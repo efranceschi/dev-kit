@@ -346,7 +346,7 @@ dialog p { color: var(--text-secondary); }
 /* execution graph */
 .board-tools { display: flex; gap: 10px; flex-wrap: wrap; margin-left: auto; margin-right: 12px; }
 .seg-switch { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 9px; overflow: hidden; }
-.seg-btn { font: inherit; font-size: 12px; padding: 4px 12px; background: transparent; color: var(--text-muted); border: 0; cursor: pointer; }
+.seg-btn { font: inherit; font-size: 13px; padding: 5px 16px; background: transparent; color: var(--text-secondary); border: 0; cursor: pointer; }
 .seg-btn + .seg-btn { border-left: 1px solid var(--border-strong); }
 .seg-btn.on { background: var(--surface-2); color: var(--text-primary); font-weight: 700; box-shadow: inset 0 -2px 0 var(--text-primary); }
 .seg-btn:focus-visible, .graph-scroll:focus-visible, .gnode:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
