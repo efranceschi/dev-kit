@@ -1,0 +1,1088 @@
+{
+  "about": "Single source for /dev-kit:help and the generated docs (docs/skills.md, docs/recipes.md, docs/glossary.md). English only; the help skill answers in the user's language. Edit here, then run: python3 -I skills/core/scripts/dev_docs.py build",
+  "categories": [
+    {
+      "id": "start",
+      "title": "Start and orientation"
+    },
+    {
+      "id": "specify",
+      "title": "Specify"
+    },
+    {
+      "id": "build",
+      "title": "Build"
+    },
+    {
+      "id": "quality",
+      "title": "Quality"
+    },
+    {
+      "id": "change",
+      "title": "Bugs, changes and what is pending"
+    },
+    {
+      "id": "ship",
+      "title": "Ship"
+    },
+    {
+      "id": "observe",
+      "title": "Observe"
+    }
+  ],
+  "skills": [
+    {
+      "name": "start",
+      "category": "start",
+      "one_line": "Entry point: starts a new project or resumes the current one and routes to the next skill.",
+      "when": "First command in any project, and whenever you come back and want to know where things stopped.",
+      "args": [
+        {
+          "arg": "idea",
+          "meaning": "a project idea starts the interview"
+        },
+        {
+          "arg": "(empty)",
+          "meaning": "resume: reconcile with git and route"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:start a personal expense tracker",
+          "what": "new project: git init if needed, then the interview"
+        },
+        {
+          "command": "/dev-kit:start",
+          "what": "resume where the project stopped"
+        }
+      ],
+      "produces": "routing only; starts a session in the log",
+      "related": [
+        "interview",
+        "status",
+        "help"
+      ]
+    },
+    {
+      "name": "help",
+      "category": "start",
+      "one_line": "Help inside Claude Code: what to do next, how each skill works, recipes and concepts.",
+      "when": "Whenever you are unsure which skill to use or what something means.",
+      "args": [
+        {
+          "arg": "(empty)",
+          "meaning": "next steps for this project and the skill map"
+        },
+        {
+          "arg": "skill",
+          "meaning": "card of one skill"
+        },
+        {
+          "arg": "question",
+          "meaning": "the recipe or concept that answers it"
+        },
+        {
+          "arg": "agents",
+          "meaning": "the agents and who calls them"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:help",
+          "what": "what to do now"
+        },
+        {
+          "command": "/dev-kit:help issue",
+          "what": "how to report bugs and improvements"
+        },
+        {
+          "command": "/dev-kit:help how do I run it overnight?",
+          "what": "the unattended recipe"
+        }
+      ],
+      "produces": "nothing (read-only)",
+      "related": [
+        "status",
+        "backlog"
+      ]
+    },
+    {
+      "name": "interview",
+      "category": "start",
+      "one_line": "Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md with the autonomy policy.",
+      "when": "Beginning of a project (start calls it), or later to answer questions the kit parked.",
+      "args": [
+        {
+          "arg": "idea",
+          "meaning": "initial idea"
+        },
+        {
+          "arg": "--express",
+          "meaning": "one round with the 4 most important questions"
+        },
+        {
+          "arg": "--gaps",
+          "meaning": "answer open and parked questions"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:interview --gaps",
+          "what": "resolve what the kit parked or assumed"
+        }
+      ],
+      "produces": ".dev/brief.md, .dev/decisions.md, autonomy and quality settings",
+      "related": [
+        "start",
+        "prd",
+        "autopilot"
+      ]
+    },
+    {
+      "name": "status",
+      "category": "start",
+      "one_line": "Read-only dashboard: phase, milestones, gates, scores, issues, preview, production drift, cost so far.",
+      "when": "Any time you want a quick picture of the project.",
+      "args": [
+        {
+          "arg": "--json",
+          "meaning": "machine-readable state"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:status",
+          "what": "where the project stands"
+        }
+      ],
+      "produces": "nothing (read-only)",
+      "related": [
+        "backlog",
+        "costs",
+        "help"
+      ]
+    },
+    {
+      "name": "board",
+      "category": "start",
+      "one_line": "Live Scrum board in the browser: sprint goal, kanban, burndown, velocity, backlog, impediments, definition of done.",
+      "when": "When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.",
+      "args": [
+        {
+          "arg": "(empty)",
+          "meaning": "start the local server (or reuse the running one) and open the default browser"
+        },
+        {
+          "arg": "stop",
+          "meaning": "stop the server (the page also has a Stop server button)"
+        },
+        {
+          "arg": "status",
+          "meaning": "whether it is running, its URL and PID"
+        },
+        {
+          "arg": "--open | --no-open | --port N",
+          "meaning": "force a new tab, do not open a tab, preferred port (default 8765)"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:board",
+          "what": "open the board; calling it again does not start a second server or a second tab"
+        },
+        {
+          "command": "/dev-kit:board stop",
+          "what": "stop the board server"
+        }
+      ],
+      "produces": "nothing in the project (read-only); its own files in .dev/run/",
+      "related": [
+        "status",
+        "backlog",
+        "costs"
+      ]
+    },
+    {
+      "name": "prd",
+      "category": "specify",
+      "one_line": "Product requirements with user stories and numbered acceptance criteria (AC-n).",
+      "when": "After the interview, or to revise requirements when scope changes.",
+      "args": [
+        {
+          "arg": "focus or change request",
+          "meaning": "what to (re)write"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:prd",
+          "what": "write the PRD from the brief"
+        },
+        {
+          "command": "/dev-kit:prd add CSV export of reports",
+          "what": "revise for a scope change"
+        }
+      ],
+      "produces": ".dev/prd.md",
+      "related": [
+        "review",
+        "architecture",
+        "issue"
+      ]
+    },
+    {
+      "name": "architecture",
+      "category": "specify",
+      "one_line": "Stack, repository layout, data model, contracts, environments, deploy commands and ADRs.",
+      "when": "After the PRD passes review, or when a structural decision must be revisited.",
+      "args": [
+        {
+          "arg": "constraints",
+          "meaning": "extra constraints to respect"
+        },
+        {
+          "arg": "review",
+          "meaning": "revisit the current architecture"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:architecture",
+          "what": "decide and document the architecture"
+        }
+      ],
+      "produces": ".dev/architecture.md, .dev/decisions.md",
+      "related": [
+        "prd",
+        "ux",
+        "plan"
+      ]
+    },
+    {
+      "name": "ux",
+      "category": "specify",
+      "one_line": "Information architecture, journeys, every screen state, forms and microcopy guide.",
+      "when": "Products with a UI, after architecture, or to redesign a flow.",
+      "args": [
+        {
+          "arg": "flow, persona or screen",
+          "meaning": "what to (re)design"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:ux",
+          "what": "design all flows"
+        },
+        {
+          "command": "/dev-kit:ux checkout",
+          "what": "redesign one flow"
+        }
+      ],
+      "produces": ".dev/design/ux-flows.md",
+      "related": [
+        "ui",
+        "review"
+      ]
+    },
+    {
+      "name": "ui",
+      "category": "specify",
+      "one_line": "Design tokens, components with states, and a spec for every screen (responsive, dark mode, accessibility).",
+      "when": "After ux, or to (re)specify a screen or component.",
+      "args": [
+        {
+          "arg": "screen, component or tokens",
+          "meaning": "what to (re)specify"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:ui",
+          "what": "full UI spec"
+        },
+        {
+          "command": "/dev-kit:ui tokens",
+          "what": "only the design tokens"
+        }
+      ],
+      "produces": ".dev/design/ui-spec.md",
+      "related": [
+        "ux",
+        "review"
+      ]
+    },
+    {
+      "name": "plan",
+      "category": "specify",
+      "one_line": "Milestones M1..Mn and small vertical-slice tasks T-xxx with dependencies, ACs and files.",
+      "when": "After design (or architecture for UI-less products), and to replan remaining work.",
+      "args": [
+        {
+          "arg": "milestone focus",
+          "meaning": "plan one area"
+        },
+        {
+          "arg": "replan",
+          "meaning": "rewrite only todo tasks of future milestones"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:plan",
+          "what": "plan the whole build"
+        },
+        {
+          "command": "/dev-kit:plan replan",
+          "what": "after a scope change"
+        }
+      ],
+      "produces": ".dev/plan.md synced into .dev/state.json",
+      "related": [
+        "review",
+        "implement",
+        "autopilot"
+      ]
+    },
+    {
+      "name": "review",
+      "category": "specify",
+      "one_line": "Scored independent review (0-100, with cut-off) of the PRD, design, plan or docs, looping until it passes.",
+      "when": "Before implementation (prd, design, plan) and before release (docs).",
+      "args": [
+        {
+          "arg": "prd | design | plan | docs | all",
+          "meaning": "what to review"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:review prd",
+          "what": "score the PRD and revise until it passes"
+        }
+      ],
+      "produces": ".dev/reviews/<target>/report.md and scores",
+      "related": [
+        "prd",
+        "plan",
+        "docs"
+      ]
+    },
+    {
+      "name": "autopilot",
+      "category": "build",
+      "one_line": "Drives the whole build on its own, from PRD to release; pauses follow your autonomy settings.",
+      "when": "After the interview, when you want the app built with minimal interaction (also overnight).",
+      "args": [
+        {
+          "arg": "--until phase",
+          "meaning": "stop after a phase (e.g. plan to review documents first)"
+        },
+        {
+          "arg": "--milestone M1",
+          "meaning": "build only one milestone"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:autopilot",
+          "what": "build everything"
+        },
+        {
+          "command": "/dev-kit:autopilot --until plan",
+          "what": "only the documents, so you can review them"
+        },
+        {
+          "command": "/dev-kit:autopilot --milestone M1",
+          "what": "one milestone, e.g. to gauge cost"
+        }
+      ],
+      "produces": "everything below, one commit per task",
+      "related": [
+        "status",
+        "backlog",
+        "costs"
+      ]
+    },
+    {
+      "name": "implement",
+      "category": "build",
+      "one_line": "Implements ready tasks test-first, full suite, one commit per task; hotfix lane first.",
+      "when": "To build tasks by hand instead of autopilot, or to run a specific task (e.g. a fix).",
+      "args": [
+        {
+          "arg": "T-003",
+          "meaning": "one task"
+        },
+        {
+          "arg": "--milestone M1 | --tasks N",
+          "meaning": "a milestone or N tasks"
+        },
+        {
+          "arg": "--parallel N",
+          "meaning": "N isolated implementers in git worktrees"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:implement T-031",
+          "what": "build one task (e.g. a hotfix)"
+        },
+        {
+          "command": "/dev-kit:implement --milestone M2 --parallel 3",
+          "what": "build M2 with 3 workers"
+        }
+      ],
+      "produces": "code, tests, one commit per task",
+      "related": [
+        "test",
+        "qa",
+        "issue"
+      ]
+    },
+    {
+      "name": "test",
+      "category": "build",
+      "one_line": "Test strategy and test writing: plan, missing tests for a task or path, flaky tests.",
+      "when": "Tests are missing, failing or flaky, or you want to define the testing approach.",
+      "args": [
+        {
+          "arg": "T-003 | path",
+          "meaning": "cover a task or a folder"
+        },
+        {
+          "arg": "plan",
+          "meaning": "write the test plan"
+        },
+        {
+          "arg": "fix-flaky",
+          "meaning": "find and fix flaky tests"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:test src/auth",
+          "what": "add missing tests for a folder"
+        }
+      ],
+      "produces": ".dev/qa/test-plan.md, tests",
+      "related": [
+        "implement",
+        "qa"
+      ]
+    },
+    {
+      "name": "qa",
+      "category": "quality",
+      "one_line": "Milestone gate: auditors in parallel, 0-100 score per dimension, fix tasks until the cut-off is met.",
+      "when": "When a milestone's tasks are done, or to check one task (e.g. after a hotfix).",
+      "args": [
+        {
+          "arg": "M1",
+          "meaning": "gate of a milestone"
+        },
+        {
+          "arg": "--scope T-003",
+          "meaning": "audit one task"
+        },
+        {
+          "arg": "--only code,security,...",
+          "meaning": "run a subset of auditors"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:qa M2",
+          "what": "gate M2"
+        },
+        {
+          "command": "/dev-kit:qa --scope T-031",
+          "what": "check a hotfix"
+        }
+      ],
+      "produces": ".dev/qa/<M>/report.md, scores, fix tasks",
+      "related": [
+        "implement",
+        "issue",
+        "usability"
+      ]
+    },
+    {
+      "name": "usability",
+      "category": "quality",
+      "one_line": "Whole-product audit of usability, accessibility, visuals and copy, with score and fix tasks.",
+      "when": "After the UI milestones are built, before release.",
+      "args": [
+        {
+          "arg": "screens or flows",
+          "meaning": "limit the audit"
+        },
+        {
+          "arg": "--url",
+          "meaning": "audit a running app"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:usability",
+          "what": "audit every screen"
+        }
+      ],
+      "produces": ".dev/qa/ux/report.md, screenshots, fix tasks",
+      "related": [
+        "qa",
+        "issue"
+      ]
+    },
+    {
+      "name": "issue",
+      "category": "change",
+      "one_line": "Report a bug, improvement or scope change in plain words; the kit classifies and routes it without breaking the milestone cadence.",
+      "when": "You found a bug or want something to work differently, during or after the build.",
+      "args": [
+        {
+          "arg": "\"description\"",
+          "meaning": "new issue"
+        },
+        {
+          "arg": "I-003",
+          "meaning": "show or update"
+        },
+        {
+          "arg": "--from F-012 M3",
+          "meaning": "promote a deferred QA finding"
+        },
+        {
+          "arg": "--schedule I-003 M8",
+          "meaning": "bring into an existing milestone"
+        },
+        {
+          "arg": "--close I-003 wontfix|duplicate",
+          "meaning": "close"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:issue \"the Save button on the profile page does nothing\"",
+          "what": "report a bug"
+        },
+        {
+          "command": "/dev-kit:issue \"export reports as CSV\"",
+          "what": "request a change"
+        },
+        {
+          "command": "/dev-kit:issue --from F-012 M3",
+          "what": "turn a deferred finding into an issue"
+        }
+      ],
+      "produces": ".dev/issues.md, tasks linked to the issue",
+      "related": [
+        "backlog",
+        "implement",
+        "plan"
+      ]
+    },
+    {
+      "name": "backlog",
+      "category": "change",
+      "one_line": "Everything pending: hotfix, issue queue, next buffer, tasks, parked questions, deferred findings, deploys.",
+      "when": "You want to know what is left or what to do next.",
+      "args": [
+        {
+          "arg": "issues | tasks | questions | findings | deploy",
+          "meaning": "one section only"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:backlog",
+          "what": "the full list and the recommended next step"
+        },
+        {
+          "command": "/dev-kit:backlog issues",
+          "what": "only issues"
+        }
+      ],
+      "produces": "nothing (read-only)",
+      "related": [
+        "issue",
+        "status",
+        "interview"
+      ]
+    },
+    {
+      "name": "deploy",
+      "category": "ship",
+      "one_line": "Production deploy of an approved milestone or release: preflight, backup, dry-run, install, migrations, smoke checks.",
+      "when": "After a gate when the project deploys per milestone, at release, or to check how far production is behind.",
+      "args": [
+        {
+          "arg": "M3",
+          "meaning": "deploy a milestone"
+        },
+        {
+          "arg": "--check",
+          "meaning": "only show the drift"
+        },
+        {
+          "arg": "--dry-run",
+          "meaning": "simulate"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:deploy --check",
+          "what": "is production up to date?"
+        },
+        {
+          "command": "/dev-kit:deploy M4",
+          "what": "deploy M4"
+        }
+      ],
+      "produces": "deploy record shown by status",
+      "related": [
+        "release",
+        "status"
+      ]
+    },
+    {
+      "name": "docs",
+      "category": "ship",
+      "one_line": "Project documentation from the artifacts and code: README, user guide, API reference, CHANGELOG.",
+      "when": "Before a release, or when you need docs for the project.",
+      "args": [
+        {
+          "arg": "readme | guide | api | changelog | all",
+          "meaning": "what to write"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:docs all",
+          "what": "all project docs"
+        }
+      ],
+      "produces": "README.md, docs/, CHANGELOG.md",
+      "related": [
+        "review",
+        "release"
+      ]
+    },
+    {
+      "name": "release",
+      "category": "ship",
+      "one_line": "Release checklist and execution: audits, version, CHANGELOG, tag; patch releases for hotfixes.",
+      "when": "When the build is done and you want to ship, or after a hotfix.",
+      "args": [
+        {
+          "arg": "version",
+          "meaning": "explicit version"
+        },
+        {
+          "arg": "--dry-run",
+          "meaning": "check without changing anything"
+        },
+        {
+          "arg": "--hotfix",
+          "meaning": "patch release for a closed hotfix"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:release --dry-run",
+          "what": "see what would happen"
+        },
+        {
+          "command": "/dev-kit:release --hotfix",
+          "what": "ship a hotfix as a patch version"
+        }
+      ],
+      "produces": "version bump, release notes, tag",
+      "related": [
+        "deploy",
+        "docs"
+      ]
+    },
+    {
+      "name": "costs",
+      "category": "observe",
+      "one_line": "Token usage and estimated US$ (API-equivalent) per stage, agent, model or session; CSV of tokens.",
+      "when": "You want to know how much was spent and where.",
+      "args": [
+        {
+          "arg": "--all | --since YYYY-MM-DD",
+          "meaning": "period (default: current session)"
+        },
+        {
+          "arg": "--by stage|agent|model|session",
+          "meaning": "grouping"
+        },
+        {
+          "arg": "--csv",
+          "meaning": "export every token count"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:costs",
+          "what": "cost of this session by stage"
+        },
+        {
+          "command": "/dev-kit:costs --all --by agent --csv",
+          "what": "whole project by agent, with CSV"
+        }
+      ],
+      "produces": ".dev/costs/ (usage, prices, CSV)",
+      "related": [
+        "feedback",
+        "status"
+      ]
+    },
+    {
+      "name": "feedback",
+      "category": "observe",
+      "one_line": "Evaluation of the session: grade per stage with reasons, what worked and failed, suggestions for the kit.",
+      "when": "After a run, to review it or to send feedback to the dev-kit author.",
+      "args": [
+        {
+          "arg": "--all | --since YYYY-MM-DD",
+          "meaning": "period (default: current session)"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:feedback",
+          "what": "evaluate this session"
+        }
+      ],
+      "produces": ".dev/feedback/feedback-report-<timestamp>.md and export",
+      "related": [
+        "costs"
+      ]
+    }
+  ],
+  "recipes": [
+    {
+      "id": "new-app",
+      "title": "Build a new app",
+      "topics": [
+        "new",
+        "start",
+        "build",
+        "create app",
+        "begin"
+      ],
+      "steps": [
+        "/dev-kit:start <your idea> and answer the interview",
+        "/dev-kit:autopilot --until plan, then read the PRD, design and plan",
+        "/dev-kit:autopilot to build the rest",
+        "/dev-kit:status at any time"
+      ]
+    },
+    {
+      "id": "overnight",
+      "title": "Let it run overnight",
+      "topics": [
+        "overnight",
+        "sleep",
+        "unattended",
+        "autonomous",
+        "night",
+        "alone"
+      ],
+      "steps": [
+        "Choose 'unattended with floors' in the interview (or: dev_state.py set autonomy.level unattended)",
+        "Cover permission prompts: /fewer-permission-prompts and --permission-mode acceptEdits",
+        "Run inside tmux: claude --permission-mode acceptEdits \"/dev-kit:autopilot\"",
+        "In the morning: /dev-kit:status, /dev-kit:backlog, /dev-kit:costs, /dev-kit:interview --gaps"
+      ]
+    },
+    {
+      "id": "bug",
+      "title": "I found a bug",
+      "topics": [
+        "bug",
+        "error",
+        "broken",
+        "crash",
+        "defect",
+        "problem",
+        "fix"
+      ],
+      "steps": [
+        "/dev-kit:issue \"what happens and where\"",
+        "Confirm the class the kit proposes (hotfix, current, standard, intangible)",
+        "Hotfix: /dev-kit:implement T-xxx → /dev-kit:qa --scope T-xxx → /dev-kit:deploy → /dev-kit:release --hotfix",
+        "Otherwise it waits in the queue for the next milestone's buffer or the cool-down"
+      ]
+    },
+    {
+      "id": "improvement",
+      "title": "I want an improvement",
+      "topics": [
+        "improve",
+        "improvement",
+        "polish",
+        "better",
+        "tweak",
+        "enhancement"
+      ],
+      "steps": [
+        "/dev-kit:issue \"what should be better\"",
+        "Standard improvements enter the next milestone's buffer; small ones the cool-down",
+        "See the queue with /dev-kit:backlog issues"
+      ]
+    },
+    {
+      "id": "change",
+      "title": "Change the scope (new feature, different behaviour)",
+      "topics": [
+        "feature",
+        "scope",
+        "new requirement",
+        "change",
+        "add"
+      ],
+      "steps": [
+        "/dev-kit:issue \"the new behaviour\" (class change)",
+        "Accept the chain prd → review prd → (ux/ui → review design) → plan replan",
+        "The new tasks land in future milestones; the cadence does not change"
+      ]
+    },
+    {
+      "id": "pending",
+      "title": "What is left to do?",
+      "topics": [
+        "pending",
+        "left",
+        "todo",
+        "remaining",
+        "next",
+        "what now"
+      ],
+      "steps": [
+        "/dev-kit:backlog for everything pending and the recommended next step",
+        "/dev-kit:status for the overall picture"
+      ]
+    },
+    {
+      "id": "cost",
+      "title": "How much did it cost?",
+      "topics": [
+        "cost",
+        "costs",
+        "spent",
+        "price",
+        "tokens",
+        "money",
+        "budget"
+      ],
+      "steps": [
+        "/dev-kit:costs for this session by stage",
+        "/dev-kit:costs --all --by agent for the whole project",
+        "/dev-kit:costs --csv to apply your own prices"
+      ]
+    },
+    {
+      "id": "deploy",
+      "title": "Put it in production",
+      "topics": [
+        "deploy",
+        "production",
+        "install",
+        "ship",
+        "publish"
+      ],
+      "steps": [
+        "Answer the production questions in the interview (method, host, when, smoke checks, prerequisites)",
+        "/dev-kit:deploy --check to see the drift",
+        "/dev-kit:deploy M3 or let autopilot deploy per milestone"
+      ]
+    },
+    {
+      "id": "resume",
+      "title": "Resume after a crash or a reboot",
+      "topics": [
+        "resume",
+        "crash",
+        "stuck",
+        "continue",
+        "reboot",
+        "frozen"
+      ],
+      "steps": [
+        "/dev-kit:start to reconcile state with git",
+        "/dev-kit:autopilot continues from the current phase",
+        "dev_state.py cleanup if processes were left behind"
+      ]
+    },
+    {
+      "id": "feedback",
+      "title": "Review the session or send feedback to the author",
+      "topics": [
+        "feedback",
+        "evaluate",
+        "review session",
+        "author",
+        "report"
+      ],
+      "steps": [
+        "/dev-kit:feedback writes a graded report and an export without project data",
+        "Review both files in .dev/feedback/ before sending them"
+      ]
+    },
+    {
+      "id": "settings",
+      "title": "Change autonomy, quality or other settings",
+      "topics": [
+        "settings",
+        "config",
+        "autonomy",
+        "cut-off",
+        "quality bar",
+        "tips off"
+      ],
+      "steps": [
+        "/dev-kit:interview --gaps to revisit decisions",
+        "Or directly: dev_state.py set autonomy.<field> <value> (level, quality, cooldown, issue_buffer_pct, tips, model_policy, pause_policy…)"
+      ]
+    }
+  ],
+  "glossary": [
+    {
+      "term": "AC",
+      "definition": "Acceptance criterion, numbered AC-n in the PRD; every task and test points to the ACs it satisfies."
+    },
+    {
+      "term": "ADR",
+      "definition": "Architecture decision record in .dev/decisions.md; source auto, user, interview or policy."
+    },
+    {
+      "term": "milestone",
+      "definition": "A cadence step M1, M2…; the next one starts only after the previous gate passes. Issues never renumber milestones."
+    },
+    {
+      "term": "gate",
+      "definition": "The quality check at the end of a milestone (qa): passes only with no critical/high findings and every score above its cut-off."
+    },
+    {
+      "term": "cut-off",
+      "definition": "Minimum score for a gate or review, set in the interview (standard 85, premium 92, prototype 70)."
+    },
+    {
+      "term": "delta mode",
+      "definition": "From round 2, auditors verify whether previous findings were closed; new low findings are recorded but not scored."
+    },
+    {
+      "term": "low cap",
+      "definition": "Low findings cost at most 10 points per dimension."
+    },
+    {
+      "term": "class of service",
+      "definition": "How an issue is scheduled: expedite (hotfix), current, standard (buffer), intangible (cool-down) or change (replan)."
+    },
+    {
+      "term": "buffer",
+      "definition": "Share of each milestone (default 20%) reserved for queued issues."
+    },
+    {
+      "term": "cool-down",
+      "definition": "Optional short slot after a gate where small issues are fixed before the next milestone."
+    },
+    {
+      "term": "hotfix",
+      "definition": "Expedite lane for critical/high bugs in delivered work: one at a time, scoped QA, patch release."
+    },
+    {
+      "term": "lane",
+      "definition": "Priority lane of a task: hotfix runs first, then cool-down, then the plan."
+    },
+    {
+      "term": "slot",
+      "definition": "Per-agent isolation number that gives each agent its own port, database and scratch folder."
+    },
+    {
+      "term": "park",
+      "definition": "In unattended runs, record what needs you as a question, block only what depends on it and go on."
+    },
+    {
+      "term": "pause policy",
+      "definition": "What the kit does at each pause point: ask, preauthorize within a limit, apply the recommendation, or park."
+    },
+    {
+      "term": "model ladder",
+      "definition": "Agents start on their base model and effort; failed dimensions are re-run one step higher, with consent."
+    },
+    {
+      "term": "API-equivalent cost",
+      "definition": "Estimated US$ of the tokens at API prices; on subscription plans nothing is billed per token."
+    },
+    {
+      "term": "session log",
+      "definition": ".dev/telemetry.jsonl: structured, high-level events of the run, without project data."
+    }
+  ],
+  "agents_called_by": {
+    "a11y-auditor": [
+      "qa",
+      "usability"
+    ],
+    "architect": [
+      "architecture"
+    ],
+    "code-reviewer": [
+      "qa"
+    ],
+    "copy-reviewer": [
+      "qa",
+      "usability"
+    ],
+    "data-reviewer": [
+      "qa",
+      "release"
+    ],
+    "deps-auditor": [
+      "qa",
+      "release"
+    ],
+    "design-reviewer": [
+      "review"
+    ],
+    "docs-reviewer": [
+      "review",
+      "release"
+    ],
+    "implementer": [
+      "implement"
+    ],
+    "ops-reviewer": [
+      "qa",
+      "release"
+    ],
+    "performance-auditor": [
+      "qa",
+      "release"
+    ],
+    "requirements-reviewer": [
+      "review"
+    ],
+    "security-auditor": [
+      "qa",
+      "release"
+    ],
+    "spec-tracer": [
+      "qa",
+      "release"
+    ],
+    "test-auditor": [
+      "qa"
+    ],
+    "usability-auditor": [
+      "usability"
+    ],
+    "visual-reviewer": [
+      "qa",
+      "usability"
+    ]
+  }
+}

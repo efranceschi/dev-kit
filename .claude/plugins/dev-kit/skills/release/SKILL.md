@@ -1,0 +1,31 @@
+---
+name: release
+description: Release checklist and execution - verifies all milestone gates and the usability audit passed, runs the full suite, security secrets check and build, bumps the version, finalises CHANGELOG and release notes, tags the release, and marks the project phase done. Use when the user wants to ship or cut a version.
+argument-hint: "[version e.g. 1.0.0 | --dry-run | --hotfix]"
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, Agent, AskUserQuestion
+---
+
+# release
+
+Kit root (`<KIT>` in shared files and agents): `${CLAUDE_SKILL_DIR}/../core`. Include `Kit root: ${CLAUDE_SKILL_DIR}/../core` in the prompt of every agent you spawn. Work from the project root (`${CLAUDE_PROJECT_DIR}`) and do not `cd` away from it.
+
+Input: $ARGUMENTS
+State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" status`
+
+Let `DS` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}"`.
+
+## Checklist (stop at the first failure and say what is missing)
+Log `skill_start`/`skill_end` and agent events (`conventions.md` §13); give each auditor a `Slot: N` and the isolation line, and run `DS cleanup` after them.
+1. All tasks `done`; every milestone gate `passed` (with its score) or `skipped`/forced with an ADR; reviews `prd`, `design` (UI products), `plan`, `ux` (UI products) and `docs` are `pass` in `DS status --json` → `reviews` (run `review`/`usability` for any missing). Working tree clean.
+2. Run the full test suite, lint and type-check; run the build command from `architecture.md`.
+3. Secrets hygiene: run the detection commands in `${CLAUDE_SKILL_DIR}/../core/shared/checklists/security-secrets.md`; `.env.example` complete.
+4. Release audit with score: spawn in parallel `spec-tracer`, `security-auditor`, `ops-reviewer`, `deps-auditor`, `data-reviewer` (if there is a database), `performance-auditor` and `docs-reviewer`, all with scope `release`. Save their JSON to `.dev/qa/release/raw/`, score with `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_score.py" score --scope release --kind gate --root . --out .dev/qa/release/scores.json .dev/qa/release/raw/*.json`. Require exit 0 (no blocking findings, every dimension and the overall score at or above the cut-offs); every must-have AC must be `complete`. On failure create fix tasks with `DS add-task --type fix`; under `autopilot` return to `implement` and re-run `release` (rounds as in `qa`); otherwise stop and tell the user to run `implement` then `release` again.
+5. Docs: README, CHANGELOG present (run `docs` first if not); open questions reviewed — list the still-open ones in the release notes as known limitations.
+6. Version: from the argument or next semver per brief (breaking → major, features → minor, fixes → patch). Update version files (package.json / pyproject / Cargo.toml …), CHANGELOG heading with date, and write `.dev/release-notes-<version>.md` from `${CLAUDE_SKILL_DIR}/../core/shared/templates/release-notes.md`.
+7. Commit `chore(release): v<version>` and tag `v<version>` (annotated). Push and publish only if `autonomy.may_push` is true and the brief's block 10 asked for it; deploying anywhere public is `public_exposure` → ask first unless already authorised in the brief or `pause_policy.public_exposure` preauthorizes that target; `park` → stop after tagging and list the deploy as pending.
+Before `skill_end`, run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root "${CLAUDE_PROJECT_DIR}" ingest` (token usage per stage, `conventions.md` §14).
+8. If `autonomy.production.when` is `on_release`, run `deploy` for the tagged commit (it asks or parks per `pause_policy.production_deploy`). If a local preview is running (`conventions.md` §11), replace it with the released version when `local_deploy.mode` is `keep_running`, otherwise stop it. `DS set phase done`. Report: version, tag, release score vs cut-off, scores of every gate and review, verification summary, known limitations, and how to run/deploy.
+
+`--hotfix`: patch release for a closed hotfix (`conventions.md` §15): skip step 1's all-milestones check; require the hotfix task `done`, its scoped QA (`qa --scope <task>`) passed and the suite green; bump only the patch number; CHANGELOG entry under "Fixed" with the issue id; tag; deploy per `pause_policy.production_deploy`.
+
+`--dry-run`: perform steps 1–5 and report what would happen in 6–8 without changing anything.

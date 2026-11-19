@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="board-token" content="__BOARD_TOKEN__">
+  <meta name="color-scheme" content="dark light">
+  <title>dev-kit board</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/board.css">
+  <script src="/assets/board.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="topbar" role="banner">
+    <div class="brand">
+      <img class="logo" src="/assets/favicon.svg" alt="">
+      <div class="brand-text">
+        <span class="kicker">dev-kit board</span>
+        <h1 id="project">Loading…</h1>
+      </div>
+    </div>
+    <ol class="phases" id="phases" aria-label="Project phase"></ol>
+    <div class="top-actions">
+      <span class="live" id="live" role="status" aria-live="polite">
+        <span class="dot" aria-hidden="true"></span><span id="live-text">Connecting…</span>
+      </span>
+      <span class="updated" id="updated" aria-live="off"></span>
+      <button type="button" class="btn btn-danger" id="stop-btn">
+        <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        Stop server
+      </button>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" role="alert" hidden></div>
+
+  <nav class="sprints" aria-label="Sprints">
+    <span class="sprints-label">Sprints</span>
+    <div role="tablist" id="tabs" aria-label="Milestones"></div>
+  </nav>
+
+  <main id="main" tabindex="-1" aria-busy="true">
+    <section class="hero card" aria-labelledby="sprint-title">
+      <div class="hero-main">
+        <p class="eyebrow" id="sprint-eyebrow">Sprint</p>
+        <h2 id="sprint-title">—</h2>
+        <p class="goal"><span class="goal-label">Sprint goal</span> <span id="sprint-goal">—</span></p>
+        <div class="segbar" id="segbar" role="img" aria-label="Task status split"></div>
+        <ul class="seg-legend" id="seg-legend"></ul>
+      </div>
+      <div class="hero-side">
+        <div class="hero-figure"><span id="hero-pct">0</span><small>%</small></div>
+        <p class="hero-caption">of sprint backlog done</p>
+        <div id="gate-badge"></div>
+      </div>
+    </section>
+
+    <section class="tiles" aria-label="Key figures" id="tiles"></section>
+
+    <section class="card board-card" aria-labelledby="board-h">
+      <div class="card-head">
+        <h2 id="board-h">Sprint board</h2>
+        <p class="card-sub" id="next-up"></p>
+      </div>
+      <div class="kanban" id="kanban"></div>
+    </section>
+
+    <div class="grid-2">
+      <section class="card" aria-labelledby="burn-h">
+        <div class="card-head">
+          <h2 id="burn-h">Burndown</h2>
+          <ul class="legend" aria-label="Legend">
+            <li><span class="key key-line s1" aria-hidden="true"></span>Remaining tasks</li>
+            <li><span class="key key-line ideal" aria-hidden="true"></span>Ideal</li>
+          </ul>
+        </div>
+        <div class="chart" id="burndown"></div>
+        <details class="table-view"><summary>Show as table</summary><div id="burndown-table"></div></details>
+      </section>
+      <section class="card" aria-labelledby="vel-h">
+        <div class="card-head">
+          <h2 id="vel-h">Velocity</h2>
+          <p class="card-sub">Tasks done per sprint</p>
+        </div>
+        <div class="chart" id="velocity"></div>
+        <details class="table-view"><summary>Show as table</summary><div id="velocity-table"></div></details>
+      </section>
+    </div>
+
+    <div class="grid-3">
+      <section class="card" aria-labelledby="pb-h">
+        <div class="card-head"><h2 id="pb-h">Product backlog</h2><p class="card-sub" id="pb-sub"></p></div>
+        <div id="product-backlog" class="list-wrap"></div>
+      </section>
+      <section class="card" aria-labelledby="imp-h">
+        <div class="card-head"><h2 id="imp-h">Impediments</h2><p class="card-sub">Blocked tasks and open questions</p></div>
+        <div id="impediments" class="list-wrap"></div>
+      </section>
+      <section class="card" aria-labelledby="dod-h">
+        <div class="card-head"><h2 id="dod-h">Definition of done</h2><p class="card-sub" id="dod-sub"></p></div>
+        <div id="dod" class="list-wrap"></div>
+      </section>
+    </div>
+
+    <section class="card" aria-labelledby="act-h">
+      <div class="card-head"><h2 id="act-h">Activity</h2><p class="card-sub">Latest entries of .dev/log.md</p></div>
+      <ol class="feed" id="feed"></ol>
+    </section>
+
+    <footer class="foot" id="foot"></footer>
+  </main>
+
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+
+  <dialog id="stop-dialog" aria-labelledby="stop-h">
+    <form method="dialog">
+      <h2 id="stop-h">Stop the board server?</h2>
+      <p>The page stops updating. Start it again any time with <code>/dev-kit:board</code>. Your project is not touched.</p>
+      <div class="dialog-actions">
+        <button class="btn" value="cancel" autofocus>Keep running</button>
+        <button class="btn btn-danger" value="stop" id="stop-confirm">Stop server</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="stopped" id="stopped" hidden>
+    <div class="stopped-card">
+      <img class="logo big" src="/assets/favicon.svg" alt="">
+      <h2>Board stopped</h2>
+      <p>The server is off. You can close this tab.<br>Run <code>/dev-kit:board</code> to start it again.</p>
+    </div>
+  </div>
+</body>
+</html>
