@@ -88,6 +88,7 @@
   function renderHeader() {
     $("project").textContent = data.project;
     document.title = `${data.project} · dev-kit board`;
+    $("kit-ver").textContent = data.kit && data.kit !== "unknown" ? `v${data.kit}` : "";
     const phases = data.phases.filter((p) => p !== "init");
     const idx = phases.indexOf(data.phase);
     fill($("phases"), phases.map((p, i) => h("li", {

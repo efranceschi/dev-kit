@@ -260,8 +260,9 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(code, 200)
         d = json.loads(body)
         for key in ("project", "phase", "phases", "progress", "milestones", "tasks", "next", "reviews", "quality",
-                    "backlog", "questions", "log", "current_milestone", "board"):
+                    "backlog", "questions", "log", "current_milestone", "board", "kit"):
             self.assertIn(key, d)
+        self.assertRegex(d["kit"], r"^\d+\.\d+\.\d+")
         self.assertEqual(d["milestones"][0]["goal"], "Ship a deployable skeleton.")
         self.assertEqual(d["tasks"]["T-001"]["status"], "in_progress")
         self.assertNotIn("token", d["board"])

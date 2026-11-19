@@ -55,6 +55,7 @@ DEFAULT_PORT = 8765
 CODE_ID = hashlib.sha256(Path(__file__).resolve().read_bytes()).hexdigest()[:12]
 WATCHED = ("state.json", "log.md", "open-questions.md", "costs/summary.json", "plan.md", "run/agents.jsonl",
            "telemetry.jsonl", "plan-baseline.json")
+KIT_VERSION = ds.tel.kit_version()  # read once: it is the version of the code this server is actually running
 AGENT_STALE_S = 3600  # a start with no stop after this long is treated as lost, not running
 AGENT_RECENT = 10
 LOG_TAIL = 25
@@ -455,6 +456,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "log": log_tail(_read(store.dev / "log.md")),
         "costs": costs,
         "agents": agents_data(root),
+        "kit": KIT_VERSION,
         "board": {k: board.get(k) for k in ("pid", "port", "url", "started_at")} if board else None,
         "generated_at": ds.now(),
     }
