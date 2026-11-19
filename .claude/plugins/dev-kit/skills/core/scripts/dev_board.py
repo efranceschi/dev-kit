@@ -7,6 +7,8 @@ Subcommands
   start   start the board (or reuse the one already running) and open the default browser
           --port N (preferred port, default 8765; falls back to a free one) · --no-open · --open (force a tab
           even when the board was already running) · --idle-min N (auto-stop after N idle minutes, default 120)
+          · --host IP (listen address, default 127.0.0.1; 0.0.0.0 or :: shares it with the network, see below;
+          a running board on another address is restarted)
   stop    stop the board of this project (token-authenticated shutdown, then SIGTERM, then SIGKILL)
   status  print whether the board is running, its URL and PID (--json)
   serve   internal: the server process itself (spawned by start)
@@ -16,8 +18,11 @@ One board per project: .dev/run/board.json holds {pid, port, token, url, root, s
 is alive, its command line is this script serving this root, and /api/ping on the port answers with the
 same token fingerprint. Anything else is a stale record and is removed.
 
-The server never writes to .dev/ except its own files in .dev/run/. It binds 127.0.0.1 only, rejects
-foreign Host/Origin headers and needs the per-run token to shut down.
+The server never writes to .dev/ except its own files in .dev/run/ and needs the per-run token to shut down.
+By default it binds 127.0.0.1 and answers Host headers that are localhost or an IP literal (tunnels, forwards),
+refusing host names (DNS rebinding). With --host on a non-loopback address the board is "exposed": every
+request except /api/ping needs the access key (the per-run token) from ?key= - traded for an HttpOnly,
+SameSite=Strict cookie - so host names are accepted there. It is plain HTTP: for trusted networks only.
 
 Exit codes: 0 ok · 1 error · 2 no dev-kit state in the project
 """
@@ -27,12 +32,15 @@ import argparse
 import fcntl
 import hashlib
 import http.client
+import http.cookies
+import ipaddress
 import json
 import mimetypes
 import os
 import re
 import secrets
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -121,10 +129,54 @@ def is_board_process(pid: int, root: Path) -> bool:
     return any(a.endswith("dev_board.py") for a in args) and "serve" in args and str(root) in args
 
 
-def ping(port: int, timeout: float = 1.0) -> dict | None:
+def parse_bind(host: str) -> str:
+    """Validate --host: an IP address to listen on (0.0.0.0 / :: = every interface). Names are refused."""
+    h = host.strip().strip("[]").lower()
+    if h == "localhost":
+        return "127.0.0.1"
     try:
-        c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
-        c.request("GET", "/api/ping", headers={"Host": f"127.0.0.1:{port}"})
+        return ipaddress.ip_address(h).compressed
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--host needs an IP address such as 127.0.0.1 or 0.0.0.0, not {host!r}")
+
+
+def is_exposed(bind_host: str) -> bool:
+    return not ipaddress.ip_address(bind_host).is_loopback
+
+
+def connect_addr(bind_host: str) -> str:
+    """Address this machine uses to reach the server (ping, stop, local browser)."""
+    return {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(bind_host, bind_host)
+
+
+def hostport(addr: str, port: int) -> str:
+    return f"[{addr}]:{port}" if ":" in addr else f"{addr}:{port}"
+
+
+def lan_addresses(bind_host: str) -> list[str]:
+    """Addresses other machines can use: the bound IP, or this machine's non-loopback IPs for 0.0.0.0 / ::."""
+    if bind_host not in ("0.0.0.0", "::"):
+        return [bind_host]
+    found: set[str] = set()
+    for probe in ("192.0.2.1", "10.255.255.255"):  # UDP connect sends nothing; it only selects the outgoing interface
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as u:
+                u.connect((probe, 9))
+                found.add(u.getsockname()[0])
+        except OSError:
+            pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            found.add(info[4][0])
+    except OSError:
+        pass
+    return sorted(ip for ip in found if not ipaddress.ip_address(ip).is_loopback)
+
+
+def ping(port: int, timeout: float = 1.0, addr: str = "127.0.0.1") -> dict | None:
+    try:
+        c = http.client.HTTPConnection(addr, port, timeout=timeout)
+        c.request("GET", "/api/ping", headers={"Host": hostport(addr, port)})
         r = c.getresponse()
         body = r.read()
         c.close()
@@ -139,7 +191,7 @@ def live_record(root: Path) -> dict | None:
     if not rec:
         return None
     ok = (is_board_process(rec["pid"], root)
-          and (p := ping(int(rec.get("port", 0)))) is not None
+          and (p := ping(int(rec.get("port", 0)), addr=str(rec.get("connect", "127.0.0.1")))) is not None
           and p.get("app") == "dev-kit-board" and p.get("fingerprint") == fingerprint(str(rec.get("token", ""))))
     if not ok:
         remove_record(root)
@@ -525,7 +577,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "costs": costs,
         "agents": live_agents(root),
         "kit": KIT_VERSION,
-        "board": {k: board.get(k) for k in ("pid", "port", "url", "started_at")} if board else None,
+        "board": {k: board.get(k) for k in ("pid", "port", "url", "started_at", "host", "exposed")} if board else None,
         "generated_at": ds.now(),
     }
 
@@ -544,19 +596,33 @@ def signature(root: Path) -> tuple:
 
 # --------------------------------------------------------------------------- server
 
-LOOPBACK_NAMES = {"127.0.0.1", "localhost", "[::1]"}
+def allowed_host(host: str) -> bool:
+    """Host headers the board answers: 'localhost' or any IP literal (127.0.0.1, [::1], 192.168.x.y...),
+    with or without a numeric port. Any other name is refused.
 
-
-def loopback_host(host: str) -> bool:
-    """True for 'localhost', '127.0.0.1' or '[::1]', with or without a numeric port."""
+    The threat is DNS rebinding: a malicious site points its own domain name at this machine and reads the
+    board from its page. That only works with a domain name in the Host header; a page whose URL is a raw IP
+    is a different origin from any attacker site. IP literals are therefore safe to accept, and they are what
+    the browser sends through SSH tunnels, editor port forwarding or a LAN forward (ssh -L 0.0.0.0:...).
+    The server itself still binds 127.0.0.1 only: reaching it from another machine needs such a forward."""
     host = host.strip().lower()
     if host.startswith("["):
         name, _, rest = host.partition("]")
-        name, port = name + "]", rest[1:] if rest.startswith(":") else (None if not rest else "x")
+        name, port = name[1:], rest[1:] if rest.startswith(":") else (None if not rest else "x")
+        v6_only = True
     else:
         name, _, port = host.partition(":")
         port = port if ":" in host else None
-    return name in LOOPBACK_NAMES and (port is None or (port.isdigit() and 0 < int(port) < 65536))
+        v6_only = False
+    if port is not None and not (port.isdigit() and 0 < int(port) < 65536):
+        return False
+    if name == "localhost" and not v6_only:
+        return True
+    try:
+        ip = ipaddress.ip_address(name)
+    except ValueError:
+        return False
+    return (ip.version == 6) == v6_only
 
 
 class Board(ThreadingHTTPServer):
@@ -566,6 +632,7 @@ class Board(ThreadingHTTPServer):
     def __init__(self, addr, root: Path, token: str, idle_s: int):
         super().__init__(addr, Handler)
         self.root, self.token, self.idle_s = root, token, idle_s
+        self.exposed = is_exposed(addr[0])  # listening beyond loopback: every request needs the access key
         self.record: dict = {}
         self.stopping = threading.Event()
         self.last_activity = time.monotonic()
@@ -581,6 +648,10 @@ class Board(ThreadingHTTPServer):
             threading.Thread(target=self.shutdown, daemon=True).start()
 
 
+class Board6(Board):
+    address_family = socket.AF_INET6
+
+
 class Handler(BaseHTTPRequestHandler):
     server: Board
     server_version = "dev-kit-board"
@@ -590,13 +661,44 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _host_ok(self) -> bool:
-        """Loopback names on any port: SSH tunnels and editor port forwarding may use another local port.
-        Any other name (e.g. a DNS-rebinding domain) is refused."""
+        """localhost or an IP address, on any port (tunnels and forwards may change both); see allowed_host."""
         host = self.headers.get("Host", "")
-        if loopback_host(host):
+        if allowed_host(host) or self.server.exposed:  # exposed: the access key protects instead (a rebinding page never has it)
             return True
-        print(f"refused Host header {host[:80]!r} (only localhost / 127.0.0.1 / [::1] are accepted)", file=sys.stderr, flush=True)
+        print(f"refused Host header {host[:80]!r} (only localhost or an IP address are accepted)", file=sys.stderr, flush=True)
         return False
+
+    def _cookie_name(self) -> str:
+        return f"dkb_{self.server.server_address[1]}"
+
+    def _key_from_query(self) -> str:
+        q = self.path.partition("?")[2]
+        return next((v[4:] for v in q.split("&") if v.startswith("key=")), "")
+
+    def _authorized(self) -> bool:
+        """Loopback-only boards need no key. Exposed ones need the access key, by cookie or ?key=."""
+        if not self.server.exposed:
+            return True
+        tok = self.server.token
+        if self._key_from_query() and secrets.compare_digest(self._key_from_query(), tok):
+            return True
+        try:
+            jar = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
+        except http.cookies.CookieError:
+            return False
+        c = jar.get(self._cookie_name())
+        return bool(c) and secrets.compare_digest(c.value, tok)
+
+    def _deny(self, path: str):
+        print(f"refused unauthenticated request for {path[:60]!r} from {self.client_address[0]}", file=sys.stderr, flush=True)
+        if path.startswith("/api/"):
+            return self._json(401, {"ok": False, "error": "access key required",
+                                    "hint": "open the access link printed by /dev-kit:board (or /dev-kit:board status)"})
+        body = (b"<!doctype html><meta charset=utf-8><title>dev-kit board</title>"
+                b"<body style=\"font:16px system-ui;margin:15vh auto;max-width:36em;padding:0 1em\">"
+                b"<h1>Access link required</h1><p>This board is shared on the network and only opens with its access "
+                b"link. Run <code>/dev-kit:board status</code> on the machine that runs it to see the link.</p>")
+        self._send(401, body, "text/html; charset=utf-8")
 
     def _origin_ok(self) -> bool:
         """POSTs must come from the page itself: Origin, when sent, is the same origin the browser used."""
@@ -626,12 +728,19 @@ class Handler(BaseHTTPRequestHandler):
         self.server.touch()
         if not self._host_ok():
             return self._json(403, {"ok": False, "error": "forbidden host", "host": self.headers.get("Host", "")[:80],
-                                    "hint": "open the board as http://localhost:<port>/ or http://127.0.0.1:<port>/ "
-                                            "(through an SSH tunnel on remote machines)"})
+                                    "hint": "open the board by IP address or localhost, e.g. http://127.0.0.1:<port>/ or "
+                                            "http://<machine IP>:<port>/; host names are refused (DNS rebinding protection)"})
         path = self.path.split("?", 1)[0]
         if path == "/api/ping":
             return self._json(200, {"ok": True, "app": "dev-kit-board", "pid": os.getpid(),
                                     "fingerprint": fingerprint(self.server.token)})
+        if not self._authorized():
+            return self._deny(path)
+        if self.server.exposed and self._key_from_query() and path in ("/", "/index.html"):
+            # trade the key in the URL for a cookie, so it leaves the address bar and the history
+            return self._send(303, b"", "text/plain", {
+                "Location": "/",
+                "Set-Cookie": f"{self._cookie_name()}={self.server.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400"})
         if path == "/api/state":
             return self._json(200, build_state(self.server.root, self.server.record))
         if path == "/api/graph":
@@ -705,20 +814,27 @@ class Handler(BaseHTTPRequestHandler):
                 srv.clients -= 1
 
 
-def bind(port: int, root: Path, token: str, idle_s: int) -> Board:
+def bind(host: str, port: int, root: Path, token: str, idle_s: int) -> Board:
+    cls = Board6 if ":" in host else Board
     try:
-        return Board(("127.0.0.1", port), root, token, idle_s)
+        return cls((host, port), root, token, idle_s)
     except OSError:
-        return Board(("127.0.0.1", 0), root, token, idle_s)
+        return cls((host, 0), root, token, idle_s)
 
 
 def cmd_serve(root: Path, a: argparse.Namespace) -> int:
     token = os.environ.pop("DEV_BOARD_TOKEN", "") or secrets.token_urlsafe(24)
-    srv = bind(a.port, root, token, a.idle_min * 60)
+    host = a.host or "127.0.0.1"
+    srv = bind(host, a.port, root, token, a.idle_min * 60)
     port = srv.server_address[1]
-    url = f"http://127.0.0.1:{port}/"
+    conn = connect_addr(host)
+    url = f"http://{hostport(conn, port)}/"
     srv.record = {"pid": os.getpid(), "port": port, "token": token, "url": url, "root": str(root),
+                  "host": host, "connect": conn, "exposed": srv.exposed,
                   "code": CODE_ID, "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    if srv.exposed:
+        srv.record["open_url"] = f"{url}?key={token}"
+        srv.record["access_urls"] = [f"http://{hostport(ip, port)}/?key={token}" for ip in lan_addresses(host)]
     write_record(root, srv.record)
 
     def on_signal(signum, frame):
@@ -735,7 +851,7 @@ def cmd_serve(root: Path, a: argparse.Namespace) -> int:
             if read_record(root) is None or (read_record(root) or {}).get("pid") != os.getpid():
                 srv.stop()  # record removed or taken over: this server is no longer the board
     threading.Thread(target=watchdog, daemon=True).start()
-    print(f"serving {url} for {root} (pid {os.getpid()})", flush=True)
+    print(f"serving {url} on {host} for {root} (pid {os.getpid()})" + (" · exposed: access key required" if srv.exposed else ""), flush=True)
     try:
         srv.serve_forever(poll_interval=0.5)
     finally:
@@ -761,20 +877,26 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
     with Lock(root):
         rec = live_record(root)
         restarted = False
+        why = None
         if rec and rec.get("code") != CODE_ID:
-            code, msg = stop_locked(root)  # started by an older copy of the kit: replace it
-            print(f"the running board was started by another version of the kit; {msg}")
+            why = "the running board was started by another version of the kit"
+        elif rec and a.host and rec.get("host", "127.0.0.1") != a.host:
+            why = f"the running board listens on {rec.get('host', '127.0.0.1')}, not {a.host}"
+        if why:
+            code, msg = stop_locked(root)  # replace it rather than reuse it
+            print(f"{why}; {msg}")
             if code:
                 return code
             rec, restarted = None, True
         if rec:
-            opened = open_browser(rec["url"]) if a.open else False
+            opened = open_browser(rec.get("open_url") or rec["url"]) if a.open else False
             print(f"already running: {rec['url']} (pid {rec['pid']})" +
                   (" · opened a new tab" if opened else " · no new tab opened (use --open to force one)"))
+            print_exposure(rec)
             return 0
         log = open(run_dir(root) / "board.log", "a", encoding="utf-8")
         cmd = [sys.executable, "-I", str(Path(__file__).resolve()), "--root", str(root), "serve",
-               "--port", str(a.port), "--idle-min", str(a.idle_min)]
+               "--port", str(a.port), "--idle-min", str(a.idle_min), "--host", a.host or "127.0.0.1"]
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=str(root),
                                 start_new_session=True, close_fds=True)
         log.close()
@@ -784,7 +906,7 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
             if proc.poll() is not None:
                 break
             r = read_record(root)
-            if r and r.get("pid") == proc.pid and ping(int(r["port"]), 0.5):
+            if r and r.get("pid") == proc.pid and ping(int(r["port"]), 0.5, str(r.get("connect", "127.0.0.1"))):
                 rec = r
                 break
             time.sleep(0.1)
@@ -793,10 +915,23 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
                 proc.terminate()
             print(f"the board did not start; see {run_dir(root) / 'board.log'}", file=sys.stderr)
             return 1
-    opened = False if a.no_open else open_browser(rec["url"])
+    opened = False if a.no_open else open_browser(rec.get("open_url") or rec["url"])
     print(f"{'restarted' if restarted else 'started'}: {rec['url']} (pid {rec['pid']})" +
           (" · opened in the default browser" if opened else " · open the URL in your browser"))
+    print_exposure(rec)
     return 0
+
+
+def print_exposure(rec: dict) -> None:
+    """For a board listening beyond loopback: the access links and the warning that goes with them."""
+    if not rec.get("exposed"):
+        return
+    print(f"exposed on {rec.get('host')} port {rec['port']}: plain HTTP, anyone with an access link can see the board and stop it")
+    for u in rec.get("access_urls") or []:
+        print(f"access link: {u}")
+    if not rec.get("access_urls"):
+        print(f"access link: http://<this machine's IP>:{rec['port']}/?key={rec['token']}")
+    print("keep the links private; restart without --host (or --host 127.0.0.1) to stop sharing")
 
 
 def cmd_stop(root: Path, a: argparse.Namespace) -> int:
@@ -816,9 +951,10 @@ def stop_locked(root: Path) -> tuple[int, str]:
         remove_record(root)
         return 0, f"not running (removed a stale record for pid {pid})"
     try:
-        c = http.client.HTTPConnection("127.0.0.1", int(rec["port"]), timeout=2)
+        addr = str(rec.get("connect", "127.0.0.1"))
+        c = http.client.HTTPConnection(addr, int(rec["port"]), timeout=2)
         c.request("POST", "/api/shutdown", body=b"",
-                  headers={"Host": f"127.0.0.1:{rec['port']}", "X-Board-Token": str(rec.get("token", ""))})
+                  headers={"Host": hostport(addr, int(rec["port"])), "X-Board-Token": str(rec.get("token", ""))})
         c.getresponse().read()
         c.close()
     except OSError:
@@ -850,11 +986,13 @@ def _zombie(pid: int) -> bool:
 def cmd_status(root: Path, a: argparse.Namespace) -> int:
     with Lock(root):
         rec = live_record(root)
-    out = {"running": bool(rec), **({k: rec[k] for k in ("url", "pid", "port", "started_at")} if rec else {})}
+    out = {"running": bool(rec), **({k: rec.get(k) for k in ("url", "pid", "port", "started_at", "host", "exposed", "access_urls")}
+                                    if rec else {})}
     if a.json:
         print(json.dumps(out))
     elif rec:
         print(f"running: {rec['url']} (pid {rec['pid']}, since {rec['started_at']})")
+        print_exposure(rec)
     else:
         print("not running")
     return 0
@@ -868,6 +1006,9 @@ def build_parser() -> argparse.ArgumentParser:
         s = sub.add_parser(name)
         s.add_argument("--port", type=int, default=DEFAULT_PORT)
         s.add_argument("--idle-min", type=int, default=120, help="stop after N minutes with no open tab (0 = never)")
+        s.add_argument("--host", type=parse_bind, default=None,
+                       help="IP address to listen on (default 127.0.0.1). 0.0.0.0 or :: shares the board with the "
+                            "network: every request then needs the access key printed at start")
         if name == "start":
             g = s.add_mutually_exclusive_group()
             g.add_argument("--no-open", action="store_true", help="do not open a browser tab")

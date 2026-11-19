@@ -1036,7 +1036,8 @@ def board_line(store: Store) -> str | None:
         return None
     if not _alive(pid) or not _proc_in_project(pid, store.root.resolve()):
         return None
-    return f"Board: {rec.get('url')} (pid {pid}) · stop with /dev-kit:board stop"
+    shared = f" · shared on the network ({rec.get('host')})" if rec.get("exposed") else ""
+    return f"Board: {rec.get('url')} (pid {pid}){shared} · stop with /dev-kit:board stop"
 
 
 def cmd_cleanup(store: Store, a: argparse.Namespace) -> None:
