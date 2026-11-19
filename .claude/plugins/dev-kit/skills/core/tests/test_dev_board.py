@@ -198,6 +198,24 @@ class BoardTest(unittest.TestCase):
         self.assertFalse(alive(rec["pid"]))
         self.assertIsNone(self.record())
 
+    def test_ssh_tunnel_on_another_local_port_is_accepted(self):
+        """ssh -L 9000:127.0.0.1:<port> makes the browser send Host: localhost:9000 (or 127.0.0.1:9000, [::1]:9000)."""
+        self.board("start", check=True)
+        rec = self.record()
+        port, tok = rec["port"], rec["token"]
+        for host in ("localhost:9000", "127.0.0.1:9000", "[::1]:9000", "LOCALHOST:9000", "localhost"):
+            self.assertEqual(request(port, "GET", "/api/state", {"Host": host})[0], 200, host)
+        for host in ("evil.example", "evil.example:9000", "localhost.evil.example:9000", "127.0.0.1.nip.io:9000",
+                     "localhost:abc", "[::1]x", ""):
+            self.assertEqual(request(port, "GET", "/api/state", {"Host": host})[0], 403, host)
+        # Origin must match the Host the browser used
+        self.assertEqual(request(port, "POST", "/api/shutdown",
+                                 {"Host": "localhost:9000", "X-Board-Token": tok, "Origin": "http://localhost:8000"})[0], 403)
+        self.assertIn("refused Host header", (self.root / ".dev" / "run" / "board.log").read_text())
+        code, _ = request(port, "POST", "/api/shutdown",
+                          {"Host": "localhost:9000", "X-Board-Token": tok, "Origin": "http://localhost:9000"})
+        self.assertEqual(code, 202)
+
     def test_static_files_are_whitelisted(self):
         self.board("start", check=True)
         port = self.record()["port"]
