@@ -453,6 +453,19 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(request(port, "GET", "/api/graph?m=M9")[0], 404)
         self.assertEqual(request(port, "GET", "/api/graph?m=M1", {"Host": "evil.example"})[0], 403)
 
+    def test_task_endpoint(self):
+        self.board("start", check=True)
+        port = self.record()["port"]
+        code, body = request(port, "GET", "/api/task?id=T-001")
+        self.assertEqual(code, 200)
+        d = json.loads(body)
+        self.assertEqual(d["id"], "T-001")
+        for k in ("acceptance", "deps", "blocks", "files", "log", "commit_sha"):
+            self.assertIn(k, d)
+        self.assertEqual(request(port, "GET", "/api/task?id=bad")[0], 400)
+        self.assertEqual(request(port, "GET", "/api/task?id=T-999")[0], 404)
+        self.assertEqual(request(port, "GET", "/api/task?id=T-001", {"Host": "evil.example"})[0], 403)
+
     def test_status_line_in_dev_state(self):
         self.board("start", check=True)
         out = self.ds("status").stdout

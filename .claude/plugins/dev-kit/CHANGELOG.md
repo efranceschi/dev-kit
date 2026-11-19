@@ -2,6 +2,11 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.13.0 — 2026-11-19
+
+### Added
+- Board: click a kanban card (or a graph node, Enter/Space from the keyboard) to open a details dialog with the task's acceptance criteria (with the PRD text), test notes, planned files, dependencies and what it unblocks, source issue, commit (subject and changed files) and history. Served on demand by the new `GET /api/task?id=T-nnn`; `/api/state` stays light.
+
 ## 1.12.0 — 2026-11-19
 
 Gap review of 1.11.0: places the brownfield change and earlier features did not reach.

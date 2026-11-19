@@ -120,6 +120,11 @@
 
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
 
+  <dialog id="task-dialog" class="task-dialog" aria-labelledby="task-title">
+    <div class="td-head"><h2 id="task-title"></h2><button type="button" class="btn" id="task-close" aria-label="Close details">Close</button></div>
+    <div id="task-body" aria-live="polite"></div>
+  </dialog>
+
   <dialog id="stop-dialog" aria-labelledby="stop-h">
     <form method="dialog">
       <h2 id="stop-h">Stop the board server?</h2>

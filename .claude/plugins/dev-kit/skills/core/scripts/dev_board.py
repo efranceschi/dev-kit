@@ -339,6 +339,75 @@ def _task_events(root: Path) -> list[dict]:
     return events
 
 
+AC_LINE_RE = re.compile(r"^\s*[-*]\s*\**(AC-\d+)\**\s*(?:\[[^\]]*\])?\s*:\s*(.+)$")
+TASK_ID_RE = re.compile(r"T-\d{1,5}")
+SHA_RE = re.compile(r"[0-9a-f]{7,40}")
+
+
+def _commit_info(root: Path, sha: object) -> dict | None:
+    """Subject, date and changed files of a task's commit; None when there is no commit or git cannot show it."""
+    if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
+        return None
+    try:
+        r = subprocess.run(["git", "show", "--stat=120", "--format=%H%x09%an%x09%aI%x09%s", sha], cwd=root,
+                           capture_output=True, text=True, timeout=3, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    lines = r.stdout.splitlines()
+    head = lines[0].split("\t", 3)
+    if len(head) < 4:
+        return None
+    files = [ln.strip() for ln in lines[1:] if ln.strip()]
+    return {"sha": head[0], "author": head[1], "date": head[2], "subject": head[3],
+            "files": files[:-1][:40], "summary": files[-1] if files else ""}
+
+
+def task_detail(root: Path, tid: str) -> dict | None:
+    """Everything the kit keeps about one task, resolved on demand (the board state only carries the card)."""
+    store = ds.Store(root)
+    if not store.exists():
+        return None
+    try:
+        store.load()
+    except SystemExit:
+        return None
+    t = store.tasks().get(tid)
+    if t is None:
+        return None
+    prd = {}
+    for line in _read(store.dev / "prd.md").splitlines():
+        m = AC_LINE_RE.match(line)
+        if m:
+            prd.setdefault(m.group(1), m.group(2).strip())
+    acs = []
+    for a in t.get("acceptance") or []:
+        m = re.match(r"(AC-\d+)\s*(?:\[[^\]]*\])?\s*:?\s*(.*)", str(a))
+        acs.append({"id": m.group(1) if m else None, "text": str(a),
+                    "prd": prd.get(m.group(1)) if m and prd.get(m.group(1)) not in (None, (m.group(2) or "").strip()) else None})
+    tasks = store.tasks()
+    deps = [{"id": d, "title": tasks.get(d, {}).get("title"), "status": tasks.get(d, {}).get("status", "unknown")}
+            for d in t.get("deps") or []]
+    blocks = [{"id": k, "title": v.get("title"), "status": v.get("status")}
+              for k, v in tasks.items() if tid in (v.get("deps") or []) and v.get("status") != "dropped"]
+    issue = None
+    src = t.get("source")
+    if isinstance(src, str) and src.startswith("issue:"):
+        i = (store.state.get("issues") or {}).get(src[6:])
+        if i:
+            issue = {"id": src[6:], **{k: i.get(k) for k in ("title", "type", "class", "severity", "status", "note", "affects", "origin")}}
+    pat = re.compile(rf"\b{re.escape(tid)}\b")
+    log = [r for r in log_tail(_read(store.dev / "log.md"), 100000) if pat.search(r["text"])]
+    events = [{"ts": e.get("ts"), "transition": e.get("transition")} for e in _task_events(root)
+              if e.get("event") == "task" and e.get("task") == tid]
+    return {"ok": True, "id": tid, **{k: t.get(k) for k in ("title", "milestone", "type", "status", "lane", "source", "test_notes",
+                                                           "blocked_reason", "started_at", "done_at")},
+            "files": t.get("files") or [], "acceptance": acs, "deps": deps, "blocks": blocks, "issue": issue,
+            "commit": _commit_info(root, t.get("commit")), "commit_sha": t.get("commit"),
+            "log": log[:30], "events": events[-30:]}
+
+
 def graph_data(root: Path, milestone: str) -> dict | None:
     """Execution graph of one milestone: the initial plan (baseline) plus what really happened.
 
@@ -754,6 +823,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"ok": False, "error": "bad milestone"})
             g = graph_data(self.server.root, ms)
             return self._json(200 if g else 404, g or {"ok": False, "error": "unknown milestone"})
+        if path == "/api/task":
+            q = self.path.partition("?")[2]
+            tid = next((v[3:] for v in q.split("&") if v.startswith("id=")), "")
+            if not TASK_ID_RE.fullmatch(tid):
+                return self._json(400, {"ok": False, "error": "bad task id"})
+            d = task_detail(self.server.root, tid)
+            return self._json(200 if d else 404, d or {"ok": False, "error": "unknown task"})
         if path == "/api/events":
             return self._events()
         name = STATIC.get(path)
