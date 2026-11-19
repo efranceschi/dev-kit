@@ -378,3 +378,26 @@ dialog p { color: var(--text-secondary); }
 .gtable th, .gtable td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
 .ghead { fill: var(--text-muted); stroke: none; }
 .ghead.fix, .ghead.loop { fill: var(--critical); }
+
+/* pipeline chevrons: phases and sprint tabs are arrows pointing in the direction of progress */
+.phases li, [role="tab"] {
+  --n: 8px; --chev-border: var(--border-strong); --chev-bg: var(--surface-1);
+  position: relative; isolation: isolate; border: 0; border-radius: 0; box-shadow: none; background: var(--chev-border);
+  clip-path: polygon(0 0, calc(100% - var(--n)) 0, 100% 50%, calc(100% - var(--n)) 100%, 0 100%, var(--n) 50%);
+  padding: 6px calc(var(--n) + 6px) 6px calc(var(--n) + 12px); min-height: 32px;
+}
+.phases li::after, [role="tab"]::after {
+  content: ""; position: absolute; inset: 1.5px; z-index: -1; background: var(--chev-bg);
+  clip-path: polygon(0 0, calc(100% - var(--n)) 0, 100% 50%, calc(100% - var(--n)) 100%, 0 100%, var(--n) 50%);
+}
+.phases { gap: 0; }
+.phases li + li, [role="tablist"] > [role="tab"] + [role="tab"] { margin-left: calc(4px - var(--n)); }
+[role="tablist"] { gap: 0; }
+.phases li { --chev-border: var(--border); background: var(--chev-border); }
+.phases li.past { --chev-bg: color-mix(in srgb, var(--good) 12%, var(--surface-1)); --chev-border: color-mix(in srgb, var(--good) 40%, transparent); }
+.phases li.current { --chev-border: var(--accent-a); --chev-bg: linear-gradient(135deg, var(--accent-a), color-mix(in srgb, var(--accent-b) 80%, var(--accent-a))); background: var(--chev-border); }
+[role="tab"]:hover { --chev-border: var(--text-muted); }
+[role="tab"][aria-selected="true"] { --chev-border: var(--accent-a); --chev-bg: color-mix(in srgb, var(--accent-a) 18%, var(--surface-1)); background: var(--chev-border); }
+/* the clip hides outlines, so keyboard focus is shown by the border colour and a thicker border */
+[role="tab"]:focus-visible { --chev-border: var(--text-primary); outline: none; }
+[role="tab"]:focus-visible::after { inset: 3px; }
