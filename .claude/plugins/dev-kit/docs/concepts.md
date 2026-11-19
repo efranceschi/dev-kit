@@ -87,7 +87,7 @@ Optionally, each approved milestone can run locally on `127.0.0.1` (`keep_runnin
 
 ## The board
 
-`/dev-kit:board` opens a live, read-only dashboard of the project in the browser: sprint goal, kanban and execution graph (with running agents as badges), burndown, velocity, backlog and impediments. One server per project, stopped from the page or with `stop`, and by itself after 2 idle hours. `--host 0.0.0.0` shares it on your network through a private access link (plain HTTP: trusted networks only); on a remote machine an SSH tunnel to `127.0.0.1` works too.
+`/dev-kit:board` opens a live, read-only dashboard of the project in the browser: a "right now" strip (what needs you, what is running, what comes next), the sprint goal and kanban (filterable, with running agents on the cards and a details panel per task, linkable as `#T-nnn`), and insights tabs for burndown, velocity, quality and backlog; light, dark or following the system. One server per project, stopped from the page's ⋯ menu or with `stop`, and by itself after 2 idle hours. `--host 0.0.0.0` shares it on your network through a private access link (plain HTTP: trusted networks only); on a remote machine an SSH tunnel to `127.0.0.1` works too.
 
 ## Session log, feedback, costs and tips [§13, §14, §15]
 

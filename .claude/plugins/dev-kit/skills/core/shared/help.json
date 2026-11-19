@@ -173,7 +173,7 @@
     {
       "name": "board",
       "category": "start",
-      "one_line": "Live Scrum board in the browser: sprint goal, kanban and execution graph with live agents, burndown, velocity, backlog, impediments; local, or shared on your network with an access link.",
+      "one_line": "Live Scrum board in the browser: what needs you, what is running now, the sprint kanban with live agents and task details, burndown, velocity, quality and backlog; light or dark; local, or shared on your network with an access link.",
       "when": "When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.",
       "args": [
         {

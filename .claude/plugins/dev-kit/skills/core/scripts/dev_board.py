@@ -62,7 +62,7 @@ DEFAULT_PORT = 8765
 # of the kit (e.g. before a plugin update) and is restarted by `start` instead of reused.
 CODE_ID = hashlib.sha256(Path(__file__).resolve().read_bytes()).hexdigest()[:12]
 WATCHED = ("state.json", "log.md", "open-questions.md", "costs/summary.json", "plan.md", "run/agents.jsonl",
-           "telemetry.jsonl", "plan-baseline.json")
+           "telemetry.jsonl")
 KIT_VERSION = ds.tel.kit_version()  # read once: it is the version of the code this server is actually running
 AGENT_STALE_S = 3600
 LINK_WINDOW_S = 30  # a hook start and a skill spawn of the same agent type this close may be the same agent
@@ -408,134 +408,6 @@ def task_detail(root: Path, tid: str) -> dict | None:
             "log": log[:30], "events": events[-30:]}
 
 
-def graph_data(root: Path, milestone: str) -> dict | None:
-    """Execution graph of one milestone: the initial plan (baseline) plus what really happened.
-
-    Nodes are tasks (plus stubs for dependencies in other milestones and a Gate sink); edges are dependencies;
-    loops are failures that leave and re-enter the same node (block, restart, failed QA run); `parallel` lists
-    groups of tasks whose execution intervals overlapped."""
-    store = ds.Store(root)
-    if not store.exists():
-        return None
-    try:
-        store.load()
-    except SystemExit:
-        return None
-    if milestone not in store.milestones():
-        return None
-    tasks = store.tasks()
-    try:
-        base = json.loads((store.dev / "plan-baseline.json").read_text(encoding="utf-8"))
-        if not isinstance(base, dict):
-            base = {}
-    except (OSError, json.JSONDecodeError):
-        base = {}
-    has_base = bool(base)
-    now = time.time()
-    hist: dict[str, list[tuple[str, str]]] = {}
-    gate_runs = []
-    for e in _task_events(root):
-        if e.get("event") == "task" and e.get("task") and e.get("transition"):
-            hist.setdefault(e["task"], []).append((e.get("ts"), e["transition"]))
-        elif e.get("event") == "gate" and e.get("scope") == milestone and e.get("value") == "pending" and (e.get("qa_runs") or 0) > 0:
-            gate_runs.append({"at": e.get("ts"), "score": e.get("score"), "run": e.get("qa_runs")})
-
-    done_by: dict[str, list[dict]] = {}
-    for e in _task_events(root):
-        if e.get("event") == "agent_end":
-            node = _node_of(e.get("scope"))
-            if node:
-                f = e.get("findings") if isinstance(e.get("findings"), dict) else {}
-                done_by.setdefault(node, []).append({"agent": _short(e.get("agent")), "at": e.get("ts"), "status": e.get("status"),
-                                                     "duration_s": e.get("duration_s"), "findings": sum(v for v in f.values() if isinstance(v, (int, float))) if f else None})
-    mine = {tid: t for tid, t in tasks.items() if t.get("milestone") == milestone and t.get("status") != "dropped"}
-    nodes, edges, loops, spans = {}, [], [], {}
-
-    def planned(tid: str, t: dict) -> bool:
-        if has_base:
-            return tid in base
-        return t.get("type") != "fix" and not str(t.get("source") or "").startswith("issue:")
-
-    for tid, t in sorted(mine.items(), key=lambda kv: int(kv[0][2:])):
-        h = hist.get(tid, [])
-        attempts = sum(1 for _, tr in h if tr == "start")
-        blocks = sum(1 for _, tr in h if tr == "block")
-        intervals, cur, prev = [], None, None
-        for ts_, tr in h:
-            if tr == "start":
-                if cur is not None:
-                    intervals.append([cur, ts_])
-                    loops.append({"task": tid, "kind": "restart", "at": ts_})
-                elif prev in ("done",):
-                    loops.append({"task": tid, "kind": "restart", "at": ts_})
-                cur = ts_
-            elif tr in ("done", "block") and cur is not None:
-                intervals.append([cur, ts_])
-                cur = None
-                if tr == "block":
-                    loops.append({"task": tid, "kind": "block", "at": ts_})
-            elif tr == "block":
-                loops.append({"task": tid, "kind": "block", "at": ts_})
-            prev = tr
-        if cur is not None and t.get("status") == "in_progress":
-            intervals.append([cur, None])
-        spans[tid] = [(_ts(a), _ts(b) if b else now) for a, b in intervals]
-        nodes[tid] = {"id": tid, "title": t.get("title"), "type": t.get("type"), "status": t.get("status"),
-                      "lane": t.get("lane"), "planned": planned(tid, t), "added": has_base and tid not in base or not planned(tid, t),
-                      "external": False, "attempts": attempts, "blocks": blocks, "intervals": intervals,
-                      "history": [[a, b] for a, b in h[-24:]], "agents_done": done_by.get(tid, [])[-AGENTS_DONE:]}
-    # dependency edges: current deps, compared with the baseline when there is one
-    sinks = set(mine)
-    for tid, t in mine.items():
-        cur_deps = set(t.get("deps") or [])
-        old_deps = set((base.get(tid) or {}).get("deps") or []) if has_base and tid in base else cur_deps
-        for d in sorted(cur_deps | old_deps):
-            if d not in tasks:
-                continue
-            kind = "planned" if d in cur_deps and d in old_deps else ("added" if d in cur_deps else "removed")
-            if d not in nodes:
-                dt = tasks[d]
-                nodes[d] = {"id": d, "title": dt.get("title"), "type": dt.get("type"), "status": dt.get("status"),
-                            "lane": None, "planned": True, "added": False, "external": True, "milestone": dt.get("milestone"),
-                            "attempts": 0, "blocks": 0, "intervals": [], "history": [], "agents_done": []}
-            edges.append({"from": d, "to": tid, "kind": kind})
-            if kind != "removed":
-                sinks.discard(d)
-    m = store.milestones()[milestone]
-    nodes["GATE"] = {"id": "GATE", "title": f"QA gate {milestone}", "type": "gate", "status": m.get("gate", "pending"),
-                     "score": m.get("score"), "qa_runs": m.get("qa_runs", 0), "planned": True, "added": False,
-                     "external": False, "attempts": 0, "blocks": 0, "intervals": [], "history": [],
-                     "agents_done": done_by.get(f"GATE:{milestone}", [])[-AGENTS_DONE:]}
-    fixes = [tid for tid, n in nodes.items() if tid in mine and n["added"] and mine[tid].get("type") == "fix"]
-    for tid in sorted(sinks):
-        if tid not in fixes:
-            edges.append({"from": tid, "to": "GATE", "kind": "planned"})
-    for tid in fixes:  # out and back: the gate sends work to the fix task and the fix returns to the gate
-        edges.append({"from": "GATE", "to": tid, "kind": "fix"})
-        edges.append({"from": tid, "to": "GATE", "kind": "fix"})
-    for r in gate_runs:
-        loops.append({"task": "GATE", "kind": "gate", "at": r["at"], "score": r["score"], "run": r["run"]})
-    # parallel groups: connected components of overlapping execution intervals
-    ids = [t for t in spans if spans[t]]
-    parent = {t: t for t in ids}
-
-    def find(x: str) -> str:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-    for i, a_ in enumerate(ids):
-        for b_ in ids[i + 1:]:
-            if any(s1 < e2 and s2 < e1 for s1, e1 in spans[a_] for s2, e2 in spans[b_]):
-                parent[find(a_)] = find(b_)
-    groups: dict[str, list[str]] = {}
-    for t_ in ids:
-        groups.setdefault(find(t_), []).append(t_)
-    return {"ok": True, "milestone": milestone, "baseline": has_base, "nodes": list(nodes.values()), "edges": edges,
-            "loops": loops, "parallel": [sorted(g, key=lambda x: int(x[2:])) for g in groups.values() if len(g) > 1],
-            "generated_at": ds.now()}
-
-
 def _short(agent: object) -> str:
     return str(agent or "agent").removeprefix("dev-kit:")
 
@@ -567,7 +439,7 @@ def open_spawns(events: list[dict], now: float) -> list[dict]:
 
 
 def live_agents(root: Path) -> dict:
-    """Running agents and the graph node each one works on.
+    """Running agents and the board node (task, or QA gate of a milestone) each one works on.
 
     Skills log agent_spawn/agent_end with a scope (task or milestone) in telemetry; plugin hooks, where the
     environment runs them, log exact start/stop of every agent but without the task. With hooks, the running set
@@ -816,13 +688,6 @@ class Handler(BaseHTTPRequestHandler):
                 "Set-Cookie": f"{self._cookie_name()}={self.server.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400"})
         if path == "/api/state":
             return self._json(200, build_state(self.server.root, self.server.record))
-        if path == "/api/graph":
-            q = self.path.partition("?")[2]
-            ms = next((v[2:] for v in q.split("&") if v.startswith("m=")), "")
-            if not re.fullmatch(r"M\d{1,3}", ms):
-                return self._json(400, {"ok": False, "error": "bad milestone"})
-            g = graph_data(self.server.root, ms)
-            return self._json(200 if g else 404, g or {"ok": False, "error": "unknown milestone"})
         if path == "/api/task":
             q = self.path.partition("?")[2]
             tid = next((v[3:] for v in q.split("&") if v.startswith("id=")), "")

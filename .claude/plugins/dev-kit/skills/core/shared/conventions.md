@@ -32,7 +32,7 @@ Paths written as `<KIT>/shared/...` and `<KIT>/scripts/...` are relative to the 
   qa/ux/report.md     usability/accessibility audit
   log.md              append-only journal (written by dev_state.py)
   issues.md           issue queue, generated from state (§15)
-  plan-baseline.json  first version of the plan, for the board's graph (§13)
+  plan-baseline.json  first version of the plan, as sync-plan first wrote it (§13)
   reviews/<target>/   scored reviews: raw/, scores.json, findings-round-<n>.json, report.md
   qa/<M>/raw/, scores.json, findings-round-<n>.json   per-gate audit data (also qa/ux/, qa/release/, qa/T-xxx/)
   release-notes-<v>.md  release notes per version
@@ -238,8 +238,8 @@ Every skill keeps a structured, high-level log of the session, for the user to f
 - **Stage grades** (fixed formula, `dev_telemetry.stage_report`): start at 100; −10 per round beyond the first of each review or gate, plus −10 per round beyond `max_fix_rounds_per_gate`; forced pass −25 by the user, −15 by policy; −10 each time a scope's score drops between rounds; −5 per error (max −30); −5 per agent without parsable JSON; −10 per failed and −5 per parked skill run; feedback of the stage's area −3 per `failed` and +2 per `worked` item (net −15…+6); a review or gate still failing caps the stage at 60; clamp 0–100. Stages that did not run show `—`, and so does a stage recorded only as a review `n/a` (existing projects); the overall grade is the mean of the stages that ran. `review` runs are graded in their target's stage (log `skill_start`/`skill_end` with `scope=<target>`); `qa --scope T-xxx` and hotfix reviews count in `qa`. Every grade lists the reasons that produced it.
 - Logging never blocks work: if an event is rejected, fix the fields or drop it; never put project text into a field to make it pass.
 
-- **Agent badges:** the board places a running agent on the graph node named by the `scope` of its `agent_spawn` (a task id, or the milestone for the QA gate), so always log `scope`, and log `agent_end` with the same `agent`, `slot` and `scope` to close it. Where plugin hooks run, a hook agent is linked to a spawn only when the match by type and start time is unambiguous; otherwise it is shown without a task.
-- **Graph inputs:** the board's execution graph reads `task` events (`add`, `start`, `done`, `block`, `unblock`) and `gate` events from this log, plus `.dev/plan-baseline.json`, the initial plan written by `sync-plan` (first write wins; QA fix and issue tasks never enter it).
+- **Agent badges:** the board places a running agent on the task card (or the milestone's QA gate) named by the `scope` of its `agent_spawn` (a task id, or the milestone for the QA gate), so always log `scope`, and log `agent_end` with the same `agent`, `slot` and `scope` to close it. Where plugin hooks run, a hook agent is linked to a spawn only when the match by type and start time is unambiguous; otherwise it is shown without a task.
+- **Initial plan:** `.dev/plan-baseline.json` keeps the plan as `sync-plan` first wrote it (first write wins; QA fix and issue tasks never enter it), so later tools can compare plan and execution. The board no longer reads it.
 
 ## 14. Costs (`dev_cost.py`, skill `costs`)
 
