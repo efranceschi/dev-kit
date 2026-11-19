@@ -203,10 +203,12 @@ class BoardTest(unittest.TestCase):
         self.board("start", check=True)
         rec = self.record()
         port, tok = rec["port"], rec["token"]
-        for host in ("localhost:9000", "127.0.0.1:9000", "[::1]:9000", "LOCALHOST:9000", "localhost"):
+        for host in ("localhost:9000", "127.0.0.1:9000", "[::1]:9000", "LOCALHOST:9000", "localhost",
+                     "192.168.68.121:9876", "10.0.0.5", "[fe80::1]:9000"):
             self.assertEqual(request(port, "GET", "/api/state", {"Host": host})[0], 200, host)
         for host in ("evil.example", "evil.example:9000", "localhost.evil.example:9000", "127.0.0.1.nip.io:9000",
-                     "localhost:abc", "[::1]x", ""):
+                     "localhost:abc", "[::1]x", "", "192.168.68.121.evil.example:9876", "[192.168.1.1]:80",
+                     "999.1.1.1:80", "localhost:70000"):
             self.assertEqual(request(port, "GET", "/api/state", {"Host": host})[0], 403, host)
         # Origin must match the Host the browser used
         self.assertEqual(request(port, "POST", "/api/shutdown",
@@ -238,6 +240,71 @@ class BoardTest(unittest.TestCase):
         d = json.loads(body)
         self.assertEqual(d["host"], "myserver.lan:8765")
         self.assertIn("localhost", d["hint"])
+
+    # ------------------------------------------------------------------ --host (sharing on the network)
+
+    def test_default_bind_is_loopback_and_needs_no_key(self):
+        self.board("start", check=True)
+        rec = self.record()
+        self.assertEqual(rec["host"], "127.0.0.1")
+        self.assertFalse(rec["exposed"])
+        self.assertNotIn("access_urls", rec)
+        self.assertEqual(request(rec["port"], "GET", "/api/state")[0], 200)
+
+    def test_exposed_board_requires_the_access_key(self):
+        r = self.board("start", "--host", "0.0.0.0", check=True)
+        self.assertIn("exposed on 0.0.0.0", r.stdout)
+        self.assertIn("keep the links private", r.stdout)
+        rec = self.record()
+        port, tok = rec["port"], rec["token"]
+        self.assertTrue(rec["exposed"])
+        for u in rec["access_urls"]:
+            self.assertTrue(u.endswith(f":{port}/?key={tok}"), u)
+        for path in ("/", "/api/state", "/api/events", "/assets/board.js"):
+            self.assertEqual(request(port, "GET", path)[0], 401, path)
+        self.assertEqual(request(port, "GET", "/api/ping")[0], 200)  # identity check used by start/stop
+        self.assertEqual(request(port, "GET", "/api/state", {"Cookie": f"dkb_{port}=wrong"})[0], 401)
+        # the key in the URL becomes an HttpOnly cookie and leaves the address bar
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        c.request("GET", f"/?key={tok}")
+        r = c.getresponse(); r.read(); c.close()
+        self.assertEqual(r.status, 303)
+        self.assertEqual(r.getheader("Location"), "/")
+        cookie = r.getheader("Set-Cookie")
+        self.assertIn(f"dkb_{port}={tok}", cookie)
+        for flag in ("HttpOnly", "SameSite=Strict"):
+            self.assertIn(flag, cookie)
+        ok = {"Cookie": f"dkb_{port}={tok}"}
+        self.assertEqual(request(port, "GET", "/api/state", ok)[0], 200)
+        # with the key, host names are fine: a DNS-rebinding page never has the key
+        self.assertEqual(request(port, "GET", "/api/state", {**ok, "Host": f"myserver.lan:{port}"})[0], 200)
+        self.assertEqual(request(port, "GET", "/api/state", {"Host": f"myserver.lan:{port}"})[0], 401)
+        self.assertIn("shared on the network", self.ds("status").stdout)
+        self.assertIn("access link:", self.board("status").stdout)
+        self.assertIn("stopped", self.board("stop", check=True).stdout)
+        self.assertIsNone(self.record())
+
+    def test_changing_host_restarts_and_plain_start_keeps_it(self):
+        self.board("start", check=True)
+        first = self.record()["pid"]
+        r = self.board("start", "--host", "0.0.0.0", check=True)
+        self.assertIn("listens on 127.0.0.1, not 0.0.0.0", r.stdout)
+        self.assertIn("restarted:", r.stdout)
+        self.assertFalse(alive(first))
+        shared = self.record()["pid"]
+        r = self.board("start", check=True)  # no --host: reuse the shared board as it is
+        self.assertIn("already running", r.stdout)
+        self.assertEqual(self.record()["pid"], shared)
+        r = self.board("start", "--host", "127.0.0.1", check=True)
+        self.assertIn("restarted:", r.stdout)
+        self.assertFalse(self.record()["exposed"])
+        self.assertEqual(len(self.board_pids()), 1)
+
+    def test_host_must_be_an_ip_address(self):
+        r = self.board("start", "--host", "myserver.lan")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("needs an IP address", r.stderr)
+        self.assertIsNone(self.record())
 
     def test_static_files_are_whitelisted(self):
         self.board("start", check=True)

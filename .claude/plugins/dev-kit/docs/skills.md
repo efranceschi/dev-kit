@@ -158,7 +158,7 @@ Live Scrum board in the browser: sprint goal, kanban, burndown, velocity, backlo
 
 **When:** When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.
 
-**Usage:** `/dev-kit:board [stop | status | --open | --no-open | --port N]`
+**Usage:** `/dev-kit:board [stop | status | --open | --no-open | --port N | --host IP]`
 
 | Argument | Meaning |
 |---|---|
@@ -166,10 +166,12 @@ Live Scrum board in the browser: sprint goal, kanban, burndown, velocity, backlo
 | `stop` | stop the server (the page also has a Stop server button) |
 | `status` | whether it is running, its URL and PID |
 | `--open | --no-open | --port N` | force a new tab, do not open a tab, preferred port (default 8765) |
+| `--host IP` | listen address (default 127.0.0.1); 0.0.0.0 shares the board on the network, opened only with the access link it prints |
 
 **Examples:**
 
 - `/dev-kit:board`: open the board; calling it again does not start a second server or a second tab
+- `/dev-kit:board --host 0.0.0.0`: share it on your network (phone, another computer) with a private access link
 - `/dev-kit:board stop`: stop the board server
 
 **Produces:** nothing in the project (read-only); its own files in .dev/run/

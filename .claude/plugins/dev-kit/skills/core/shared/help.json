@@ -187,12 +187,20 @@
         {
           "arg": "--open | --no-open | --port N",
           "meaning": "force a new tab, do not open a tab, preferred port (default 8765)"
+        },
+        {
+          "arg": "--host IP",
+          "meaning": "listen address (default 127.0.0.1); 0.0.0.0 shares the board on the network, opened only with the access link it prints"
         }
       ],
       "examples": [
         {
           "command": "/dev-kit:board",
           "what": "open the board; calling it again does not start a second server or a second tab"
+        },
+        {
+          "command": "/dev-kit:board --host 0.0.0.0",
+          "what": "share it on your network (phone, another computer) with a private access link"
         },
         {
           "command": "/dev-kit:board stop",
