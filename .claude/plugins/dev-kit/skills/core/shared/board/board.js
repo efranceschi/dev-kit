@@ -397,7 +397,8 @@
 
   // ------------------------------------------------------------------ execution graph (DAG of the milestone)
   const GW = 176, GH = 46, GX = 72, GY = 52, GPAD = 34;
-  let view = "kanban", gmode = "actual", gdata = null, gseq = 0;
+  const store = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
+  let view = store.get("board-view", "graph") === "kanban" ? "kanban" : "graph", gmode = "actual", gdata = null, gseq = 0;
   const STCOL = { done: "var(--good)", in_progress: "var(--warning)", blocked: "var(--critical)", todo: "var(--todo)", pending: "var(--todo)", passed: "var(--good)", skipped: "var(--todo)" };
 
   function segSwitch(label, opts, cur, onPick) {
@@ -405,7 +406,7 @@
       opts.map(([k, text]) => h("button", { type: "button", class: `seg-btn${cur === k ? " on" : ""}`, "aria-pressed": String(cur === k), text, onclick: () => onPick(k) })));
   }
   function renderBoardView(m) {
-    const tools = [segSwitch("View", [["kanban", "Kanban"], ["graph", "Graph"]], view, (k) => { view = k; renderBoardView(currentMilestone()); })];
+    const tools = [segSwitch("View", [["graph", "Graph"], ["kanban", "Kanban"]], view, (k) => { view = k; store.set("board-view", k); renderBoardView(currentMilestone()); })];
     if (view === "graph") tools.push(segSwitch("Graph mode", [["actual", "Actual"], ["planned", "Planned"]], gmode, (k) => { gmode = k; drawGraph(); renderBoardView(currentMilestone()); }));
     fill($("board-tools"), tools);
     $("kanban").hidden = view !== "kanban";
