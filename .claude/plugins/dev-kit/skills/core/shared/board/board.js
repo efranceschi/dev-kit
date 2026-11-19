@@ -223,9 +223,13 @@
     const nx = data.next || {};
     const nt = nx.task && data.tasks[nx.task];
     $("now-next").disabled = !nt;
-    $("now-next-value").textContent = nt ? `${nx.task} ${nt.title}` : nx.reason || "Nothing queued";
-    $("now-next-value").title = nt ? nt.title : nx.reason || "";
-    $("now-next-note").textContent = nt ? `${nt.milestone} · ${nt.type} · open details` : "";
+    // dev_state explains why nothing is ready; turn its common case into plain words and keep the rest as a note
+    const busy = !nt && /\bis in_progress\b/.test(nx.reason || "");
+    $("now-next-value").textContent = nt ? `${nx.task} ${nt.title}` : busy ? "Nothing ready yet" : nx.reason ? "Nothing ready" : "Nothing queued";
+    $("now-next-value").title = nt ? nt.title : "";
+    $("now-next-note").textContent = nt ? `${nt.milestone} · ${nt.type} · open details`
+      : busy ? "The next task is picked when the running ones finish" : nx.reason || "";
+    $("now-next-note").title = nt ? "" : nx.reason || "";
   }
   $("now-needs").addEventListener("click", () => {
     const el = $("attention");
