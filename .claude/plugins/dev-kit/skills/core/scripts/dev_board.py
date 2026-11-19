@@ -285,6 +285,21 @@ def signature(root: Path) -> tuple:
 
 # --------------------------------------------------------------------------- server
 
+LOOPBACK_NAMES = {"127.0.0.1", "localhost", "[::1]"}
+
+
+def loopback_host(host: str) -> bool:
+    """True for 'localhost', '127.0.0.1' or '[::1]', with or without a numeric port."""
+    host = host.strip().lower()
+    if host.startswith("["):
+        name, _, rest = host.partition("]")
+        name, port = name + "]", rest[1:] if rest.startswith(":") else (None if not rest else "x")
+    else:
+        name, _, port = host.partition(":")
+        port = port if ":" in host else None
+    return name in LOOPBACK_NAMES and (port is None or (port.isdigit() and 0 < int(port) < 65536))
+
+
 class Board(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -316,13 +331,18 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _host_ok(self) -> bool:
-        port = self.server.server_address[1]
-        return self.headers.get("Host", "") in (f"127.0.0.1:{port}", f"localhost:{port}")
+        """Loopback names on any port: SSH tunnels and editor port forwarding may use another local port.
+        Any other name (e.g. a DNS-rebinding domain) is refused."""
+        host = self.headers.get("Host", "")
+        if loopback_host(host):
+            return True
+        print(f"refused Host header {host[:80]!r} (only localhost / 127.0.0.1 / [::1] are accepted)", file=sys.stderr, flush=True)
+        return False
 
     def _origin_ok(self) -> bool:
-        port = self.server.server_address[1]
+        """POSTs must come from the page itself: Origin, when sent, is the same origin the browser used."""
         origin = self.headers.get("Origin")
-        return origin is None or origin in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
+        return origin is None or origin.lower() == f"http://{self.headers.get('Host', '')}".lower()
 
     def _send(self, code: int, body: bytes, ctype: str = "application/json; charset=utf-8", extra: dict | None = None):
         self.send_response(code)

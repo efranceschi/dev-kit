@@ -4,10 +4,16 @@ A [Claude Code](https://claude.com/claude-code) plugin that builds a complete ap
 
 You answer one thorough interview. The kit then writes the PRD, architecture and design, plans the work, implements it task by task with tests, audits every milestone and prepares the release. It stops only when it needs a decision from you, and everything it produces is kept in a `.dev/` folder inside your project, so you can stop and resume at any time.
 
+<p align="center">
+  <img src=".github/assets/dev-kit-board.png" alt="dev-kit board: sprint goal and progress, gate score, impediments, cost and the sprint kanban of a real project, updated in real time in the browser" width="900">
+  <br>
+  <sub><code>/dev-kit:board</code> shows the build in <b>real time</b> in your browser: sprint goal, kanban, burndown, impediments and quality gates.</sub>
+</p>
+
 ## What it does
 
-- **23 skills**, invoked as `/dev-kit:<name>`, covering the whole lifecycle: `interview`, `prd`, `architecture`, `ux`, `ui`, `plan`, `implement`, `test`, `qa`, `review`, `usability`, `docs`, `release`, `deploy`, plus `autopilot`, `status`, `board`, `backlog`, `issue`, `costs`, `feedback`, `help` and `start`.
-- **17 agents** that the skills call: one implementer, one architecture consultant and 15 read-only reviewers (code, security, tests, accessibility, data, performance, copy and more).
+- **Skills for the whole lifecycle**, invoked as `/dev-kit:<name>`, such as `interview`, `prd`, `architecture`, `ux`, `ui`, `plan`, `implement`, `test`, `qa`, `review`, `usability`, `docs`, `release`, `deploy`, plus `autopilot`, `status`, `board`, `backlog`, `issue`, `costs`, `feedback`, `help` and `start`.
+- **Specialised agents** that the skills call: an implementer, an architecture consultant and a team of read-only reviewers (code, security, tests, accessibility, data, performance, copy and more).
 - **Quality gates**: each milestone ends with a scored review (0-100 per dimension) that must clear a cut-off before the next one starts.
 - **Adjustable autonomy**: from supervised (asks at each decision, always with a recommendation) to unattended (parks what needs you and keeps going).
 - **Bugs and ideas** found at any time are classified and routed with `/dev-kit:issue`, without renumbering the plan.

@@ -23,6 +23,7 @@ Read-only for the project: the server only reads `.dev/` and writes its own file
    - anything else (empty, `--open`, `--no-open`, `--port N`) → run `DB start` with those flags. Do not add `&` or `run_in_background`: `start` detaches the server itself and returns in a few seconds.
 3. Report in the user's language, in one or two lines:
    - `started: URL` → the URL, that it opened in the default browser (or that they should open the URL when the output says so, e.g. on a remote machine without a display), and the two ways to stop it: the **Stop server** button on the page or `/dev-kit:board stop`.
+   - Remote machine (SSH session, no display, or the output says to open the URL): the board only listens on 127.0.0.1, so tell the user to open an SSH tunnel from their own computer, `ssh -N -L <local port>:127.0.0.1:<board port> <user>@<this host>`, and open `http://localhost:<local port>/`. Any local port works (editor port forwarding too); never suggest exposing the port to the network.
    - `already running: URL` → the URL and that no new tab was opened, so the existing tab is the one to use; `/dev-kit:board --open` opens another tab if they closed it.
    - `stopped` / `not running` → say so.
    - Exit 2 (no `.dev/state.json`) → there is no dev-kit project here; suggest `/dev-kit:start`.
