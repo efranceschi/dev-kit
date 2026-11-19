@@ -40,6 +40,18 @@ This writes and reviews the PRD, architecture, UX/UI specs and the plan, then st
 
 It implements each milestone test-first (one commit per task), runs the quality gate (`qa`), fixes what failed and moves to the next milestone. Prefer to drive it yourself? `/dev-kit:implement --milestone M1`, then `/dev-kit:qa M1`.
 
+## Already have a project?
+
+Run `/dev-kit:start <the change you want>` in the repository root (commit pending work first). In a codebase that was not built with dev-kit, `start` first runs an **onboarding**: it tags the current commit `dev-kit-baseline`, writes `.dev/discovery.md` (stack, commands, your commit/version/CHANGELOG conventions, existing docs and ADRs), records the current test results in `.dev/qa/baseline.md`, and asks for an entry mode:
+
+| mode | use it when | what happens |
+|---|---|---|
+| feature | you want a new capability | short interview about the change, then PRD (as-built + new), plan and build |
+| maintenance | you only fix bugs and make small improvements | no PRD or plan to write: report work with `/dev-kit:issue` |
+| import | you already have a PRD, specs or ADRs | they become the source; only the gaps are asked |
+
+Nothing in your code, docs or history is changed by the onboarding. From then on QA scores only what changed since the baseline, and problems that were already there become low-priority issues instead of blocking the gate. Commits follow your project's style. If a stage was skipped, `/dev-kit:start` routes to it; a stage that does not apply (e.g. design when there is no new UI) is recorded as `n/a`.
+
 ## 5. Follow along
 
 | You want | Run |

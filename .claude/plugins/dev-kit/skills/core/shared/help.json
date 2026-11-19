@@ -792,6 +792,27 @@
       ]
     },
     {
+      "id": "existing-project",
+      "title": "Adopt dev-kit in an existing project",
+      "topics": [
+        "existing",
+        "brownfield",
+        "legacy",
+        "adopt",
+        "onboarding",
+        "import",
+        "maintenance",
+        "skip stage"
+      ],
+      "steps": [
+        "Commit or stash pending work, then /dev-kit:start <the change you want> in the repository root",
+        "Onboarding: baseline tag dev-kit-baseline, .dev/discovery.md (stack, conventions, existing docs), test baseline, ADRs discovered/imported",
+        "Pick the entry mode: feature (new capability), maintenance (bugs only: straight to /dev-kit:issue) or import (use the project's PRD/specs/ADRs)",
+        "A stage was skipped? /dev-kit:start routes to the first missing artifact; a stage that does not apply is recorded as review n/a",
+        "QA scores only what changed since the baseline; pre-existing problems become intangible issues"
+      ]
+    },
+    {
       "id": "overnight",
       "title": "Let it run overnight",
       "topics": [
@@ -967,7 +988,7 @@
     },
     {
       "term": "ADR",
-      "definition": "Architecture decision record in .dev/decisions.md; source auto, user, interview or policy."
+      "definition": "Architecture decision record in .dev/decisions.md; source auto, user, interview, policy, discovered or imported."
     },
     {
       "term": "milestone",
@@ -1032,6 +1053,14 @@
     {
       "term": "session log",
       "definition": ".dev/telemetry.jsonl: structured, high-level events of the run, without project data."
+    },
+    {
+      "term": "Baseline",
+      "definition": "The git tag dev-kit-baseline set by the onboarding: everything before it is legacy, everything after it is new work that QA scores."
+    },
+    {
+      "term": "Brownfield",
+      "definition": "An existing project not built with dev-kit. start runs the onboarding (baseline tag, discovery, test baseline, entry mode); audits score only the changes since the baseline and legacy problems become issues (conventions §16)."
     }
   ],
   "agents_called_by": {

@@ -26,3 +26,4 @@ For auth, database, payments, crypto, framework core: last release date, mainten
 
 ## Output extras
 Add `"counts": {"direct": n, "vulnerable": n, "outdated_major": n}` and `"licenses": {"MIT": n, ...}` inside the JSON.
+- Existing projects (`conventions.md` §16): diff the manifests against `git show <brownfield.baseline_ref>:<manifest>`; only added or upgraded dependencies need an ADR; issues in pre-existing ones are `"legacy": true` unless the scope upgraded them.

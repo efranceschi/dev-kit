@@ -107,6 +107,50 @@ class TestInitAndSync(Base):
         bf = self.state()["brownfield"]
         self.assertEqual(bf, {"baseline_ref": "dev-kit-baseline", "baseline_sha": "abc1234"})
 
+    def test_brownfield_mode_is_validated(self) -> None:
+        self.run_state("init", "--brownfield-json", '{"mode":"maintenance"}')
+        self.assertEqual(self.state()["brownfield"]["mode"], "maintenance")
+        self.run_state("init", "--brownfield-json", '{"mode":"rewrite"}', expect=1)
+        out = self.run_state("status").stdout
+        self.assertIn("Brownfield: mode maintenance", out)
+
+    def test_commit_style_is_validated(self) -> None:
+        self.run_state("init")
+        self.run_state("set", "autonomy.commit_style", "{type}: {summary}")
+        self.assertEqual(self.state()["autonomy"]["commit_style"], "{type}: {summary}")
+        self.run_state("set", "autonomy.commit_style", "[{task}] no summary", expect=1)
+        self.run_state("set", "autonomy.commit_style", "{ticket}: {summary}", expect=1)
+        self.run_state("init", "--autonomy-json", '{"commit_style":"oops"}', expect=1)
+
+    def test_review_not_applicable_needs_note(self) -> None:
+        self.run_state("init")
+        self.run_state("review", "design", "n/a", expect=1)
+        self.run_state("review", "design", "n/a", "--note", "no new UI")
+        r = self.state()["reviews"]["design"]
+        self.assertEqual(r["verdict"], "n/a")
+        self.assertEqual(r["note"], "no new UI")
+
+    def test_set_phase_warns_on_missing_artifacts(self) -> None:
+        self.run_state("init")
+        proc = self.run_state("set", "phase", "plan")
+        self.assertIn("prd.md does not exist", proc.stderr)
+        self.assertIn("architecture.md does not exist", proc.stderr)
+        self.assertNotIn("ux-flows.md", proc.stderr)
+        self.assertEqual(self.state()["phase"], "plan")
+        for f in ("brief.md", "prd.md", "architecture.md"):
+            (self.root / ".dev" / f).write_text("x", encoding="utf-8")
+        self.assertEqual(self.run_state("set", "phase", "plan").stderr, "")
+
+    def test_empty_maintenance_milestone_syncs(self) -> None:
+        self.run_state("init", "--brownfield-json", '{"mode":"maintenance"}')
+        (self.root / ".dev" / "plan.md").write_text("# Plan\n\n## M1 — Maintenance\n", encoding="utf-8")
+        self.run_state("sync-plan")
+        self.assertIn("M1", self.state()["milestones"])
+        self.run_state("status")
+        self.run_state("next", expect=None)
+        self.run_state("add-task", "--milestone", "M1", "--type", "fix", "--title", "Fix login bug")
+        self.assertEqual(self.run_state("next").stdout.split()[0], "T-001")
+
     def test_init_is_idempotent_and_updates_fields(self) -> None:
         self.run_state("init", "--language", "en")
         out = self.run_state("init", "--language", "pt-BR", "--phase", "prd")
@@ -530,6 +574,16 @@ class TestScore(Base):
         res = json.loads((self.root / "scores.json").read_text())
         self.assertEqual(res["dimensions"]["code"]["score"], 69)  # cap for any high
         self.assertEqual(len(res["blockers"]), 1)
+
+    def test_legacy_findings_do_not_score_or_block(self) -> None:
+        a = self.write("a", "security-auditor", [finding("critical", legacy=True), finding("low", id="F-2", file="b.py")])
+        proc = self.run_score(a, expect=0)
+        res = json.loads((self.root / "scores.json").read_text())
+        self.assertEqual(res["dimensions"]["security"]["score"], 98)
+        self.assertEqual(res["blockers"], [])
+        self.assertEqual(len(res["legacy"]), 1)
+        self.assertEqual(res["legacy"][0]["severity"], "critical")
+        self.assertIn("legacy: 1 pre-existing", proc.stdout)
 
     def test_critical_caps_at_40(self) -> None:
         a = self.write("a", "security-auditor", [finding("critical")])

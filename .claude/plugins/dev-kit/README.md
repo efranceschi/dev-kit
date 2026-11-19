@@ -31,6 +31,7 @@ Step by step: [getting started](docs/getting-started.md).
 | I want to… | Run |
 |---|---|
 | start a project, or resume one | `/dev-kit:start` |
+| adopt the kit in an existing project | `/dev-kit:start <the change you want>` (runs the onboarding first) |
 | know what to do next | `/dev-kit:help` |
 | let the kit build it | `/dev-kit:autopilot` |
 | build it step by step | `/dev-kit:prd` → `architecture` → `ux` → `ui` → `plan` → `implement` → `qa` |

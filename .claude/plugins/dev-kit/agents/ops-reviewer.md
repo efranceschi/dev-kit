@@ -28,3 +28,7 @@ Scope (milestone or `release`), language for prose. `.dev/brief.md` blocks 5, 8,
 - Each finding names the file, the missing mechanism and the fix in one sentence.
 
 End with a prose summary and the single JSON block from the contract (`auditor: "ops-reviewer"`).
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16): judge the project's existing CI, Docker and deploy setup only where the scope changed them or where a `new` feature depends on them; gaps in untouched files are `"legacy": true`. A deploy owned by the project's pipeline (`production.method` `external`) is not a finding.

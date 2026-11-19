@@ -30,3 +30,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 ## Rules
 - Every AC that involves the interface must be reachable in at least one journey step; check this before finishing.
 - Do not specify colours, spacing or components here; that is `ui`.
+
+## Existing projects (brownfield)
+
+When state has `brownfield` (`conventions.md` §16): start the screen inventory from the existing routes and screens in `.dev/discovery.md` §5–6 and tag each `existing` (one line: id, route, file) or `new`/`changed`; journeys, states and forms are specified only for `new`/`changed` screens and for existing screens a `new` AC passes through. Reuse the app's navigation model and microcopy tone; do not redesign. If no `new` AC touches the UI, write nothing, record `dev_state.py review design n/a --note "no new UI"` and set phase `plan`.

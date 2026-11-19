@@ -44,3 +44,7 @@ Stop when: requested tasks done; milestone complete (announce the gate); an `alw
 
 ## Never
 - Never skip or weaken tests to pass; never commit with failing tests; never edit `state.json` manually; never push unless `may_push` is true and the brief asked for it.
+
+## Existing projects (brownfield)
+
+When state has `brownfield` (`conventions.md` §16): follow the folder layout, test framework, test location and naming, and the build/test/lint commands in `.dev/discovery.md` §3 (they override `test-pyramid.md` defaults and `architecture.md` §8 where they differ); never add a runner, linter, formatter or build tool without an `always_ask` decision. Commit with `autonomy.commit_style` (trailer `Refs: T-xxx` when the template has no `{task}`). Uncommitted changes that belong to no task are the user's work: always ask (never stash them on your own). In `maintenance` mode the tasks come from `issue` in `M1 — Maintenance`; when no `todo` task is left, stop and suggest `/dev-kit:issue` instead of `qa`.

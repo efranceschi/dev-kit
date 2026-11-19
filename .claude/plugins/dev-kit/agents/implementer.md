@@ -37,3 +37,7 @@ You are an implementation worker inside the dev-kit pipeline. You receive one ta
 }
 ```
 Prose before the JSON in the language given in the prompt, at most eight lines.
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16): follow the layout, test framework, test location and commands in `.dev/discovery.md` §3–4; do not add or change tooling, configuration or dependencies beyond what the task needs, and never refactor legacy code outside the task's files. Report any legacy problem you see as a note, not a fix.

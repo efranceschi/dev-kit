@@ -31,6 +31,8 @@ Paths written as `<KIT>/shared/...` and `<KIT>/scripts/...` are relative to the 
   qa/<M>/report.md    QA gate report per milestone (+ findings.json)
   qa/ux/report.md     usability/accessibility audit
   log.md              append-only journal (written by dev_state.py)
+  discovery.md        existing projects only: facts about the code before dev-kit (§16)
+  qa/baseline.md      existing projects only: test results at the baseline tag (§16)
 ```
 
 Never edit `state.json` by hand. Always go through `python3 -I "<KIT>/scripts/dev_state.py" <subcommand>`.
@@ -62,7 +64,8 @@ Rules: `type` ∈ `feature | fix | chore | test | docs`. `status` in plan.md is 
 
 ## 5. Commits
 
-- One commit per completed task, subject: `[T-003] <type>: <imperative summary>` (type = feat | fix | chore | test | docs | refactor). Body (in the user's language): what changed, which ACs it satisfies, how it was verified.
+- One commit per completed task. Subject from `autonomy.commit_style` (template with `{task}`, `{type}`, `{summary}`; default `[{task}] {type}: {summary}`, e.g. `[T-003] feat: add login form`; type = feat | fix | chore | test | docs | refactor). When the template has no `{task}` (existing projects that use Conventional Commits, Jira keys, etc.), end the body with the trailer `Refs: T-003`. Body (in the user's language): what changed, which ACs it satisfies, how it was verified.
+- Tools find a task's commit by the SHA recorded in state (`done --commit`), never by parsing the subject.
 - Only commit when the working tree contains just that task's changes. Never amend or rewrite history. Never push unless the brief says so.
 - Record the SHA: `dev_state.py done T-003 --commit <sha>`.
 - If the brief says `commit_per_task: false`, skip committing but still call `done`.
@@ -246,3 +249,25 @@ Every skill keeps a structured, high-level log of the session, for the user to f
 - **Overuse:** more than 2 hotfixes in one milestone is reported by `backlog` as a warning.
 - **Tips:** `dev_state.py tip <context>` returns one short tip from `shared/tips.json` (each at most twice; `autonomy.tips: on | off | always`; `tips --reset`). Scripts append it to their human output (`💡 …`); skills end their report with at most one tip, never inside a question and never invented.
 
+## 16. Existing projects (brownfield)
+
+Applies when `state.json` has `brownfield` (written by `start`'s onboarding, `shared/onboarding.md`): code that was **not** built with dev-kit. Every skill and agent that sees the marker follows these rules; they override the greenfield defaults elsewhere in the kit.
+
+- **Baseline.** `brownfield.baseline_ref` (tag `dev-kit-baseline`) splits "before dev-kit" from new work. Audits and coverage are scoped to `git diff <baseline_ref>..HEAD` (or the task SHAs in state); untouched legacy code is out of scope.
+- **Legacy debt is never blocking.** A problem that exists at the baseline and is not made worse by the change becomes an issue of class `intangible` (`dev_state.py add-issue --origin baseline`, or `--origin qa` when found by an audit), not a blocking finding or fix task. Test failures listed in `.dev/qa/baseline.md` are not F-001.
+- **Existing vs new.** ACs are tagged `existing` (already works; verified, no task) or `new` (to build). Screens in `ux-flows.md` are tagged the same way; only `new`/changed screens need a full spec. `spec-tracer` reports `existing` ACs as `existing-verified` when the behaviour is in the code, without requiring a task or a test that names the AC.
+- **The project's conventions win.** Folder layout, test framework and test layout, lint/format tools, commit style (`autonomy.commit_style`), CHANGELOG format, version source and tag prefix are read from `discovery.md` and followed. Adding a new runner, linter, formatter, framework or build tool is `always_ask`. Dependencies already in the manifests at the baseline need no ADR; only new ones do.
+- **Design.** Tokens and components are extracted from the code (theme files, CSS variables, UI library); `ui` extends them instead of inventing a new system. Inherited contrast or accessibility problems on untouched screens become issues.
+- **Decisions.** Facts read from the code are ADRs with `source: discovered`; ADRs the project already had are referenced with `source: imported` (link to the original file), never rewritten.
+- **Not applicable reviews.** A review that does not apply (e.g. `design` when no `new` AC touches the UI, or `prd`/`plan` in maintenance mode) is recorded as `dev_state.py review <name> n/a --note "<reason>"`; `n/a` satisfies prerequisites in `autopilot` and `release`.
+- **Working tree.** `pause_policy.dirty_tree` defaults to `ask`: the tree may hold the user's own work.
+- **Deploy.** If the project deploys through its own CI/CD, `autonomy.production.method` is `external`: `deploy` never runs install commands, it confirms with the user (or reads the CI status) and records the SHA.
+- **Entry modes** (`brownfield.mode`):
+
+| mode | when | path |
+|---|---|---|
+| `feature` | new capability or behaviour change | `interview --express` on the change → `prd` (as-built + new ACs) → `architecture` → (`ux`/`ui` if new UI) → `plan` → `implement` |
+| `maintenance` | bugs and small improvements only | minimal brief, as-built `prd` (all ACs `existing`), `architecture` from discovery, `plan.md` with an empty `## M1 — Maintenance`; reviews `prd`/`design`/`plan` `n/a`; phase `implement`; work enters through `issue` |
+| `import` | the project already has a PRD, specs or ADRs | those documents are the primary source: `interview` asks only the blocks they do not cover, `prd` is derived from them, ADRs are imported; then as `feature` |
+
+- **Missing stages.** On resume, `start` routes to the first missing artifact (brief → prd → architecture → design if new UI → plan) before following the phase; `dev_state.py set phase` warns when an earlier artifact is missing.

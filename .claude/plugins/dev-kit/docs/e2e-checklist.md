@@ -45,7 +45,11 @@ Tick each item; note the Claude Code version used.
 - [ ] In a git repo with `pyproject.toml` (fastapi + pytest), tests and a README, no `.dev/`, run `/dev-kit:start "add X"`: it creates tag `dev-kit-baseline`, `.dev/discovery.md`, `.dev/qa/baseline.md`, ADRs with `source: discovered`, `brownfield` in `state.json`, and only then runs `interview --express` with block 5 pre-filled as inferred.
 - [ ] A failing test in the repo becomes an `intangible` issue, not a finding; existing README/docs/source are unchanged after onboarding.
 - [ ] `prd` tags ACs `existing`/`new`; `plan` has no walking-skeleton M1 and no tasks for `existing` ACs; `architecture` keeps the stack.
-- [ ] `qa M1` scores only `git diff dev-kit-baseline..HEAD`; a legacy flaw in untouched code becomes an `intangible` issue and does not block the gate.
+- [ ] `qa M1` scores only `git diff dev-kit-baseline..HEAD`; a legacy flaw in untouched code is reported `"legacy": true`, becomes an `intangible` issue and does not block the gate.
+- [ ] Repo with Conventional Commits, `docs/adr/0001-*.md`, tag `v2.3.0` and a deploy workflow: `discovery.md` §11 proposes `commit_style` `{type}: {summary}`, the ADR appears as `source: imported`, `production.method` is `external`; a task commit is `feat: …` with trailer `Refs: T-001`; `release --dry-run` proposes `v2.4.0`.
+- [ ] Mode **maintenance**: after onboarding the phase is `implement`, `plan.md` has an empty `## M1 — Maintenance`, reviews `prd`/`design`/`plan` are `n/a`; `/dev-kit:issue` with a high bug creates a hotfix task in M1; `status` shows the `Brownfield:` line.
+- [ ] Mode **import** with a `docs/prd.md`: the interview asks only blocks the document does not cover and `prd` cites the original ids.
+- [ ] Delete `.dev/prd.md` and run `/dev-kit:start`: it routes to `prd` and says the stage was skipped; `dev_state.py set phase plan` without `prd.md` prints a warning.
 
 ## 5. Gaps, usability, docs, release
 - [ ] `/dev-kit:interview --gaps` lists exactly the open `Q-nnn` rows; answering one that contradicts an assumption creates a superseding ADR and (when needed) a fix task.

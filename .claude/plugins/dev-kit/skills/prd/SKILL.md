@@ -28,3 +28,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 
 ## Revising (when a PRD already exists)
 Apply the change request; mark removed ACs as `(superseded by ADR-nnn)` rather than deleting; append new ACs with new numbers; note in `.dev/log.md` via a `dev_state.py add-question` only if the change needs confirmation. Tell the user that `plan` must be re-run to sync tasks.
+
+## Existing projects (brownfield)
+
+When state has `brownfield` (`conventions.md` §16): in `import` mode the project's PRD, specs or user stories listed in `.dev/discovery.md` §12 are the primary source; keep their wording and identifiers (map them to `AC-n` and cite the original), tag each AC `existing` or `new`, and record contradictions with the code as `Q-nnn`. In `maintenance` mode write only the as-built section with `existing` ACs for the main journeys, then `dev_state.py review prd n/a --note "maintenance mode: as-built PRD"`.

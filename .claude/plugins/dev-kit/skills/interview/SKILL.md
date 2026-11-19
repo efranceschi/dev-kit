@@ -50,3 +50,7 @@ Read `.dev/open-questions.md` (Open table). Group questions by theme, ask them i
 - Never ask something already answered in the initial message, the repo or the brief.
 - Keep questions concrete with examples; avoid jargon for non-technical users (block 1 tells you their level).
 - Never record secret values; record variable names only.
+
+## Existing projects (brownfield)
+
+When state has `brownfield` (`conventions.md` §16) the mode in `brownfield.mode` limits the interview: `feature` → express round on the change, blocks 5–8 and 10 confirmed from `discovery.md`; `import` → read the documents listed in `discovery.md` §12 first and ask only the blocks they leave open (cite the source of each pre-filled answer in `brief.md`); `maintenance` → only blocks 9–10 (autonomy, quality, deploy consent). In every mode, confirm `autonomy.commit_style` and `production` proposed by discovery instead of asking them from scratch, and keep `pause_policy.dirty_tree` at `ask`.

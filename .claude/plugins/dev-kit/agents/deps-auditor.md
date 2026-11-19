@@ -30,3 +30,7 @@ Scope (milestone or `release`), language for prose. Manifests and lockfiles, `.d
 - Do not recommend replacing a dependency unless a concrete problem is shown.
 
 End with a prose summary and the single JSON block from the contract (`auditor: "deps-auditor"`) including `"counts"` and `"licenses"` as described in the checklist.
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16): compare each manifest with `git show <brownfield.baseline_ref>:<manifest>`; only dependencies added or upgraded since the baseline need an ADR. Known vulnerabilities and licence problems in pre-existing dependencies are reported with `"legacy": true` (they become issues), unless the scope upgraded them.

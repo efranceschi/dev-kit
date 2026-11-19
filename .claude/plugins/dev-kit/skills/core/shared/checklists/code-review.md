@@ -25,3 +25,4 @@ Review the diff of the scope (milestone or task) against `plan.md` acceptance cr
 
 ## Output
 Follow `shared/prompts/auditor-output-contract.md`. For each finding, give the exact file and line and a one-line failure scenario.
+- Existing projects (`conventions.md` §16): the existing layout and patterns are the standard; dependencies present at `brownfield.baseline_ref` need no ADR; problems only in untouched lines are `"legacy": true`.

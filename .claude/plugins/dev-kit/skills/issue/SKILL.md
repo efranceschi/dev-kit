@@ -46,3 +46,7 @@ Let `DS` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root
    - UI improvements: the task's acceptance includes updating `.dev/design/ui-spec.md`, so spec and code do not drift.
 7. Run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root "${CLAUDE_PROJECT_DIR}" ingest` and log `skill_end` (`conventions.md` §13–14).
 8. **Report** in the user's language, short: issue id, type and class (with the reason), what happens next and when, the recommended next command. End with one tip from `DS tip issue_created:<class>` on its own line (skip if empty).
+
+## Existing projects (brownfield)
+
+When state has `brownfield` (`conventions.md` §16): if the project uses an external tracker and the user mentions an issue there, keep its link in the issue (`DS issue I-nnn --note "<url or #n>"`); when a remote exists and `gh` is available, also check `gh issue list --search "<keywords>"` for duplicates in step 3 and offer to link instead of creating. In `maintenance` mode `M1 — Maintenance` is the current milestone for `expedite` and `current`, and `standard`/`intangible` issues may be scheduled there directly (`--schedule I-nnn M1`). A bug that already existed at the baseline is still a valid issue; cite `.dev/qa/baseline.md` when it lists it.

@@ -24,17 +24,18 @@ If the injected output above contains a Python "can't open file" error, the kit 
 
 ## Procedure
 1. Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` (language rule, layout, autonomy summary). Apply the language rule now: converse in the user's language.
-2. **Existing codebase, no state above** (detection says `"greenfield": false`): follow `${CLAUDE_SKILL_DIR}/../core/shared/onboarding.md` end to end (git baseline tag, `.dev/discovery.md`, test baseline, retroactive ADRs, `brownfield` marker in state), then it hands over to `interview --express` framed on the change wanted. Tell the user in three lines what the onboarding will do and that nothing in the existing code or docs is modified. The user's input is the goal of the change. Skip the rest of this step.
+2. **Existing codebase, no state above** (detection says `"greenfield": false`): follow `${CLAUDE_SKILL_DIR}/../core/shared/onboarding.md` end to end (git baseline tag, `.dev/discovery.md` with the project's own conventions, existing docs and ADRs, test baseline, entry mode `feature` / `maintenance` / `import`, `brownfield` marker in state), then hand over as the chosen mode says. Tell the user in three lines what the onboarding will do and that nothing in the existing code, docs or history is modified. The user's input is the goal of the change. Skip the rest of this step.
 2b. **New project (no state above, `"greenfield": true`):**
    - If the directory is not a git repository, initialise one (`git init`) unless the user objects; dev-kit commits per task.
    - Explain in three lines how the kit works: one thorough interview, then autonomous build with checkpoints only on always-ask decisions; artifacts live in `.dev/`. Mention that `/dev-kit:help` answers any "how do I…?" at any time.
    - Invoke `interview` with the user's input as the initial idea (Skill tool: `interview`). Do not ask questions here; the interview owns them.
 3. **Existing project (state above):**
    - Reconcile with git: run `git status --short` and `git log -5 --format='%h %s'`. If a task is `in_progress`:
-     - a commit `[T-xxx]` for it exists → run `dev_state.py done T-xxx --commit <sha>`.
+     - a commit for it exists (subject `[T-xxx]`, or trailer `Refs: T-xxx` when `autonomy.commit_style` has no `{task}`; `git log --grep T-xxx`) → run `dev_state.py done T-xxx --commit <sha>`.
      - uncommitted changes exist for it → tell the user you will continue it (default) unless they prefer to reset (`unblock`/`--force`); when running autonomously, continue.
      - no changes at all → `dev_state.py set` nothing; just note the task will restart.
    - Show the three-line status and open questions count, and one line: "Not sure what to do? /dev-kit:help".
+   - Existing project (state has `brownfield`, `conventions.md` §16): before the table, check the artifacts in order — `brief.md` → `prd.md` → `architecture.md` → `design/ux-flows.md` and `design/ui-spec.md` (only if a `new` AC touches the UI and review `design` is not `n/a`) → `plan.md` — and route to the skill that writes the first one missing, whatever the phase says (say which stage was skipped). In `maintenance` mode with phase `implement` and no `todo` tasks, route to `issue` (or `backlog`) instead of `implement`.
    - Decide the next skill from `phase`:
      | phase | next |
      |---|---|

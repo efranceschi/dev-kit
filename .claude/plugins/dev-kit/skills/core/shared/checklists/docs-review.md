@@ -29,3 +29,4 @@ Verify that the documentation matches the product as built. **Execute what the d
 
 ## Severity
 Instructions that fail or mislead on the main setup/run path → `high`; missing main-flow guide/API coverage → `medium`; polish → `low`.
+- Existing projects (`conventions.md` §16): CHANGELOG covers every commit from the later of the latest tag and `brownfield.baseline_ref`, in the project's own format; sections the kit did not write are checked only for contradictions with the new work.

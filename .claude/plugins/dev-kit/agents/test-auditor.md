@@ -30,3 +30,7 @@ You are a test quality auditor inside the dev-kit pipeline. You run tests and re
 - Never modify or skip tests to make them pass.
 
 End with the prose summary and the single JSON block defined in the output contract; include the AC map as `"ac_map": {"AC-1": "covered|weak|missing"}` inside the JSON.
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16): failures listed in `.dev/qa/baseline.md` are not the failing-suite critical finding (report only new failures or baseline failures in files the scope changed); coverage targets apply only to files changed since `brownfield.baseline_ref`; `existing` ACs may be covered by legacy tests that do not name the AC id.

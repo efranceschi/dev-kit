@@ -35,3 +35,7 @@ Spawn `architect` with "challenge" instructions on the current `architecture.md`
 ## Rules
 - No dependency may appear later in code without an ADR or a line in the stack table; `code-reviewer` enforces this.
 - Prefer the simplest architecture satisfying the NFRs; justify every extra component with the AC or NFR it serves.
+
+## Existing projects (brownfield)
+
+When state has `brownfield` (`conventions.md` §16): `architecture.md` describes the system as it is (from `.dev/discovery.md`) plus what the `new` ACs add; mark each section `as-built` or `planned`. When the project already has an architecture document (`discovery.md` §12), summarise it and link to it instead of rewriting it. §8 uses the project's real build, test and lint commands.
