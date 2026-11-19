@@ -10,7 +10,8 @@ A Claude Code plugin that builds a complete application, from requirements inter
 ## Install
 
 ```
-/plugin install dev-kit@minhas-skills
+/plugin marketplace add efranceschi/dev-kit
+/plugin install dev-kit@dev-kit
 ```
 
 To try it without installing: `claude --plugin-dir .claude/plugins/dev-kit`. The `skills/core/` folder holds the kit's scripts, templates and checklists; keep it installed next to the other skills.

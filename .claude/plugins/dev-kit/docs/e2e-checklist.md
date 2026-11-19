@@ -1,6 +1,6 @@
 # dev-kit end-to-end checklist (manual)
 
-Install the plugin (`/plugin install dev-kit@minhas-skills`) or run `claude --plugin-dir .claude/plugins/dev-kit` in a scratch project, then start Claude Code there.
+Install the plugin (`/plugin install dev-kit@dev-kit`) or run `claude --plugin-dir .claude/plugins/dev-kit` in a scratch project, then start Claude Code there.
 
 Tick each item; note the Claude Code version used.
 
