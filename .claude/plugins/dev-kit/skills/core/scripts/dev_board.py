@@ -49,6 +49,9 @@ ASSETS = SCRIPTS.parent / "shared" / "board"
 STATIC = {"/": "index.html", "/index.html": "index.html", "/assets/board.css": "board.css",
           "/assets/board.js": "board.js", "/assets/favicon.svg": "favicon.svg"}
 DEFAULT_PORT = 8765
+# Identity of this code: a running server whose record carries another value was started by an older copy
+# of the kit (e.g. before a plugin update) and is restarted by `start` instead of reused.
+CODE_ID = hashlib.sha256(Path(__file__).resolve().read_bytes()).hexdigest()[:12]
 WATCHED = ("state.json", "log.md", "open-questions.md", "costs/summary.json", "plan.md")
 LOG_TAIL = 25
 
@@ -366,7 +369,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.server.touch()
         if not self._host_ok():
-            return self._json(403, {"ok": False, "error": "forbidden host"})
+            return self._json(403, {"ok": False, "error": "forbidden host", "host": self.headers.get("Host", "")[:80],
+                                    "hint": "open the board as http://localhost:<port>/ or http://127.0.0.1:<port>/ "
+                                            "(through an SSH tunnel on remote machines)"})
         path = self.path.split("?", 1)[0]
         if path == "/api/ping":
             return self._json(200, {"ok": True, "app": "dev-kit-board", "pid": os.getpid(),
@@ -450,7 +455,7 @@ def cmd_serve(root: Path, a: argparse.Namespace) -> int:
     port = srv.server_address[1]
     url = f"http://127.0.0.1:{port}/"
     srv.record = {"pid": os.getpid(), "port": port, "token": token, "url": url, "root": str(root),
-                  "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+                  "code": CODE_ID, "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     write_record(root, srv.record)
 
     def on_signal(signum, frame):
@@ -492,6 +497,13 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
         return 2
     with Lock(root):
         rec = live_record(root)
+        restarted = False
+        if rec and rec.get("code") != CODE_ID:
+            code, msg = stop_locked(root)  # started by an older copy of the kit: replace it
+            print(f"the running board was started by another version of the kit; {msg}")
+            if code:
+                return code
+            rec, restarted = None, True
         if rec:
             opened = open_browser(rec["url"]) if a.open else False
             print(f"already running: {rec['url']} (pid {rec['pid']})" +
@@ -519,47 +531,50 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
             print(f"the board did not start; see {run_dir(root) / 'board.log'}", file=sys.stderr)
             return 1
     opened = False if a.no_open else open_browser(rec["url"])
-    print(f"started: {rec['url']} (pid {rec['pid']})" +
+    print(f"{'restarted' if restarted else 'started'}: {rec['url']} (pid {rec['pid']})" +
           (" · opened in the default browser" if opened else " · open the URL in your browser"))
     return 0
 
 
 def cmd_stop(root: Path, a: argparse.Namespace) -> int:
     with Lock(root):
-        rec = read_record(root)
-        if not rec:
-            print("not running")
-            return 0
-        pid = rec["pid"]
-        if not is_board_process(pid, root):
-            remove_record(root)
-            print(f"not running (removed a stale record for pid {pid})")
-            return 0
-        try:
-            c = http.client.HTTPConnection("127.0.0.1", int(rec["port"]), timeout=2)
-            c.request("POST", "/api/shutdown", body=b"",
-                      headers={"Host": f"127.0.0.1:{rec['port']}", "X-Board-Token": str(rec.get("token", ""))})
-            c.getresponse().read()
-            c.close()
-        except OSError:
-            pass
-        for sig, wait in ((None, 3.0), (signal.SIGTERM, 2.0), (signal.SIGKILL, 1.0)):
-            if sig is not None and ds._alive(pid):
-                try:
-                    os.kill(pid, sig)
-                except OSError:
-                    pass
-            end = time.monotonic() + wait
-            while time.monotonic() < end and ds._alive(pid) and not _zombie(pid):
-                time.sleep(0.1)
-            if not ds._alive(pid) or _zombie(pid):
-                break
+        code, msg = stop_locked(root)
+    print(msg, file=sys.stderr if code else sys.stdout)
+    return code
+
+
+def stop_locked(root: Path) -> tuple[int, str]:
+    """Stop this project's board; the caller holds the lock. Returns (exit code, message)."""
+    rec = read_record(root)
+    if not rec:
+        return 0, "not running"
+    pid = rec["pid"]
+    if not is_board_process(pid, root):
         remove_record(root)
-        if ds._alive(pid) and not _zombie(pid):
-            print(f"could not stop pid {pid}", file=sys.stderr)
-            return 1
-        print(f"stopped (pid {pid})")
-        return 0
+        return 0, f"not running (removed a stale record for pid {pid})"
+    try:
+        c = http.client.HTTPConnection("127.0.0.1", int(rec["port"]), timeout=2)
+        c.request("POST", "/api/shutdown", body=b"",
+                  headers={"Host": f"127.0.0.1:{rec['port']}", "X-Board-Token": str(rec.get("token", ""))})
+        c.getresponse().read()
+        c.close()
+    except OSError:
+        pass
+    for sig, wait in ((None, 3.0), (signal.SIGTERM, 2.0), (signal.SIGKILL, 1.0)):
+        if sig is not None and ds._alive(pid):
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        end = time.monotonic() + wait
+        while time.monotonic() < end and ds._alive(pid) and not _zombie(pid):
+            time.sleep(0.1)
+        if not ds._alive(pid) or _zombie(pid):
+            break
+    remove_record(root)
+    if ds._alive(pid) and not _zombie(pid):
+        return 1, f"could not stop pid {pid}"
+    return 0, f"stopped (pid {pid})"
 
 
 def _zombie(pid: int) -> bool:
