@@ -1,5 +1,5 @@
 {
-  "name": "minhas-skills",
+  "name": "dev-kit",
   "owner": {
     "name": "Eduardo"
   },
@@ -7,17 +7,7 @@
     {
       "name": "dev-kit",
       "source": "./.claude/plugins/dev-kit",
-      "description": "Kit de desenvolvimento de aplicações completas, da entrevista ao lançamento."
-    },
-    {
-      "name": "3d-maker",
-      "source": "./.claude/plugins/3d-maker",
-      "description": "Kit para projetar e imprimir objetos em 3D: peças grandes, segmentadas e encaixáveis."
-    },
-    {
-      "name": "casa-inteligente",
-      "source": "./.claude/plugins/casa-inteligente",
-      "description": "Integração com casa inteligente: API REST e MCP do Home Assistant, e MQTT com usuário e senha."
+      "description": "Kit for building complete applications, from requirements interview to release."
     }
   ]
 }

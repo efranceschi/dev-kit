@@ -5,7 +5,7 @@ Your first project with the dev-kit, step by step. Inside Claude Code, `/dev-kit
 ## 1. Install
 
 ```
-/plugin install dev-kit@minhas-skills
+/plugin install dev-kit@dev-kit
 ```
 
 To try it without installing: `claude --plugin-dir .claude/plugins/dev-kit`. Open Claude Code in an empty folder (or an existing repository).
