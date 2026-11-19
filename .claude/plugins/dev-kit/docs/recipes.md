@@ -11,6 +11,14 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 3. /dev-kit:autopilot to build the rest
 4. /dev-kit:status at any time
 
+## Adopt dev-kit in an existing project
+
+1. Commit or stash pending work, then /dev-kit:start <the change you want> in the repository root
+2. Onboarding: baseline tag dev-kit-baseline, .dev/discovery.md (stack, conventions, existing docs), test baseline, ADRs discovered/imported
+3. Pick the entry mode: feature (new capability), maintenance (bugs only: straight to /dev-kit:issue) or import (use the project's PRD/specs/ADRs)
+4. A stage was skipped? /dev-kit:start routes to the first missing artifact; a stage that does not apply is recorded as review n/a
+5. QA scores only what changed since the baseline; pre-existing problems become intangible issues
+
 ## Let it run overnight
 
 1. Choose 'unattended with floors' in the interview (or: dev_state.py set autonomy.level unattended)

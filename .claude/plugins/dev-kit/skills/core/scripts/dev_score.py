@@ -16,6 +16,9 @@ Scoring rule (reproducible, no judgement involved)
   delta (--previous, rounds >= 2): previous findings stay scored unless an auditor of their dimension
           marks them "closed" in its "previous" list (omitted = still open); new critical/high/medium
           findings score; new low findings are recorded as deferred and do not score
+  legacy: findings with "legacy": true (existing projects: a problem already present at the brownfield
+          baseline and not made worse by the scope) never score or block; they are listed in "legacy"
+          so the orchestrator registers them as issues
   overall = weighted average of the dimensions that ran (weights from .dev/state.json autonomy.quality.weights)
 
 Verdict = pass only when ALL hold
@@ -179,6 +182,7 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
     dims: dict[str, dict] = {}
     problems: list[str] = []
     marks: dict[str, dict[str, str]] = {}  # dimension -> previous id -> closed|open
+    legacy: list[dict] = []
     for path in inputs:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -197,7 +201,14 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
         entry = dims.setdefault(dim, {"auditors": [], "findings": [], "score": 100})
         if auditor not in entry["auditors"]:
             entry["auditors"].append(auditor)
-        entry["findings"] += [{**f, "_auditor": auditor, "_src": str(path)} for f in findings if isinstance(f, dict)]
+        for f in findings:
+            if not isinstance(f, dict):
+                continue
+            if f.get("legacy") is True:
+                legacy.append({"dimension": dim, "auditor": auditor, "id": f.get("id"), "severity": f.get("severity"),
+                               "title": f.get("title"), "file": f.get("file"), "line": f.get("line")})
+            else:
+                entry["findings"].append({**f, "_auditor": auditor, "_src": str(path)})
         entry["stats"] = data.get("stats", {})
         for pv in data.get("previous") or []:
             if isinstance(pv, dict) and pv.get("id"):
@@ -270,6 +281,7 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
         "dimensions": dims, "blockers": blockers, "problems": problems,
         "verdict": "pass" if not reasons else "fail", "reasons": reasons,
         **({"delta": delta} if delta is not None else {}),
+        **({"legacy": legacy} if legacy else {}),
     }
 
 
@@ -284,6 +296,8 @@ def render(res: dict) -> str:
     if res.get("delta"):
         dl = res["delta"]
         lines.append(f"delta: {dl['closed']} closed · {dl['still_open']} still open · {dl['new_scored']} new scored · {dl['new_deferred']} new low deferred")
+    if res.get("legacy"):
+        lines.append(f"legacy: {len(res['legacy'])} pre-existing finding(s) not scored (register them as issues)")
     for r in res["reasons"]:
         lines.append(f"  - {r}")
     for b in res["blockers"][:15]:

@@ -55,6 +55,13 @@ PHASES = [
 TASK_TYPES = {"feature", "fix", "chore", "test", "docs"}
 TASK_STATUSES = {"todo", "in_progress", "done", "blocked"}
 GATES = {"passed", "pending", "skipped"}
+BROWNFIELD_MODES = ("feature", "maintenance", "import")
+DEFAULT_COMMIT_STYLE = "[{task}] {type}: {summary}"
+# artifact that must exist before entering each phase (checked by `set phase`, warning only)
+PHASE_ARTIFACTS = [
+    ("prd", "brief.md"), ("architecture", "prd.md"), ("ux", "architecture.md"),
+    ("ui", "design/ux-flows.md"), ("implement", "plan.md"),
+]
 
 DEFAULT_AUTONOMY = {
     "level": "high",
@@ -163,6 +170,15 @@ def check_production(pr: object) -> None:
         fail("autonomy.production needs a method (install script, systemd, compose, paas...) when deploys are enabled")
 
 
+def check_commit_style(cs: object) -> None:
+    if not isinstance(cs, str) or "{summary}" not in cs:
+        fail('autonomy.commit_style must be a template containing {summary}, e.g. "{type}: {summary}" or "[{task}] {type}: {summary}"')
+    try:
+        cs.format(task="T-001", type="feat", summary="x")
+    except (KeyError, IndexError, ValueError):
+        fail("autonomy.commit_style may only use the placeholders {task}, {type} and {summary}")
+
+
 def check_local_deploy(ld: object) -> None:
     if not isinstance(ld, dict) or ld.get("mode", "off") not in LOCAL_DEPLOY_MODES:
         fail(f"autonomy.local_deploy.mode must be one of {', '.join(LOCAL_DEPLOY_MODES)}")
@@ -219,7 +235,7 @@ ISSUE_TYPES = ("bug", "improvement", "change")
 ISSUE_CLASSES = ("expedite", "current", "standard", "intangible", "change")
 ISSUE_STATUSES = ("open", "scheduled", "in_progress", "done", "wontfix", "duplicate")
 ISSUE_SEVERITIES = ("critical", "high", "medium", "low")
-ISSUE_ORIGINS = ("user", "qa", "usability", "deploy", "feedback", "review")
+ISSUE_ORIGINS = ("user", "qa", "usability", "deploy", "feedback", "review", "baseline")
 LANES = ("hotfix", "cooldown")
 CLASS_RANK = {"standard": 0, "intangible": 1}
 SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -486,6 +502,8 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
             fail(f"--brownfield-json is not valid JSON: {e}")
         if not isinstance(bf, dict):
             fail("--brownfield-json must be a JSON object, e.g. {\"baseline_ref\": \"dev-kit-baseline\"}")
+        if "mode" in bf and bf["mode"] not in BROWNFIELD_MODES:
+            fail(f"brownfield.mode must be one of {', '.join(BROWNFIELD_MODES)}")
         store.state["brownfield"] = {**store.state.get("brownfield", {}), **bf}
     if a.autonomy_json:
         try:
@@ -508,6 +526,8 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
         if "local_deploy" in patch:
             check_local_deploy(patch["local_deploy"])
             patch["local_deploy"] = {**DEFAULT_AUTONOMY["local_deploy"], **auto.get("local_deploy", {}), **patch["local_deploy"]}
+        if "commit_style" in patch:
+            check_commit_style(patch["commit_style"])
         if "on_park" in patch and patch["on_park"] not in ON_PARK:
             fail(f"autonomy.on_park must be one of {', '.join(ON_PARK)}")
         auto.update(patch)
@@ -1520,7 +1540,8 @@ def cmd_tips(store: Store, a: argparse.Namespace) -> None:
         print(f"[{tp['context']}] {tp.get('en')}")
 
 
-REVIEW_VALUES = {"pass", "fail", "pending"}
+REVIEW_VALUES = {"pass", "fail", "pending", "n/a"}
+REVIEW_SATISFIED = {"pass", "n/a"}
 
 
 def cmd_review(store: Store, a: argparse.Namespace) -> None:
@@ -1528,8 +1549,12 @@ def cmd_review(store: Store, a: argparse.Namespace) -> None:
     store.load()
     if a.value not in REVIEW_VALUES:
         fail(f"review value must be one of {', '.join(sorted(REVIEW_VALUES))}")
+    if a.value == "n/a" and not a.note:
+        fail(f"review {a.name} n/a needs --note with the reason (e.g. 'no new UI in this project')")
     reviews = store.state.setdefault("reviews", {})
     r = reviews.setdefault(a.name, {"rounds": 0})
+    if a.value == "n/a":
+        r.pop("score", None)
     if a.value == "pass":
         minimum = quality_cfg(store)["review_min_overall"]
         if a.score is None and not a.force:
@@ -1549,11 +1574,25 @@ def cmd_review(store: Store, a: argparse.Namespace) -> None:
         r["rounds"] = int(r.get("rounds", 0)) + 1
     r["at"] = now()
     store.save()
-    store.event("review", scope=tel.scope_token(a.name), value=a.value, score=a.score, round=r.get("rounds", 0),
+    store.event("review", scope=tel.scope_token(a.name), value="na" if a.value == "n/a" else a.value, score=a.score, round=r.get("rounds", 0),
                 forced=bool(a.force and a.value == "pass"),
                 force_source=("policy" if (a.note or "").startswith("policy:") else "user") if a.force and a.value == "pass" else None)
     store.log(f"review {a.name} {a.value}" + (f" score={a.score}" if a.score is not None else ""))
     print(f"review {a.name}: {a.value}" + (f" (score {a.score})" if a.score is not None else "") + f" · rounds {r['rounds']}")
+
+
+def missing_artifacts(store: Store, phase: str) -> list[str]:
+    """Artifacts of earlier phases that are absent when moving to `phase` (UI artifacts only for UI products)."""
+    target = PHASES.index(phase)
+    out = []
+    for p, art in PHASE_ARTIFACTS:
+        if PHASES.index(p) > target:
+            continue
+        if art.startswith("design/") and p != phase:
+            continue  # UI artifacts only matter when entering ui itself (UI-less products skip ux/ui)
+        if not (store.dev / art).exists():
+            out.append(art)
+    return out
 
 
 def cmd_set(store: Store, a: argparse.Namespace) -> None:
@@ -1562,6 +1601,8 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
     if key == "phase":
         if val not in PHASES:
             fail(f"invalid phase {val}; one of {', '.join(PHASES)}")
+        for missing in missing_artifacts(store, val):
+            print(f"warning: entering phase {val} but .dev/{missing} does not exist; run the skill that writes it", file=sys.stderr)
         store.state["phase"] = val
     elif key in ("language", "project"):
         store.state[key] = val
@@ -1614,6 +1655,9 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
             if val not in TIPS_MODES:
                 fail(f"autonomy.tips must be one of {', '.join(TIPS_MODES)}")
             auto["tips"] = val
+        elif field == "commit_style":
+            check_commit_style(val)
+            auto["commit_style"] = val
         elif field == "on_park":
             if val not in ON_PARK:
                 fail(f"autonomy.on_park must be one of {', '.join(ON_PARK)}")
@@ -1704,6 +1748,10 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
     stack = s.get("stack") or {}
     if stack:
         print("Stack: " + ", ".join(f"{k}={v}" for k, v in stack.items() if k != "detected_from" and v))
+    bf = s.get("brownfield")
+    if bf:
+        print(f"Brownfield: mode {bf.get('mode', 'feature')} · baseline {bf.get('baseline_ref', '?')} ({str(bf.get('baseline_sha') or '?')[:7]})"
+              + (" · test baseline: .dev/qa/baseline.md" if (store.dev / "qa" / "baseline.md").exists() else ""))
     revs = s.get("reviews") or {}
     if revs:
         print("Reviews: " + ", ".join(f"{k}:{v.get('verdict')}" + (f"({v['score']})" if v.get("score") is not None else "") for k, v in revs.items()))

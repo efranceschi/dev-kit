@@ -32,7 +32,7 @@ FEEDBACK_LISTS = ("worked", "failed", "improve")
 # key -> kind: "num", "bool", "tok" (token or id), "counts", "dims", "delta", "mtok" ({"model","effort"}), "feedback"
 COMMON = {"duration_s": "num", "round": "num", "feedback": "feedback"}
 SCHEMA: dict[str, dict[str, str]] = {
-    "session_start": {"trigger": "tok"},
+    "session_start": {"trigger": "tok", "brownfield": "bool", "mode": "tok"},
     "skill_start": {"skill": "tok", "args_kind": "tok"},
     "skill_end": {"skill": "tok", "args_kind": "tok", "status": "tok"},
     "agent_spawn": {"agent": "tok", "model": "tok", "effort": "tok", "slot": "num", "scope": "tok", "background": "bool"},
@@ -417,7 +417,9 @@ def stage_report(events: list[dict], state: dict) -> dict:
         elif ev in ("gate", "review"):
             sc = e.get("scope", "other")
             val = e.get("value")
-            if val in ("passed", "pending", "pass", "fail"):
+            if val == "na":
+                x["final"][sc] = "n/a"
+            elif val in ("passed", "pending", "pass", "fail"):
                 x["rounds"][sc] = x["rounds"].get(sc, 0) + 1
                 x["final"][sc] = "pass" if val in ("passed", "pass") else "fail"
             if e.get("forced"):

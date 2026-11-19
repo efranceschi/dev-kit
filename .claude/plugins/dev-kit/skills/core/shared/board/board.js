@@ -370,7 +370,7 @@
     const sp = h("span"); sp.style.width = `${score != null ? Math.min(100, score) : 0}%`;
     const c = h("span", { class: "cut", title: `cut-off ${cut}` }); c.style.left = `calc(${cut}% - 1px)`;
     mm.append(sp, c);
-    const ok = verdict === "pass" || verdict === "passed" || verdict === "skipped";
+    const ok = verdict === "pass" || verdict === "passed" || verdict === "skipped" || verdict === "n/a";
     const bad = verdict === "fail" || (score != null && score < cut && !ok);
     return h("div", { class: "dod-row" }, h("span", { class: "name" }, name, " ",
       h("span", { class: `badge ${ok ? "good" : bad ? "bad" : "neutral"}`, text: ok ? `✓ ${verdict}` : bad ? "✕ below cut-off" : verdict || "pending" })),

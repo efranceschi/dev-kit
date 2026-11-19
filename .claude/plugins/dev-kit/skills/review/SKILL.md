@@ -39,3 +39,6 @@ Before `skill_end`, run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cos
 - The reviewer never edits; only you or the producing skill do.
 - Never mark a review passed by hand; the score comes from `dev_score.py` and `DS review` enforces the cut-off.
 - Keep reports short: lead with the verdict and score, then the blocking items.
+
+## Existing projects (brownfield)
+When state has `brownfield` (`conventions.md` §16): a target that does not apply (e.g. `design` when no `new` AC touches the UI; `prd`/`plan` in `maintenance` mode) is recorded as `DS review <target> n/a --note "<reason>"` instead of spawning a reviewer. Tell the reviewer the project is brownfield so it judges only `new`/`changed` content against the as-built baseline, and so pre-existing problems are marked `"legacy": true`.

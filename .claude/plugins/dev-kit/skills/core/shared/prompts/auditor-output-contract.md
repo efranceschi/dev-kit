@@ -46,6 +46,7 @@ Rules:
 - `verdict` is `fail` when any finding is `critical` or `high`.
 - Only report what you verified by reading code, running commands or inspecting artifacts. Mark anything inferred but unverified with `"confidence": "low"` in the finding.
 - No duplicate findings; merge instances of the same root cause into one finding listing all files.
+- Existing projects (`.dev/state.json` has `brownfield`, `conventions.md` §16): a problem that already existed at `brownfield.baseline_ref` and that the scope does not make worse gets `"legacy": true`. Legacy findings never score or block; the orchestrator turns them into `intangible` issues. Do not mark as legacy anything in lines the scope added or changed.
 - Keep `title` ≤ 60 characters. Severity follows `shared/conventions.md` §7.
 - If the scope is empty or cannot be found, return `findings: []`, `verdict: "pass"` and explain in `summary`.
 - Write nothing to the repository. You are read-only except for running tests/linters, scratch builds, and saving screenshots/raw tool output under `.dev/qa/<scope>/` when your own instructions say so.

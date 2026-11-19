@@ -29,3 +29,11 @@ Before `skill_end`, run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cos
 `--hotfix`: patch release for a closed hotfix (`conventions.md` §15): skip step 1's all-milestones check; require the hotfix task `done`, its scoped QA (`qa --scope <task>`) passed and the suite green; bump only the patch number; CHANGELOG entry under "Fixed" with the issue id; tag; deploy per `pause_policy.production_deploy`.
 
 `--dry-run`: perform steps 1–5 and report what would happen in 6–8 without changing anything.
+
+## Existing projects (brownfield)
+
+When state has `brownfield` (`conventions.md` §16):
+- Step 1: a review recorded as `n/a` counts as passed; `existing` ACs count as complete when `spec-tracer` reports them `existing-verified`. In `maintenance` mode require only that the tasks and gates of `M1 — Maintenance` are done.
+- Step 6: the current version comes from the manifest named in `.dev/discovery.md` §11 and the latest tag; bump from there (never restart at 0.1.0). If manifest and tag disagree, ask which one is right. Keep the project's CHANGELOG format.
+- Step 7: commit with `autonomy.commit_style` (e.g. `chore(release): 2.4.0`) and tag with the project's prefix (`v2.4.0`, `2.4.0`, `release-2.4.0`).
+- Step 8: with `production.method` `external`, the project's pipeline deploys the tag; `deploy` only records it.

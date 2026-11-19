@@ -30,3 +30,7 @@ Language for prose. README.md, docs/, CHANGELOG.md, CLAUDE.md, `.env.example`, `
 - Stop any process you started; leave the working tree untouched.
 
 End with a prose summary and the single JSON block from the contract (`auditor: "docs-reviewer"`, `scope: "docs"` or `"release"`).
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16): compare the CHANGELOG with every commit from the later of the latest tag and `brownfield.baseline_ref` to `HEAD`, in the project's existing CHANGELOG format; sections of README and docs that the kit did not write are checked only for contradictions with the new work.

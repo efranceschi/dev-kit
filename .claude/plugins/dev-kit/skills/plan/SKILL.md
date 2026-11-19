@@ -28,3 +28,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 
 ## `replan`
 Keep done/in_progress tasks untouched; rewrite only `todo` tasks of remaining milestones; new tasks get new ids; mark dropped tasks by deleting their section (state keeps them as `todo`; block them with reason "dropped in replan ADR-nnn" to keep history consistent).
+
+## Existing projects (brownfield)
+
+When state has `brownfield` (`conventions.md` §16): in `maintenance` mode `plan.md` is just `# Plan` and `## M1 — Maintenance` with no tasks (issues fill it); record `dev_state.py review plan n/a --note "maintenance mode"`. In `replan` after switching from `maintenance` to `feature`, keep M1 and its tasks and add the new milestones after it. Task `files` follow the existing layout from `.dev/discovery.md` §4.

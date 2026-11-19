@@ -66,3 +66,7 @@ Report in the user's language: what was built (milestones, tasks, commits), gate
 - Never run `release` for real with `public_exposure` implications without an explicit yes recorded in the brief, asked now, or `pause_policy.public_exposure` preauthorized for that target.
 - Never bypass a gate silently; `--skip-gate` always leaves an ADR.
 - Never rewrite git history.
+
+## Existing projects (brownfield)
+
+When state has `brownfield` (`conventions.md` §16): a review recorded as `n/a` satisfies the prerequisite column. Skip the `ux` and `ui` rows when no `new` AC touches the UI (record `DS review design n/a --note "no new UI"`, and at the usability row `DS review ux n/a --note "no new UI"`), going from `architecture` to `plan`. In `maintenance` mode start at `implement`, run only the tasks in `M1 — Maintenance`, and when none is left stop and point to `/dev-kit:issue` (do not go to usability, docs or release unless the user asks).

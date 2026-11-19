@@ -29,3 +29,7 @@ Language for prose. `.dev/design/ux-flows.md`, `.dev/design/ui-spec.md`, `.dev/p
 - Mark anything you could not verify with `"confidence": "low"`.
 
 End with a prose summary and the single JSON block from the contract (`auditor: "design-reviewer"`, `scope: "design"`); add `"contrast": [{"pair": "text on surface", "ratio": 7.2, "required": 4.5}]` inside the JSON.
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16): review only screens tagged `new`/`changed`; `existing` screens need only their one-line reference. Inherited token contrast problems on untouched screens are findings with `"legacy": true` (not scored; the orchestrator turns them into issues).

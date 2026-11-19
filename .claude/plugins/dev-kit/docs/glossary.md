@@ -5,8 +5,10 @@
 | Term | Meaning |
 |---|---|
 | **AC** | Acceptance criterion, numbered AC-n in the PRD; every task and test points to the ACs it satisfies. |
-| **ADR** | Architecture decision record in .dev/decisions.md; source auto, user, interview or policy. |
+| **ADR** | Architecture decision record in .dev/decisions.md; source auto, user, interview, policy, discovered or imported. |
 | **API-equivalent cost** | Estimated US$ of the tokens at API prices; on subscription plans nothing is billed per token. |
+| **Baseline** | The git tag dev-kit-baseline set by the onboarding: everything before it is legacy, everything after it is new work that QA scores. |
+| **Brownfield** | An existing project not built with dev-kit. start runs the onboarding (baseline tag, discovery, test baseline, entry mode); audits score only the changes since the baseline and legacy problems become issues (conventions §16). |
 | **buffer** | Share of each milestone (default 20%) reserved for queued issues. |
 | **class of service** | How an issue is scheduled: expedite (hotfix), current, standard (buffer), intangible (cool-down) or change (replan). |
 | **cool-down** | Optional short slot after a gate where small issues are fixed before the next milestone. |
