@@ -1,4 +1,4 @@
-/* dev-kit board - read-only view of .dev/state.json. No dependencies. All untrusted text goes through textContent. */
+/* dev-kit board - read-only view of .dev/state.json: what needs the user, what is running, the sprint kanban, insights. No dependencies. All untrusted text goes through textContent. */
 (() => {
   "use strict";
 
@@ -84,7 +84,92 @@
   }
   const hideTip = () => { tip.hidden = true; };
 
-  // ------------------------------------------------------------------ render pieces
+  const store = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
+  const TASK_RE = /^T-\d{1,5}$/;
+  const INS = ["burndown", "velocity", "quality", "backlog"];
+  let query = "";            // text filter of the kanban
+  let typeFilter = "";       // task type filter of the kanban
+  let showAllDone = false;   // Done column: latest 5 or all
+  let mobileCol = null;      // column shown on narrow screens (null = pick the most useful one)
+  let goalOpen = false;      // sprint goal expanded
+  let insTab = INS.includes(store.get("board-insight", "")) ? store.get("board-insight", "") : "burndown";
+  let firstRender = true;
+
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + "s"}`;
+  const stLabel = (x) => String(x || "").replace("_", " ");
+  function dur(sec) {
+    sec = Math.max(0, Math.round(sec));
+    return sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m` : `${Math.floor(sec / 3600)}h${String(Math.floor((sec % 3600) / 60)).padStart(2, "0")}m`;
+  }
+  function agoShort(t) {
+    const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
+    return sec < 60 ? "now" : sec < 3600 ? `${Math.floor(sec / 60)}m ago` : sec < 86400 ? `${Math.floor(sec / 3600)}h ago` : sec < 7 * 86400 ? `${Math.floor(sec / 86400)}d ago` : fmtDate(t);
+  }
+  const activeAgents = () => ((data && data.agents && data.agents.active) || []);
+  const agentsOn = (key) => activeAgents().filter((x) => x.node === key);
+  const agentBits = (x) => [h("span", { class: "agent-dot", "aria-hidden": "true" }), h("span", { class: "agent-name", text: x.agent }),
+    h("span", { class: "agent-time", "data-start": x.started_at, text: dur((Date.now() - parseT(x.started_at)) / 1000) })];
+  /** Task ids inside free text become buttons that open the task; everything else stays text. */
+  function linkify(text) {
+    return String(text || "").split(/\b(T-\d{1,5})\b/).map((part) => (TASK_RE.test(part) && data.tasks[part]
+      ? h("button", { type: "button", class: "tid-btn", text: part, title: data.tasks[part].title, onclick: () => openTask(part) }) : part));
+  }
+  function keepFocus(fn) {
+    const a = document.activeElement;
+    const tid = a && a.getAttribute && a.getAttribute("data-tid");
+    const id = a && a.id;
+    fn();
+    if (!a || a.isConnected) return;
+    const el = tid ? document.querySelector(`[data-tid="${tid}"]`) : id ? $(id) : null;
+    if (el) el.focus({ preventScroll: true });
+  }
+
+  // ------------------------------------------------------------------ popovers (phases, options) and theme
+  const pops = [];
+  function popover(btn, pop) {
+    const close = () => { pop.hidden = true; btn.setAttribute("aria-expanded", "false"); };
+    btn.addEventListener("click", () => {
+      const open = pop.hidden;
+      pops.forEach((p) => p.close());
+      if (open) { pop.hidden = false; btn.setAttribute("aria-expanded", "true"); }
+    });
+    pops.push({ btn, pop, close });
+  }
+  popover($("phase-btn"), $("phase-pop"));
+  popover($("menu-btn"), $("menu-pop"));
+  document.addEventListener("click", (e) => pops.forEach((p) => { if (!p.pop.hidden && !p.pop.contains(e.target) && !p.btn.contains(e.target)) p.close(); }));
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    pops.forEach((p) => { if (!p.pop.hidden) { p.close(); p.btn.focus(); } });
+  });
+
+  // theme: "auto" follows the system; the top-bar button flips between light and dark, the menu can go back to auto
+  const sysDark = matchMedia("(prefers-color-scheme: dark)");
+  let themePref = store.get("board-theme", "auto");
+  const effectiveTheme = () => (themePref === "light" || themePref === "dark" ? themePref : sysDark.matches ? "dark" : "light");
+  function applyTheme() {
+    const v = themePref === "light" || themePref === "dark" ? themePref : "auto";
+    if (v === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", v);
+    document.documentElement.dataset.effective = effectiveTheme();
+    document.querySelectorAll("[data-theme-opt]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themeOpt === v)));
+    const next = effectiveTheme() === "dark" ? "light" : "dark";
+    const label = `Switch to ${next} theme`;
+    $("theme-btn").setAttribute("aria-label", label);
+    $("theme-btn").title = label;
+  }
+  function setTheme(v) {
+    themePref = v; store.set("board-theme", v); applyTheme();
+    if (data && data.ok) render();  // charts read colours from CSS at draw time
+  }
+  applyTheme();
+  sysDark.addEventListener("change", () => { if (themePref === "auto") { applyTheme(); if (data && data.ok) render(); } });
+  $("theme-btn").addEventListener("click", () => setTheme(effectiveTheme() === "dark" ? "light" : "dark"));
+  $("theme-switch").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-theme-opt]");
+    if (b) setTheme(b.dataset.themeOpt);
+  });
+
+  // ------------------------------------------------------------------ header
   function renderHeader() {
     $("project").textContent = data.project;
     document.title = `${data.project} · dev-kit board`;
@@ -92,11 +177,13 @@
     $("bf-mode").textContent = data.brownfield ? `existing project · ${data.brownfield.mode || "feature"} · since ${data.brownfield.baseline_ref || "baseline"}` : "";
     const phases = data.phases.filter((p) => p !== "init");
     const idx = phases.indexOf(data.phase);
-    fill($("phases"), phases.map((p, i) => h("li", {
-      class: i < idx || data.phase === "done" ? "past" : i === idx ? "current" : "",
-      "aria-current": i === idx ? "step" : null, text: PHASE_LABEL[p] || p,
-      "data-step": i === idx ? ` · step ${i + 1} of ${phases.length}` : null,
-    })));
+    const name = PHASE_LABEL[data.phase] || data.phase || "—";
+    const cls = (i) => (i < idx || data.phase === "done" ? "past" : i === idx ? "current" : "");
+    $("phase-name").textContent = name;
+    $("phase-step").textContent = idx >= 0 ? `step ${idx + 1} of ${phases.length}` : "";
+    $("phase-btn").setAttribute("aria-label", `Project phase: ${name}${idx >= 0 ? `, step ${idx + 1} of ${phases.length}` : ""}. Show all phases`);
+    fill($("phase-track"), phases.map((p, i) => h("span", { class: cls(i) })));
+    fill($("phases"), phases.map((p, i) => h("li", { class: cls(i), "aria-current": i === idx ? "step" : null, text: PHASE_LABEL[p] || p })));
   }
 
   function currentId() {
@@ -104,7 +191,50 @@
     if (selected && ids.includes(selected)) return selected;
     return data.current_milestone || ids[0] || null;
   }
+  const currentMilestone = () => (data && data.milestones.find((x) => x.id === currentId())) || null;
+  function selectSprint(id, focusTab) {
+    selected = id; showAllDone = false; goalOpen = false; mobileCol = null;
+    render();
+    if (focusTab && $(`tab-${id}`)) $(`tab-${id}`).focus();
+  }
 
+  // ------------------------------------------------------------------ "right now": what needs the user, what runs, what comes next
+  function renderNow() {
+    const blocked = Object.entries(data.tasks).filter(([, t]) => t.status === "blocked");
+    const hot = (data.backlog || {}).hotfix_open || [];
+    const parts = [];
+    if (hot.length) parts.push(plural(hot.length, "open hotfix", "open hotfixes"));
+    if (blocked.length) parts.push(plural(blocked.length, "blocked task"));
+    if (data.questions.length) parts.push(plural(data.questions.length, "open question"));
+    $("now-needs").className = `now-block ${parts.length ? "alert" : "clear"}`;
+    $("now-needs-value").textContent = parts.join(" · ") || "Nothing needs you";
+    $("now-needs-note").textContent = blocked.length ? `${blocked[0][0]} ${blocked[0][1].blocked_reason || blocked[0][1].title}`
+      : data.questions.length ? `${data.questions[0].id} ${data.questions[0].question}` : parts.length ? "" : "No blocked tasks, no open questions";
+
+    const running = Object.entries(data.tasks).filter(([, t]) => t.status === "in_progress");
+    const ids = new Set(running.map(([id]) => id));
+    const chips = running.map(([id, t]) => h("button", { type: "button", class: "run-chip", title: `${id} ${t.title}. Open details`, onclick: () => openTask(id) },
+      h("span", { class: "tid", text: id }), h("span", { class: "run-title", text: t.title }), agentsOn(id).slice(0, 2).flatMap(agentBits)));
+    activeAgents().filter((x) => !x.node || !ids.has(x.node)).forEach((x) => chips.push(h("span", { class: "run-chip" },
+      x.node ? h("span", { class: "tid", text: x.node.replace("GATE:", "QA ") }) : null, agentBits(x))));
+    $("now-running").className = `now-block ${chips.length ? "busy" : ""}`;
+    fill($("now-running-chips"), chips.length ? chips : h("span", { class: "now-idle", text: "Nothing is running" }));
+
+    const nx = data.next || {};
+    const nt = nx.task && data.tasks[nx.task];
+    $("now-next").disabled = !nt;
+    $("now-next-value").textContent = nt ? `${nx.task} ${nt.title}` : nx.reason || "Nothing queued";
+    $("now-next-value").title = nt ? nt.title : nx.reason || "";
+    $("now-next-note").textContent = nt ? `${nt.milestone} · ${nt.type} · open details` : "";
+  }
+  $("now-needs").addEventListener("click", () => {
+    const el = $("attention");
+    el.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    el.focus({ preventScroll: true });
+  });
+  $("now-next").addEventListener("click", () => { if (data && data.next && data.next.task) openTask(data.next.task); });
+
+  // ------------------------------------------------------------------ sprint: tabs, goal, progress
   function renderTabs() {
     const cur = currentId();
     const tabs = data.milestones.map((m) => {
@@ -113,93 +243,128 @@
       const done = ts.filter((t) => t.status === "done").length;
       return h("button", {
         role: "tab", type: "button", id: `tab-${m.id}`, "aria-selected": String(m.id === cur), "aria-controls": "main",
-        tabindex: m.id === cur ? "0" : "-1", title: m.title || m.id,
-        onclick: () => { selected = m.id; render(); $(`tab-${m.id}`).focus(); },
+        tabindex: m.id === cur ? "0" : "-1", title: `${m.title || m.id} · gate ${m.gate}`,
+        onclick: () => selectSprint(m.id, true),
       }, h("span", { class: `tab-dot ${active ? "active" : m.gate}`, "aria-hidden": "true" }), h("strong", { text: m.id }),
       h("span", { text: `${done}/${ts.length}` }),
       m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null);
     });
     if (!tabs.length) tabs.push(h("span", { class: "card-sub", text: "No milestones yet. They appear after /dev-kit:plan." }));
     fill($("tabs"), tabs);
+    if (firstRender && $(`tab-${cur}`)) $("tabs").scrollLeft = Math.max(0, $(`tab-${cur}`).offsetLeft - 60);
   }
 
-  function renderHero(m) {
+  function renderSprint(m) {
     const ts = tasksOf(m);
     const counts = Object.fromEntries(STATUS.map((st) => [st.key, ts.filter((t) => t.status === st.key).length]));
     const pct = ts.length ? Math.round((counts.done / ts.length) * 100) : 0;
-    $("sprint-eyebrow").textContent = m ? `Sprint ${m.id}${m.id === data.current_milestone ? " · current" : ""}` : "Sprint";
-    $("sprint-title").textContent = m ? m.title || m.id : "No sprint planned yet";
-    $("sprint-goal").textContent = m ? m.goal || "No goal paragraph in plan.md for this milestone." : "Run /dev-kit:plan to create milestones and tasks.";
-    $("hero-pct").textContent = String(pct);
+    $("sprint-title").textContent = m ? `${m.id} · ${m.title || "Sprint"}` : "No sprint planned yet";
+    const goal = $("sprint-goal");
+    goal.textContent = m ? m.goal || "No goal paragraph in plan.md for this milestone." : "Run /dev-kit:plan to create milestones and tasks.";
+    goal.classList.remove("open");
+    const clipped = goal.scrollHeight > goal.clientHeight + 1;
+    goal.classList.toggle("open", goalOpen);
+    $("goal-more").hidden = !clipped;
+    $("goal-more").textContent = goalOpen ? "Show less" : "Show more";
+    $("goal-more").setAttribute("aria-expanded", String(goalOpen));
+    $("sprint-done").textContent = String(counts.done);
+    $("sprint-total").textContent = ` of ${plural(ts.length, "task")} done`;
+    $("sprint-pct").textContent = `${pct}%`;
     const order = ["done", "in_progress", "blocked", "todo"];
+    const label = (k) => STATUS.find((x) => x.key === k).label;
     fill($("segbar"), order.filter((k) => counts[k]).map((k) => {
-      const sp = h("span", { class: `st-${k}`, title: `${STATUS.find((x) => x.key === k).label}: ${counts[k]}` });
+      const sp = h("span", { class: `st-${k}`, title: `${label(k)}: ${counts[k]}` });
       sp.style.flexGrow = String(counts[k]);
       return sp;
     }));
-    $("segbar").setAttribute("aria-label", order.map((k) => `${STATUS.find((x) => x.key === k).label} ${counts[k]}`).join(", "));
-    fill($("seg-legend"), order.map((k) => h("li", {}, h("span", { class: `swatch st-${k}`, "aria-hidden": "true" }),
-      `${STATUS.find((x) => x.key === k).label} ${counts[k]}`)));
-    fill($("gate-badge"), gateBadge(m, data.quality));
+    $("segbar").setAttribute("aria-label", order.map((k) => `${label(k)} ${counts[k]}`).join(", "));
+    fill($("seg-legend"), order.map((k) => h("li", {}, h("span", { class: `swatch st-${k}`, "aria-hidden": "true" }), `${label(k)} ${counts[k]}`)));
+    const p = data.progress, c = data.costs, q = data.quality;
+    const badge = gateBadge(m, q);
+    if (badge) badge.title = `Cut-off ${q.min_overall} overall · ${q.min_dimension} per dimension`;
+    fill($("sprint-facts"),
+      h("span", { title: "Tasks done in the whole project", text: `Project ${p.done}/${p.total}` }),
+      h("span", { title: c ? `${compact(c.tokens || 0)} tokens (API-equivalent estimate)` : "Run /dev-kit:costs to compute the estimated cost",
+        text: c ? `Cost US$ ${Number(c.usd || 0).toFixed(2)}` : "Cost not computed" }),
+      badge);
   }
+  $("goal-more").addEventListener("click", () => { goalOpen = !goalOpen; renderSprint(currentMilestone()); });
 
-  function tile(label, value, note, extra) {
-    return h("div", { class: `tile ${extra || ""}` }, h("div", { class: "tile-label", text: label }),
-      h("div", { class: "tile-value" }, value), note ? h("div", { class: "tile-note", text: note }) : null);
+  // ------------------------------------------------------------------ kanban
+  function waitingOn(t) {
+    return (t.deps || []).filter((d) => d && data.tasks[d] && data.tasks[d].status !== "done");
   }
-
-  function renderTiles(m) {
-    const ts = tasksOf(m);
-    const done = ts.filter((t) => t.status === "done").length;
-    const inprog = ts.filter((t) => t.status === "in_progress");
-    const blockedAll = Object.values(data.tasks).filter((t) => t.status === "blocked").length;
-    const imp = blockedAll + data.questions.length;
-    const p = data.progress;
-    const scoreVal = m && m.score != null ? h("span", {}, String(m.score), h("small", { text: `/ ${data.quality.min_overall}` })) : "—";
-    const c = data.costs;
-    fill($("tiles"),
-        tile("Sprint backlog", h("span", {}, String(done), h("small", { text: `/ ${ts.length} done` })), `Project: ${p.done}/${p.total} tasks done`),
-        tile("In progress", String(inprog.length), inprog.length ? `${inprog[0].id} ${inprog[0].title}` : "Nobody is working right now"),
-        tile("Impediments", String(imp), `${blockedAll} blocked · ${data.questions.length} open questions`, imp ? "alert" : ""),
-        tile("Gate score", scoreVal, m ? `Cut-off ${data.quality.min_overall} overall · ${data.quality.min_dimension} per dimension` : ""),
-      tile("Estimated cost", c ? `US$ ${Number(c.usd || 0).toFixed(2)}` : "—", c ? `${compact(c.tokens || 0)} tokens (API-equivalent)` : "Run /dev-kit:costs to compute"));
-  }
-
   function taskCard(t) {
     const isNext = data.next && data.next.task === t.id;
-    const deps = (t.deps || []).filter(Boolean);
-    return h("article", { class: `tcard s-${t.status}${isNext ? " next" : ""}`, "aria-label": `${t.id} ${t.title}, ${t.status.replace("_", " ")}. Open details`,
+    const wait = t.status === "done" ? [] : waitingOn(t);
+    const here = agentsOn(t.id);
+    return h("article", { class: `tcard s-${t.status}${isNext ? " next" : ""}`, "aria-label": `${t.id} ${t.title}, ${stLabel(t.status)}${wait.length ? `, waiting on ${wait.join(", ")}` : ""}. Open details`,
       tabindex: "0", role: "button", "aria-haspopup": "dialog", "data-tid": t.id,
       onclick: () => openTask(t.id), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTask(t.id); } } },
       h("div", { class: "tcard-top" }, h("span", { class: "tid", text: t.id }), h("span", { class: "chip", text: t.type }),
         t.lane ? h("span", { class: `chip lane-${t.lane}`, text: t.lane }) : null,
         isNext ? h("span", { class: "chip next-chip", text: "next up" }) : null),
       h("div", { class: "tcard-title", text: t.title }),
-      agentsOn(t.id).length ? h("div", { class: "tcard-agents" }, agentsOn(t.id).map((x) => h("span", { class: "agent-chip small" },
-        h("span", { class: "agent-dot", "aria-hidden": "true" }), h("span", { class: "agent-name", text: x.agent }),
-        h("span", { class: "agent-time", "data-start": x.started_at, text: fmtDur((Date.now() - parseT(x.started_at)) / 1000) })))) : null,
+      here.length ? h("div", { class: "tcard-agents" }, here.map((x) => h("span", { class: "agent-chip" }, agentBits(x)))) : null,
       t.status === "blocked" && t.blocked_reason ? h("div", { class: "reason", text: t.blocked_reason }) : null,
       h("div", { class: "tcard-meta" },
-        t.acceptance ? h("span", { text: `${t.acceptance} AC` }) : null,
-        deps.length ? h("span", { text: `deps ${deps.join(", ")}` }) : null,
+        wait.length ? h("span", { class: "chip wait", text: `Waiting on ${wait.join(", ")}` }) : null,
+        t.status === "todo" && !wait.length && !isNext ? h("span", { class: "chip ready", text: "Ready" }) : null,
+        t.acceptance ? h("span", { title: "Acceptance criteria", text: `${t.acceptance} AC` }) : null,
         t.status === "in_progress" && t.started_at ? h("span", { text: `started ${ago(parseT(t.started_at))}` }) : null,
         t.status === "done" && t.done_at ? h("span", { text: `done ${fmtDT(parseT(t.done_at))}` }) : null,
-        t.commit ? h("span", { class: "tid", text: t.commit.slice(0, 7) }) : null));
+        t.commit ? h("span", { class: "tid", title: "Commit", text: t.commit.slice(0, 7) }) : null));
   }
 
   function renderKanban(m) {
     const ts = tasksOf(m);
-    fill($("kanban"), STATUS.map((st) => {
-      const list = ts.filter((t) => t.status === st.key);
-      if (st.key === "done") list.sort((a, b) => parseT(b.done_at) - parseT(a.done_at));
-      return h("section", { class: "col", "aria-label": `${st.label}, ${list.length} tasks` },
+    const types = [...new Set(ts.map((t) => t.type).filter(Boolean))].sort();
+    const sel = $("type-filter");
+    if (typeFilter && !types.includes(typeFilter)) typeFilter = "";
+    if (sel.dataset.types !== types.join(",")) {
+      sel.dataset.types = types.join(",");
+      fill(sel, h("option", { value: "", text: "All types" }), types.map((t) => h("option", { value: t, text: t })));
+    }
+    sel.value = typeFilter;
+    sel.disabled = types.length < 2;
+    const q = query.trim().toLowerCase();
+    const filtering = Boolean(q || typeFilter);
+    const match = (t) => (!typeFilter || t.type === typeFilter) && (!q || `${t.id} ${t.title}`.toLowerCase().includes(q));
+    const shown = ts.filter(match);
+    const note = $("filter-note");
+    note.hidden = !filtering;
+    if (filtering) fill(note, `${shown.length} of ${plural(ts.length, "task")} shown. `,
+      h("button", { type: "button", class: "link-btn", text: "Clear filter", onclick: () => { query = ""; typeFilter = ""; $("task-search").value = ""; renderKanban(currentMilestone()); $("task-search").focus(); } }));
+    const box = $("kanban");
+    if (!m) {
+      fill($("col-tabs"));
+      fill(box, h("div", { class: "board-empty" }, "No sprint planned yet. Run ", h("code", { text: "/dev-kit:plan" }), " to create milestones and tasks."));
+      return;
+    }
+    const by = Object.fromEntries(STATUS.map((st) => [st.key, shown.filter((t) => t.status === st.key)]));
+    by.done.sort((a, b) => (parseT(b.done_at) || 0) - (parseT(a.done_at) || 0));
+    const col = mobileCol || ["in_progress", "blocked", "todo", "done"].find((k) => by[k].length) || "todo";
+    box.dataset.col = col;
+    fill($("col-tabs"), STATUS.map((st) => h("button", { type: "button", class: "seg-btn", "aria-pressed": String(col === st.key),
+      text: `${st.label} ${by[st.key].length}`, onclick: () => { mobileCol = st.key; renderKanban(currentMilestone()); } })));
+    fill(box, STATUS.map((st) => {
+      let list = by[st.key];
+      let more = null;
+      if (st.key === "done" && list.length > 5 && !filtering) {
+        more = h("button", { type: "button", class: "col-more", id: "done-more", text: showAllDone ? "Show only the latest 5" : `Show all ${list.length} done`,
+          onclick: () => { showAllDone = !showAllDone; keepFocus(() => renderKanban(currentMilestone())); } });
+        if (!showAllDone) list = list.slice(0, 5);
+      }
+      const slim = st.key === "blocked" && !ts.some((t) => t.status === "blocked");
+      return h("section", { class: `col${slim ? " slim" : ""}`, "data-st": st.key, "aria-label": `${st.label}, ${plural(by[st.key].length, "task")}` },
         h("div", { class: "col-head" }, h("span", { class: `swatch st-${st.key}`, "aria-hidden": "true" }), st.label,
-          h("span", { class: "count", text: String(list.length) })),
-        list.length ? list.map(taskCard) : h("div", { class: "col-empty", text: st.key === "blocked" ? "No impediments" : "Empty" }));
+          h("span", { class: "count", text: String(by[st.key].length) })),
+        list.length ? list.map(taskCard) : h("div", { class: "col-empty", text: filtering ? "No match" : st.key === "blocked" ? "Nothing blocked" : "Empty" }),
+        more);
     }));
-    const nx = data.next || {};
-    $("next-up").textContent = nx.task ? `Next up: ${nx.task} ${data.tasks[nx.task].title}` : nx.reason ? `Next: ${nx.reason}` : "";
   }
+  $("task-search").addEventListener("input", (e) => { query = e.target.value; renderKanban(currentMilestone()); });
+  $("type-filter").addEventListener("change", (e) => { typeFilter = e.target.value; renderKanban(currentMilestone()); });
 
   // ------------------------------------------------------------------ burndown (step line over time + ideal line)
   function burndownSeries(m) {
@@ -326,48 +491,48 @@
       h("tbody", {}, rows.map((r) => h("tr", {}, h("td", { text: `${r.id} ${r.title || ""}` }), h("td", { text: String(r.done) }), h("td", { text: String(r.total) }))))));
   }
 
-  // ------------------------------------------------------------------ backlog, impediments, definition of done, activity
+  // ------------------------------------------------------------------ needs you, activity
   function listBlock(title, items, emptyText, good) {
     return h("div", {}, h("div", { class: "list-title" }, title, items.length ? h("span", { class: "chip", text: String(items.length) }) : null),
       items.length ? h("ul", { class: "list" }, items) : h("div", { class: `empty${good ? " good" : ""}`, text: emptyText }));
   }
 
-  function renderBacklog(cur) {
-    const b = data.backlog || {};
-    const issues = b.issues || {};
-    const order = ["expedite", "current", "standard", "intangible", "change"];
-    const queued = order.flatMap((c) => ((b.queue || {})[c] || []).map((id) => ({ id, c, ...issues[id] })));
-    const scheduled = Object.entries(issues).filter(([, v]) => ["scheduled", "in_progress"].includes(v.status));
-    const curIdx = data.milestones.findIndex((m) => m.id === cur);
-    const future = data.milestones.slice(curIdx + 1).flatMap((m) => tasksOf(m).filter((t) => t.status !== "done"));
-    $("pb-sub").textContent = `${queued.length} queued issues · ${future.length} tasks in later sprints`;
-    const issueLi = (i) => h("li", {}, h("span", { class: "id", text: i.id }), h("span", { text: i.title || "" }),
-      h("span", { class: `chip${i.c === "expedite" ? " lane-hotfix" : ""}`, text: i.c || i.status }),
-      h("span", { class: "sub", text: [i.type, i.severity, i.origin === "baseline" ? "pre-existing" : null, i.scheduled_in ? `→ ${i.scheduled_in}` : null].filter(Boolean).join(" · ") }));
-    const buf = b.buffer;
-    fill($("product-backlog"),
-      listBlock("Issue queue", queued.map(issueLi), "No issues waiting.", true),
-      scheduled.length ? listBlock("Scheduled", scheduled.map(([id, v]) => issueLi({ id, c: v.class, ...v })), "") : null,
-      buf ? h("div", {}, h("div", { class: "list-title", text: `Buffer of ${buf.milestone}` }),
-        h("div", { class: "score", text: `${buf.used}/${buf.capacity} slots used (${buf.pct}%)` }),
-        (() => { const mm = h("div", { class: "meter" }); const sp = h("span"); sp.style.width = `${Math.min(100, buf.capacity ? (buf.used / buf.capacity) * 100 : 0)}%`; mm.append(sp); return mm; })()) : null,
-      listBlock("Later sprints", future.slice(0, 8).map((t) => h("li", {}, h("span", { class: "id", text: t.id }), h("span", { text: t.title }),
-        h("span", { class: "chip", text: t.milestone }))), "Nothing planned after this sprint."),
-      future.length > 8 ? h("div", { class: "card-sub", text: `+ ${future.length - 8} more` }) : null);
-  }
-
   function renderImpediments() {
     const blocked = Object.entries(data.tasks).filter(([, t]) => t.status === "blocked");
+    const b = data.backlog || {};
+    const hot = b.hotfix_open || [];
+    const warns = b.warnings || [];
+    const n = blocked.length + data.questions.length + hot.length;
+    $("att-sub").textContent = n ? plural(n, "item") : "";
+    if (!n && !warns.length) {
+      fill($("impediments"), h("div", { class: "empty good", text: "Nothing is blocked and no questions are open." }));
+      return;
+    }
     fill($("impediments"),
-      listBlock("Blocked tasks", blocked.map(([id, t]) => h("li", {}, h("span", { class: "id", text: id }), h("span", { text: t.title }),
-        h("span", { class: "chip", text: t.milestone }), h("span", { class: "sub", text: t.blocked_reason || "no reason recorded" }))), "Nothing is blocked.", true),
-      listBlock("Open questions", data.questions.map((q) => h("li", {}, h("span", { class: "id", text: q.id }), h("span", { text: q.question }),
-        h("span", { class: "chip", text: q.by || "?" }), q.assumption ? h("span", { class: "sub", text: `Assumed: ${q.assumption}` }) : null)),
-        "No open questions.", true),
-      ((data.backlog || {}).warnings || []).length ? listBlock("Warnings", data.backlog.warnings.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
-      data.questions.length || blocked.length ? h("p", { class: "card-sub" }, "Resolve with ", h("code", { text: "/dev-kit:interview --gaps" })) : null);
+      hot.length ? listBlock("Open hotfixes", hot.map((id) => h("li", {}, h("span", { class: "id", text: String(id) }),
+        h("span", { text: (data.tasks[id] || (b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))), "") : null,
+      blocked.length ? listBlock("Blocked tasks", blocked.map(([id, t]) => h("li", { class: "has-btn" },
+        h("button", { type: "button", class: "row-btn", "data-tid": id, "aria-haspopup": "dialog", onclick: () => openTask(id) },
+          h("span", { class: "id", text: id }), h("span", { text: t.title }), h("span", { class: "chip", text: t.milestone }),
+          h("span", { class: "sub bad", text: t.blocked_reason || "No reason recorded" })))), "") : null,
+      data.questions.length ? listBlock("Open questions", data.questions.map((q) => h("li", {}, h("span", { class: "id", text: q.id }), h("span", {}, linkify(q.question)),
+        h("span", { class: "chip", text: q.by || "?" }), q.assumption ? h("span", { class: "sub", text: `Assumed meanwhile: ${q.assumption}` }) : null)), "") : null,
+      warns.length ? listBlock("Warnings", warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
+      data.questions.length || blocked.length ? h("p", { class: "card-sub" }, "Answer in Claude Code with ", h("code", { text: "/dev-kit:interview --gaps" })) : null);
   }
 
+  function renderFeed() {
+    fill($("feed"), data.log.length ? data.log.map((r) => {
+      const t = parseT(r.at);
+      return h("li", {}, h("time", { datetime: r.at, title: Number.isFinite(t) ? fmtDT(t) : r.at, text: Number.isFinite(t) ? agoShort(t) : r.at }),
+        h("span", { class: "txt" }, linkify(r.text)));
+    }) : h("li", {}, h("span", { class: "txt", text: "No activity logged yet." })));
+    const b = data.board;
+    fill($("foot"), `Read-only view of ${data.project}/.dev · autonomy ${data.autonomy || "?"}`,
+      b ? ` · server pid ${b.pid} on port ${b.port}` : "", " · stop it from the ⋯ menu or with ", h("code", { text: "/dev-kit:board stop" }));
+  }
+
+  // ------------------------------------------------------------------ insights: quality (definition of done) and backlog
   function dodRow(name, score, cut, verdict) {
     const mm = h("div", { class: "meter" });
     const sp = h("span"); sp.style.width = `${score != null ? Math.min(100, score) : 0}%`;
@@ -382,249 +547,81 @@
 
   function renderDoD() {
     const q = data.quality;
-    $("dod-sub").textContent = `Gate cut-off ${q.min_overall} · reviews ${q.review_min_overall}`;
-    const revs = ["prd", "design", "plan", "ux", "docs"].map((k) => [k, data.reviews[k] || {}]);
-    const extra = Object.entries(data.reviews).filter(([k]) => !["prd", "design", "plan", "ux", "docs"].includes(k));
-    fill($("dod"),
-      h("div", {}, h("div", { class: "list-title", text: "Reviews" }), h("div", { class: "list" },
-        [...revs, ...extra].map(([k, v]) => dodRow(k.toUpperCase().length <= 3 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1), v.score ?? null, k === "ux" ? q.min_overall : q.review_min_overall, v.verdict)))),
-      h("div", {}, h("div", { class: "list-title", text: "Milestone gates" }), h("div", { class: "list" },
-        data.milestones.length ? data.milestones.map((m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? (m.score != null ? "fail" : "pending") : m.gate))
-          : h("div", { class: "empty", text: "No milestones yet." }))));
+    $("dod-sub").textContent = `Cut-off: gates ${q.min_overall} · reviews ${q.review_min_overall}. Rows show the score against its cut-off mark.`;
+    const base = ["prd", "design", "plan", "ux", "docs"];
+    const revs = [...base.map((k) => [k, data.reviews[k] || {}]), ...Object.entries(data.reviews).filter(([k]) => !base.includes(k))];
+    const rname = (k) => (k.length <= 3 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1));
+    const started = (v) => v.score != null || (v.verdict && v.verdict !== "pending");
+    const revRows = revs.filter(([, v]) => started(v)).map(([k, v]) => dodRow(rname(k), v.score ?? null, k === "ux" ? q.min_overall : q.review_min_overall, v.verdict));
+    const revPending = revs.filter(([, v]) => !started(v)).map(([k]) => rname(k));
+    const gStarted = (m) => m.score != null || m.gate !== "pending";
+    const gateRows = data.milestones.filter(gStarted).map((m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? "fail" : m.gate));
+    const gatePending = data.milestones.filter((m) => !gStarted(m)).map((m) => m.id);
+    const block = (title, rows, pending, emptyText) => h("div", {}, h("div", { class: "list-title", text: title }),
+      rows.length ? h("div", { class: "list" }, rows) : !pending.length ? h("div", { class: "empty", text: emptyText }) : null,
+      pending.length ? h("p", { class: "pending-line", text: `Not run yet: ${pending.join(", ")}` }) : null);
+    fill($("dod"), block("Reviews", revRows, revPending, "No reviews."), block("Milestone gates", gateRows, gatePending, "No milestones yet."));
   }
 
-  function renderFeed() {
-    fill($("feed"), data.log.length ? data.log.map((r) => h("li", {}, h("time", { datetime: r.at, text: Number.isFinite(parseT(r.at)) ? fmtDT(parseT(r.at)) : r.at }),
-      h("span", { class: "txt", text: r.text }))) : h("li", {}, h("span", { class: "txt", text: "No activity logged yet." })));
-    const b = data.board;
-    fill($("foot"), `Read-only view of ${data.project}/.dev · phase ${data.phase} · autonomy ${data.autonomy || "?"}`,
-      b ? ` · server pid ${b.pid} on port ${b.port}` : "", " · stop it here or with ", h("code", { text: "/dev-kit:board stop" }));
+  function renderBacklog(cur) {
+    const b = data.backlog || {};
+    const issues = b.issues || {};
+    const order = ["expedite", "current", "standard", "intangible", "change"];
+    const queued = order.flatMap((c) => ((b.queue || {})[c] || []).map((id) => ({ id, c, ...issues[id] })));
+    const scheduled = Object.entries(issues).filter(([, v]) => ["scheduled", "in_progress"].includes(v.status));
+    const curIdx = data.milestones.findIndex((m) => m.id === cur);
+    const later = data.milestones.slice(curIdx + 1).map((m) => ({ m, left: tasksOf(m).filter((t) => t.status !== "done").length })).filter((x) => x.left);
+    const laterTasks = later.reduce((n, x) => n + x.left, 0);
+    $("pb-sub").textContent = `${plural(queued.length, "queued issue")} · ${plural(laterTasks, "task")} in later sprints`;
+    const issueLi = (i) => h("li", {}, h("span", { class: "id", text: i.id }), h("span", { text: i.title || "" }),
+      h("span", { class: `chip${i.c === "expedite" ? " lane-hotfix" : ""}`, text: i.c || i.status }),
+      h("span", { class: "sub", text: [i.type, i.severity, i.origin === "baseline" ? "pre-existing" : null, i.scheduled_in ? `→ ${i.scheduled_in}` : null].filter(Boolean).join(" · ") }));
+    const buf = b.buffer;
+    let meter = null;
+    if (buf) {
+      meter = h("div", { class: "meter" });
+      const sp = h("span"); sp.style.width = `${Math.min(100, buf.capacity ? (buf.used / buf.capacity) * 100 : 0)}%`;
+      meter.append(sp);
+    }
+    fill($("product-backlog"),
+      listBlock("Issue queue", queued.map(issueLi), "No issues waiting.", true),
+      scheduled.length || buf ? h("div", { class: "list-wrap" },
+        scheduled.length ? listBlock("Scheduled issues", scheduled.map(([id, v]) => issueLi({ id, c: v.class, ...v })), "") : null,
+        buf ? h("div", {}, h("div", { class: "list-title", text: `Issue buffer of ${buf.milestone}` }),
+          h("div", { class: "score", text: `${buf.used} of ${plural(buf.capacity, "slot")} used (${buf.pct}% of the sprint reserved for issues)` }), meter) : null) : null,
+      listBlock("Later sprints", later.map(({ m, left }) => h("li", { class: "has-btn" },
+        h("button", { type: "button", class: "row-btn", title: `Show ${m.id} on the board`, onclick: () => { selectSprint(m.id, false); $("main").scrollIntoView({ block: "start" }); } },
+          h("span", { class: "id", text: m.id }), h("span", { text: m.title || "" }), h("span", { class: "chip", text: plural(left, "task") })))),
+        "Nothing planned after this sprint."));
   }
 
-  // ------------------------------------------------------------------ execution graph (DAG of the milestone)
-  const GW = 176, GH = 46, GX = 72, GY = 52, GPAD = 34;
-  const store = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
-  let view = store.get("board-view", "graph") === "kanban" ? "kanban" : "graph", gmode = "actual", gdata = null, gseq = 0;
-  const STCOL = { done: "var(--good)", in_progress: "var(--warning)", blocked: "var(--critical)", todo: "var(--todo)", pending: "var(--todo)", passed: "var(--good)", skipped: "var(--todo)" };
-
-  function segSwitch(label, opts, cur, onPick) {
-    return h("div", { class: "seg-switch", role: "group", "aria-label": label },
-      opts.map(([k, text]) => h("button", { type: "button", class: `seg-btn${cur === k ? " on" : ""}`, "aria-pressed": String(cur === k), text, onclick: () => onPick(k) })));
-  }
-  function renderBoardView(m) {
-    const tools = [segSwitch("View", [["graph", "Graph"], ["kanban", "Kanban"]], view, (k) => { view = k; store.set("board-view", k); renderBoardView(currentMilestone()); renderAgents(); })];
-    if (view === "graph") tools.push(segSwitch("Graph mode", [["actual", "Actual"], ["planned", "Planned"]], gmode, (k) => { gmode = k; drawGraph(); renderBoardView(currentMilestone()); }));
-    fill($("board-tools"), tools);
-    $("kanban").hidden = view !== "kanban";
-    $("graph").hidden = view !== "graph";
-    if (view === "graph" && m) loadGraph(m.id);
-  }
-  const currentMilestone = () => (data && data.milestones.find((x) => x.id === currentId())) || null;
-
-  async function loadGraph(mid) {
-    const my = ++gseq;
-    try {
-      const r = await fetch(`/api/graph?m=${encodeURIComponent(mid)}`, { cache: "no-store" });
-      const g = await r.json();
-      if (my !== gseq) return;
-      gdata = g.ok ? g : null;
-    } catch (e) { if (my !== gseq) return; gdata = null; }
-    drawGraph();
-  }
-
-  function layoutGraph(g) {
-    const planned = gmode === "planned";
-    const nodes = g.nodes.filter((n) => (planned ? n.planned && n.id !== "GATE" || n.id === "GATE" : true));
-    const ids = new Set(nodes.map((n) => n.id));
-    const edges = g.edges.filter((e) => ids.has(e.from) && ids.has(e.to) && (planned ? e.kind === "planned" || e.kind === "removed" : e.kind !== "removed"));
-    const dep = edges.filter((e) => e.kind !== "fix" && e.to !== "GATE" && e.from !== "GATE");
-    const layer = {};
-    const preds = (id) => dep.filter((e) => e.to === id).map((e) => e.from);
-    const lay = (id, seen = new Set()) => {
-      if (layer[id] !== undefined) return layer[id];
-      if (seen.has(id)) return 0; seen.add(id);
-      layer[id] = preds(id).reduce((mx, p) => Math.max(mx, lay(p, seen) + 1), 0);
-      return layer[id];
-    };
-    const fixes = new Set(g.edges.filter((e) => e.kind === "fix" && e.from === "GATE" && ids.has(e.to)).map((e) => e.to));
-    nodes.forEach((n) => { if (n.id !== "GATE" && !fixes.has(n.id)) lay(n.id); });
-    const maxL = Math.max(0, ...Object.values(layer));
-    fixes.forEach((f) => { layer[f] = maxL; });
-    layer.GATE = maxL + 1;
-    const cols = {};
-    nodes.forEach((n) => { (cols[layer[n.id]] = cols[layer[n.id]] || []).push(n); });
-    const pos = {}, rowOf = {};
-    let rowsMax = 1;
-    Object.keys(cols).map(Number).sort((a, b) => a - b).forEach((l) => {
-      const list = cols[l];
-      if (+l === layer.GATE) return;
-      const bary = (n) => { const ys = preds(n.id).map((p) => rowOf[p]).filter((v) => v !== undefined); return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : Infinity; };
-      list.sort((a, b) => (fixes.has(a.id) - fixes.has(b.id)) || (bary(a) - bary(b)) || (parseInt(a.id.slice(2)) - parseInt(b.id.slice(2))));
-      list.forEach((n, i) => { rowOf[n.id] = i; pos[n.id] = { x: GPAD + l * (GW + GX), y: GPAD + 24 + i * (GH + GY) }; });
-      rowsMax = Math.max(rowsMax, list.length);
+  function renderInsights(m, curId) {
+    INS.forEach((k) => {
+      const tab = $(`ins-tab-${k}`);
+      tab.setAttribute("aria-selected", String(k === insTab));
+      tab.tabIndex = k === insTab ? 0 : -1;
+      $(`ins-${k}`).hidden = k !== insTab;
     });
-    const midY = GPAD + 24 + ((rowsMax - 1) * (GH + GY)) / 2;
-    pos.GATE = { x: GPAD + layer.GATE * (GW + GX), y: midY };
-    return { nodes, edges, pos, fixes, layer, width: GPAD * 2 + (layer.GATE + 1) * (GW + GX) - GX, height: GPAD * 2 + 24 + rowsMax * (GH + GY) + 40, planned };
+    if (insTab === "burndown") renderBurndown(m);
+    else if (insTab === "velocity") renderVelocity(curId);
+    else if (insTab === "quality") renderDoD();
+    else renderBacklog(curId);
   }
+  function pickInsight(k, focus) {
+    insTab = k; store.set("board-insight", k);
+    if (data && data.ok) renderInsights(currentMilestone(), currentId());
+    if (focus) $(`ins-tab-${k}`).focus();
+  }
+  $("ins-tabs").addEventListener("click", (e) => { const t = e.target.closest("[data-ins]"); if (t) pickInsight(t.dataset.ins, false); });
+  $("ins-tabs").addEventListener("keydown", (e) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    let i = INS.indexOf(insTab);
+    i = e.key === "Home" ? 0 : e.key === "End" ? INS.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + INS.length) % INS.length;
+    pickInsight(INS[i], true); e.preventDefault();
+  });
 
-  function groupLoops(g, id) {
-    const by = {};
-    g.loops.filter((l) => l.task === id).forEach((l) => { (by[l.kind] = by[l.kind] || []).push(l); });
-    return Object.entries(by).map(([kind, list]) => ({ kind, list }));
-  }
-  const LOOPTXT = { block: "blocked", restart: "retry", gate: "gate failed" };
-
-  function drawGraph() {
-    const box = $("graph");
-    if (!gdata) { fill(box, h("div", { class: "empty", text: "No graph available for this milestone." })); return; }
-    const g = gdata, L = layoutGraph(g);
-    const parGroups = g.parallel.map((grp, i) => ({ grp, tag: String.fromCharCode(65 + i) }));
-    const parOf = {}; parGroups.forEach((p) => p.grp.forEach((id) => { parOf[id] = p; }));
-    const svg = s("svg", { class: "gsvg", width: L.width, height: L.height, viewBox: `0 0 ${L.width} ${L.height}`, role: "img",
-      "aria-label": `Execution graph of ${g.milestone}: ${L.nodes.length} nodes` });
-    // arrowheads are drawn explicitly (a small triangle at the end of each edge), so direction shows in any renderer
-    const head = (tx, ty, fx, fy, cls) => {
-      const a = Math.atan2(ty - fy, tx - fx), L1 = 9, W = 4.5;
-      const bx = tx - Math.cos(a) * L1, by = ty - Math.sin(a) * L1, px = -Math.sin(a) * W, py = Math.cos(a) * W;
-      svg.append(s("path", { d: `M${tx} ${ty} L${bx + px} ${by + py} L${bx - px} ${by - py} Z`, class: `ghead ${cls}` }));
-    };
-    const P = (id) => L.pos[id];
-    let bottom = L.height;
-    // dependency edges
-    L.edges.forEach((e) => {
-      const a = P(e.from), b = P(e.to);
-      if (!a || !b) return;
-      if (e.kind === "fix") {
-        if (e.from === "GATE") {  // back edge below the nodes: the gate sends work to the fix task
-          const y = Math.max(a.y, b.y) + GH + 30;
-          svg.append(s("path", { d: `M${a.x + GW / 2} ${a.y + GH} C${a.x + GW / 2} ${y} ${b.x + GW / 2} ${y} ${b.x + GW / 2} ${b.y + GH}`, class: "gedge fix" }));
-          head(b.x + GW / 2, b.y + GH, b.x + GW / 2, y, "fix");
-        } else {
-          const x1 = a.x + GW, y1 = a.y + GH / 2, x2 = b.x, y2 = b.y + GH / 2, dx = (x2 - x1) / 2;
-          svg.append(s("path", { d: `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`, class: "gedge fix" }));
-          head(x2, y2, x2 - dx, y2, "fix");
-        }
-        return;
-      }
-      const x1 = a.x + GW, y1 = a.y + GH / 2, x2 = b.x, y2 = b.y + GH / 2, dx = Math.max(24, (x2 - x1) / 2);
-      // an edge that skips columns arches over the nodes in between instead of running behind them
-      const arch = L.layer[e.to] - L.layer[e.from] > 1 ? Math.min(y1, y2) - GH * 1.4 : null;
-      const cy1 = arch === null ? y1 : arch, cy2 = arch === null ? y2 : arch;
-      svg.append(s("path", { d: `M${x1} ${y1} C${x1 + dx} ${cy1} ${x2 - dx} ${cy2} ${x2} ${y2}`, class: `gedge ${e.kind}` }));
-      head(x2, y2, x2 - dx, cy2, e.kind);
-    });
-    // nodes
-    L.nodes.forEach((n) => {
-      const p = P(n.id); if (!p) return;
-      const st = L.planned ? "todo" : n.status;
-      const dur = n.intervals.reduce((sum, [a, b]) => sum + ((b ? parseT(b) : Date.now()) - parseT(a)), 0) / 1000;
-      const label = n.id === "GATE" ? `QA gate${!L.planned && n.score != null ? ` · ${n.score}` : ""}` : n.id;
-      const title = (n.title || "").length > 24 ? n.title.slice(0, 23) + "…" : n.title || "";
-      const par = L.planned ? null : parOf[n.id];
-      const here = L.planned ? [] : agentsOn(n.id === "GATE" ? `GATE:${g.milestone}` : n.id);
-      const gEl = s("g", { class: `gnode${n.external ? " ext" : ""}${n.added && !L.planned ? " added" : ""}${n.id === "GATE" ? " gate" : ""}`, transform: `translate(${p.x} ${p.y})`, tabindex: "0",
-        role: "img", "aria-label": `${n.id} ${n.title || ""}, ${String(n.status).replace("_", " ")}${n.attempts > 1 ? `, ${n.attempts} attempts` : ""}${par ? `, parallel group ${par.tag}` : ""}${here.length ? `, agents running: ${here.map((x) => x.agent).join(", ")}` : ""}` },
-        s("rect", { class: "gbox", width: GW, height: GH, rx: 9 }),
-        s("rect", { class: "gbar", width: 5, height: GH - 12, x: 0, y: 6, rx: 2.5, style: `fill:${STCOL[st] || STCOL.todo}` }),
-        s("text", { class: "gid", x: 14, y: 19, text: label + (n.external ? ` · ${n.milestone}` : "") }),
-        s("text", { class: "gtitle", x: 14, y: 36, text: title }));
-      if (!L.planned && n.attempts > 1) gEl.append(s("text", { class: "gbadge", x: GW - 8, y: 17, "text-anchor": "end", text: `×${n.attempts}` }));
-      if (par) gEl.append(s("text", { class: "gpar", x: GW - 8, y: 36, "text-anchor": "end", text: `∥${par.tag}` }));
-      const tip = (evt) => {
-        const rows = [[String(n.status).replace("_", " "), "status"]];
-        if (n.id !== "GATE") rows.push([String(n.attempts), n.attempts === 1 ? "attempt" : "attempts"], [String(n.blocks), "blocks"]);
-        if (dur > 0) rows.push([fmtDur(dur), "executing"]);
-        if (n.id === "GATE") rows.push([String(n.qa_runs || 0), "QA runs"]);
-        if (par) rows.push([`∥${par.tag}`, `with ${par.grp.filter((x) => x !== n.id).join(", ")}`]);
-        here.forEach((x) => rows.push([x.agent, `running ${fmtDur((Date.now() - parseT(x.started_at)) / 1000)}`]));
-        (n.agents_done || []).slice(-5).forEach((x) => rows.push([x.agent, [x.status || "done", x.duration_s != null ? fmtDur(x.duration_s) : null,
-          x.findings != null ? `${x.findings} findings` : null].filter(Boolean).join(" · ")]));
-        n.history.slice(-8).forEach(([at, tr]) => rows.push([tr, Number.isFinite(parseT(at)) ? fmtDT(parseT(at)) : at]));
-        showTip(evt, `${n.id}${n.title ? ` · ${n.title}` : ""}`, rows);
-      };
-      if (n.id !== "GATE") {
-        gEl.setAttribute("role", "button"); gEl.setAttribute("aria-haspopup", "dialog"); gEl.setAttribute("data-tid", n.id); gEl.classList.add("clickable");
-        gEl.addEventListener("click", () => openTask(n.id));
-        gEl.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTask(n.id); } });
-      }
-      ["pointermove", "focus"].forEach((ev) => gEl.addEventListener(ev, tip));
-      ["pointerleave", "blur"].forEach((ev) => gEl.addEventListener(ev, hideTip));
-      svg.append(gEl);
-      // running agents on this node: pills under the box (max 3, then +N)
-      // stacked under the node: the gate is alone in its column, so it shows more rows (parallel auditors)
-      const rows = n.id === "GATE" ? 6 : 2, BH = 17, BG = 3;
-      const list = here.length > rows ? here.slice(0, rows - 1) : here;
-      list.forEach((x, k) => {
-        const dur = shortDur((Date.now() - parseT(x.started_at)) / 1000);
-        const w = Math.min(GW, 30 + x.agent.length * 6.3 + 34);
-        svg.append(s("g", { class: "gagent", transform: `translate(${p.x} ${p.y + GH + 5 + k * (BH + BG)})` },
-          s("rect", { width: w, height: BH, rx: BH / 2 }),
-          s("circle", { class: "agent-dot", cx: 9, cy: BH / 2, r: 3.5 }),
-          s("text", { class: "gagent-name", x: 17, y: 12.5, text: x.agent }),
-          s("text", { class: "agent-time gagent-time", x: w - 8, y: 12.5, "text-anchor": "end", "data-start": x.started_at, "data-short": "1", text: dur })));
-      });
-      bottom = Math.max(bottom, p.y + GH + 5 + (list.length + (here.length > list.length ? 1 : 0)) * (BH + BG) + 16);
-      if (here.length > list.length) svg.append(s("text", { class: "gagent-more", x: p.x + 6, y: p.y + GH + 5 + list.length * (BH + BG) + 12.5,
-        text: `+${here.length - list.length} more` }));
-      // failure loops: leave the top of the node and re-enter it
-      if (!L.planned) groupLoops(g, n.id).forEach(({ kind, list }, i) => {
-        const x1 = p.x + GW * 0.2 + i * 7, x2 = p.x + GW * 0.5 + i * 7, y = p.y, hgt = 16 + i * 9;
-        svg.append(s("path", { d: `M${x1} ${y} C${x1 - 4} ${y - hgt} ${x2 + 4} ${y - hgt} ${x2} ${y - 1}`, class: "gedge loop" }));
-        head(x2, y - 1, x2 + 4, y - hgt, "loop");
-        const last = list[list.length - 1];
-        svg.append(s("text", { class: "gloop", x: p.x + GW * 0.5 + 18, y: y - 5 - i * 12, "text-anchor": "start",
-          text: `${LOOPTXT[kind] || kind}${list.length > 1 ? ` ×${list.length}` : ""}${kind === "gate" && last.score != null ? ` · ${last.score}` : ""}` }));
-      });
-    });
-    const note = [];
-    if (!g.baseline) note.push(h("p", { class: "gnote", text: "No baseline recorded for this project yet: the initial plan is taken from the next sync-plan, so Planned shows the current plan." }));
-    const legend = h("ul", { class: "glegend", "aria-label": "Legend" },
-      [["done", "Done"], ["in_progress", "In progress"], ["blocked", "Blocked"], ["todo", "To do"]].map(([k, t]) => h("li", {}, h("span", { class: `swatch st-${k}`, "aria-hidden": "true" }), t)),
-      h("li", {}, h("span", { class: "lg-line loop", "aria-hidden": "true" }), "Failure loop (block, retry, failed gate)"),
-      h("li", {}, h("span", { class: "lg-line added", "aria-hidden": "true" }), "Added after the plan"),
-      h("li", {}, h("span", { class: "agent-dot", "aria-hidden": "true" }), (data.agents && data.agents.hooks) ? "Agent running" : "Agent running (agents outside dev-kit skills need plugin hooks)"),
-      parGroups.length ? h("li", {}, "∥ " + parGroups.map((p) => `${p.tag}: ${p.grp.join(", ")}`).join(" · ")) : h("li", { text: "No parallel execution yet" }));
-    const rows = g.nodes.filter((n) => n.id !== "GATE").map((n) => {
-      const deps = g.edges.filter((e) => e.to === n.id && e.kind !== "removed").map((e) => e.from).join(", ");
-      return h("tr", {}, h("td", { text: n.id }), h("td", { text: n.title || "" }), h("td", { text: String(n.status).replace("_", " ") }), h("td", { text: deps || "—" }),
-        h("td", { text: String(n.attempts) }), h("td", { text: String(n.blocks) }));
-    });
-    if (bottom > L.height) { svg.setAttribute("height", bottom); svg.setAttribute("viewBox", `0 0 ${L.width} ${bottom}`); }
-    renderAgents();
-    fill(box, note, legend, h("div", { class: "graph-scroll", tabindex: "0", role: "region", "aria-label": "Execution graph (scrollable)" }, svg),
-      h("details", { class: "table-view" }, h("summary", { text: "Show as table" }),
-        h("table", { class: "gtable" }, h("thead", {}, h("tr", {}, ["Task", "Title", "Status", "Depends on", "Attempts", "Blocks"].map((c) => h("th", { text: c })))), h("tbody", {}, rows))));
-  }
-
-  // ------------------------------------------------------------------ agents (fed by plugin hooks)
-  function fmtDur(sec) {
-    sec = Math.max(0, Math.round(sec));
-    return sec < 60 ? `${sec} s` : sec < 3600 ? `${Math.floor(sec / 60)} min ${sec % 60} s` : `${Math.floor(sec / 3600)} h ${Math.floor((sec % 3600) / 60)} min`;
-  }
-  const activeAgents = () => ((data && data.agents && data.agents.active) || []);
-  const agentsOn = (key) => activeAgents().filter((x) => x.node === key);
-  function renderAgents() {
-    // agents placed on a visible graph node are shown there; the strip keeps the rest
-    const onGraph = new Set();
-    if (view === "graph" && gdata) gdata.nodes.forEach((n) => onGraph.add(n.id === "GATE" ? `GATE:${gdata.milestone}` : n.id));
-    const loose = activeAgents().filter((x) => !x.node || !onGraph.has(x.node));
-    $("agents-card").hidden = loose.length === 0;
-    fill($("agents"), loose.map((x) => h("span", { class: "agent-chip" },
-      h("span", { class: "agent-dot", "aria-hidden": "true" }),
-      h("span", { class: "agent-name", text: x.agent }),
-      x.node ? h("span", { class: "agent-node", text: x.node.replace("GATE:", "QA ") }) : null,
-      h("span", { class: "agent-time", "data-start": x.started_at, text: fmtDur((Date.now() - parseT(x.started_at)) / 1000) }))));
-  }
-  function shortDur(sec) {
-    sec = Math.max(0, Math.round(sec));
-    return sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m` : `${Math.floor(sec / 3600)}h${Math.floor((sec % 3600) / 60)}m`;
-  }
   function tickAgents() {
-    document.querySelectorAll(".agent-time[data-start]").forEach((el) => {
-      const sec = (Date.now() - parseT(el.dataset.start)) / 1000;
-      el.textContent = el.dataset.short ? shortDur(sec) : fmtDur(sec);
-    });
+    document.querySelectorAll(".agent-time[data-start]").forEach((el) => { el.textContent = dur((Date.now() - parseT(el.dataset.start)) / 1000); });
   }
   setInterval(tickAgents, 1000);
 
@@ -639,9 +636,16 @@
     banner.hidden = true;
     const curId = currentId();
     const m = data.milestones.find((x) => x.id === curId) || null;
-    renderHeader(); renderTabs(); renderHero(m); renderTiles(m); renderAgents(); renderKanban(m); renderBoardView(m);
-    renderBurndown(m); renderVelocity(curId); renderBacklog(curId); renderImpediments(); renderDoD(); renderFeed();
+    keepFocus(() => {
+      renderHeader(); renderTabs(); renderNow(); renderSprint(m); renderKanban(m);
+      renderImpediments(); renderFeed(); renderInsights(m, curId);
+    });
     $("main").setAttribute("aria-busy", "false");
+    if (firstRender) {
+      firstRender = false;
+      const tid = decodeURIComponent(location.hash.slice(1));
+      if (TASK_RE.test(tid)) openTask(tid);
+    }
   }
 
   async function load() {
@@ -657,6 +661,7 @@
       lastUpdate = Date.now();
       render();
       tickUpdated();
+      if (tdlg.open && tdCur) fetchTask(tdCur, true);
     } catch (e) {
       setLive("off", "Offline");
     } finally {
@@ -689,18 +694,22 @@
     stopped = true;
     if (es) es.close();
     setLive("off", "Stopped");
+    if (tdlg.open) tdlg.close();
     $("stopped").hidden = false;
     document.title = "Board stopped · dev-kit";
   }
 
-  // ------------------------------------------------------------------ task details (opened from a card or a graph node)
+  // ------------------------------------------------------------------ task details: a side drawer, linkable as #T-nnn
   const tdlg = $("task-dialog");
-  let tdFrom = null;
-  const stLabel = (x) => String(x || "").replace("_", " ");
+  let tdOrigin = null;   // card the drawer was opened from: focus returns there
+  let tdCur = null;      // task shown now (the user can walk through dependencies inside the drawer)
   function section(title, ...kids) {
     const body = kids.flat().filter(Boolean);
     return body.length ? h("section", { class: "td-sec" }, h("h3", { text: title }), body) : null;
   }
+  const taskRefs = (list) => (list.length ? h("ul", { class: "td-list plain" }, list.map((x) => h("li", {},
+    h("button", { type: "button", class: "tid-btn", text: x.id, "aria-label": `Open ${x.id}`, onclick: () => openTask(x.id) }), ` ${x.title || ""} `,
+    h("span", { class: `chip st-chip s-${x.status}`, text: stLabel(x.status) })))) : null);
   function renderTask(d) {
     const body = $("task-body");
     if (!d.ok) { fill(body, h("p", { class: "card-sub", text: d.error === "unknown task" ? "This task no longer exists (a replan may have removed it)." : "Could not load the task." })); return; }
@@ -711,45 +720,61 @@
         d.lane ? h("span", { class: `chip lane-${d.lane}`, text: d.lane }) : null, h("span", { class: "chip", text: d.milestone }),
         d.started_at ? h("span", { text: `started ${fmtDT(parseT(d.started_at))}` }) : null,
         d.done_at ? h("span", { text: `done ${fmtDT(parseT(d.done_at))}` }) : null),
-      d.blocked_reason ? h("div", { class: "reason", text: d.blocked_reason }) : null,
+      agentsOn(d.id).length ? h("div", { class: "tcard-agents td-sec" }, agentsOn(d.id).map((x) => h("span", { class: "agent-chip" }, agentBits(x)))) : null,
+      d.blocked_reason ? h("div", { class: "reason td-sec", text: d.blocked_reason }) : null,
       section("Origin", d.issue ? h("p", {}, h("span", { class: "tid", text: d.issue.id }), ` ${d.issue.title || ""}`,
         h("span", { class: "card-sub", text: ` · ${[d.issue.type, d.issue.class, d.issue.severity, d.issue.status].filter(Boolean).join(" · ")}` }),
         d.issue.note ? h("span", { class: "td-note", text: d.issue.note }) : null) : (d.source ? h("p", { text: d.source }) : null)),
       section(`Acceptance criteria (${d.acceptance.length})`, d.acceptance.length ? h("ul", { class: "td-list" }, d.acceptance.map((a) =>
         h("li", {}, a.text, a.prd ? h("span", { class: "td-note", text: `PRD: ${a.prd}` }) : null))) : null),
       section("How to test", d.test_notes ? h("p", { text: d.test_notes }) : null),
+      section("Depends on", taskRefs(d.deps)),
+      section("Unblocks", taskRefs(d.blocks)),
       section("Planned files", d.files.length ? h("ul", { class: "td-list mono" }, d.files.map((f) => h("li", { text: f }))) : null),
-      section("Depends on", d.deps.length ? h("ul", { class: "td-list" }, d.deps.map((x) => h("li", {}, h("span", { class: "tid", text: x.id }), ` ${x.title || ""} `, h("span", { class: "card-sub", text: `· ${stLabel(x.status)}` })))) : null),
-      section("Unblocks", d.blocks.length ? h("ul", { class: "td-list" }, d.blocks.map((x) => h("li", {}, h("span", { class: "tid", text: x.id }), ` ${x.title || ""} `, h("span", { class: "card-sub", text: `· ${stLabel(x.status)}` })))) : null),
       section("Commit", c ? [h("p", {}, h("span", { class: "tid", text: c.sha.slice(0, 7) }), ` ${c.subject}`, h("span", { class: "card-sub", text: ` · ${c.author} · ${fmtDT(parseT(c.date))}` })),
         c.files.length ? h("ul", { class: "td-list mono" }, c.files.map((f) => h("li", { text: f }))) : null, c.summary ? h("p", { class: "card-sub", text: c.summary }) : null]
         : (d.commit_sha ? h("p", {}, h("span", { class: "tid", text: d.commit_sha.slice(0, 7) }), h("span", { class: "card-sub", text: " · not available in this checkout" })) : null)),
-      section("History", d.log.length ? h("ul", { class: "td-list" }, d.log.map((r) => h("li", {}, h("span", { class: "card-sub", text: `${r.at} ` }), r.text))) : null),
+      section("History", d.log.length ? h("ul", { class: "td-list plain" }, d.log.map((r) => h("li", {}, h("span", { class: "card-sub", text: `${r.at} ` }), r.text))) : null),
       h("p", { class: "card-sub td-foot", text: "No free-text description is stored for tasks yet; this is everything recorded in .dev/." })]);
   }
-  async function openTask(id) {
-    tdFrom = id;
-    $("task-title").textContent = id;
-    fill($("task-body"), h("p", { class: "card-sub", text: "Loading…" }));
-    if (!tdlg.open) (tdlg.showModal ? tdlg.showModal() : tdlg.setAttribute("open", ""));
+  async function fetchTask(id, quiet) {
     try {
       const r = await fetch(`/api/task?id=${encodeURIComponent(id)}`, { cache: "no-store" });
-      if (tdFrom !== id) return;
-      renderTask(await r.json());
-    } catch (e) { if (tdFrom === id) renderTask({ ok: false, error: "network" }); }
+      const d = await r.json();
+      if (tdCur === id) renderTask(d);
+    } catch (e) { if (tdCur === id && !quiet) renderTask({ ok: false, error: "network" }); }
+  }
+  function openTask(id) {
+    if (!tdlg.open) tdOrigin = id;
+    tdCur = id;
+    $("task-title").textContent = data && data.tasks && data.tasks[id] ? `${id} ${data.tasks[id].title}` : id;
+    fill($("task-body"), h("p", { class: "card-sub", text: "Loading…" }));
+    if (!tdlg.open) (tdlg.showModal ? tdlg.showModal() : tdlg.setAttribute("open", ""));
+    tdlg.scrollTop = 0;
+    if (location.hash !== `#${id}`) history.replaceState(null, "", `#${id}`);
+    fetchTask(id, false);
   }
   $("task-close").addEventListener("click", () => tdlg.close());
   tdlg.addEventListener("click", (e) => { if (e.target === tdlg) tdlg.close(); });
   tdlg.addEventListener("close", () => {
-    const back = tdFrom && document.querySelector(`[data-tid="${tdFrom}"]`);
-    tdFrom = null;
+    const back = tdOrigin && document.querySelector(`[data-tid="${tdOrigin}"]`);
+    tdOrigin = tdCur = null;
+    if (location.hash) history.replaceState(null, "", location.pathname + location.search);
     if (back) back.focus();
+  });
+  window.addEventListener("hashchange", () => {
+    const tid = decodeURIComponent(location.hash.slice(1));
+    if (TASK_RE.test(tid) && tid !== tdCur) openTask(tid);
+    else if (!tid && tdlg.open) tdlg.close();
   });
 
   // ------------------------------------------------------------------ stop server
   const dlg = $("stop-dialog");
-  $("stop-btn").addEventListener("click", () => (dlg.showModal ? dlg.showModal() : confirm("Stop the board server?") && stopServer()));
-  dlg.addEventListener("close", () => { if (dlg.returnValue === "stop") stopServer(); });
+  $("stop-btn").addEventListener("click", () => {
+    pops.forEach((p) => p.close());
+    if (dlg.showModal) dlg.showModal(); else if (confirm("Stop the board server?")) stopServer();
+  });
+  dlg.addEventListener("close", () => { if (dlg.returnValue === "stop") stopServer(); else $("menu-btn").focus(); });
   async function stopServer() {
     const btn = $("stop-btn");
     btn.disabled = true;
@@ -763,13 +788,13 @@
     }
   }
 
-  // tabs: arrow keys move between sprints
+  // sprint tabs: arrow keys move between sprints
   $("tabs").addEventListener("keydown", (e) => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !data) return;
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !data || !data.milestones.length) return;
     const ids = data.milestones.map((m) => m.id);
     let i = ids.indexOf(currentId());
     i = e.key === "Home" ? 0 : e.key === "End" ? ids.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + ids.length) % ids.length;
-    selected = ids[i]; render(); $(`tab-${ids[i]}`).focus(); e.preventDefault();
+    selectSprint(ids[i], true); e.preventDefault();
   });
 
   let resizeT = null;

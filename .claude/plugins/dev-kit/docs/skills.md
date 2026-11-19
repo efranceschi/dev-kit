@@ -12,7 +12,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 | [`help`](#help) | Help inside Claude Code: what to do next, how each skill works, recipes and concepts. |
 | [`interview`](#interview) | Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md with the autonomy policy. |
 | [`status`](#status) | Read-only dashboard: phase, milestones, gates, scores, issues, preview, production drift, cost so far. |
-| [`board`](#board) | Live Scrum board in the browser: sprint goal, kanban and execution graph with live agents, burndown, velocity, backlog, impediments; local, or shared on your network with an access link. |
+| [`board`](#board) | Live Scrum board in the browser: what needs you, what is running now, the sprint kanban with live agents and task details, burndown, velocity, quality and backlog; light or dark; local, or shared on your network with an access link. |
 
 ## Specify
 
@@ -155,7 +155,7 @@ Read-only dashboard: phase, milestones, gates, scores, issues, preview, producti
 
 ### board
 
-Live Scrum board in the browser: sprint goal, kanban and execution graph with live agents, burndown, velocity, backlog, impediments; local, or shared on your network with an access link.
+Live Scrum board in the browser: what needs you, what is running now, the sprint kanban with live agents and task details, burndown, velocity, quality and backlog; light or dark; local, or shared on your network with an access link.
 
 **When:** When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.
 
@@ -164,7 +164,7 @@ Live Scrum board in the browser: sprint goal, kanban and execution graph with li
 | Argument | Meaning |
 |---|---|
 | `(empty)` | start the local server (or reuse the running one) and open the default browser |
-| `stop` | stop the server (the page also has a Stop server button) |
+| `stop` | stop the server (the page also has Stop server in its ⋯ menu) |
 | `status` | whether it is running, its URL and PID |
 | `--open | --no-open | --port N` | force a new tab, do not open a tab, preferred port (default 8765) |
 | `--host IP` | listen address (default 127.0.0.1); 0.0.0.0 shares the board on the network, opened only with the access link it prints |

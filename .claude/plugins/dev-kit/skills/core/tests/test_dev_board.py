@@ -358,38 +358,6 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(d["recent"][0]["agent"], "dev-kit:code-reviewer")
         self.assertNotIn("SECRET", (self.root / ".dev" / "run" / "agents.jsonl").read_text())
 
-    def test_graph_baseline_loops_fix_gate_and_parallel(self):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("dev_board", BOARD)
-        mod = importlib.util.module_from_spec(spec)
-        sys.path.insert(0, str(BOARD.parent))
-        spec.loader.exec_module(mod)
-        base_file = self.root / ".dev" / "plan-baseline.json"
-        base = json.loads(base_file.read_text())
-        self.assertEqual(sorted(base), ["T-001", "T-002"])
-        self.ds("block", "T-001", "--reason", "boom")
-        self.ds("unblock", "T-001")
-        self.ds("start", "T-001")
-        self.ds("start", "T-002", "--force")  # overlaps with T-001 -> parallel
-        self.ds("add-task", "--milestone", "M1", "--title", "Fix lint", "--type", "fix", "--source", "qa")
-        self.ds("gate", "M1", "pending", "--score", "60", "--count-run")
-        (self.root / ".dev" / "plan.md").write_text(PLAN.replace("Project scaffold", "Renamed"), encoding="utf-8")
-        self.ds("sync-plan")
-        self.assertEqual(json.loads(base_file.read_text()), base)  # first write wins, fix task never enters it
-        g = mod.graph_data(self.root, "M1")
-        nodes = {n["id"]: n for n in g["nodes"]}
-        self.assertTrue(g["baseline"])
-        self.assertEqual(nodes["T-001"]["blocks"], 1)
-        self.assertEqual(nodes["T-001"]["attempts"], 2)
-        self.assertTrue(nodes["T-003"]["added"] and not nodes["T-003"]["planned"])
-        kinds = {(l["task"], l["kind"]) for l in g["loops"]}
-        self.assertIn(("T-001", "block"), kinds)
-        self.assertIn(("GATE", "gate"), kinds)
-        self.assertEqual(g["parallel"], [["T-001", "T-002"]])
-        fix_edges = {(e["from"], e["to"]) for e in g["edges"] if e["kind"] == "fix"}
-        self.assertEqual(fix_edges, {("GATE", "T-003"), ("T-003", "GATE")})
-        self.assertIsNone(mod.graph_data(self.root, "M9"))
-
     def _mod(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("dev_board", BOARD)
@@ -417,9 +385,6 @@ class BoardTest(unittest.TestCase):
         self.assertFalse(a["hooks"])
         self.assertEqual(sorted((x["agent"], x["node"]) for x in a["active"]),
                          [("code-reviewer", "GATE:M1"), ("implementer", "T-002")])
-        gate = next(n for n in mod.graph_data(self.root, "M1")["nodes"] if n["id"] == "GATE")
-        self.assertEqual(gate["agents_done"][-1]["agent"], "security-auditor")
-        self.assertEqual(gate["agents_done"][-1]["duration_s"], 40)
 
     def test_live_agents_hooks_link_only_when_unambiguous(self):
         mod = self._mod()
@@ -443,15 +408,11 @@ class BoardTest(unittest.TestCase):
         late = [x for x in mod.live_agents(self.root)["active"] if x["agent"] == "implementer"]
         self.assertEqual([x["node"] for x in late], [None])
 
-    def test_graph_endpoint(self):
+    def test_graph_endpoint_is_gone(self):
         self.board("start", check=True)
         port = self.record()["port"]
-        code, body = request(port, "GET", "/api/graph?m=M1")
-        self.assertEqual(code, 200)
-        self.assertIn("T-001", [n["id"] for n in json.loads(body)["nodes"]])
-        self.assertEqual(request(port, "GET", "/api/graph?m=bad")[0], 400)
-        self.assertEqual(request(port, "GET", "/api/graph?m=M9")[0], 404)
-        self.assertEqual(request(port, "GET", "/api/graph?m=M1", {"Host": "evil.example"})[0], 403)
+        self.assertEqual(request(port, "GET", "/api/graph?m=M1")[0], 404)
+        self.assertNotIn(b"/api/graph", request(port, "GET", "/assets/board.js")[1])
 
     def test_task_endpoint(self):
         self.board("start", check=True)

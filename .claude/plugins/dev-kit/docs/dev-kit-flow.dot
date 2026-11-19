@@ -101,7 +101,7 @@ digraph G {
   subgraph cluster_obs {
     label="Anytime · issues and follow-up (issue writes; the others are read-only; all recorded in the log)"; fontsize=11; style="rounded,dashed"; color="#7a5aa6";
     status   [label="/dev-kit:status\nphase, gates, preview, production drift,\nleftover processes, cost so far", fillcolor="#efe7f8", color="#7a5aa6"];
-    board    [label="/dev-kit:board\nlive board in the browser: kanban, graph\nwith running agents, burndown, backlog\n(--host 0.0.0.0: shared with an access link)", fillcolor="#efe7f8", color="#7a5aa6"];
+    board    [label="/dev-kit:board\nlive board in the browser: what needs you,\nrunning agents, kanban, burndown, backlog\n(--host 0.0.0.0: shared with an access link)", fillcolor="#efe7f8", color="#7a5aa6"];
     costs    [label="/dev-kit:costs\ntokens (input, output, cache) and\nestimated US$ per stage, agent, model\n(from local transcripts; CSV on request)", fillcolor="#efe7f8", color="#7a5aa6"];
     feedback [label="/dev-kit:feedback\ngrade 0-100 per stage with reasons,\nwhat worked / failed, suggestions;\ntimestamped report + export for the author", fillcolor="#efe7f8", color="#7a5aa6"];
     help     [label="/dev-kit:help [skill | question]\nwhat to do next · how each skill works\nrecipes, concepts, agents (docs/ generated\nfrom the same catalog)", fillcolor="#fff3c4", color="#b8860b"];
