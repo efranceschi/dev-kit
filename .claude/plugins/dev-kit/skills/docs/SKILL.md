@@ -16,6 +16,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 
 ## Procedure
 1. Read `.dev/brief.md` block 10 (documentation expected, audience), `.dev/prd.md`, `.dev/architecture.md`, `.dev/decisions.md`, and `git log --format='%h %s%n%b' --reverse`. Documentation for end users is written in the **application language(s)**; developer docs in the user's language unless the brief says otherwise (open source → English).
+   Existing project (state has `brownfield`) with README/docs already present: merge into them (keep existing content, add or fix sections, show a diff summary) instead of overwriting.
 2. **README.md** (repo root): what it is and for whom, screenshots if `.dev/qa/ux/screenshots/` exists, prerequisites, setup (env var names from `.env.example`), run, test, lint, deploy, project structure (from architecture §3), link to `.dev/` artifacts and ADRs, licence. Never include secret values.
 3. **User guide** (`docs/user-guide.md`): one section per persona journey from `ux-flows.md`, step by step, with the copy the UI actually shows (grep the code, do not invent).
 4. **API reference** (`docs/api.md`) when `architecture.md` §5 defines contracts: generate from the actual routes/schemas (OpenAPI if the stack produces it; otherwise derive from code), with auth, errors and examples.

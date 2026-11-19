@@ -479,6 +479,14 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
             store.state["stack"] = json.loads(a.stack_json)
         except json.JSONDecodeError as e:
             fail(f"--stack-json is not valid JSON: {e}")
+    if a.brownfield_json:
+        try:
+            bf = json.loads(a.brownfield_json)
+        except json.JSONDecodeError as e:
+            fail(f"--brownfield-json is not valid JSON: {e}")
+        if not isinstance(bf, dict):
+            fail("--brownfield-json must be a JSON object, e.g. {\"baseline_ref\": \"dev-kit-baseline\"}")
+        store.state["brownfield"] = {**store.state.get("brownfield", {}), **bf}
     if a.autonomy_json:
         try:
             patch = json.loads(a.autonomy_json)
@@ -1773,6 +1781,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("init"); s.set_defaults(fn=cmd_init)
     s.add_argument("--project"); s.add_argument("--language"); s.add_argument("--phase")
     s.add_argument("--stack-json"); s.add_argument("--autonomy-json"); s.add_argument("--force", action="store_true")
+    s.add_argument("--brownfield-json", help='existing-project marker, e.g. {"baseline_ref":"dev-kit-baseline","baseline_sha":"<sha>"}')
 
     s = sub.add_parser("sync-plan"); s.set_defaults(fn=cmd_sync_plan); s.add_argument("--plan")
 

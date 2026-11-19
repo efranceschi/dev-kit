@@ -72,12 +72,13 @@ Entry point: starts a new project or resumes the current one and routes to the n
 
 | Argument | Meaning |
 |---|---|
-| `idea` | a project idea starts the interview |
+| `idea` | a project idea starts the interview; in an existing codebase it is the goal of the change, after the onboarding (baseline tag, discovery, test baseline) |
 | `(empty)` | resume: reconcile with git and route |
 
 **Examples:**
 
 - `/dev-kit:start a personal expense tracker`: new project: git init if needed, then the interview
+- `/dev-kit:start add CSV export to the reports page`: existing codebase without .dev/: onboarding (baseline tag, discovery, test baseline, retroactive ADRs), then a short interview about the change
 - `/dev-kit:start`: resume where the project stopped
 
 **Produces:** routing only; starts a session in the log

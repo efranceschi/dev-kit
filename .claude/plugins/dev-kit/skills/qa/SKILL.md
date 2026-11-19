@@ -16,7 +16,7 @@ Let `DS` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root
 
 ## 1. Prepare
 1. Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` (§7 severities and scoring) and the template `${CLAUDE_SKILL_DIR}/../core/shared/templates/qa-report.md`. Determine the milestone (argument, or the latest one whose tasks are all done and gate is pending). Ensure the working tree is clean; otherwise apply `pause_policy.dirty_tree` (`conventions.md` §10): `ask` → ask to commit or stash; `auto_recommend` → stash with a dated message and say so in the report.
-2. Run the test suite yourself once for a baseline (command in `architecture.md` §8). A failing suite is finding F-001 (`critical`, auditor `test-auditor`) and the gate cannot pass; still run the agents so fixes are batched.
+2. Existing project (state has `brownfield`): scope every auditor to what changed since `brownfield.baseline_ref` (`git diff <baseline_ref>..HEAD`); failures already listed in `.dev/qa/baseline.md` are not F-001, and problems found only in untouched legacy code become `intangible` issues (`DS add-issue`), never blocking findings or fix tasks. Then run the test suite yourself once for a baseline (command in `architecture.md` §8). A failing suite is finding F-001 (`critical`, auditor `test-auditor`) and the gate cannot pass; still run the agents so fixes are batched.
 3. Decide which auditors apply, from the milestone's tasks (`DS status --json`: files, acceptance) and the changed files (`git diff --name-only <before-first-task-commit>..HEAD`):
 
 | auditor | runs when |

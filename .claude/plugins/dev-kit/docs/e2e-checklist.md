@@ -41,8 +41,11 @@ Tick each item; note the Claude Code version used.
 - [ ] `python3 -I .claude/plugins/dev-kit/skills/core/scripts/dev_state.py gate M1 passed --score 80` is refused (below 85); with the real score it succeeds and `status` shows `M1:passed(NN)`.
 - [ ] A seeded flaw (e.g. an unauthenticated route) produces a `critical` security finding, a security score ≤ 40, gate `pending`, and a fix task that is picked first by `next`.
 
-## 4. Brownfield detection
-- [ ] In a folder with `pyproject.toml` (fastapi + pytest) run `/dev-kit:start`: interview pre-fills block 5 as inferred; `architecture` keeps the stack.
+## 4. Brownfield onboarding
+- [ ] In a git repo with `pyproject.toml` (fastapi + pytest), tests and a README, no `.dev/`, run `/dev-kit:start "add X"`: it creates tag `dev-kit-baseline`, `.dev/discovery.md`, `.dev/qa/baseline.md`, ADRs with `source: discovered`, `brownfield` in `state.json`, and only then runs `interview --express` with block 5 pre-filled as inferred.
+- [ ] A failing test in the repo becomes an `intangible` issue, not a finding; existing README/docs/source are unchanged after onboarding.
+- [ ] `prd` tags ACs `existing`/`new`; `plan` has no walking-skeleton M1 and no tasks for `existing` ACs; `architecture` keeps the stack.
+- [ ] `qa M1` scores only `git diff dev-kit-baseline..HEAD`; a legacy flaw in untouched code becomes an `intangible` issue and does not block the gate.
 
 ## 5. Gaps, usability, docs, release
 - [ ] `/dev-kit:interview --gaps` lists exactly the open `Q-nnn` rows; answering one that contradicts an assumption creates a superseding ADR and (when needed) a fix task.
