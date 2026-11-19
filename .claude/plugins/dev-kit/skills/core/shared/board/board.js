@@ -400,24 +400,23 @@
     return sec < 60 ? `${sec} s` : sec < 3600 ? `${Math.floor(sec / 60)} min ${sec % 60} s` : `${Math.floor(sec / 3600)} h ${Math.floor((sec % 3600) / 60)} min`;
   }
   function renderAgents() {
-    const a = data.agents || { hooks: false, active: [], recent: [] };
+    const a = data.agents || { hooks: false, active: [] };
     const card = $("agents-card");
     card.classList.toggle("disabled", !a.hooks);
     if (!a.hooks) {
-      $("agents-sub").textContent = "Disabled";
-      fill($("agents"), h("div", { class: "empty" },
-        "Live agents need plugin hooks, and none has fired in this project yet. Make sure hooks are enabled in this environment and reload the dev-kit plugin (", h("code", { text: "hooks/hooks.json" }),
-        "); the panel turns on by itself when the first agent starts."));
+      card.hidden = false;
+      card.title = "Live agents need plugin hooks (hooks/hooks.json). The strip turns on by itself when the first agent starts.";
+      $("agents-label").textContent = "Agents · disabled";
+      fill($("agents"), h("span", { class: "agents-note", text: "plugin hooks have not fired in this project" }));
       return;
     }
-    $("agents-sub").textContent = a.active.length ? `${a.active.length} running` : "None running";
-    const run = a.active.map((x) => h("li", { class: "agent-row" },
-      h("span", { class: "agent-dot", "aria-hidden": "true" }), h("span", { class: "agent-name", text: x.agent }),
-      h("span", { class: "agent-time", "data-start": x.started_at, text: fmtDur((Date.now() - parseT(x.started_at)) / 1000) })));
-    const done = a.recent.map((x) => h("li", { class: "agent-row done" },
-      h("span", { class: "agent-dot off", "aria-hidden": "true" }), h("span", { class: "agent-name", text: x.agent }),
-      h("span", { class: "agent-time", text: x.duration_s === null ? "finished" : `finished in ${fmtDur(x.duration_s)}` })));
-    fill($("agents"), listBlock("Running now", run, "No agent is running."), listBlock("Recently finished", done, "Nothing finished yet."));
+    card.removeAttribute("title");
+    card.hidden = a.active.length === 0;
+    $("agents-label").textContent = "Agents";
+    fill($("agents"), a.active.map((x) => h("span", { class: "agent-chip" },
+      h("span", { class: "agent-dot", "aria-hidden": "true" }),
+      h("span", { class: "agent-name", text: String(x.agent).replace(/^dev-kit:/, "") }),
+      h("span", { class: "agent-time", "data-start": x.started_at, text: fmtDur((Date.now() - parseT(x.started_at)) / 1000) }))));
   }
   function tickAgents() {
     document.querySelectorAll(".agent-time[data-start]").forEach((el) => { el.textContent = fmtDur((Date.now() - parseT(el.dataset.start)) / 1000); });

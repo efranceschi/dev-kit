@@ -329,13 +329,16 @@ dialog p { color: var(--text-secondary); }
   .segbar span, .swatch, .bar { forced-color-adjust: none; }
 }
 
-/* agents panel */
-.agent-row { display: flex; align-items: center; gap: 10px; padding: 8px 2px; font-size: 13px; border-bottom: 1px solid var(--border); }
-.agent-name { flex: 1; font-weight: 600; }
+/* agents strip */
+.agents-strip { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 14px; margin: 0 0 14px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; }
+.agents-strip[hidden] { display: none; }
+.agents-label { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.agents-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.agents-note { font-size: 12px; color: var(--text-muted); }
+.agent-chip { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; font-size: 12px; border: 1px solid var(--border-strong); border-radius: 999px; }
+.agent-name { font-weight: 600; }
 .agent-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.agent-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); animation: agent-pulse 1.6s ease-in-out infinite; }
-.agent-dot.off { background: var(--todo); animation: none; }
-.agent-row.done .agent-name { font-weight: 400; color: var(--text-muted); }
-#agents-card.disabled { opacity: .75; }
+.agent-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); animation: agent-pulse 1.6s ease-in-out infinite; }
+.agents-strip.disabled { opacity: .75; }
 @keyframes agent-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .agent-dot { animation: none; } }
