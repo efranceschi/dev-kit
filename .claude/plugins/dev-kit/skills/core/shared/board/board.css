@@ -401,3 +401,5 @@ dialog p { color: var(--text-secondary); }
 /* the clip hides outlines, so keyboard focus is shown by the border colour and a thicker border */
 [role="tab"]:focus-visible { --chev-border: var(--text-primary); outline: none; }
 [role="tab"]:focus-visible::after { inset: 3px; }
+.kit-ver { margin-left: 6px; padding: 1px 7px; border: 1px solid var(--border-strong); border-radius: 999px; letter-spacing: 0; text-transform: none; font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+.kit-ver:empty { display: none; }
