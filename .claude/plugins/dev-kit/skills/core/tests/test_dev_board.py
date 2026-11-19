@@ -216,6 +216,29 @@ class BoardTest(unittest.TestCase):
                           {"Host": "localhost:9000", "X-Board-Token": tok, "Origin": "http://localhost:9000"})
         self.assertEqual(code, 202)
 
+    def test_server_from_older_code_is_restarted_not_reused(self):
+        """After a plugin update the old server must not keep answering with the old rules."""
+        self.board("start", check=True)
+        old = self.record()
+        rec = dict(old, code="older-version")
+        (self.root / ".dev" / "run" / "board.json").write_text(json.dumps(rec))
+        r = self.board("start", check=True)
+        self.assertIn("another version of the kit", r.stdout)
+        self.assertIn("restarted:", r.stdout)
+        new = self.record()
+        self.assertNotEqual(new["pid"], old["pid"])
+        self.assertFalse(alive(old["pid"]))
+        self.assertEqual(self.board_pids(), [new["pid"]])
+        self.assertIn("already running", self.board("start", check=True).stdout)
+
+    def test_forbidden_host_reply_explains_itself(self):
+        self.board("start", check=True)
+        code, body = request(self.record()["port"], "GET", "/", {"Host": "myserver.lan:8765"})
+        self.assertEqual(code, 403)
+        d = json.loads(body)
+        self.assertEqual(d["host"], "myserver.lan:8765")
+        self.assertIn("localhost", d["hint"])
+
     def test_static_files_are_whitelisted(self):
         self.board("start", check=True)
         port = self.record()["port"]
