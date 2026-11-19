@@ -394,6 +394,36 @@
       b ? ` · server pid ${b.pid} on port ${b.port}` : "", " · stop it here or with ", h("code", { text: "/dev-kit:board stop" }));
   }
 
+  // ------------------------------------------------------------------ agents (fed by plugin hooks)
+  function fmtDur(sec) {
+    sec = Math.max(0, Math.round(sec));
+    return sec < 60 ? `${sec} s` : sec < 3600 ? `${Math.floor(sec / 60)} min ${sec % 60} s` : `${Math.floor(sec / 3600)} h ${Math.floor((sec % 3600) / 60)} min`;
+  }
+  function renderAgents() {
+    const a = data.agents || { hooks: false, active: [], recent: [] };
+    const card = $("agents-card");
+    card.classList.toggle("disabled", !a.hooks);
+    if (!a.hooks) {
+      $("agents-sub").textContent = "Disabled";
+      fill($("agents"), h("div", { class: "empty" },
+        "Live agents need plugin hooks, and none has fired in this project yet. Make sure hooks are enabled in this environment and reload the dev-kit plugin (", h("code", { text: "hooks/hooks.json" }),
+        "); the panel turns on by itself when the first agent starts."));
+      return;
+    }
+    $("agents-sub").textContent = a.active.length ? `${a.active.length} running` : "None running";
+    const run = a.active.map((x) => h("li", { class: "agent-row" },
+      h("span", { class: "agent-dot", "aria-hidden": "true" }), h("span", { class: "agent-name", text: x.agent }),
+      h("span", { class: "agent-time", "data-start": x.started_at, text: fmtDur((Date.now() - parseT(x.started_at)) / 1000) })));
+    const done = a.recent.map((x) => h("li", { class: "agent-row done" },
+      h("span", { class: "agent-dot off", "aria-hidden": "true" }), h("span", { class: "agent-name", text: x.agent }),
+      h("span", { class: "agent-time", text: x.duration_s === null ? "finished" : `finished in ${fmtDur(x.duration_s)}` })));
+    fill($("agents"), listBlock("Running now", run, "No agent is running."), listBlock("Recently finished", done, "Nothing finished yet."));
+  }
+  function tickAgents() {
+    document.querySelectorAll(".agent-time[data-start]").forEach((el) => { el.textContent = fmtDur((Date.now() - parseT(el.dataset.start)) / 1000); });
+  }
+  setInterval(tickAgents, 1000);
+
   // ------------------------------------------------------------------ main render + data flow
   function render() {
     if (!data) return;
@@ -405,7 +435,7 @@
     banner.hidden = true;
     const curId = currentId();
     const m = data.milestones.find((x) => x.id === curId) || null;
-    renderHeader(); renderTabs(); renderHero(m); renderTiles(m); renderKanban(m);
+    renderHeader(); renderTabs(); renderHero(m); renderTiles(m); renderAgents(); renderKanban(m);
     renderBurndown(m); renderVelocity(curId); renderBacklog(curId); renderImpediments(); renderDoD(); renderFeed();
     $("main").setAttribute("aria-busy", "false");
   }

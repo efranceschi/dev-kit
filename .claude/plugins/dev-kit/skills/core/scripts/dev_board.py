@@ -52,7 +52,9 @@ DEFAULT_PORT = 8765
 # Identity of this code: a running server whose record carries another value was started by an older copy
 # of the kit (e.g. before a plugin update) and is restarted by `start` instead of reused.
 CODE_ID = hashlib.sha256(Path(__file__).resolve().read_bytes()).hexdigest()[:12]
-WATCHED = ("state.json", "log.md", "open-questions.md", "costs/summary.json", "plan.md")
+WATCHED = ("state.json", "log.md", "open-questions.md", "costs/summary.json", "plan.md", "run/agents.jsonl")
+AGENT_STALE_S = 3600  # a start with no stop after this long is treated as lost, not running
+AGENT_RECENT = 10
 LOG_TAIL = 25
 
 
@@ -218,6 +220,49 @@ def log_tail(text: str, n: int = LOG_TAIL) -> list[dict]:
     return rows[::-1]
 
 
+def _ts(v: object) -> float:
+    try:
+        return datetime.strptime(str(v), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def agents_data(root: Path) -> dict:
+    """Live agents from the hook log. `hooks` is true only once a hook has actually fired in this project,
+    i.e. the environment runs plugin hooks; otherwise the panel is shown as disabled."""
+    path = root / ".dev" / "run" / "agents.jsonl"
+    recs = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines()[-2000:]:
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(r, dict) and r.get("event") in ("session_start", "agent_start", "agent_stop"):
+                recs.append(r)
+    except OSError:
+        pass
+    if not recs:
+        return {"hooks": False, "active": [], "recent": []}
+    session = next((r.get("session") for r in reversed(recs) if r["event"] == "session_start"), None)
+    now = time.time()
+    running: dict[str, dict] = {}
+    recent: list[dict] = []
+    for r in recs:
+        aid = r.get("agent_id") or ""
+        if r["event"] == "agent_start" and aid:
+            running[aid] = r
+        elif r["event"] == "agent_stop" and aid:
+            st = running.pop(aid, None)
+            dur = max(0, round(_ts(r.get("ts")) - _ts(st.get("ts")))) if st else None
+            recent.append({"agent": r.get("agent") or (st or {}).get("agent") or "agent", "agent_id": aid,
+                           "started_at": (st or {}).get("ts"), "ended_at": r.get("ts"), "duration_s": dur})
+    active = [{"agent": r.get("agent") or "agent", "agent_id": aid, "started_at": r.get("ts")}
+              for aid, r in running.items()
+              if now - _ts(r.get("ts")) < AGENT_STALE_S and (session is None or r.get("session") == session)]
+    return {"hooks": True, "active": active, "recent": recent[-AGENT_RECENT:][::-1]}
+
+
 def build_state(root: Path, board: dict | None = None) -> dict:
     store = ds.Store(root)
     if not store.exists():
@@ -269,6 +314,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "questions": open_questions(_read(store.dev / "open-questions.md")),
         "log": log_tail(_read(store.dev / "log.md")),
         "costs": costs,
+        "agents": agents_data(root),
         "board": {k: board.get(k) for k in ("pid", "port", "url", "started_at")} if board else None,
         "generated_at": ds.now(),
     }

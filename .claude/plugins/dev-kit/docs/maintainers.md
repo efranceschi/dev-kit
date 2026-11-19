@@ -34,7 +34,7 @@ How the plugin is built, tested and documented. Users do not need this page.
 - Agents and shared files get no variable substitution: they use `<KIT>`, and the skill that spawns an agent passes `Kit root: <absolute path>` in the prompt.
 - State commands use `${CLAUDE_PROJECT_DIR}` so they keep pointing at the project.
 - Scripts run with `python3 -I`; modules next to them are imported by inserting the script folder into `sys.path` explicitly.
-- No hooks are installed.
+- One optional hook set (`hooks/hooks.json`: SessionStart, SubagentStart, SubagentStop) feeds the board's live Agents panel through `dev_agent_hook.py`, which stores only ids and the agent type in `.dev/run/agents.jsonl`. Nothing depends on it: where the environment does not run plugin hooks, the panel shows as disabled.
 
 ## Frontmatter
 
