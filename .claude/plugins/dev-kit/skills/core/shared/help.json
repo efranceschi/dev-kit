@@ -39,7 +39,7 @@
       "args": [
         {
           "arg": "idea",
-          "meaning": "a project idea starts the interview"
+          "meaning": "a project idea starts the interview; in an existing codebase it is the goal of the change, after the onboarding (baseline tag, discovery, test baseline)"
         },
         {
           "arg": "(empty)",
@@ -50,6 +50,10 @@
         {
           "command": "/dev-kit:start a personal expense tracker",
           "what": "new project: git init if needed, then the interview"
+        },
+        {
+          "command": "/dev-kit:start add CSV export to the reports page",
+          "what": "existing codebase without .dev/: onboarding (baseline tag, discovery, test baseline, retroactive ADRs), then a short interview about the change"
         },
         {
           "command": "/dev-kit:start",

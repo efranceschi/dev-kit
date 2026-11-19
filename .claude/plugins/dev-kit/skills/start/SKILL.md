@@ -1,6 +1,6 @@
 ---
 name: start
-description: Entry point and resume for dev-kit projects. Detects whether .dev/ exists, reconciles state with git, reports where the project is (interview, PRD, plan, implementation, QA...) and routes to the next * skill. Use when the user wants to start building an application, continue a project, or asks "where were we" / "what's next". Also use to kick off a new project idea.
+description: Entry point and resume for dev-kit projects. Detects whether .dev/ exists, reconciles state with git, reports where the project is (interview, PRD, plan, implementation, QA...) and routes to the next * skill. For an existing codebase without .dev/ it runs the onboarding first (git baseline tag, discovery, test baseline, retroactive ADRs). Use when the user wants to start building an application, adopt the kit in an existing project, continue a project, or asks "where were we" / "what's next". Also use to kick off a new project idea.
 argument-hint: "[project idea or goal, or empty to resume]"
 allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, Skill
 ---
@@ -24,7 +24,8 @@ If the injected output above contains a Python "can't open file" error, the kit 
 
 ## Procedure
 1. Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` (language rule, layout, autonomy summary). Apply the language rule now: converse in the user's language.
-2. **New project (no state above):**
+2. **Existing codebase, no state above** (detection says `"greenfield": false`): follow `${CLAUDE_SKILL_DIR}/../core/shared/onboarding.md` end to end (git baseline tag, `.dev/discovery.md`, test baseline, retroactive ADRs, `brownfield` marker in state), then it hands over to `interview --express` framed on the change wanted. Tell the user in three lines what the onboarding will do and that nothing in the existing code or docs is modified. The user's input is the goal of the change. Skip the rest of this step.
+2b. **New project (no state above, `"greenfield": true`):**
    - If the directory is not a git repository, initialise one (`git init`) unless the user objects; dev-kit commits per task.
    - Explain in three lines how the kit works: one thorough interview, then autonomous build with checkpoints only on always-ask decisions; artifacts live in `.dev/`. Mention that `/dev-kit:help` answers any "how do I…?" at any time.
    - Invoke `interview` with the user's input as the initial idea (Skill tool: `interview`). Do not ask questions here; the interview owns them.
@@ -53,4 +54,5 @@ If the injected output above contains a Python "can't open file" error, the kit 
 
 ## Never
 - Never edit `.dev/state.json` by hand; use the script.
+- Never move or recreate the `dev-kit-baseline` tag, and never modify existing source or docs during onboarding.
 - Never skip the interview for a new project unless the user explicitly says "skip the interview" (then run `interview` in express mode: one round with the four most critical questions).

@@ -101,6 +101,12 @@ class TestInitAndSync(Base):
         self.assertTrue((self.root / ".dev" / "open-questions.md").exists())
         self.assertTrue((self.root / ".dev" / "log.md").exists())
 
+    def test_init_records_brownfield_marker(self) -> None:
+        self.run_state("init", "--brownfield-json", '{"baseline_ref":"dev-kit-baseline"}')
+        self.run_state("init", "--brownfield-json", '{"baseline_sha":"abc1234"}')
+        bf = self.state()["brownfield"]
+        self.assertEqual(bf, {"baseline_ref": "dev-kit-baseline", "baseline_sha": "abc1234"})
+
     def test_init_is_idempotent_and_updates_fields(self) -> None:
         self.run_state("init", "--language", "en")
         out = self.run_state("init", "--language", "pt-BR", "--phase", "prd")

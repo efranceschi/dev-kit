@@ -20,7 +20,7 @@ Stack: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_detect_stack.py" "$
 1. Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md`, `${CLAUDE_SKILL_DIR}/../core/shared/interview/questionnaire.md` and `${CLAUDE_SKILL_DIR}/../core/shared/interview/autonomy-policy.md`.
 2. Language: infer from the user's messages; if `.dev/state.json` has `language`, use it. If undeterminable, the very first question asks it.
 3. If `.dev/state.json` does not exist: `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" init --language <tag> --phase interview --project "<name or folder>"`.
-4. Brownfield (stack detected or code present): spend a few minutes mapping the repo (README, manifests, top-level folders, routes, models) and pre-fill blocks 5–8 as `inferred`.
+4. Brownfield (stack detected or code present): if `.dev/discovery.md` exists (written by `start`'s onboarding), pre-fill blocks 5–8 from it as `inferred`; otherwise spend a few minutes mapping the repo (README, manifests, top-level folders, routes, models) and pre-fill them. Frame the questions on the change wanted, not on the whole product.
 
 ## Mode: full interview (default)
 Follow `questionnaire.md` exactly:
