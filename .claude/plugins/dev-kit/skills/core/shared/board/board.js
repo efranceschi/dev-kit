@@ -168,7 +168,9 @@
   function taskCard(t) {
     const isNext = data.next && data.next.task === t.id;
     const deps = (t.deps || []).filter(Boolean);
-    return h("article", { class: `tcard s-${t.status}${isNext ? " next" : ""}`, "aria-label": `${t.id} ${t.title}, ${t.status.replace("_", " ")}` },
+    return h("article", { class: `tcard s-${t.status}${isNext ? " next" : ""}`, "aria-label": `${t.id} ${t.title}, ${t.status.replace("_", " ")}. Open details`,
+      tabindex: "0", role: "button", "aria-haspopup": "dialog", "data-tid": t.id,
+      onclick: () => openTask(t.id), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTask(t.id); } } },
       h("div", { class: "tcard-top" }, h("span", { class: "tid", text: t.id }), h("span", { class: "chip", text: t.type }),
         t.lane ? h("span", { class: `chip lane-${t.lane}`, text: t.lane }) : null,
         isNext ? h("span", { class: "chip next-chip", text: "next up" }) : null),
@@ -541,6 +543,11 @@
         n.history.slice(-8).forEach(([at, tr]) => rows.push([tr, Number.isFinite(parseT(at)) ? fmtDT(parseT(at)) : at]));
         showTip(evt, `${n.id}${n.title ? ` · ${n.title}` : ""}`, rows);
       };
+      if (n.id !== "GATE") {
+        gEl.setAttribute("role", "button"); gEl.setAttribute("aria-haspopup", "dialog"); gEl.setAttribute("data-tid", n.id); gEl.classList.add("clickable");
+        gEl.addEventListener("click", () => openTask(n.id));
+        gEl.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTask(n.id); } });
+      }
       ["pointermove", "focus"].forEach((ev) => gEl.addEventListener(ev, tip));
       ["pointerleave", "blur"].forEach((ev) => gEl.addEventListener(ev, hideTip));
       svg.append(gEl);
@@ -685,6 +692,59 @@
     $("stopped").hidden = false;
     document.title = "Board stopped · dev-kit";
   }
+
+  // ------------------------------------------------------------------ task details (opened from a card or a graph node)
+  const tdlg = $("task-dialog");
+  let tdFrom = null;
+  const stLabel = (x) => String(x || "").replace("_", " ");
+  function section(title, ...kids) {
+    const body = kids.flat().filter(Boolean);
+    return body.length ? h("section", { class: "td-sec" }, h("h3", { text: title }), body) : null;
+  }
+  function renderTask(d) {
+    const body = $("task-body");
+    if (!d.ok) { fill(body, h("p", { class: "card-sub", text: d.error === "unknown task" ? "This task no longer exists (a replan may have removed it)." : "Could not load the task." })); return; }
+    $("task-title").textContent = `${d.id} ${d.title || ""}`;
+    const c = d.commit;
+    fill(body, [
+      h("div", { class: "tcard-top" }, h("span", { class: `chip st-chip s-${d.status}`, text: stLabel(d.status) }), h("span", { class: "chip", text: d.type }),
+        d.lane ? h("span", { class: `chip lane-${d.lane}`, text: d.lane }) : null, h("span", { class: "chip", text: d.milestone }),
+        d.started_at ? h("span", { text: `started ${fmtDT(parseT(d.started_at))}` }) : null,
+        d.done_at ? h("span", { text: `done ${fmtDT(parseT(d.done_at))}` }) : null),
+      d.blocked_reason ? h("div", { class: "reason", text: d.blocked_reason }) : null,
+      section("Origin", d.issue ? h("p", {}, h("span", { class: "tid", text: d.issue.id }), ` ${d.issue.title || ""}`,
+        h("span", { class: "card-sub", text: ` · ${[d.issue.type, d.issue.class, d.issue.severity, d.issue.status].filter(Boolean).join(" · ")}` }),
+        d.issue.note ? h("span", { class: "td-note", text: d.issue.note }) : null) : (d.source ? h("p", { text: d.source }) : null)),
+      section(`Acceptance criteria (${d.acceptance.length})`, d.acceptance.length ? h("ul", { class: "td-list" }, d.acceptance.map((a) =>
+        h("li", {}, a.text, a.prd ? h("span", { class: "td-note", text: `PRD: ${a.prd}` }) : null))) : null),
+      section("How to test", d.test_notes ? h("p", { text: d.test_notes }) : null),
+      section("Planned files", d.files.length ? h("ul", { class: "td-list mono" }, d.files.map((f) => h("li", { text: f }))) : null),
+      section("Depends on", d.deps.length ? h("ul", { class: "td-list" }, d.deps.map((x) => h("li", {}, h("span", { class: "tid", text: x.id }), ` ${x.title || ""} `, h("span", { class: "card-sub", text: `· ${stLabel(x.status)}` })))) : null),
+      section("Unblocks", d.blocks.length ? h("ul", { class: "td-list" }, d.blocks.map((x) => h("li", {}, h("span", { class: "tid", text: x.id }), ` ${x.title || ""} `, h("span", { class: "card-sub", text: `· ${stLabel(x.status)}` })))) : null),
+      section("Commit", c ? [h("p", {}, h("span", { class: "tid", text: c.sha.slice(0, 7) }), ` ${c.subject}`, h("span", { class: "card-sub", text: ` · ${c.author} · ${fmtDT(parseT(c.date))}` })),
+        c.files.length ? h("ul", { class: "td-list mono" }, c.files.map((f) => h("li", { text: f }))) : null, c.summary ? h("p", { class: "card-sub", text: c.summary }) : null]
+        : (d.commit_sha ? h("p", {}, h("span", { class: "tid", text: d.commit_sha.slice(0, 7) }), h("span", { class: "card-sub", text: " · not available in this checkout" })) : null)),
+      section("History", d.log.length ? h("ul", { class: "td-list" }, d.log.map((r) => h("li", {}, h("span", { class: "card-sub", text: `${r.at} ` }), r.text))) : null),
+      h("p", { class: "card-sub td-foot", text: "No free-text description is stored for tasks yet; this is everything recorded in .dev/." })]);
+  }
+  async function openTask(id) {
+    tdFrom = id;
+    $("task-title").textContent = id;
+    fill($("task-body"), h("p", { class: "card-sub", text: "Loading…" }));
+    if (!tdlg.open) (tdlg.showModal ? tdlg.showModal() : tdlg.setAttribute("open", ""));
+    try {
+      const r = await fetch(`/api/task?id=${encodeURIComponent(id)}`, { cache: "no-store" });
+      if (tdFrom !== id) return;
+      renderTask(await r.json());
+    } catch (e) { if (tdFrom === id) renderTask({ ok: false, error: "network" }); }
+  }
+  $("task-close").addEventListener("click", () => tdlg.close());
+  tdlg.addEventListener("click", (e) => { if (e.target === tdlg) tdlg.close(); });
+  tdlg.addEventListener("close", () => {
+    const back = tdFrom && document.querySelector(`[data-tid="${tdFrom}"]`);
+    tdFrom = null;
+    if (back) back.focus();
+  });
 
   // ------------------------------------------------------------------ stop server
   const dlg = $("stop-dialog");
