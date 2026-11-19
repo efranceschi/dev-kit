@@ -1,0 +1,30 @@
+{
+  "$schema": "dev-kit/finding",
+  "auditor": "code-reviewer",
+  "scope": "M1",
+  "summary": "",
+  "stats": {
+    "files_reviewed": 0,
+    "tests_run": false,
+    "tests_passed": 0,
+    "tests_failed": 0
+  },
+  "findings": [
+    {
+      "id": "F-001",
+      "severity": "high",
+      "category": "correctness",
+      "title": "",
+      "file": "",
+      "line": 0,
+      "evidence": "",
+      "failure_scenario": "",
+      "recommendation": "",
+      "acceptance_ref": null,
+      "task_ref": null,
+      "effort": "S",
+      "confidence": "high"
+    }
+  ],
+  "verdict": "pass"
+}

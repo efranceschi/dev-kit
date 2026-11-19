@@ -1,0 +1,463 @@
+#!/usr/bin/env python3
+"""dev_cost.py - token usage and estimated cost (US$, API-equivalent) per dev-kit stage.
+
+Standard library only. Usage:
+  python3 -I dev_cost.py --root DIR ingest [--transcripts DIR]
+  python3 -I dev_cost.py --root DIR report [--by stage|agent|model|session] [--all | --since YYYY-MM-DD] [--json] [--no-ingest]
+  python3 -I dev_cost.py --root DIR export [--stamp YYYYMMDD-HHMMSS] [--all | --since D] [--no-ingest]
+
+Source: Claude Code's local transcripts (~/.claude/projects/<project>/<session>.jsonl and
+<session>/subagents/agent-*.jsonl). Only usage numbers, model, agent type and ids are read and stored, in
+.dev/costs/usage.jsonl; never message content. Requests are deduplicated by requestId (one transcript line per
+content block shares it). Each request is attributed to a stage using the skill windows of the session log
+(.dev/telemetry.jsonl, conventions.md §13); requests outside any window go to "orchestration".
+
+Prices: .dev/costs/prices.json (created from the defaults below; edit it freely). Values are US$ per million
+tokens and an ESTIMATE of the API-equivalent cost: on subscription plans nothing is billed per token.
+
+Exit codes: 0 ok · 1 usage error · 2 no state
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir
+import dev_telemetry as tel  # noqa: E402
+
+DEFAULT_PRICES = {
+    "currency": "USD",
+    "unit": "per million tokens",
+    "as_of": "2026-11-03",
+    "note": "Estimate of the API-equivalent cost; check the current pricing page and edit this file if needed.",
+    "rules": {"cache_write_5m": 1.25, "cache_write_1h": 2.0, "cache_read": 0.1},
+    "models": {
+        "claude-fable-5-2": {"input": 8, "output": 40, "cache_read": 0.20, "fast": 2},
+        "claude-mythos-5-2": {"input": 8, "output": 40, "cache_read": 0.20, "fast": 2},
+        "claude-fable-5-1": {"input": 10, "output": 50},
+        "claude-mythos-5-1": {"input": 10, "output": 50},
+        "claude-fable-5": {"input": 10, "output": 50},
+        "claude-opus-5-5": {"input": 4, "output": 20, "cache_read": 0.20, "fast": 2},
+        "claude-opus-5": {"input": 5, "output": 25, "fast": 2},
+        "claude-opus-4-8": {"input": 5, "output": 25, "fast": 2},
+        "claude-opus-4-7": {"input": 5, "output": 25},
+        "claude-opus-4-6": {"input": 5, "output": 25},
+        "claude-sonnet-5-5": {"input": 2, "output": 10, "cache_read": 0.10},
+        "claude-sonnet-5": {"input": 2, "output": 10},
+        "claude-sonnet-4-6": {"input": 3, "output": 15},
+        "claude-haiku-5-5": {"input": 0.10, "output": 0.50},
+        "claude-haiku-4-5": {"input": 1, "output": 5},
+    },
+}
+TOKEN_FIELDS = ("input", "output", "cache_write_5m", "cache_write_1h", "cache_read")
+AGENT_STAGE_HINT = {"implementer": "implement", "architect": "architecture"}
+
+
+def fail(msg: str, code: int = 1) -> None:
+    print(f"dev_cost: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def parse_ts(s: object) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def safe_token(s: object, default: str = "other") -> str:
+    v = str(s or "").strip().lower()
+    return v if re.fullmatch(r"[a-z0-9][a-z0-9_.:<>-]{0,59}", v) else default
+
+
+# ------------------------------------------------------------------ ingest
+
+def transcripts_dir(root: Path, override: str | None) -> Path:
+    if override:
+        return Path(override)
+    base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    return base / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(root.resolve()))
+
+
+def parse_file(path: Path, agent: str, agent_id: str | None) -> list[dict]:
+    """One record per requestId (last line wins: it carries the final usage). Content is never read into the record."""
+    by_req: dict[str, dict] = {}
+    with path.open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if '"assistant"' not in line or '"usage"' not in line:
+                continue
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("type") != "assistant":
+                continue
+            m = r.get("message") or {}
+            model = str(m.get("model") or "")
+            u = m.get("usage") or {}
+            if not model or model.startswith("<") or not u:
+                continue
+            rid = str(r.get("requestId") or m.get("id") or r.get("uuid") or "")
+            if not rid:
+                continue
+            cc = u.get("cache_creation") or {}
+            w5 = int(cc.get("ephemeral_5m_input_tokens") or 0)
+            w1 = int(cc.get("ephemeral_1h_input_tokens") or 0)
+            total_w = int(u.get("cache_creation_input_tokens") or 0)
+            if not cc and total_w:
+                w5 = total_w
+            by_req[rid] = {
+                "ts": r.get("timestamp"), "session": safe_token(r.get("sessionId"), "unknown"),
+                "agent": agent, "agent_id": safe_token(agent_id or r.get("agentId"), "main") if agent != "main" else "main",
+                "model": safe_token(model, "unknown"), "request": safe_token(rid, "unknown"),
+                "input": int(u.get("input_tokens") or 0), "output": int(u.get("output_tokens") or 0),
+                "cache_write_5m": w5, "cache_write_1h": w1, "cache_read": int(u.get("cache_read_input_tokens") or 0),
+                "speed": "fast" if u.get("speed") == "fast" else "standard",
+            }
+    return list(by_req.values())
+
+
+def ingest(dev: Path, root: Path, override: str | None = None) -> dict:
+    tdir = transcripts_dir(root, override)
+    costs = dev / "costs"
+    costs.mkdir(parents=True, exist_ok=True)
+    prices_path = costs / "prices.json"
+    if not prices_path.exists():
+        prices_path.write_text(json.dumps(DEFAULT_PRICES, indent=2) + "\n", encoding="utf-8")
+    if not tdir.exists():
+        return {"transcripts": False, "files": 0, "changed": 0, "requests": count_usage(costs)}
+    index_path = costs / "ingested.json"
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        index = {}
+    groups: dict[str, list[dict]] = {}
+    up = costs / "usage.jsonl"
+    if up.exists():
+        for line in up.read_text(encoding="utf-8").splitlines():
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            groups.setdefault(rec.get("src", "?"), []).append(rec)
+    files: list[tuple[Path, str, str | None]] = []
+    for p in sorted(tdir.glob("*.jsonl")):
+        files.append((p, "main", None))
+    for p in sorted(tdir.glob("*/subagents/agent-*.jsonl")):
+        meta = p.with_suffix(".meta.json")
+        try:
+            agent = safe_token(json.loads(meta.read_text(encoding="utf-8")).get("agentType"), "subagent")
+        except (OSError, json.JSONDecodeError):
+            agent = "subagent"
+        files.append((p, agent, p.stem.replace("agent-", "")))
+    changed = 0
+    for p, agent, aid in files:
+        src = safe_token(p.stem, "src") + ("@" + safe_token(p.parent.parent.name, "s") if agent != "main" else "")
+        st = p.stat()
+        sig = [st.st_size, int(st.st_mtime)]
+        if index.get(src) == sig and src in groups:
+            continue
+        groups[src] = [{**r, "src": src} for r in parse_file(p, agent, aid)]
+        index[src] = sig
+        changed += 1
+    seen: set[str] = set()
+    out = []
+    for src in sorted(groups):
+        for r in groups[src]:
+            key = f"{r.get('session')}:{r.get('request')}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(r)
+    out.sort(key=lambda r: str(r.get("ts")))
+    tmp = up.with_suffix(".jsonl.tmp")
+    tmp.write_text("".join(json.dumps(r) + "\n" for r in out), encoding="utf-8")
+    os.replace(tmp, up)
+    index_path.write_text(json.dumps(index) + "\n", encoding="utf-8")
+    return {"transcripts": True, "files": len(files), "changed": changed, "requests": len(out)}
+
+
+def count_usage(costs: Path) -> int:
+    up = costs / "usage.jsonl"
+    return len(up.read_text(encoding="utf-8").splitlines()) if up.exists() else 0
+
+
+def load_usage(dev: Path) -> list[dict]:
+    up = dev / "costs" / "usage.jsonl"
+    out = []
+    if up.exists():
+        for line in up.read_text(encoding="utf-8").splitlines():
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+    return out
+
+
+# ------------------------------------------------------------------ attribution
+
+def stage_windows(events: list[dict]) -> list[tuple[datetime, datetime, str]]:
+    """(start, end, stage) for every skill run in the session log; unclosed runs end at +inf."""
+    far = datetime.max.replace(tzinfo=timezone.utc)
+    open_runs: list[tuple[str, datetime]] = []
+    wins: list[tuple[datetime, datetime, str]] = []
+    reviews = [(parse_ts(e["ts"]), tel.scope_stage(e.get("scope"))) for e in events if e["event"] == "review"]
+    for e in events:
+        ts = parse_ts(e.get("ts"))
+        if ts is None or e["event"] not in ("skill_start", "skill_end"):
+            continue
+        skill = e.get("skill", "other")
+        if e["event"] == "skill_start":
+            open_runs.append((skill, ts))
+            continue
+        for i in range(len(open_runs) - 1, -1, -1):
+            if open_runs[i][0] == skill:
+                wins.append((open_runs[i][1], ts, skill))
+                open_runs.pop(i)
+                break
+    wins += [(start, far, skill) for skill, start in open_runs]
+    out = []
+    for start, end, skill in wins:
+        stage = tel.SKILL_STAGE.get(skill)
+        if skill == "review":
+            inside = [s for t, s in reviews if t and start <= t <= end and s]
+            stage = inside[0] if inside else "plan"
+        out.append((start, end, stage or "orchestration"))
+    return out
+
+
+def attribute(usage: list[dict], events: list[dict]) -> list[dict]:
+    wins = stage_windows(events)
+    first_seen: dict[str, datetime] = {}
+    for r in usage:
+        if r.get("agent") != "main":
+            ts = parse_ts(r.get("ts"))
+            k = r.get("agent_id", "")
+            if ts and (k not in first_seen or ts < first_seen[k]):
+                first_seen[k] = ts
+
+    def window_stage(ts: datetime | None) -> str:
+        if ts is None:
+            return "orchestration"
+        inside = [w for w in wins if w[0] <= ts <= w[1]]
+        return max(inside, key=lambda w: w[0])[2] if inside else "orchestration"
+
+    out = []
+    for r in usage:
+        if r.get("agent") == "main":
+            stage = window_stage(parse_ts(r.get("ts")))
+        else:
+            hint = next((v for k, v in AGENT_STAGE_HINT.items() if str(r.get("agent", "")).endswith(k)), None)
+            stage = hint or window_stage(first_seen.get(r.get("agent_id", "")))
+        out.append({**r, "stage": stage})
+    return out
+
+
+# ------------------------------------------------------------------ pricing and report
+
+def load_prices(dev: Path) -> dict:
+    p = dev / "costs" / "prices.json"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("models"), dict):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return DEFAULT_PRICES
+
+
+def price_for(model: str, prices: dict) -> dict | None:
+    models = prices.get("models", {})
+    if model in models:
+        return models[model]
+    keys = [k for k in models if model.startswith(k)]
+    return models[max(keys, key=len)] if keys else None
+
+
+def cost_of(r: dict, prices: dict) -> float | None:
+    p = price_for(str(r.get("model", "")), prices)
+    if not p:
+        return None
+    rules = {**DEFAULT_PRICES["rules"], **prices.get("rules", {})}
+    inp = float(p["input"])
+    cr = float(p["cache_read"]) if "cache_read" in p else inp * rules["cache_read"]
+    usd = (r.get("input", 0) * inp + r.get("output", 0) * float(p["output"]) +
+           r.get("cache_write_5m", 0) * inp * rules["cache_write_5m"] +
+           r.get("cache_write_1h", 0) * inp * rules["cache_write_1h"] + r.get("cache_read", 0) * cr) / 1e6
+    if r.get("speed") == "fast":
+        usd *= float(p.get("fast", 1))
+    return usd
+
+
+def period_filter(usage: list[dict], events: list[dict], mode: str, since: str | None) -> tuple[list[dict], dict]:
+    if mode == "all":
+        return usage, {"mode": "all"}
+    if mode == "since":
+        start = parse_ts(f"{since}T00:00:00+00:00")
+        if start is None:
+            fail("--since must be YYYY-MM-DD")
+        return [r for r in usage if (parse_ts(r.get("ts")) or start) >= start], {"mode": "since", "since": since}
+    sess = tel.filter_period(events, "session")
+    start = parse_ts(sess[0]["ts"]) if sess else None
+    if start is None:
+        return usage, {"mode": "all", "note": "no dev-kit session in the log; showing everything"}
+    return [r for r in usage if (parse_ts(r.get("ts")) or start) >= start], {"mode": "session", "from": sess[0]["ts"]}
+
+
+def build_report(dev: Path, by: str, mode: str, since: str | None) -> dict:
+    events, _ = tel.read_events(dev)
+    usage = attribute(load_usage(dev), events)
+    usage, period = period_filter(usage, events, mode, since)
+    prices = load_prices(dev)
+    rows: dict[str, dict] = {}
+    unknown: set[str] = set()
+    for r in usage:
+        key = {"stage": r["stage"], "agent": r.get("agent"), "model": r.get("model"), "session": r.get("session")}[by] or "other"
+        row = rows.setdefault(key, {"key": key, "requests": 0, **{f: 0 for f in TOKEN_FIELDS}, "usd": 0.0, "usd_complete": True})
+        row["requests"] += 1
+        for f in TOKEN_FIELDS:
+            row[f] += int(r.get(f, 0))
+        c = cost_of(r, prices)
+        if c is None:
+            row["usd_complete"] = False
+            unknown.add(str(r.get("model")))
+        else:
+            row["usd"] += c
+    warnings = []
+    source = "transcripts"
+    if not usage:
+        partial = [e for e in tel.filter_period(events, mode if mode != "since" else "since", since) if e["event"] == "agent_end" and e.get("tokens")]
+        if partial:
+            source = "skills (partial)"
+            warnings.append("partial: no transcripts found; only the token totals reported by the skills (no cost, no cache split)")
+            for e in partial:
+                key = (tel.scope_stage(e.get("scope")) or e.get("agent", "other")) if by == "stage" else e.get(by if by != "session" else "session", "other")
+                row = rows.setdefault(str(key), {"key": str(key), "requests": 0, **{f: 0 for f in TOKEN_FIELDS}, "usd": 0.0, "usd_complete": False})
+                row["requests"] += 1
+                row["input"] += int(e["tokens"])
+    if unknown:
+        warnings.append("no price for: " + ", ".join(sorted(unknown)) + " (add them to .dev/costs/prices.json); their cost shows as n/d")
+    as_of = parse_ts(f"{prices.get('as_of', '')}T00:00:00+00:00")
+    if as_of and (datetime.now(timezone.utc) - as_of).days > 90:
+        warnings.append(f"price table is from {prices.get('as_of')}; check the current prices")
+    total = {"requests": sum(r["requests"] for r in rows.values()),
+             **{f: sum(r[f] for r in rows.values()) for f in TOKEN_FIELDS},
+             "usd": round(sum(r["usd"] for r in rows.values()), 4),
+             "usd_complete": all(r["usd_complete"] for r in rows.values())}
+    total["tokens"] = sum(total[f] for f in TOKEN_FIELDS)
+    out_rows = sorted(rows.values(), key=lambda r: -r["usd"])
+    for r in out_rows:
+        r["usd"] = round(r["usd"], 4)
+        r["tokens"] = sum(r[f] for f in TOKEN_FIELDS)
+        r["share"] = round(100 * r["usd"] / total["usd"], 1) if total["usd"] else 0.0
+    rep = {"by": by, "period": period, "source": source, "currency": "USD", "estimate": "API-equivalent",
+           "prices_as_of": prices.get("as_of"), "rows": out_rows, "total": total, "warnings": warnings}
+    (dev / "costs").mkdir(parents=True, exist_ok=True)
+    (dev / "costs" / "summary.json").write_text(json.dumps({"at": tel.now(), "period": period, "total": total}) + "\n", encoding="utf-8")
+    return rep
+
+
+def fmt_tokens(n: int) -> str:
+    return f"{n / 1e6:.2f}M" if n >= 1e6 else (f"{n / 1e3:.1f}k" if n >= 1e3 else str(n))
+
+
+def render(rep: dict) -> str:
+    lines = [f"Estimated cost (US$, API-equivalent) by {rep['by']} · period {rep['period'].get('mode')} · source {rep['source']}",
+             f"{rep['by']:<22}{'US$':>10}{'%':>7}{'reqs':>7}{'input':>9}{'output':>9}{'c.write':>9}{'c.read':>9}"]
+    for r in rep["rows"]:
+        usd = f"{r['usd']:.2f}" + ("" if r["usd_complete"] else "*")
+        lines.append(f"{str(r['key'])[:21]:<22}{usd:>10}{r['share']:>7}{r['requests']:>7}{fmt_tokens(r['input']):>9}"
+                     f"{fmt_tokens(r['output']):>9}{fmt_tokens(r['cache_write_5m'] + r['cache_write_1h']):>9}{fmt_tokens(r['cache_read']):>9}")
+    t = rep["total"]
+    lines.append(f"{'total':<22}{t['usd']:>10.2f}{'':>7}{t['requests']:>7}{fmt_tokens(t['input']):>9}{fmt_tokens(t['output']):>9}"
+                 f"{fmt_tokens(t['cache_write_5m'] + t['cache_write_1h']):>9}{fmt_tokens(t['cache_read']):>9}")
+    for w in rep["warnings"]:
+        lines.append(f"  ! {w}")
+    if not t["usd_complete"]:
+        lines.append("  * n/d: part of the tokens have no price")
+    return "\n".join(lines)
+
+
+def stamped(folder: Path, prefix: str, ext: str, stamp: str | None) -> Path:
+    stamp = stamp or datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    folder.mkdir(parents=True, exist_ok=True)
+    path, n = folder / f"{prefix}-{stamp}.{ext}", 2
+    while path.exists():
+        path, n = folder / f"{prefix}-{stamp}-{n}.{ext}", n + 1
+    return path
+
+
+def export_csv(dev: Path, mode: str, since: str | None, stamp: str | None) -> Path:
+    events, _ = tel.read_events(dev)
+    usage, _ = period_filter(attribute(load_usage(dev), events), events, mode, since)
+    prices = load_prices(dev)
+    agg: dict[tuple, dict] = {}
+    for r in usage:
+        k = (r["stage"], r.get("agent"), r.get("model"))
+        row = agg.setdefault(k, {"requests": 0, **{f: 0 for f in TOKEN_FIELDS}, "usd": 0.0, "priced": True})
+        row["requests"] += 1
+        for f in TOKEN_FIELDS:
+            row[f] += int(r.get(f, 0))
+        c = cost_of(r, prices)
+        if c is None:
+            row["priced"] = False
+        else:
+            row["usd"] += c
+    path = stamped(dev / "costs", "tokens", "csv", stamp)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["stage", "agent", "model", "requests", *TOKEN_FIELDS, "estimated_usd"])
+        for (stage, agent, model), row in sorted(agg.items()):
+            w.writerow([stage, agent, model, row["requests"], *[row[x] for x in TOKEN_FIELDS],
+                        f"{row['usd']:.4f}" if row["priced"] else "n/d"])
+    return path
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--root", default=os.environ.get("CLAUDE_PROJECT_DIR", "."))
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("ingest"); s.add_argument("--transcripts")
+    for name in ("report", "export"):
+        s = sub.add_parser(name)
+        g = s.add_mutually_exclusive_group(); g.add_argument("--all", action="store_true"); g.add_argument("--since")
+        s.add_argument("--no-ingest", action="store_true"); s.add_argument("--transcripts")
+        if name == "report":
+            s.add_argument("--by", choices=["stage", "agent", "model", "session"], default="stage")
+            s.add_argument("--json", action="store_true")
+        else:
+            s.add_argument("--stamp")
+    a = p.parse_args(argv)
+    root = Path(a.root).resolve()
+    dev = root / ".dev"
+    if not (dev / "state.json").exists():
+        fail(f"no dev-kit state at {dev}", 2)
+    if a.cmd == "ingest":
+        res = ingest(dev, root, a.transcripts)
+        print(json.dumps(res))
+        return 0
+    if not a.no_ingest:
+        ingest(dev, root, a.transcripts)
+    mode = "all" if a.all else ("since" if a.since else "session")
+    if a.cmd == "report":
+        rep = build_report(dev, a.by, mode, a.since)
+        print(json.dumps(rep, indent=2) if a.json else render(rep))
+        stages = {}
+        if a.by == "stage":
+            stages = {str(r["key"]): r["usd"] for r in rep["rows"] if re.fullmatch(r"[a-z_]{1,40}", str(r["key"]))}
+        tel.safe_emit(dev, "cost", {"usd": rep["total"]["usd"], "tokens": rep["total"]["tokens"],
+                                    "requests": rep["total"]["requests"], "period": mode, "stages": stages or None})
+        return 0
+    path = export_csv(dev, mode, a.since, a.stamp)
+    print(f"tokens written to {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
