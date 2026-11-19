@@ -267,6 +267,29 @@ class BoardTest(unittest.TestCase):
         self.assertNotIn("token", d["board"])
         self.assertEqual(state_file.read_bytes(), before)
 
+    def test_agents_disabled_until_a_hook_fires_then_live(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("dev_board", BOARD)
+        mod = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(BOARD.parent))
+        spec.loader.exec_module(mod)
+        self.assertEqual(mod.agents_data(self.root), {"hooks": False, "active": [], "recent": []})
+        hook = CORE / "scripts" / "dev_agent_hook.py"
+
+        def fire(event, **kw):
+            payload = {"hook_event_name": event, "session_id": "s1", "cwd": str(self.root), "prompt": "SECRET", **kw}
+            subprocess.run([sys.executable, "-I", str(hook)], input=json.dumps(payload), text=True, check=True,
+                           capture_output=True, env={**os.environ, "CLAUDE_PROJECT_DIR": str(self.root)})
+        fire("SessionStart")
+        self.assertTrue(mod.agents_data(self.root)["hooks"])
+        fire("SubagentStart", agent_id="a1", agent_type="dev-kit:code-reviewer")
+        fire("SubagentStart", agent_id="a2", agent_type="dev-kit:security-auditor")
+        fire("SubagentStop", agent_id="a1", agent_type="dev-kit:code-reviewer")
+        d = mod.agents_data(self.root)
+        self.assertEqual([a["agent_id"] for a in d["active"]], ["a2"])
+        self.assertEqual(d["recent"][0]["agent"], "dev-kit:code-reviewer")
+        self.assertNotIn("SECRET", (self.root / ".dev" / "run" / "agents.jsonl").read_text())
+
     def test_status_line_in_dev_state(self):
         self.board("start", check=True)
         out = self.ds("status").stdout
