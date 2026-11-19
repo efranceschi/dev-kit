@@ -524,6 +524,31 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
     print(f"state {'created' if created else 'updated'} at {store.path}")
 
 
+def record_baseline(store: Store, tasks: dict) -> int:
+    """Initial-plan snapshot for the board's graph: first write wins, a task already recorded is never changed."""
+    path = store.dev / "plan-baseline.json"
+    try:
+        base = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(base, dict):
+            base = {}
+    except (OSError, json.JSONDecodeError):
+        base = {}
+    added = 0
+    for tid, t in tasks.items():
+        live = store.tasks().get(tid) or {}
+        if live.get("type") == "fix" or live.get("source"):
+            continue  # added during execution (QA fix, issue): not part of the initial plan
+        if tid not in base:
+            base[tid] = {"milestone": t["milestone"], "title": t["title"], "deps": list(t["deps"]),
+                         "type": t["type"], "recorded_at": now()}
+            added += 1
+    if added:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(base, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp.replace(path)
+    return added
+
+
 def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
     store.load()
     plan_path = Path(a.plan) if a.plan else store.dev / "plan.md"
@@ -570,6 +595,7 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
     if store.state["phase"] in ("init", "interview", "prd", "architecture", "ux", "ui", "plan") and store.tasks():
         store.state["phase"] = "implement" if store.state["phase"] == "plan" else store.state["phase"]
     store.save()
+    record_baseline(store, tasks)
     store.log(f"sync-plan +{added_m} milestones, +{added_t} tasks, ~{updated_t} updated")
     print(f"synced: {added_m} new milestones, {added_t} new tasks, {updated_t} updated")
     if problems:
@@ -757,6 +783,7 @@ def cmd_add_task(store: Store, a: argparse.Namespace) -> None:
         link_task(store, a.issue, tid, a.milestone)
     append_task_to_plan(store.dev / "plan.md", a.milestone, store.milestones()[a.milestone]["title"], tid, t)
     store.save()
+    store.event("task", task=tid, transition="add", type=a.type, milestone=a.milestone)
     store.log(f"add-task {tid} [{a.milestone}] ({a.type}) {a.title} source={a.source or '-'}")
     print(tid)
 
