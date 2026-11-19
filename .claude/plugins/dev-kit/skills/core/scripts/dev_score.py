@@ -175,7 +175,8 @@ def load_previous(path: Path) -> list[dict]:
     items = data.get("findings", []) if isinstance(data, dict) else data
     if not isinstance(items, list):
         raise ValueError("previous findings must be a list or {\"findings\": [...]}")
-    return [f for f in items if isinstance(f, dict)]
+    # legacy findings (pre-existing debt in existing projects) never score, in any round (conventions §16)
+    return [f for f in items if isinstance(f, dict) and not f.get("legacy")]
 
 
 def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous: list[dict] | None = None) -> dict:

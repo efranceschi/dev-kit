@@ -6,7 +6,7 @@ from stdin and appends one JSON line to <project>/.dev/run/agents.jsonl:
   {"ts": "...Z", "event": "session_start|agent_start|agent_stop", "session": "<id>", "agent_id": "<id>", "agent": "<type>"}
 
 Privacy: only ids and the agent type are kept; prompts, messages and tool data in the payload are ignored.
-It never fails a hook (always exits 0) and does nothing outside a dev-kit project (no .dev/ folder).
+It never fails a hook (always exits 0) and does nothing outside a dev-kit project (no .dev/state.json).
 """
 from __future__ import annotations
 
@@ -35,10 +35,12 @@ def main() -> int:
             return 0
         root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ".")
         dev = root / ".dev"
-        if not dev.is_dir():
+        if not (dev / "state.json").is_file():
             return 0
         run = dev / "run"
         run.mkdir(exist_ok=True)
+        if not (run / ".gitignore").exists():
+            (run / ".gitignore").write_text("*\n", encoding="utf-8")
         path = run / "agents.jsonl"
         rec = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "event": event,
                "session": tok(payload.get("session_id")), "agent_id": tok(payload.get("agent_id")),

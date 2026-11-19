@@ -14,15 +14,17 @@ Everything the kit knows about your project lives in `.dev/` inside the project,
   qa/  reviews/       reports, scores and findings per milestone and per review
   costs/  feedback/   token usage and prices; session reports
   telemetry.jsonl     session log (no project data)
+  discovery.md  qa/baseline.md   existing projects only: what was there before dev-kit
+  run/  preview/  tmp/   machine-local (board, processes, local preview); ignored by git
 ```
 
-The Markdown files can be edited by hand. After a scope change run `/dev-kit:prd` or `/dev-kit:plan replan` so the change propagates. Each task becomes one commit `[T-003] feat: ...`; history is never rewritten.
+The Markdown files can be edited by hand. After a scope change run `/dev-kit:prd` or `/dev-kit:plan replan` so the change propagates. Each task becomes one commit, `[T-003] feat: ...` by default or in your project's own style (`autonomy.commit_style`, with a `Refs: T-003` trailer); history is never rewritten.
 
 ## Flow and milestones
 
-`start → interview → prd → review → architecture → ux → ui → review → plan → review`, then per milestone `implement ⇄ test → qa`, then `usability → docs → review → release`. See the [flow diagram](dev-kit-flow.png).
+`start → interview → prd → review → architecture → ux → ui → review → plan → review`, then per milestone `implement ⇄ test → qa` (with the optional local preview and production `deploy`), then `usability → docs → review → release`. An existing codebase goes through an onboarding first (below). See the [flow diagram](dev-kit-flow.png).
 
-Milestones (M1, M2, …) are the project's cadence: `M2` starts only after the `M1` gate passes, and nothing ever inserts or renumbers a milestone.
+Milestones (M1, M2, …) are the project's cadence: `M2` starts only after the `M1` gate passes, a milestone whose gate passed takes no new task, and nothing ever inserts or renumbers a milestone. A task removed by a replan is `dropped` (kept for history, never counted).
 
 ## Quality scores and gates [§7]
 
@@ -37,7 +39,7 @@ Reviewers return findings in one JSON contract; `dev_score.py` turns them into a
 
 ## Autonomy and pauses [§6, §10]
 
-The interview defines what the kit decides alone (recorded as `ADR (auto)`) and what it always asks: paid services, deleting data, public exposure, major scope changes, security model, credentials.
+The interview defines what the kit decides alone (recorded as `ADR (auto)`) and what it always asks: paid services, deleting data, public exposure, major scope changes, security model, credentials, model escalation; production deploys have their own pause point. Levels `high`, `balanced` and `cautious` are presets of these lists (`cautious` also raises the cut-offs).
 
 The **pause policy** decides what happens at each pause point: `ask`, `preauthorize` within a limit, `auto_recommend` (apply the recommendation), or `park` (record it, block only what depends on it, keep going). The `unattended` level fills the recommended values so autopilot never waits. Some floors cannot be lifted: no forced pass with security below its minimum or a critical/high open, no deletion of production data, no history rewrite, no AC change without you. Every question comes with a recommended option and its reason.
 
@@ -58,14 +60,34 @@ Bugs and ideas found at any time go through `/dev-kit:issue`, which classifies t
 | `expedite` | critical/high bug in delivered work | now, hotfix lane, one at a time, patch release |
 | `current` | bug in the milestone being built | that milestone |
 | `standard` | medium bug, valuable improvement | the next milestone's buffer (20%) |
-| `intangible` | low bug, polish, tech debt | the cool-down after a gate (if on) |
+| `intangible` | low bug, polish, tech debt | the cool-down after a gate (if on), else spare buffer |
 | `change` | new or changed AC | PRD → review → replan, future milestones |
 
 `/dev-kit:backlog` shows everything pending.
 
+## Existing projects [§16]
+
+A codebase not built with dev-kit is **onboarded** by `start`: tag `dev-kit-baseline` on the current commit, `.dev/discovery.md` (stack, commands, your commit/version/CHANGELOG conventions, existing docs and ADRs, imported as `source: imported`), the test results at the baseline in `.dev/qa/baseline.md`, an **entry mode** and the number of the first milestone (default `M1`). Nothing in the code, docs or history is changed.
+
+| mode | for | path |
+|---|---|---|
+| `feature` | a new capability | short interview on the change → PRD (as-built + new ACs) → architecture → design if new UI → plan → build |
+| `maintenance` | bugs and small improvements | as-built PRD, an empty `M<n> — Maintenance` filled by `/dev-kit:issue`; its gate runs like any milestone, then the next issue opens `M<n+1>` |
+| `import` | you already have a PRD/specs/ADRs | they are the source; only the gaps are asked; then as `feature` |
+
+- **Baseline-scoped audits:** reviewers judge `git diff dev-kit-baseline..HEAD`. A problem only in untouched code is a **legacy** finding: it never scores and becomes an issue (a leaked secret is still flagged critical so you rotate it).
+- **existing / changed / new:** tags on ACs and screens; `existing` needs no task or full spec.
+- **Your conventions win:** layout, test framework, commit style, version source and tag prefix; adding a new tool always asks; an uncommitted change is never stashed without asking.
+- **`n/a` reviews:** a review that does not apply is recorded with a note and counts as satisfied (and is not graded).
+- **`external` deploys:** when your CI/CD deploys, `deploy` only confirms and records the commit.
+
 ## Preview and production deploy [§11, §12]
 
-Optionally, each approved milestone can run locally on `127.0.0.1` (`keep_running` or `smoke`). For production, the interview records method, host, timing (`per_milestone`, `on_release`, `manual`), smoke checks and prerequisites; `/dev-kit:deploy` installs with backup and dry-run, and `status` shows how far production is behind.
+Optionally, each approved milestone can run locally on `127.0.0.1` (`keep_running` or `smoke`). For production, the interview records method, host, timing (`per_milestone`, `on_release`, `manual`), smoke checks and prerequisites; `/dev-kit:deploy` installs with backup and dry-run (`--dry-run` only simulates), and `status` shows how far production is behind. A hotfix is deployed once, by `release --hotfix`.
+
+## The board
+
+`/dev-kit:board` opens a live, read-only dashboard of the project in the browser: sprint goal, kanban and execution graph (with running agents as badges), burndown, velocity, backlog and impediments. One server per project, stopped from the page or with `stop`, and by itself after 2 idle hours. `--host 0.0.0.0` shares it on your network through a private access link (plain HTTP: trusted networks only); on a remote machine an SSH tunnel to `127.0.0.1` works too.
 
 ## Session log, feedback, costs and tips [§13, §14, §15]
 

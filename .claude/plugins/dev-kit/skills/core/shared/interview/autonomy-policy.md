@@ -18,10 +18,20 @@ Stored in `.dev/state.json` under `autonomy`. Set by `interview` (block 9); chan
     "min_dimension": 70,
     "dimension_min": {"security": 90, "tests": 80, "spec": 85, "a11y": 80},
     "review_min_overall": 80,
-    "block_on": ["critical", "high"]
-  }
+    "low_cap": 10
+  },
+  "model_policy": {"mode": "ask", "tiers": {}},
+  "pause_policy": {},
+  "on_park": "stop_when_idle",
+  "issue_buffer_pct": 20,
+  "cooldown": {"enabled": false, "max_tasks": 5},
+  "local_deploy": {"mode": "off", "port": null, "notify": false},
+  "production": {"when": "none", "method": null, "host": null, "targets": [], "smoke": [], "prerequisites": []},
+  "tips": "on"
 }
 ```
+
+`commit_style` is added when the project has its own (existing projects, `conventions.md` §5). Nested fields can be changed one at a time, e.g. `dev_state.py set autonomy.quality.min_overall 90` (the object is merged and validated).
 
 ## Quality cut-offs (`autonomy.quality`)
 
@@ -33,7 +43,7 @@ Agents give findings; `dev_score.py` turns them into 0–100 scores per dimensio
 | `balanced` | 85 | 80 | 70 | 90 | 80 | 85 | 80 |
 | `high` (default) | 85 | 80 | 70 | 90 | 80 | 85 | 80 |
 
-The interview (block 8) can override any of these (e.g. "quality bar: premium → overall 92"). Autonomy level and quality bar are independent: `high` autonomy does not lower the bar. Weights live in `dev_state.py` defaults and can be overridden in `autonomy.quality.weights`.
+`dev_state.py set autonomy.level <level>` applies the row (it only raises numbers, never lowers what the user chose). The interview (block 8) can override any of these (e.g. "quality bar: premium → overall 92"). Autonomy level and quality bar are independent: `high` autonomy does not lower the bar. Weights live in `dev_state.py` defaults and can be overridden in `autonomy.quality.weights`.
 
 ## Levels (presets)
 
@@ -42,6 +52,8 @@ The interview (block 8) can override any of these (e.g. "quality bar: premium �
 | `high` (default) | everything not in always_ask | paid_services, delete_data, public_exposure, scope_change_major, security_model_change, credentials, model_escalation (unless `model_policy.mode` is `preapproved`) | long autonomous runs after a thorough interview |
 | `balanced` | library_choice, file_structure, naming, test_strategy, dev_tooling | high list + ui_details, data_model_details, minor_scope_tradeoffs | user wants to review design-level choices |
 | `cautious` | naming, file_structure | everything else | first time using the kit, or regulated domains |
+
+Setting a level replaces `decide_alone` and `always_ask` with its preset. Leaving `unattended` restores the supervised defaults (empty `pause_policy`, `model_policy.mode` `ask`). In an existing project `dev_tooling` is always in `always_ask` and `pause_policy.dirty_tree` stays `ask` (`conventions.md` §16).
 | `unattended` | as `high` | as `high`, but each pause point follows `pause_policy` (recommended values in `conventions.md` §10) and `model_policy` is `preapproved`: the run never waits, parked items are reported at the end | long runs without the user present |
 
 `always_ask` says which decisions the agent cannot take on its own judgment; `pause_policy` says what happens when one comes up (`ask`, `preauthorize` within a recorded limit, `auto_recommend`, `park`). The floors in `conventions.md` §10 are enforced by `dev_state.py` and cannot be lifted by the interview.
@@ -64,10 +76,13 @@ The interview (block 8) can override any of these (e.g. "quality bar: premium �
 | `scope_change_major` | adding/removing/altering an AC, changing a must-have |
 | `security_model_change` | auth mechanism, permission model, token lifetime, encryption choices |
 | `credentials` | anything requiring a secret the user has not provided |
+| `model_escalation` | raising an agent's model or effort (`conventions.md` §9; governed by `model_policy`) |
+
+`production_deploy` is a pause point, not a category: every production `deploy` goes through `pause_policy.production_deploy` (`conventions.md` §10, §12).
 
 ## Procedure when a gap appears
 
-1. Look it up: `brief.md` → `prd.md` → `architecture.md` → `decisions.md`. If answered, use it.
+1. Look it up: `brief.md` → `prd.md` → `architecture.md` → `decisions.md` (→ `discovery.md` in existing projects, where the code already answers many questions). If answered, use it.
 2. Classify. If in `always_ask`: apply `pause_policy.<category>` (`conventions.md` §10). Only for `ask` (the default): stop, ask with AskUserQuestion (recommended option first), record as `ADR-nnn` with `source: user`. Otherwise record `source: policy`.
 3. Else: choose the most probable option given the brief, write `ADR-nnn (auto)` in `decisions.md` (context, decision, alternatives, why), and continue. If the user may plausibly disagree, also run `dev_state.py add-question "<question>" --skill <skill>` so `interview --gaps` can surface it later.
 4. In `autopilot`, batch `always_ask` questions when possible: finish everything that does not depend on the answer, then ask once with all pending questions.
@@ -76,7 +91,7 @@ The interview (block 8) can override any of these (e.g. "quality bar: premium �
 
 ```markdown
 ### ADR-007 (auto) — Use Zod for request validation
-- date: 2026-10-30 · status: accepted · source: auto | user | interview | policy
+- date: 2026-10-30 · status: accepted · source: auto | user | interview | policy | discovered | imported
 - context: brief block 5 says TypeScript + Next.js; no validation lib chosen
 - decision: Zod, shared schemas between client and server
 - alternatives: Yup (less TS inference), class-validator (decorators, heavier)

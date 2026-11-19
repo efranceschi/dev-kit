@@ -27,3 +27,7 @@ Mode (`prd` or `plan`) and the language for prose. Files under `.dev/`: `brief.m
 - If the artifact is missing, return a single `critical` finding saying so.
 
 End with a prose summary and the single JSON block from the contract (`auditor: "requirements-reviewer"`, `scope: "prd"` or `"plan"`).
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16, `Baseline:` line of your prompt): ACs tagged `existing` describe behaviour that already works: they need no task and are not orphans (only `new` and `changed` ACs must map to tasks); the first milestone is not a walking skeleton (scaffold and CI exist) and is numbered from `brownfield.first_milestone`. In `prd` mode judge the as-built section only for consistency with `.dev/discovery.md`, and in `import` mode check that each AC cites its original requirement. Problems that exist only in the imported documents and do not affect new work are `"legacy": true`.

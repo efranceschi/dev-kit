@@ -1,7 +1,7 @@
 ---
 name: board
 description: Live Scrum board of a dev-kit project in the browser - starts a small read-only web server on 127.0.0.1 (or, on request, shared on the local network with an access key) and opens the default browser on a dashboard with the sprint (current milestone) goal, kanban of tasks with a Graph view (left-to-right DAG of the milestone's tasks and QA gate with direction arrows, parallel groups and failure loops, actual or planned), running agents shown as live badges on the task or QA gate they work on (agents not tied to a task in a thin strip), burndown, velocity, product backlog, impediments, definition of done and recent activity, updating by itself while work goes on. One server per project (PID-controlled, never opened twice); stop it from the page or with "stop". Use when the user wants to see the project visually, a dashboard, a board or a panel, or asks to stop or check it.
-argument-hint: "[stop | status | --open | --no-open | --port N | --host IP]"
+argument-hint: "[stop | status | --open | --no-open | --port N | --host IP | --idle-min N]"
 allowed-tools: Bash, Read
 ---
 
@@ -20,7 +20,7 @@ Read-only for the project: the server only reads `.dev/` and writes its own file
 2. Pick the action from the arguments:
    - `stop` → run `DB stop`.
    - `status` → run `DB status`.
-   - anything else (empty, `--open`, `--no-open`, `--port N`, `--host IP`) → run `DB start` with those flags. Pass `--host` only when the user asked for it in this request (e.g. "bind on 0.0.0.0", "share it on the network", "open it from my phone"); never add it on your own. Do not add `&` or `run_in_background`: `start` detaches the server itself and returns in a few seconds.
+   - anything else (empty, `--open`, `--no-open`, `--port N`, `--host IP`, `--idle-min N`) → run `DB start` with those flags. Pass `--host` only when the user asked for it in this request (e.g. "bind on 0.0.0.0", "share it on the network", "open it from my phone"); never add it on your own. Do not add `&` or `run_in_background`: `start` detaches the server itself and returns in a few seconds.
 3. Report in the user's language, in one or two lines:
    - `started: URL` → the URL, that it opened in the default browser (or that they should open the URL when the output says so, e.g. on a remote machine without a display), and the two ways to stop it: the **Stop server** button on the page or `/dev-kit:board stop`.
    - `exposed on ...` lines (started with `--host` on a non-loopback address such as `0.0.0.0`): give the `access link:` URL(s) - other devices open the board with them, the key turns into a browser cookie - and say plainly that it is plain HTTP on the network, anyone with the link can see the board and stop it, so only on a trusted network; `/dev-kit:board --host 127.0.0.1` stops sharing. Opening the address without the link answers "Access link required"; `/dev-kit:board status` prints the link again.
@@ -29,4 +29,4 @@ Read-only for the project: the server only reads `.dev/` and writes its own file
    - `stopped` / `not running` → say so.
    - Exit 2 (no `.dev/state.json`) → there is no dev-kit project here; suggest `/dev-kit:start`.
    - Exit 1 → show the last lines of `.dev/run/board.log` and the error.
-4. Mention that the board stops by itself after 2 hours with no open tab. Do not run anything else.
+4. Mention that the board stops by itself after 2 hours with no open tab (`--idle-min N` changes it; `0` = never). Sharing on the network is the user's explicit request in this turn, so it does not go through `pause_policy.public_exposure`; never start it with `--host` from an autonomous run. Do not run anything else.

@@ -29,3 +29,7 @@ Scope (milestone or `release`), language for prose. `.dev/architecture.md` §4�
 - If the project has no database, return `findings: []` with a summary saying so.
 
 End with a prose summary and the single JSON block from the contract (`auditor: "data-reviewer"`).
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16, `Baseline:` line of your prompt): review only the schema elements, migrations and queries changed since the baseline (`git diff <baseline_ref>..HEAD`), plus the tables they touch; the scratch database is still built from all migrations, but gaps in untouched tables are `"legacy": true`. A new migration must be safe against the existing production data described in `.dev/discovery.md`.

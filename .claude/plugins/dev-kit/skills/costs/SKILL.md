@@ -16,7 +16,7 @@ Let `DC` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root 
 
 ## Procedure
 1. Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` §14. Log `DS event skill_start --set skill=costs --set args_kind=period`.
-2. `DC report --json <period args> --by <grouping>` (it ingests the transcripts first). The JSON has `period`, `source` (`transcripts` or `skills (partial)`), `rows` (key, requests, input, output, cache_write_5m, cache_write_1h, cache_read, tokens, usd, usd_complete, share), `total`, `prices_as_of` and `warnings`. If `total.requests` is 0, explain why (no transcripts for this project on this machine, or nothing ran in the period; suggest `--all`) and stop.
+2. `DC report --json <period args> --by <grouping>` (it ingests the transcripts first). The JSON has `period`, `source` (`transcripts` or `skills (partial)`), `rows` (key, requests, input, output, cache_write_5m, cache_write_1h, cache_read, tokens, usd, usd_complete, share), `total`, `prices_as_of` and `warnings`. In an existing project, `--all` starts when dev-kit was adopted (state `created_at`): Claude Code sessions in the folder before that are not counted. If `total.requests` is 0, explain why (no transcripts for this project on this machine, or nothing ran in the period; suggest `--all`) and stop.
 3. With `--csv`, also run `DC export <period args>` and keep the path it prints.
 4. Show in the chat, in the user's language, short:
    - **Header:** period, estimated total in US$ (say it is the API-equivalent estimate, not a charge), total tokens and number of requests.

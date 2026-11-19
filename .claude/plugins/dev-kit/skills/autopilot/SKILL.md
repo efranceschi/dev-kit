@@ -29,10 +29,11 @@ Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` and the autonomy policy
 | ui | - | `ui` | `review design` until pass → plan |
 | plan | `design` (UI products) | `plan` | `review plan` until pass → implement |
 | implement | `plan` | at the start of each milestone `DS pull-issues <M>` (issue buffer, §15); then `implement --milestone <current>` (or `--parallel N` if the brief allows and ≥ 3 independent tasks are ready) | when milestone complete → qa |
-| qa | - | `qa <M>` (scores the milestone; local preview per §11 when enabled) | gate passed → `DS cooldown <M>` (if on, §15) → `deploy <M>` if `autonomy.production.when` is `per_milestone` (§12), then next milestone (implement) or, if last milestone → usability; gate pending → implement (fix tasks) and re-run qa; rounds > `max_fix_rounds_per_gate` → pause |
+| qa | - | `qa <M>` (scores the milestone; local preview per §11 when enabled) | gate passed → `DS cooldown <M>` (if on, §15) → `deploy <M>` if `autonomy.production.when` is `per_milestone` (§12), then next milestone (implement) or, if last milestone → usability (`qa` sets the phase); gate pending → implement (fix tasks) and re-run qa; rounds > `max_fix_rounds_per_gate` → pause |
 | usability | - | `usability` (score recorded as review `ux`) | review `ux` pass → docs; fail → implement the fix tasks, re-audit |
-| docs | `ux` (UI products) | `docs all` | `review docs` until pass → release |
-| release | `docs` | `release --dry-run`, then real release only if the brief's definition of done includes a release; otherwise stop at the dry run (`release` runs `deploy` when `production.when` is `on_release`) | done |
+| docs | `ux` (UI products) | `docs all`, `review docs` until pass, then `release --dry-run`, and the real release only if the brief's definition of done includes one (`release` runs `deploy` when `production.when` is `on_release`) | done (`release` sets it) |
+
+`--until` targets: `prd`, `architecture`, `plan`, `usability`, `docs` stop when that row's "then" column is reached; `design` stops after review `design` passes; `qa` stops after the gate of `--milestone` (default: the current one); `release` runs to the end. `release` is not a phase: it is the last action of the `docs` row.
 
 ## Quality control (score and cut-off)
 - Every checkpoint above is scored 0–100 by independent agents through `dev_score.py`; the cut-offs come from `autonomy.quality` (set in the interview). The driver never advances past a checkpoint whose review or gate is not `pass`; `dev_state.py` refuses a pass below the cut-off.
@@ -40,7 +41,7 @@ Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` and the autonomy policy
 - If the same dimension fails twice with the same root cause, stop looping: write an ADR describing the structural problem and ask the user (replan, change the spec, or accept with `--force`).
 - Report the score of every checkpoint in the progress line.
 
-The "current milestone" is the first milestone (by number) with tasks not done or gate pending. Each sub-skill updates `phase` itself; after each returns, re-read `DS status --short` and decide the next row. If a sub-skill stops early (blocked task, question), handle it here before continuing.
+The "current milestone" is the first milestone (by number) with tasks not done or gate pending. Each sub-skill updates `phase` itself (`DS done` of a milestone's last task moves it to `qa`; `qa` moves it to `usability` or `docs` after the last gate); after each returns, re-read `DS status --short` and decide the next row. If a sub-skill stops early (blocked task, question), handle it here before continuing.
 
 ## Question handling (governed by `autonomy.pause_policy`, `conventions.md` §10)
 Every pause point below first looks up its action; only `ask` opens a question. With `autonomy.level unattended` (or every point set to something other than `ask`) the run never waits for the user.
@@ -49,7 +50,7 @@ Every pause point below first looks up its action; only `ask` opens a question. 
 - Fix rounds exhausted at a gate or review, or the same finding reappears twice: point `rounds_exhausted`. `ask` → present the options (keep fixing / accept with `--force` and an ADR / replan / change the spec), recommended option first per §9; `auto_recommend` → apply the recommendation (§10); `park` → leave the gate pending, park, end per `on_park` (later milestones depend on it).
 - Dirty working tree with unknown changes: point `dirty_tree`.
 - Model or effort escalation: `autonomy.model_policy.mode` (`ask` batches it with the other questions; `preapproved` escalates within the ladder and reports it in the progress line; `off` never escalates).
-- Open hotfix (`expedite`, §15): it runs first, whatever the phase; then `qa --scope <task>`, `deploy`, `release --hotfix`, and back to where the run was.
+- Open hotfix (`expedite`, §15): it runs first, whatever the phase; then `qa --scope <task>` and `release --hotfix` (which deploys it once), and back to where the run was.
 - Issues of class `change`: follow `pause_policy.scope_change_major`.
 - Release audit failure: create the fix tasks, go back to `implement` and re-run `release`, counting rounds like a gate.
 - Everything else is decided autonomously and logged (`decisions.md`, `open-questions.md`).
@@ -69,4 +70,4 @@ Report in the user's language: what was built (milestones, tasks, commits), gate
 
 ## Existing projects (brownfield)
 
-When state has `brownfield` (`conventions.md` §16): a review recorded as `n/a` satisfies the prerequisite column. Skip the `ux` and `ui` rows when no `new` AC touches the UI (record `DS review design n/a --note "no new UI"`, and at the usability row `DS review ux n/a --note "no new UI"`), going from `architecture` to `plan`. In `maintenance` mode start at `implement`, run only the tasks in `M1 — Maintenance`, and when none is left stop and point to `/dev-kit:issue` (do not go to usability, docs or release unless the user asks).
+When state has `brownfield` (`conventions.md` §16): a review recorded as `n/a` satisfies the prerequisite column. Skip the `ux` and `ui` rows when no `new` AC touches the UI (record `DS review design n/a --note "no new UI"`, and at the usability row `DS review ux n/a --note "no new UI"`), going from `architecture` to `plan`. In `maintenance` mode start at `implement` and run the tasks of the open maintenance milestone (`M<n> — Maintenance`); when they are done run `qa M<n>` as for any milestone, then stop and point to `/dev-kit:issue` for the next batch (do not go to usability, docs or release unless the user asks).

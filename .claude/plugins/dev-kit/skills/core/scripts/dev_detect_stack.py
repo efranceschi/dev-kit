@@ -143,10 +143,50 @@ def detect(root: Path) -> dict:
         out["git"] = True
 
     if not found:
+        found += other_markers(root, out)
+    if not found:
         out["greenfield"] = True
         files = [p.name for p in root.iterdir() if not p.name.startswith(".")] if root.exists() else []
         out["notes"].append("no manifests found" + (f"; files present: {', '.join(files[:10])}" if files else "; directory is empty"))
     return out
+
+
+SOURCE_EXT = {".py", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt", ".rb", ".php", ".cs", ".c", ".cc",
+              ".cpp", ".h", ".hpp", ".swift", ".dart", ".ex", ".exs", ".scala", ".lua", ".sh", ".html", ".vue", ".svelte", ".sql"}
+OTHER_MANIFESTS = [("setup.py", "python"), ("setup.cfg", "python"), ("Pipfile", "python"), ("requirements.txt", "python"),
+                   ("Makefile", None), ("CMakeLists.txt", "c/c++"), ("meson.build", "c/c++"), ("deno.json", "typescript")]
+SKIP_DIRS = {"node_modules", "vendor", "dist", "build", "target", "venv", ".venv", "__pycache__"}
+
+
+def other_markers(root: Path, out: dict) -> list[str]:
+    """No main manifest at the root: look for secondary manifests, manifests in subfolders (monorepos, up to
+    two levels) and source files, so an existing codebase is never mistaken for a new project."""
+    hits: list[str] = []
+    for fname, lang in OTHER_MANIFESTS:
+        if (root / fname).exists():
+            hits.append(fname)
+            out["lang"] = out["lang"] or lang
+    if not root.exists():
+        return hits
+    main_names = ("package.json", "pyproject.toml", "go.mod", "Cargo.toml", "pom.xml", "build.gradle", "Gemfile", "composer.json")
+    sources = 0
+    for depth_glob in ("*", "*/*", "*/*/*"):
+        for p in root.glob(depth_glob):
+            if any(part.startswith(".") or part in SKIP_DIRS for part in p.relative_to(root).parts):
+                continue
+            if p.is_file():
+                if p.name in main_names and p.parent != root:
+                    hits.append(str(p.relative_to(root)))
+                elif p.suffix.lower() in SOURCE_EXT:
+                    sources += 1
+        if len(hits) > 20:
+            break
+    if any("/" in h for h in hits):
+        out["notes"].append("manifests in subfolders (monorepo?): " + ", ".join(h for h in hits if "/" in h)[:200])
+    if sources:
+        hits.append(f"{sources} source file(s)")
+        out["notes"].append(f"no main manifest, but {sources} source file(s) found: existing code")
+    return hits
 
 
 def main(argv: list[str]) -> None:

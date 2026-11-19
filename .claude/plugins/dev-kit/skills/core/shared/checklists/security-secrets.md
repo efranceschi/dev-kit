@@ -23,6 +23,6 @@ Also check: `.env*` committed? (`git ls-files | rg '^\.env'`), `.gitignore` cove
 - Rotation note in docs for any key the project uses.
 
 ## Severity
-- Live credential in repo or history → critical (also tell the user to rotate it immediately).
+- Live credential in repo or history → critical (also tell the user to rotate it immediately). In an existing project a credential that predates the baseline is reported with `"legacy": true` (it does not block the gate) but keeps `critical` and the rotation warning; it becomes a `standard` issue (`conventions.md` §16).
 - `.env` committed with placeholder values → high.
 - Missing `.env.example` / no boot validation → medium.

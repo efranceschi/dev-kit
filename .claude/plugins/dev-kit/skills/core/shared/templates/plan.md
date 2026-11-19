@@ -11,6 +11,8 @@
 
 Ordering rules used: setup and CI first; then the highest-priority must-have as a thin end-to-end slice; infrastructure only when a feature needs it; fix tasks jump the queue.
 
+Existing projects: no walking skeleton (scaffold, tooling and CI exist; skip T-001 below); milestones start at `M<brownfield.first_milestone>`; `existing` ACs get no tasks. In maintenance mode the whole plan is `# Plan` plus an empty `## M<n> — Maintenance`, filled by `/dev-kit:issue`.
+
 ## M1 — {{milestone title}}
 {{one-paragraph goal and exit criterion}}
 

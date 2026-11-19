@@ -4,7 +4,7 @@ Every dev-kit skill and agent follows these rules. Read this file once per sessi
 
 ## 0. Kit root (`<KIT>`)
 
-Paths written as `<KIT>/shared/...` and `<KIT>/scripts/...` are relative to the **kit root**: the folder that contains `shared/` and `scripts/`. The skill that loaded you prints it as `Kit root: ...` and passes it in the prompt of every agent it spawns; use that absolute path literally. Never assume it is inside the project being built. Run every command from the project root; do not `cd` elsewhere, and use `dev_state.py --root <project root>` if you must.
+Paths written as `<KIT>/shared/...` and `<KIT>/scripts/...` are relative to the **kit root**: the folder that contains `shared/` and `scripts/`. The skill that loaded you prints it as `Kit root: ...` and passes it in the prompt of every agent it spawns; use that absolute path literally. Never assume it is inside the project being built. Skills that spawn agents also pass `Project root: <absolute path>`; agents call `dev_state.py --root <Project root>` (an agent may run in a git worktree, where the current directory is not the project). Run every command from the project root; do not `cd` elsewhere, and use `dev_state.py --root <project root>` if you must.
 
 ## 1. Language
 
@@ -31,9 +31,22 @@ Paths written as `<KIT>/shared/...` and `<KIT>/scripts/...` are relative to the 
   qa/<M>/report.md    QA gate report per milestone (+ findings.json)
   qa/ux/report.md     usability/accessibility audit
   log.md              append-only journal (written by dev_state.py)
+  issues.md           issue queue, generated from state (§15)
+  plan-baseline.json  first version of the plan, for the board's graph (§13)
+  reviews/<target>/   scored reviews: raw/, scores.json, findings-round-<n>.json, report.md
+  qa/<M>/raw/, scores.json, findings-round-<n>.json   per-gate audit data (also qa/ux/, qa/release/, qa/T-xxx/)
+  release-notes-<v>.md  release notes per version
+  prd/<epic>.md       PRD split by epic when it grows past ~400 lines
+  telemetry.jsonl     session log (§13); telemetry-session holds the current session id
+  costs/              usage.jsonl, prices.json, summary.json, tokens-<stamp>.csv (§14)
+  feedback/           feedback-report-<stamp>.md and telemetry-export-<stamp>.json
+  tips-seen.json      how many times each tip was shown (§15)
   discovery.md        existing projects only: facts about the code before dev-kit (§16)
   qa/baseline.md      existing projects only: test results at the baseline tag (§16)
+  run/  preview/  tmp/   machine-local: board, pids, agent log, local preview worktree, scratch (ignored by .dev/.gitignore)
 ```
+
+`.dev/` is versioned with the code except the machine-local folders, which `dev_state.py init` lists in `.dev/.gitignore`.
 
 Never edit `state.json` by hand. Always go through `python3 -I "<KIT>/scripts/dev_state.py" <subcommand>`.
 
@@ -60,13 +73,14 @@ Short goal of the milestone (one paragraph).
 - files: src/auth/LoginForm.tsx, src/auth/validate.ts
 ```
 
-Rules: `type` ∈ `feature | fix | chore | test | docs`. `status` in plan.md is informative only; `state.json` wins on conflict. `deps` may be empty (`- deps:`). Tasks should be vertical slices completable in one sitting (roughly 30–90 minutes of work) with tests included.
+Rules: `type` ∈ `feature | fix | chore | test | docs`. `status` ∈ `todo | in_progress | done | blocked | dropped` (`dropped` = removed by a replan with `dev_state.py drop`; kept for history, never counted). `status` in plan.md is informative only; `state.json` wins on conflict. `deps` may be empty (`- deps:`). Tasks should be vertical slices completable in one sitting (roughly 30–90 minutes of work) with tests included.
 
 ## 5. Commits
 
 - One commit per completed task. Subject from `autonomy.commit_style` (template with `{task}`, `{type}`, `{summary}`; default `[{task}] {type}: {summary}`, e.g. `[T-003] feat: add login form`; type = feat | fix | chore | test | docs | refactor). When the template has no `{task}` (existing projects that use Conventional Commits, Jira keys, etc.), end the body with the trailer `Refs: T-003`. Body (in the user's language): what changed, which ACs it satisfies, how it was verified.
 - Tools find a task's commit by the SHA recorded in state (`done --commit`), never by parsing the subject.
-- Only commit when the working tree contains just that task's changes. Never amend or rewrite history. Never push unless the brief says so.
+- Only commit when the working tree contains just that task's changes (plus `.dev/`, whose tracked files go in with the task commit). Never amend or rewrite history. Never push unless the brief says so.
+- **Clean tree** means clean outside `.dev/`: `git status --short -- . ':(exclude).dev'` is empty. dev-kit's own state changes never make a tree dirty, and an automatic stash never takes `.dev/` (`git stash push -u -m "dev-kit auto <date>" -- . ':(exclude).dev'`).
 - Record the SHA: `dev_state.py done T-003 --commit <sha>`.
 - If the brief says `commit_per_task: false`, skip committing but still call `done`.
 
@@ -162,6 +176,7 @@ Before any AskUserQuestion, a skill reads `autonomy.pause_policy.<point>.action`
 | `rounds_exhausted` | fix rounds exhausted, or the same finding came back twice | ask · auto_recommend · park | auto_recommend |
 | `dirty_tree` | uncommitted changes nobody owns | ask · auto_recommend (`git stash push -m "dev-kit auto <date>"`) | auto_recommend |
 | `blocked_env` | three tasks blocked in a row, tests or server cannot run | ask · park | park |
+| `production_deploy` | `deploy` to production (§12) | ask · preauthorize (`limit.targets`) · park | park |
 | model escalation | §9 | governed by `autonomy.model_policy.mode` | preapproved |
 
 What each action does:
@@ -173,13 +188,15 @@ What each action does:
 
 Floors no policy can lift (the interview shows them, it does not ask): never force security or a gate with critical/high open; never delete production data; never rewrite git history; never change an AC without the user (always `park`).
 
+The board's network sharing (`/dev-kit:board --host 0.0.0.0`) is not a pause point: it exists only when the user asks for it in that turn, and no autonomous run starts it.
+
 Claude Code's own permission prompts (Bash, Edit) are outside the kit: for an unattended run the user needs a permission mode or allowlist that covers the project (`/fewer-permission-prompts`).
 
 ## 11. Local deploy per milestone (`autonomy.local_deploy`)
 
 Optional, chosen in the interview (block 10); default `off`. Modes: `keep_running` (the approved milestone stays running for the user to try while the next one is built; the previous preview is replaced), `smoke` (start, check, stop: proves the milestone runs without holding a port), `off`.
 
-Asked only when it makes sense for the platform (brief block 3):
+Asked only when it makes sense for the platform (brief block 7):
 
 | platform | ask? | what "local deploy" means |
 |---|---|---|
@@ -215,9 +232,10 @@ Every skill keeps a structured, high-level log of the session, for the user to f
   - `agent_spawn` / `agent_end` around every agent (`agent`, `model`, `effort`, `slot`, `round`, `scope`; on end also `status`, `duration_s`, `tokens` when the tool reports usage, `findings` counts, `parsable`, and the agent's `kit_feedback` as `feedback`);
   - `pause` at every pause point (`point`, `action`, `outcome`) and `escalation` for every model/effort change (`agent`, `from`, `to`, `consent`);
   - `error` with an enumerated `code` (`no_json`, `tests_failed`, `env_broken`, `hook_rejected`, `merge_conflict`, `port_in_use`, `timeout`, `other`).
+- **Feedback areas** (the `area` of every feedback item; anything else is rejected): `start`, `interview`, `prd`, `architecture`, `design`, `plan`, `implement`, `test`, `qa`, `usability`, `review`, `deploy`, `docs`, `release`, `issue`, `board`, `scoring`, `isolation`, `scripts`, `prompts`, `cost`, `autopilot`, `other`.
 - **Feedback** (`feedback` on `skill_end` and `agent_end`; `DS feedback --worked/--failed/--improve area:note` at the end of a run): what worked, what failed and what could be improved in the dev-kit, at most 3 items per list, each note ≤ 140 characters and about the kit, never about the project. `autopilot` writes a `session_feedback` when the run ends.
 - `DS event session_start --set trigger=<skill>` starts a new session id (`start` and `autopilot` call it). `DS telemetry summary` shows the session; `DS telemetry report [--json]` grades each stage; `DS telemetry export [--events] [--stamp S]` writes `.dev/feedback/telemetry-export-<YYYYMMDD-HHMMSS>.json` (never overwriting) for the user to review and send to the author. All three take `--all` or `--since YYYY-MM-DD` (default: the current session). The skill `feedback` turns them into `.dev/feedback/feedback-report-<stamp>.md`.
-- **Stage grades** (fixed formula, `dev_telemetry.stage_report`): start at 100; −10 per round beyond the first of each review or gate, plus −10 per round beyond `max_fix_rounds_per_gate`; forced pass −25 by the user, −15 by policy; −10 each time a scope's score drops between rounds; −5 per error (max −30); −5 per agent without parsable JSON; −10 per failed and −5 per parked skill run; feedback of the stage's area −3 per `failed` and +2 per `worked` item (net −15…+6); a review or gate still failing caps the stage at 60; clamp 0–100. Stages that did not run show `—`; the overall grade is the mean of the stages that ran. Every grade lists the reasons that produced it.
+- **Stage grades** (fixed formula, `dev_telemetry.stage_report`): start at 100; −10 per round beyond the first of each review or gate, plus −10 per round beyond `max_fix_rounds_per_gate`; forced pass −25 by the user, −15 by policy; −10 each time a scope's score drops between rounds; −5 per error (max −30); −5 per agent without parsable JSON; −10 per failed and −5 per parked skill run; feedback of the stage's area −3 per `failed` and +2 per `worked` item (net −15…+6); a review or gate still failing caps the stage at 60; clamp 0–100. Stages that did not run show `—`, and so does a stage recorded only as a review `n/a` (existing projects); the overall grade is the mean of the stages that ran. `review` runs are graded in their target's stage (log `skill_start`/`skill_end` with `scope=<target>`); `qa --scope T-xxx` and hotfix reviews count in `qa`. Every grade lists the reasons that produced it.
 - Logging never blocks work: if an event is rejected, fix the fields or drop it; never put project text into a field to make it pass.
 
 - **Agent badges:** the board places a running agent on the graph node named by the `scope` of its `agent_spawn` (a task id, or the milestone for the QA gate), so always log `scope`, and log `agent_end` with the same `agent`, `slot` and `scope` to close it. Where plugin hooks run, a hook agent is linked to a spawn only when the match by type and start time is unambiguous; otherwise it is shown without a task.
@@ -229,15 +247,15 @@ Every skill keeps a structured, high-level log of the session, for the user to f
 - **Tokens kept per request:** `input`, `output`, `cache_write_5m`, `cache_write_1h`, `cache_read`, plus model and speed, so the user can price them with any rates (`dev_cost.py export` → `.dev/costs/tokens-<YYYYMMDD-HHMMSS>.csv`, never overwriting).
 - **Stage:** main-session requests take the stage of the innermost skill window (`skill_start`…`skill_end`, §13) they fall in. Subagents take the stage of the window where they started (the implementer is always `implement`). Everything else is `orchestration`.
 - **Price:** `.dev/costs/prices.json` (US$ per million tokens, with `as_of`; created from the built-in defaults, editable). Cache writes cost 1.25× input (5 min) or 2× (1 h); cache reads use the model's own price or 0.1× input; `fast` speed multiplies by the model's factor. A model without a price keeps its tokens and shows `n/d`. The value is an **API-equivalent estimate**; on subscription plans nothing is billed per token.
-- **When it runs:** `qa`, `review`, `usability`, `implement`, `deploy`, `release` and `autopilot` run `dev_cost.py ingest` before their `skill_end`. `dev_cost.py report` writes `.dev/costs/summary.json`, which `status` shows as `Cost (est., API-equivalent): …`. The `report` also logs a `cost` event with numbers only.
+- **When it runs:** `qa`, `review`, `usability`, `implement`, `deploy`, `release`, `issue` and `autopilot` run `dev_cost.py ingest` before their `skill_end`. In an existing project, `--all` starts at the adoption (state `created_at`). `dev_cost.py report` writes `.dev/costs/summary.json`, which `status` shows as `Cost (est., API-equivalent): …`. The `report` also logs a `cost` event with numbers only.
 
 ## 15. Issues, classes of service and cadence (`issue`, `backlog`)
 
-**The cadence is fixed.** Milestones M1, M2, M3… are the project's rhythm. Issues never create, insert or renumber milestones: they wait in a queue and enter existing milestones by class of service (inspired by Kanban classes of service, Scrum's capacity buffer and Shape Up's cool-down).
+**The cadence is fixed.** Milestones M1, M2, M3… are the project's rhythm. Issues never insert or renumber milestones: they wait in a queue and enter existing milestones by class of service (inspired by Kanban classes of service, Scrum's capacity buffer and Shape Up's cool-down). The one exception is an existing project in `maintenance` mode (§16), where each passed gate lets the next issue open the next maintenance milestone. A milestone whose gate passed takes no new task (`add-task` refuses it), except the hotfix lane.
 
 | class | written criterion | where it enters |
 |---|---|---|
-| `expedite` | bug, critical or high, in delivered work or production, or blocking the current milestone | **now**, hotfix lane: `add-task --lane hotfix` in the current milestone; runs before everything, even with a pending gate; **WIP 1**; closes with `qa --scope T-xxx`, deploy and a patch version (`release --hotfix`); the milestone gate is untouched |
+| `expedite` | bug, critical or high, in delivered work or production, or blocking the current milestone | **now**, hotfix lane: `add-task --lane hotfix` in the current milestone; runs before everything, even with a pending gate; **WIP 1**; closes with `qa --scope T-xxx` (recorded as review `hotfix-T-xxx`) and a patch version (`release --hotfix`, which deploys it once); the milestone gate is untouched |
 | `current` | bug in a task of the milestone being built, before its gate | that milestone, now (like QA fix tasks) |
 | `standard` | medium bug, improvement with clear value | the **buffer** of the next milestone |
 | `intangible` | low bug, polish, tech debt, promoted deferred finding | the **cool-down** (if on), else spare buffer |
@@ -253,21 +271,24 @@ Every skill keeps a structured, high-level log of the session, for the user to f
 
 Applies when `state.json` has `brownfield` (written by `start`'s onboarding, `shared/onboarding.md`): code that was **not** built with dev-kit. Every skill and agent that sees the marker follows these rules; they override the greenfield defaults elsewhere in the kit.
 
-- **Baseline.** `brownfield.baseline_ref` (tag `dev-kit-baseline`) splits "before dev-kit" from new work. Audits and coverage are scoped to `git diff <baseline_ref>..HEAD` (or the task SHAs in state); untouched legacy code is out of scope.
-- **Legacy debt is never blocking.** A problem that exists at the baseline and is not made worse by the change becomes an issue of class `intangible` (`dev_state.py add-issue --origin baseline`, or `--origin qa` when found by an audit), not a blocking finding or fix task. Test failures listed in `.dev/qa/baseline.md` are not F-001.
-- **Existing vs new.** ACs are tagged `existing` (already works; verified, no task) or `new` (to build). Screens in `ux-flows.md` are tagged the same way; only `new`/changed screens need a full spec. `spec-tracer` reports `existing` ACs as `existing-verified` when the behaviour is in the code, without requiring a task or a test that names the AC.
-- **The project's conventions win.** Folder layout, test framework and test layout, lint/format tools, commit style (`autonomy.commit_style`), CHANGELOG format, version source and tag prefix are read from `discovery.md` and followed. Adding a new runner, linter, formatter, framework or build tool is `always_ask`. Dependencies already in the manifests at the baseline need no ADR; only new ones do.
+- **Baseline.** `brownfield.baseline_ref` (tag `dev-kit-baseline`) splits "before dev-kit" from new work. Audits and coverage are scoped to `git diff <baseline_ref>..HEAD` (or the task SHAs in state); untouched legacy code is out of scope. Every skill that spawns an auditor passes `Baseline: <baseline_ref>` in the prompt. The status line injected into skills shows `existing project: <mode>`.
+- **Legacy debt is never blocking.** A problem that exists at the baseline and is not made worse by the change is reported with `"legacy": true`, never scores (not even through `--previous` in later rounds) and becomes an issue of class `intangible` (`dev_state.py add-issue --origin baseline`, or `--origin qa` when found by an audit), not a blocking finding or fix task. Exception: a critical/high security problem (a secret in the history, an unauthenticated admin route) becomes a `standard` issue and the user is told about it in the report. Test failures listed in `.dev/qa/baseline.md` are not F-001.
+- **Existing, changed, new.** ACs are tagged `existing` (already works; verified, no task), `changed` (exists, its behaviour changes; gets a task) or `new` (to build). Screens in `ux-flows.md` carry the same three tags; only `new` and `changed` screens need a full spec. `spec-tracer` reports `existing` ACs as `existing-verified` when the behaviour is in the code, without requiring a task or a test that names the AC.
+- **The project's conventions win.** Folder layout, test framework and test layout, lint/format tools, commit style (`autonomy.commit_style`), CHANGELOG format, version source and tag prefix are read from `discovery.md` and followed. Adding a new runner, linter, formatter, framework or build tool is `always_ask` (`dev_state.py` moves `dev_tooling` to `always_ask` when a level is set in an existing project). Dependencies already in the manifests at the baseline need no ADR; only new ones do.
 - **Design.** Tokens and components are extracted from the code (theme files, CSS variables, UI library); `ui` extends them instead of inventing a new system. Inherited contrast or accessibility problems on untouched screens become issues.
 - **Decisions.** Facts read from the code are ADRs with `source: discovered`; ADRs the project already had are referenced with `source: imported` (link to the original file), never rewritten.
 - **Not applicable reviews.** A review that does not apply (e.g. `design` when no `new` AC touches the UI, or `prd`/`plan` in maintenance mode) is recorded as `dev_state.py review <name> n/a --note "<reason>"`; `n/a` satisfies prerequisites in `autopilot` and `release`.
-- **Working tree.** `pause_policy.dirty_tree` defaults to `ask`: the tree may hold the user's own work.
+- **Working tree.** `pause_policy.dirty_tree` is `ask` (the tree may hold the user's own work); `dev_state.py` keeps it so even under `unattended`, and only an explicit `set autonomy.pause_policy.dirty_tree` changes it.
+- **First milestone.** `brownfield.first_milestone` (asked in the onboarding, default 1) numbers the first dev-kit milestone, so a project that already counts iterations can continue its numbering (`M7`, `M8`…).
 - **Deploy.** If the project deploys through its own CI/CD, `autonomy.production.method` is `external`: `deploy` never runs install commands, it confirms with the user (or reads the CI status) and records the SHA.
 - **Entry modes** (`brownfield.mode`):
 
 | mode | when | path |
 |---|---|---|
 | `feature` | new capability or behaviour change | `interview --express` on the change → `prd` (as-built + new ACs) → `architecture` → (`ux`/`ui` if new UI) → `plan` → `implement` |
-| `maintenance` | bugs and small improvements only | minimal brief, as-built `prd` (all ACs `existing`), `architecture` from discovery, `plan.md` with an empty `## M1 — Maintenance`; reviews `prd`/`design`/`plan` `n/a`; phase `implement`; work enters through `issue` |
+| `maintenance` | bugs and small improvements only | minimal brief (blocks 8–10), as-built `prd` (all ACs `existing`), `architecture` from discovery, `plan.md` with an empty `## M<n> — Maintenance`; reviews `prd`/`design`/`plan` `n/a`; phase `implement`; work enters through `issue`, scheduled straight into the open maintenance milestone; when its tasks are done, `qa M<n>` gates it like any milestone, and the next issue opens `M<n+1> — Maintenance` |
 | `import` | the project already has a PRD, specs or ADRs | those documents are the primary source: `interview` asks only the blocks they do not cover, `prd` is derived from them, ADRs are imported; then as `feature` |
+
+Switching from `maintenance` to `feature` or `import` (`dev_state.py init --brownfield-json '{"mode":"feature"}'`) reopens the reviews recorded `n/a` as `pending`: the new PRD, design and plan are reviewed.
 
 - **Missing stages.** On resume, `start` routes to the first missing artifact (brief → prd → architecture → design if new UI → plan) before following the phase; `dev_state.py set phase` warns when an earlier artifact is missing.

@@ -5,6 +5,7 @@
 | Term | Meaning |
 |---|---|
 | **AC** | Acceptance criterion, numbered AC-n in the PRD; every task and test points to the ACs it satisfies. |
+| **access link** | The private URL printed by /dev-kit:board --host 0.0.0.0; other devices open the shared board only through it. |
 | **ADR** | Architecture decision record in .dev/decisions.md; source auto, user, interview, policy, discovered or imported. |
 | **API-equivalent cost** | Estimated US$ of the tokens at API prices; on subscription plans nothing is billed per token. |
 | **Baseline** | The git tag dev-kit-baseline set by the onboarding: everything before it is legacy, everything after it is new work that QA scores. |
@@ -14,13 +15,23 @@
 | **cool-down** | Optional short slot after a gate where small issues are fixed before the next milestone. |
 | **cut-off** | Minimum score for a gate or review, set in the interview (standard 85, premium 92, prototype 70). |
 | **delta mode** | From round 2, auditors verify whether previous findings were closed; new low findings are recorded but not scored. |
+| **discovery** | The onboarding report of an existing project (.dev/discovery.md): stack, layout, commands, conventions, existing docs and ADRs. |
+| **dropped task** | A task removed by a replan (dev_state.py drop): kept for history, never counted by milestones, next or release. |
+| **entry mode** | How an existing project is adopted: feature (new capability), maintenance (bugs and small improvements through issues) or import (existing PRD/specs are the source). |
+| **existing / changed / new** | Tags of ACs and screens in existing projects: existing works already (no task), changed gets a task, new is built from scratch. |
+| **expedite** | The class of service for a critical/high bug in delivered work: a hotfix task that runs before everything (WIP 1). |
+| **external deploy** | production.method external: the project's own CI/CD deploys; the kit only confirms and records the commit. |
 | **gate** | The quality check at the end of a milestone (qa): passes only with no critical/high findings and every score above its cut-off. |
 | **hotfix** | Expedite lane for critical/high bugs in delivered work: one at a time, scoped QA, patch release. |
 | **lane** | Priority lane of a task: hotfix runs first, then cool-down, then the plan. |
+| **legacy** | A finding in code that existed before dev-kit (existing projects): reported with "legacy": true, never scored, turned into an issue. |
+| **local preview** | The approved milestone built and run on 127.0.0.1 (keep_running or smoke), per autonomy.local_deploy. |
 | **low cap** | Low findings cost at most 10 points per dimension. |
+| **maintenance milestone** | In maintenance mode, the milestone M<n> — Maintenance that issues fill; its gate runs like any other, then the next issue opens M<n+1>. |
 | **milestone** | A cadence step M1, M2…; the next one starts only after the previous gate passes. Issues never renumber milestones. |
 | **model ladder** | Agents start on their base model and effort; failed dimensions are re-run one step higher, with consent. |
-| **park** | In unattended runs, record what needs you as a question, block only what depends on it and go on. |
+| **n/a review** | A review that does not apply (e.g. design with no new UI); recorded with a note, it satisfies prerequisites and is not graded. |
+| **park** | Pause-point action: never wait; record the question with the recommended answer, block only what depends on it and continue (the default of most points under the unattended level, available at any level). |
 | **pause policy** | What the kit does at each pause point: ask, preauthorize within a limit, apply the recommendation, or park. |
 | **session log** | .dev/telemetry.jsonl: structured, high-level events of the run, without project data. |
 | **slot** | Per-agent isolation number that gives each agent its own port, database and scratch folder. |

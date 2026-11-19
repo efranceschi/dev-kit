@@ -27,3 +27,7 @@ Scope (milestone or screens), language for prose, optional base URL. `.dev/brief
 Blocks a task for keyboard or screen-reader users on a main flow → `critical`; WCAG A/AA failure on a main flow → `high`; on a secondary flow → `medium`; best-practice gap → `low`. The brief's target level sets the bar.
 
 End with a prose summary and the single JSON block from the contract (`auditor: "a11y-auditor"`); add `"tools_used": [...]` and `"criteria_failed": ["1.4.3", ...]` inside the JSON.
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16, `Baseline:` line of your prompt): audit the screens and components changed since the baseline (`git diff <baseline_ref>..HEAD`) and the `new`/`changed` screens in `ux-flows.md`; a failure that exists only on untouched screens is `"legacy": true` (not scored; it becomes an issue), but say in the summary when one blocks a main flow.

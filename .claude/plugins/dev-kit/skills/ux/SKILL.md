@@ -21,7 +21,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 1. Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md`, `${CLAUDE_SKILL_DIR}/../core/shared/checklists/nielsen-10.md`, the brief (blocks 2, 3, 7), the PRD stories/ACs, and the template `${CLAUDE_SKILL_DIR}/../core/shared/templates/ux-flows.md`.
 2. Derive principles for this product from the brief (device context, user technical level, tone).
 3. Build the information architecture and navigation model; then one journey per persona × top task, each mapped to story and AC ids, with a Mermaid flow and a step table including error/edge paths.
-4. Produce the screen inventory with stable ids `S-01…`; for every screen specify all states and the recovery action for errors; specify forms (fields, validation timing, messages pattern, autosave/undo).
+4. Produce the screen inventory with stable ids `S-01…` (existing projects: column `tag` = `existing | new | changed`); for every screen specify all states and the recovery action for errors; specify forms (fields, validation timing, messages pattern, autosave/undo).
 5. Microcopy guide in the **application language(s)** from brief block 2 with examples; conversation and headings stay in the user's language.
 6. Usability checkpoints: for each heuristic that matters here, how the flows satisfy it; list accessibility implications for `ui` (focus order, announcements, target sizes).
 7. Gaps → autonomy rule (`ui_details` and most UX choices are `decide_alone`); log ADRs for notable choices (navigation model, onboarding strategy). Ask only for `always_ask` matters (rare here: e.g. collecting extra personal data).

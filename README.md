@@ -17,6 +17,9 @@ You answer one thorough interview. The kit then writes the PRD, architecture and
 - **Quality gates**: each milestone ends with a scored review (0-100 per dimension) that must clear a cut-off before the next one starts.
 - **Adjustable autonomy**: from supervised (asks at each decision, always with a recommendation) to unattended (parks what needs you and keeps going).
 - **Bugs and ideas** found at any time are classified and routed with `/dev-kit:issue`, without renumbering the plan.
+- **Existing projects too**: in a codebase not built with dev-kit, `/dev-kit:start` first tags a baseline and learns the project (stack, commands, your commit and version conventions, existing docs). You pick a mode (new feature, maintenance only, or import your own PRD/specs); audits then judge only what changed, and old problems become issues instead of blocking.
+- **Live board**: `/dev-kit:board` shows the build in the browser, on this machine or shared on your network with a private link.
+- **Deploy, costs and feedback**: production deploys with backup and smoke checks (`/dev-kit:deploy`), token cost per stage (`/dev-kit:costs`) and a graded evaluation of each session (`/dev-kit:feedback`).
 - **Resumable**: state lives in `.dev/` and is reconciled with git on every `/dev-kit:start`.
 
 The kit talks to you, and writes your project's artifacts, in your language. Its own files are in English.
@@ -59,7 +62,7 @@ ClaudeAgentOptions(plugins=[{"type": "local", "path": "/path/to/dev-kit/.claude/
 query({ prompt, options: { plugins: [{ type: "local", path: "/path/to/dev-kit/.claude/plugins/dev-kit" }] } })
 ```
 
-Requirements: Claude Code, `git` and `python3` (the kit's helper scripts use only the standard library). Keep the `core` skill installed next to the other skills; it holds the scripts and templates they share.
+Requirements: Claude Code, `git` and Python 3.10+ (the kit's helper scripts use only the standard library), on Linux or macOS (on Windows use WSL: the board server needs `fcntl`). Keep the `core` skill installed next to the other skills; it holds the scripts and templates they share.
 
 ## Get started
 
@@ -77,6 +80,9 @@ Full documentation lives in [`.claude/plugins/dev-kit/docs/`](.claude/plugins/de
 | [agents](.claude/plugins/dev-kit/docs/agents.md) | every agent and who calls it |
 | [concepts](.claude/plugins/dev-kit/docs/concepts.md) | state, gates, autonomy, issues, deploy, costs |
 | [troubleshooting](.claude/plugins/dev-kit/docs/troubleshooting.md) | when something goes wrong |
+| [glossary](.claude/plugins/dev-kit/docs/glossary.md) | short definitions of the terms the kit uses |
+| [maintainers](.claude/plugins/dev-kit/docs/maintainers.md) | how the kit itself is built and tested |
+| [CHANGELOG](.claude/plugins/dev-kit/CHANGELOG.md) | what changed in each version of the kit |
 
 Inside Claude Code, `/dev-kit:help` answers "what do I do next?" and `/dev-kit:help <question>` answers "how do I...?".
 

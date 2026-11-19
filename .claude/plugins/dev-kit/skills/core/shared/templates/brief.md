@@ -11,6 +11,7 @@
 - **References / competitors:**
 - **Success metrics (v1):**
 - **Project type:** greenfield | rewrite | brownfield (repo summary: …)
+- **Existing project (brownfield only):** entry mode feature | maintenance | import · first milestone M{{n}} · facts in `.dev/discovery.md` · commit style `{{template}}` · version source and tag prefix {{…}}
 
 ## Block 2 — Users and roles
 - **Personas:**

@@ -77,3 +77,21 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 
 1. /dev-kit:interview --gaps to revisit decisions
 2. Or directly: dev_state.py set autonomy.<field> <value> (level, quality, cooldown, issue_buffer_pct, tips, model_policy, pause_policy…)
+
+## Watch the project on a board (or share it)
+
+1. /dev-kit:board opens the live board in the browser (one server per project)
+2. /dev-kit:board --host 0.0.0.0 shares it on your network: open the access link it prints on the other device
+3. /dev-kit:board stop (or the Stop server button) when done
+
+## Ship a version
+
+1. /dev-kit:docs all, then /dev-kit:review docs
+2. /dev-kit:release --dry-run to see the checklist and the version it would use
+3. /dev-kit:release (tags; pushes and deploys only as the brief allows)
+
+## Check that the app is usable and accessible
+
+1. /dev-kit:usability (or --url http://localhost:3000 for an app already running)
+2. /dev-kit:implement to run the fix tasks it created
+3. /dev-kit:usability again until review ux passes

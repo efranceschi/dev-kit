@@ -1,6 +1,9 @@
 # PRD — {{project_name}}
 
-> Purpose: what we are building and how we will know it works. Derived from `brief.md` on {{date}}. Status: draft | approved.
+> Purpose: what we are building and how we will know it works. Derived from `brief.md` (existing projects: also `discovery.md` and, in import mode, the original documents it lists) on {{date}}. Status: draft | approved.
+
+## 0. As-built (existing projects only)
+What the product already does, by journey, with links to `discovery.md`; one line each. The ACs that describe it are tagged `existing`. Imported requirements keep their original ids (e.g. `AC-4 (was REQ-12, docs/prd.md)`).
 
 ## 1. Problem and goals
 - Problem statement (from brief block 1).
@@ -22,12 +25,12 @@ Roles and permissions summary.
 | Won't | | |
 
 ## 4. User stories and acceptance criteria
-Group by epic. Every story has at least one AC; ACs are globally numbered and testable (Given/When/Then or a measurable statement).
+Group by epic. Every story has at least one AC; ACs are globally numbered and testable (Given/When/Then or a measurable statement). Existing projects: tag every AC `[existing]` (already works, no task), `[changed]` (behaviour changes, gets a task) or `[new]`.
 
 ### Epic: {{epic}}
 **US-1 — As a {{persona}}, I want {{goal}} so that {{benefit}}.**
 - AC-1: Given … when … then …
-- AC-2: …
+- AC-2 [new]: … (tag only in existing projects)
 
 ## 5. Non-functional requirements
 | Area | Requirement | Source |

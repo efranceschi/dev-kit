@@ -15,7 +15,7 @@ Review `.dev/design/ux-flows.md` and `.dev/design/ui-spec.md` **before any UI co
 - **Token completeness**: colour roles (primary, surface, border, success/warning/danger/info, text), type scale, spacing, radius, shadow, breakpoints, motion, dark mode if required. Missing role used by a screen → `medium`.
 - **Contrast**: compute ratios for every text/background and UI-component/background pair in the tokens and states (hover, disabled, focus). Text < 4.5:1 (large < 3:1) or UI < 3:1 → `high`. Show the numbers.
 - **Component inventory**: every component used by a screen spec exists in the inventory with variants and states (default, hover, focus-visible, disabled, loading, error). Reference to unknown component → `medium`.
-- **Screen specs**: every screen id in `ux-flows.md` has a spec with layout, content, states, responsive notes and accessibility notes. Missing screen → `high`.
+- **Screen specs**: every screen id in `ux-flows.md` has a spec with layout, content, states, responsive notes and accessibility notes. Missing screen → `high`. Existing projects: only screens tagged `new` or `changed` need a spec; `existing` ones need their one-line reference.
 - **Responsive**: behaviour defined for each breakpoint in scope; touch targets ≥ 44 px on touch platforms, ≥ 24 px minimum anywhere.
 - **Accessibility by design**: heading order, focus order, keyboard interactions for custom widgets, announcements for dynamic content, reduced-motion behaviour, text resizing to 200%.
 - **Consistency**: same pattern for same task across screens (same button placement, same empty-state structure); no screen invents a component outside the inventory.

@@ -30,3 +30,7 @@ Scope (milestone or screen ids), language for prose, optional base URL. `.dev/de
 - Include two or three things done well in the summary.
 
 End with a prose summary and the single JSON block from the contract (`auditor: "visual-reviewer"`); add `"screens_reviewed": [...]` and `"screenshots": [...]` inside the JSON.
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16, `Baseline:` line of your prompt): review the screens tagged `new` or `changed` in `ux-flows.md`; `existing` screens have only a one-line reference, so "differs from the spec" is not a finding there, and the existing look is the reference for new screens. Problems seen only on `existing` screens are `"legacy": true`.

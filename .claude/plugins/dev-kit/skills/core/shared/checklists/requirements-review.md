@@ -13,9 +13,9 @@ Two modes. Findings use `category: requirements` (PRD) or `category: planning` (
 - **Measurable success**: success metrics from the brief are traceable to features.
 
 ## Mode `plan` — review `.dev/plan.md` against PRD, architecture, design
-- **Coverage**: every AC appears in at least one task; every mandatory e2e flow has a task that writes it; every screen in `ui-spec.md` is built by some task. Orphan AC → `critical`.
+- **Coverage**: every AC appears in at least one task; every mandatory e2e flow has a task that writes it; every screen in `ui-spec.md` is built by some task. Orphan AC → `critical`. Existing projects: only `new` and `changed` ACs need tasks; `existing` ACs are not orphans.
 - **Slicing**: tasks are vertical slices completable in one sitting with tests included; horizontal "build all models" tasks → `medium`; tasks larger than ~90 minutes of work → `medium`.
-- **Order and dependencies**: M1 is a walking skeleton incl. tooling and CI; no task depends on a later one; no dependency cycles; dependencies are minimal. Cycle or forward dependency → `critical`.
+- **Order and dependencies**: the first milestone is a walking skeleton incl. tooling and CI (new projects only; in existing projects it is the first slice of new work, numbered from `brownfield.first_milestone`); no task depends on a later one; no dependency cycles; dependencies are minimal. Cycle or forward dependency → `critical`.
 - **Testability**: each task has `test_notes` naming layers; each AC has a place where it will be proven.
 - **Feasibility**: files listed exist in the architecture layout; needed credentials/services are available or flagged as `always_ask`.
 - **Risk first**: the riskiest integration or unknown is scheduled early with a spike or thin slice. Late risk → `medium`.

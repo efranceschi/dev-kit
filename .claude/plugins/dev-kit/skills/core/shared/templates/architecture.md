@@ -14,7 +14,7 @@
 | Package manager / runtime | | | |
 | Hosting / CI | | | |
 
-Detected from: {{detected_from}} (or "greenfield, chosen").
+Detected from: {{detected_from}} (or "greenfield, chosen"). Existing projects: mark each row `as-built` (link the `source: discovered` ADR) or `planned` (new, its own ADR); if the project already has an architecture document, link it here and record only what changes.
 
 ## 2. System context (C4 level 1–2)
 ```mermaid
@@ -53,8 +53,20 @@ dev / staging / prod, how each is run, migrations strategy, CI pipeline steps.
 Production (if `production.when` is not `none`): method and host · install command (with dry-run if any) · migrate command · rollback command · backup location · smoke checks · prerequisites (name → how it is provided; never the value).
 Local preview (if `local_deploy` is on): build + start command, port, bind address `127.0.0.1`, smoke check (URL or example command), stop command.
 
-## 8. Testing strategy (summary; details in `qa/test-plan.md`)
+## 8. Testing strategy and commands (summary; details in `qa/test-plan.md`)
 Pyramid per layer, tools, what must be e2e, coverage target.
+
+| Purpose | Command |
+|---|---|
+| install dependencies | |
+| run (dev) | |
+| test (full suite) | |
+| lint / format check | |
+| type-check | |
+| build | |
+| e2e | |
+
+Skills and agents run exactly these commands (`implement`, `qa`, `test`, `release`, `resource-isolation.md`). Existing projects: copy them from `discovery.md` §3–4.
 
 ## 9. Open points
 Items delegated to implementation time (category + where the decision will be logged).

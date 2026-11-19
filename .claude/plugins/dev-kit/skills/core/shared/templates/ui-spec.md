@@ -3,7 +3,7 @@
 > Purpose: visual system and per-screen specifications so implementation is consistent without design review per task. Derived from `design/ux-flows.md` and `brief.md` block 7 on {{date}}. Status: draft | approved.
 
 ## 1. Design system basis
-Component library / CSS approach chosen (ADR ref). Brand assets available or identity created here.
+Component library / CSS approach chosen (ADR ref). Brand assets available or identity created here. Existing projects: the library already in the code, and the tokens below are **extracted** from it (theme files, CSS variables, Tailwind config) with their source file; add a token only when a `new` screen needs it.
 
 ## 2. Tokens
 | Token | Value | Usage |
@@ -33,7 +33,7 @@ Dark mode: token overrides or "not in v1" (brief).
 Page shells (app shell, auth pages, settings), grid, max widths, responsive behaviour per breakpoint.
 
 ## 5. Screen specs
-One per screen in `ux-flows.md` §4.
+One per screen in `ux-flows.md` §4 (existing projects: only screens tagged `new` or `changed`; `existing` ones are not specified here).
 
 ### S-01 — {{screen name}}
 - Purpose & primary action; stories/ACs served.

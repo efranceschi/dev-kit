@@ -21,7 +21,9 @@ All auditor agents and `code-reviewer`, `spec-tracer` end their final message wi
       "recommendation": "what to change",
       "acceptance_ref": "AC-4 | null",
       "task_ref": "T-003 | null",
-      "effort": "S | M | L"
+      "effort": "S | M | L",
+      "confidence": "high | low (optional; low counts half)",
+      "legacy": "true only in existing projects, for a problem in untouched code (optional)"
     }
   ],
   "previous": [
@@ -38,7 +40,7 @@ All auditor agents and `code-reviewer`, `spec-tracer` end their final message wi
 
 Re-runs (delta mode, round ≥ 2): your prompt lists the previous round's findings of your dimension. For **each** of them, verify it against the current code or artifact and report it in `previous` as `closed` (fixed, with evidence) or `open` (still there). An omitted previous finding counts as open. Do not repeat a previous finding in `findings`; report there only what is new. New `low` findings are recorded but do not affect the score in a re-run, so spend your effort on closing the old ones and on anything new that is medium or worse.
 
-`kit_feedback` (optional): at most 3 items per list, each with an `area` (interview, prd, architecture, design, plan, implement, qa, usability, deploy, scoring, isolation, scripts, prompts, cost, autopilot, other) and a `note` of at most 140 characters about **the dev-kit itself** (your instructions, checklists, tools, isolation): never about the project, and never with file paths, URLs, names or data from the project.
+`kit_feedback` (optional): at most 3 items per list, each with an `area` from the list in `conventions.md` §13 (e.g. qa, review, implement, scoring, isolation, prompts, scripts, other) and a `note` of at most 140 characters about **the dev-kit itself** (your instructions, checklists, tools, isolation): never about the project, and never with file paths, URLs, names or data from the project.
 
 Agents that run commands follow `shared/prompts/resource-isolation.md` (slot, port, database, processes, files).
 

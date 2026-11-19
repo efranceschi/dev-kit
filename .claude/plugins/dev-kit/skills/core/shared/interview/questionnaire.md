@@ -9,7 +9,7 @@ Goal: leave the interview with **every decision the rest of the pipeline would o
 3. **Every question has a recommended option first**, marked "(Recomendado)"/"(Recommended)" in the user's language, and an option meaning "decide for me". "Decide for me" answers are recorded in `brief.md` as `delegated` so later skills know they may decide alone.
 4. **Follow-ups are allowed** (one extra round per block at most) when an answer opens a new branch (e.g. payments = yes → which provider, which currency).
 5. **Write as you go.** After each block, append its section to `.dev/brief.md` (template `shared/templates/brief.md`). If the session dies mid-interview, `interview` resumes at the first block without a section.
-6. **Close.** Show a compact summary (one line per block), ask for a single confirmation, then: derive initial ADRs into `decisions.md`, run `dev_state.py init` with `--language`, `--stack-json` and `--autonomy-json`, set `phase prd`.
+6. **Close.** Show a compact summary (one line per block), ask for a single confirmation, then: derive initial ADRs into `decisions.md`, run `dev_state.py init` with `--language`, `--stack-json` and `--autonomy-json`, set `phase prd` (existing project in `maintenance` mode: hand back to the onboarding instead, `onboarding.md` step 9).
 
 ## Blocks and items
 
@@ -18,7 +18,7 @@ Goal: leave the interview with **every decision the rest of the pipeline would o
 - Target audience and market (B2B, B2C, internal tool, personal).
 - Value proposition / what makes it different; 1–3 reference products or competitors.
 - Success metrics for v1 (e.g. "10 users complete onboarding").
-- Project type: greenfield, rewrite, or adding to an existing codebase (brownfield → map the repo first).
+- Project type: greenfield, rewrite, or adding to an existing codebase (existing code → `start` runs the onboarding first: baseline tag, `.dev/discovery.md`, entry mode; this block then only confirms what discovery found).
 
 ### Block 2 — Users and roles
 - Personas (name, goal, technical level).
@@ -74,7 +74,7 @@ Goal: leave the interview with **every decision the rest of the pipeline would o
 - Remind unattended users that Claude Code's own permission prompts must be covered by a permission mode or allowlist (`/fewer-permission-prompts`).
 - Autonomy level: `high` (recommended for autonomous builds), `balanced`, `cautious` — see `autonomy-policy.md`; adjust `always_ask` list.
 - May the agent: install dependencies, run dev servers and browsers, create config files (.env.example, CI), call external services with provided keys, create/modify git hooks?
-- Git: one commit per task (recommended), branch strategy (main vs feature branch per milestone), push allowed?
+- Git: one commit per task (recommended), commit message style (existing projects: confirm the style found in `discovery.md` §11 as `autonomy.commit_style`, e.g. `{type}: {summary}`; otherwise the default `[{task}] {type}: {summary}`), branch strategy (main vs feature branch per milestone), push allowed?
 - **Model and effort for the agents** (recommended option first: `ask`): show the tier table of `conventions.md` §9 (speed: haiku, balanced: sonnet, quality: opus; escalation only for failed dimensions, effort before model) and ask: `ask` (confirm before each escalation, recommended: most conservative), `preapproved` (escalate within the ladder without asking), `off` (never escalate); and whether to move any agent to another tier. Record as `autonomy.model_policy`.
 - **Issues found during the build** (conventions §15, explain in one line that the milestone cadence never changes): share of each milestone reserved for queued issues (`issue_buffer_pct`, recommended 20; 10 is more conservative), and whether to use a short **cool-down** between milestones for small items (recommended on, `max_tasks` 5). Record as `autonomy.issue_buffer_pct` and `autonomy.cooldown`. Mention that short tips will teach the rest as they become useful (`autonomy.tips`, on by default).
 - Time budget per task before marking `blocked` (default 30 min), max fix rounds per QA gate (default 3).
@@ -84,9 +84,9 @@ Goal: leave the interview with **every decision the rest of the pipeline would o
 - **Production** — only if the product will run somewhere beyond the developer's machine. Ask how it gets there and when: method (install script, systemd, docker compose, PaaS, other) and host (local or remote); when to deploy (`per_milestone`, recommended when the user already uses the product while it is being built; `on_release`; `manual`); smoke checks (e.g. a health endpoint and the main routes); and the operational prerequisites (backup credentials, API keys, model downloads, certificates), each with how it will be provided — collect them now so they do not surface as loose open questions later. Record as `autonomy.production` in block 9's JSON, and the consent as `pause_policy.production_deploy` (`ask` recommended; `preauthorize` for the named targets in unattended runs).
 - **Local deploy per milestone** — only if it makes sense for the platform (table in `conventions.md` §11: web/API/service with `may_run_servers`, desktop, CLI, native mobile with an emulator; never for libraries, single scripts or documents, where it is recorded as `off (inferred)` without asking). Ask: "When a milestone is approved, do you want a version running locally so you can try it?" — `keep_running` (recommended for web/API/service: you try it while the next milestone is built), `smoke` (recommended for CLI/desktop: proves it runs without keeping anything up), `off`. If not `off`, suggest a free port different from the dev port and ask whether to send an app notification with the URL. Record as `autonomy.local_deploy` in block 9's JSON.
 - Environments and what "done" means for v1 (deployed? running locally? passing tests?).
-- Versioning scheme (semver), changelog, documentation expected (README, API docs, user guide, ADRs).
+- Versioning scheme (semver), changelog, documentation expected (README, API docs, user guide, ADRs). Existing projects: confirm the version source, tag prefix and CHANGELOG format from `discovery.md` §11 instead of asking.
 - Handover: who maintains it, onboarding docs needed.
 
 ## Output contract
 
-`brief.md` must have one `## Block N — Title` section per block with a bullet per item: `- **Item:** answer` and, where applicable, `(delegated)` or `(inferred, confirmed)`. Unknowns that the user chose to leave open go to `open-questions.md` via `dev_state.py add-question --skill interview`.
+`brief.md` must have one `## Block N — Title` section per block with a bullet per item: `- **Item:** answer` and, where applicable, `(delegated)` or `(inferred, confirmed)`. Unknowns that the user chose to leave open go to `open-questions.md` via `dev_state.py add-question "<question>" --skill interview --assumption "<assumption>" --impact "<impact>"`.

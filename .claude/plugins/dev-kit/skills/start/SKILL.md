@@ -1,6 +1,6 @@
 ---
 name: start
-description: Entry point and resume for dev-kit projects. Detects whether .dev/ exists, reconciles state with git, reports where the project is (interview, PRD, plan, implementation, QA...) and routes to the next * skill. For an existing codebase without .dev/ it runs the onboarding first (git baseline tag, discovery, test baseline, retroactive ADRs). Use when the user wants to start building an application, adopt the kit in an existing project, continue a project, or asks "where were we" / "what's next". Also use to kick off a new project idea.
+description: Entry point and resume for dev-kit projects. Detects whether .dev/ exists, reconciles state with git, reports where the project is (interview, PRD, plan, implementation, QA...) and routes to the next skill. For an existing codebase without .dev/ it runs the onboarding first (git baseline tag, discovery, test baseline, retroactive ADRs). Use when the user wants to start building an application, adopt the kit in an existing project, continue a project, or asks "where were we" / "what's next". Also use to kick off a new project idea.
 argument-hint: "[project idea or goal, or empty to resume]"
 allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, Skill
 ---
@@ -9,7 +9,7 @@ allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, Skill
 
 Kit root (`<KIT>` in shared files and agents): `${CLAUDE_SKILL_DIR}/../core`. Include `Kit root: ${CLAUDE_SKILL_DIR}/../core` in the prompt of every agent you spawn. Work from the project root (`${CLAUDE_PROJECT_DIR}`) and do not `cd` away from it.
 
-Session log: record `skill_start` / `skill_end` (with `status`, `duration_s` and a brief `feedback` on the dev-kit itself), agent and pause events as `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` §13 says, with `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" event <type> --set key=value`. Never put project text into an event. When you resume or start a project, begin a new session with `event session_start --set trigger=start`.
+Session log (only once `.dev/state.json` exists: for a new project after the interview's `init`, for an existing one after onboarding step 2; before that `event` is skipped): record `skill_start` / `skill_end` (with `status`, `duration_s` and a brief `feedback` on the dev-kit itself), agent and pause events as `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` §13 says, with `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" event <type> --set key=value`. Never put project text into an event. When you resume or start a project, begin a new session with `event session_start --set trigger=start`.
 
 Current state (empty when this is a new project):
 !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" status --short --quiet-if-missing`
@@ -35,7 +35,7 @@ If the injected output above contains a Python "can't open file" error, the kit 
      - uncommitted changes exist for it → tell the user you will continue it (default) unless they prefer to reset (`unblock`/`--force`); when running autonomously, continue.
      - no changes at all → `dev_state.py set` nothing; just note the task will restart.
    - Show the three-line status and open questions count, and one line: "Not sure what to do? /dev-kit:help".
-   - Existing project (state has `brownfield`, `conventions.md` §16): before the table, check the artifacts in order — `brief.md` → `prd.md` → `architecture.md` → `design/ux-flows.md` and `design/ui-spec.md` (only if a `new` AC touches the UI and review `design` is not `n/a`) → `plan.md` — and route to the skill that writes the first one missing, whatever the phase says (say which stage was skipped). In `maintenance` mode with phase `implement` and no `todo` tasks, route to `issue` (or `backlog`) instead of `implement`.
+   - Existing project (state has `brownfield`; the status line says `existing project`, `conventions.md` §16): before the table, check the artifacts in order — `brief.md` → `prd.md` → `architecture.md` → `design/ux-flows.md` and `design/ui-spec.md` (only if a `new` AC touches the UI and review `design` is not `n/a`) → `plan.md` — and route to the skill that writes the first one missing, whatever the phase says (say which stage was skipped). In `maintenance` mode with phase `implement` and no `todo` tasks, route to `qa M<n>` when the open maintenance milestone has done tasks and a pending gate, otherwise to `issue` (or `backlog`).
    - Decide the next skill from `phase`:
      | phase | next |
      |---|---|
@@ -48,10 +48,10 @@ If the injected output above contains a Python "can't open file" error, the kit 
      | implement | `implement` (or `autopilot` to run until the next gate) |
      | qa | `qa <milestone>` |
      | usability | `usability` |
-     | docs | `docs` |
+     | docs | `docs`, then `review docs` and `release` |
      | done | `release` or nothing |
-   - If the user's input names a different intent (e.g. "add feature X", "run QA"), honour it instead: a scope change goes through `interview --gaps` then `plan`.
-4. Offer two options, recommended first: run the whole pipeline autonomously (`autopilot`) or run only the next step. If the brief's autonomy level is `high` and the user gave no instruction, invoke `autopilot` directly.
+   - If the user's input names a different intent (e.g. "add feature X", "run QA"), honour it instead: a bug, improvement or scope change goes through `issue` (a scope change is class `change`: `prd` → `review prd` → `plan` replan); open questions go through `interview --gaps`. Existing project in `maintenance` mode and the user asks for a feature: switch with `DS init --brownfield-json '{"mode":"feature"}'` (it reopens the `n/a` reviews), then `interview --express` on the change, `prd` revision and `plan replan`.
+4. Offer two options, recommended first: run the whole pipeline autonomously or run only the next step (invoke that skill). `autopilot` can only be started by the user: when it is the recommendation (always when the brief's autonomy level is `high` or `unattended` and the user gave no instruction), end with the command in a fenced block, `/dev-kit:autopilot`, and say in one line what it will do; never try to invoke it with the Skill tool.
 
 ## Never
 - Never edit `.dev/state.json` by hand; use the script.
