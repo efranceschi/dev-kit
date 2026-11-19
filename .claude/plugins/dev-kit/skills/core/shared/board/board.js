@@ -394,6 +394,172 @@
       b ? ` · server pid ${b.pid} on port ${b.port}` : "", " · stop it here or with ", h("code", { text: "/dev-kit:board stop" }));
   }
 
+  // ------------------------------------------------------------------ execution graph (DAG of the milestone)
+  const GW = 176, GH = 46, GX = 72, GY = 52, GPAD = 34;
+  let view = "kanban", gmode = "actual", gdata = null, gseq = 0;
+  const STCOL = { done: "var(--good)", in_progress: "var(--warning)", blocked: "var(--critical)", todo: "var(--todo)", pending: "var(--todo)", passed: "var(--good)", skipped: "var(--todo)" };
+
+  function segSwitch(label, opts, cur, onPick) {
+    return h("div", { class: "seg-switch", role: "group", "aria-label": label },
+      opts.map(([k, text]) => h("button", { type: "button", class: `seg-btn${cur === k ? " on" : ""}`, "aria-pressed": String(cur === k), text, onclick: () => onPick(k) })));
+  }
+  function renderBoardView(m) {
+    const tools = [segSwitch("View", [["kanban", "Kanban"], ["graph", "Graph"]], view, (k) => { view = k; renderBoardView(currentMilestone()); })];
+    if (view === "graph") tools.push(segSwitch("Graph mode", [["actual", "Actual"], ["planned", "Planned"]], gmode, (k) => { gmode = k; drawGraph(); renderBoardView(currentMilestone()); }));
+    fill($("board-tools"), tools);
+    $("kanban").hidden = view !== "kanban";
+    $("graph").hidden = view !== "graph";
+    if (view === "graph" && m) loadGraph(m.id);
+  }
+  const currentMilestone = () => (data && data.milestones.find((x) => x.id === currentId())) || null;
+
+  async function loadGraph(mid) {
+    const my = ++gseq;
+    try {
+      const r = await fetch(`/api/graph?m=${encodeURIComponent(mid)}`, { cache: "no-store" });
+      const g = await r.json();
+      if (my !== gseq) return;
+      gdata = g.ok ? g : null;
+    } catch (e) { if (my !== gseq) return; gdata = null; }
+    drawGraph();
+  }
+
+  function layoutGraph(g) {
+    const planned = gmode === "planned";
+    const nodes = g.nodes.filter((n) => (planned ? n.planned && n.id !== "GATE" || n.id === "GATE" : true));
+    const ids = new Set(nodes.map((n) => n.id));
+    const edges = g.edges.filter((e) => ids.has(e.from) && ids.has(e.to) && (planned ? e.kind === "planned" || e.kind === "removed" : e.kind !== "removed"));
+    const dep = edges.filter((e) => e.kind !== "fix" && e.to !== "GATE" && e.from !== "GATE");
+    const layer = {};
+    const preds = (id) => dep.filter((e) => e.to === id).map((e) => e.from);
+    const lay = (id, seen = new Set()) => {
+      if (layer[id] !== undefined) return layer[id];
+      if (seen.has(id)) return 0; seen.add(id);
+      layer[id] = preds(id).reduce((mx, p) => Math.max(mx, lay(p, seen) + 1), 0);
+      return layer[id];
+    };
+    const fixes = new Set(g.edges.filter((e) => e.kind === "fix" && e.from === "GATE" && ids.has(e.to)).map((e) => e.to));
+    nodes.forEach((n) => { if (n.id !== "GATE" && !fixes.has(n.id)) lay(n.id); });
+    const maxL = Math.max(0, ...Object.values(layer));
+    fixes.forEach((f) => { layer[f] = maxL; });
+    layer.GATE = maxL + 1;
+    const cols = {};
+    nodes.forEach((n) => { (cols[layer[n.id]] = cols[layer[n.id]] || []).push(n); });
+    const pos = {}, rowOf = {};
+    let rowsMax = 1;
+    Object.keys(cols).map(Number).sort((a, b) => a - b).forEach((l) => {
+      const list = cols[l];
+      if (+l === layer.GATE) return;
+      const bary = (n) => { const ys = preds(n.id).map((p) => rowOf[p]).filter((v) => v !== undefined); return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : Infinity; };
+      list.sort((a, b) => (fixes.has(a.id) - fixes.has(b.id)) || (bary(a) - bary(b)) || (parseInt(a.id.slice(2)) - parseInt(b.id.slice(2))));
+      list.forEach((n, i) => { rowOf[n.id] = i; pos[n.id] = { x: GPAD + l * (GW + GX), y: GPAD + 24 + i * (GH + GY) }; });
+      rowsMax = Math.max(rowsMax, list.length);
+    });
+    const midY = GPAD + 24 + ((rowsMax - 1) * (GH + GY)) / 2;
+    pos.GATE = { x: GPAD + layer.GATE * (GW + GX), y: midY };
+    return { nodes, edges, pos, fixes, layer, width: GPAD * 2 + (layer.GATE + 1) * (GW + GX) - GX, height: GPAD * 2 + 24 + rowsMax * (GH + GY) + 40, planned };
+  }
+
+  function groupLoops(g, id) {
+    const by = {};
+    g.loops.filter((l) => l.task === id).forEach((l) => { (by[l.kind] = by[l.kind] || []).push(l); });
+    return Object.entries(by).map(([kind, list]) => ({ kind, list }));
+  }
+  const LOOPTXT = { block: "blocked", restart: "retry", gate: "gate failed" };
+
+  function drawGraph() {
+    const box = $("graph");
+    if (!gdata) { fill(box, h("div", { class: "empty", text: "No graph available for this milestone." })); return; }
+    const g = gdata, L = layoutGraph(g);
+    const parGroups = g.parallel.map((grp, i) => ({ grp, tag: String.fromCharCode(65 + i) }));
+    const parOf = {}; parGroups.forEach((p) => p.grp.forEach((id) => { parOf[id] = p; }));
+    const svg = s("svg", { class: "gsvg", width: L.width, height: L.height, viewBox: `0 0 ${L.width} ${L.height}`, role: "img",
+      "aria-label": `Execution graph of ${g.milestone}: ${L.nodes.length} nodes` });
+    // arrowheads are drawn explicitly (a small triangle at the end of each edge), so direction shows in any renderer
+    const head = (tx, ty, fx, fy, cls) => {
+      const a = Math.atan2(ty - fy, tx - fx), L1 = 9, W = 4.5;
+      const bx = tx - Math.cos(a) * L1, by = ty - Math.sin(a) * L1, px = -Math.sin(a) * W, py = Math.cos(a) * W;
+      svg.append(s("path", { d: `M${tx} ${ty} L${bx + px} ${by + py} L${bx - px} ${by - py} Z`, class: `ghead ${cls}` }));
+    };
+    const P = (id) => L.pos[id];
+    // dependency edges
+    L.edges.forEach((e) => {
+      const a = P(e.from), b = P(e.to);
+      if (!a || !b) return;
+      if (e.kind === "fix") {
+        if (e.from === "GATE") {  // back edge below the nodes: the gate sends work to the fix task
+          const y = Math.max(a.y, b.y) + GH + 30;
+          svg.append(s("path", { d: `M${a.x + GW / 2} ${a.y + GH} C${a.x + GW / 2} ${y} ${b.x + GW / 2} ${y} ${b.x + GW / 2} ${b.y + GH}`, class: "gedge fix" }));
+          head(b.x + GW / 2, b.y + GH, b.x + GW / 2, y, "fix");
+        } else {
+          const x1 = a.x + GW, y1 = a.y + GH / 2, x2 = b.x, y2 = b.y + GH / 2, dx = (x2 - x1) / 2;
+          svg.append(s("path", { d: `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`, class: "gedge fix" }));
+          head(x2, y2, x2 - dx, y2, "fix");
+        }
+        return;
+      }
+      const x1 = a.x + GW, y1 = a.y + GH / 2, x2 = b.x, y2 = b.y + GH / 2, dx = Math.max(24, (x2 - x1) / 2);
+      // an edge that skips columns arches over the nodes in between instead of running behind them
+      const arch = L.layer[e.to] - L.layer[e.from] > 1 ? Math.min(y1, y2) - GH * 1.4 : null;
+      const cy1 = arch === null ? y1 : arch, cy2 = arch === null ? y2 : arch;
+      svg.append(s("path", { d: `M${x1} ${y1} C${x1 + dx} ${cy1} ${x2 - dx} ${cy2} ${x2} ${y2}`, class: `gedge ${e.kind}` }));
+      head(x2, y2, x2 - dx, cy2, e.kind);
+    });
+    // nodes
+    L.nodes.forEach((n) => {
+      const p = P(n.id); if (!p) return;
+      const st = L.planned ? "todo" : n.status;
+      const dur = n.intervals.reduce((sum, [a, b]) => sum + ((b ? parseT(b) : Date.now()) - parseT(a)), 0) / 1000;
+      const label = n.id === "GATE" ? `QA gate${!L.planned && n.score != null ? ` · ${n.score}` : ""}` : n.id;
+      const title = (n.title || "").length > 24 ? n.title.slice(0, 23) + "…" : n.title || "";
+      const par = L.planned ? null : parOf[n.id];
+      const gEl = s("g", { class: `gnode${n.external ? " ext" : ""}${n.added && !L.planned ? " added" : ""}${n.id === "GATE" ? " gate" : ""}`, transform: `translate(${p.x} ${p.y})`, tabindex: "0",
+        role: "img", "aria-label": `${n.id} ${n.title || ""}, ${String(n.status).replace("_", " ")}${n.attempts > 1 ? `, ${n.attempts} attempts` : ""}${par ? `, parallel group ${par.tag}` : ""}` },
+        s("rect", { class: "gbox", width: GW, height: GH, rx: 9 }),
+        s("rect", { class: "gbar", width: 5, height: GH - 12, x: 0, y: 6, rx: 2.5, style: `fill:${STCOL[st] || STCOL.todo}` }),
+        s("text", { class: "gid", x: 14, y: 19, text: label + (n.external ? ` · ${n.milestone}` : "") }),
+        s("text", { class: "gtitle", x: 14, y: 36, text: title }));
+      if (!L.planned && n.attempts > 1) gEl.append(s("text", { class: "gbadge", x: GW - 8, y: 17, "text-anchor": "end", text: `×${n.attempts}` }));
+      if (par) gEl.append(s("text", { class: "gpar", x: GW - 8, y: 36, "text-anchor": "end", text: `∥${par.tag}` }));
+      const tip = (evt) => {
+        const rows = [[String(n.status).replace("_", " "), "status"]];
+        if (n.id !== "GATE") rows.push([String(n.attempts), n.attempts === 1 ? "attempt" : "attempts"], [String(n.blocks), "blocks"]);
+        if (dur > 0) rows.push([fmtDur(dur), "executing"]);
+        if (n.id === "GATE") rows.push([String(n.qa_runs || 0), "QA runs"]);
+        if (par) rows.push([`∥${par.tag}`, `with ${par.grp.filter((x) => x !== n.id).join(", ")}`]);
+        n.history.slice(-8).forEach(([at, tr]) => rows.push([tr, Number.isFinite(parseT(at)) ? fmtDT(parseT(at)) : at]));
+        showTip(evt, `${n.id}${n.title ? ` · ${n.title}` : ""}`, rows);
+      };
+      ["pointermove", "focus"].forEach((ev) => gEl.addEventListener(ev, tip));
+      ["pointerleave", "blur"].forEach((ev) => gEl.addEventListener(ev, hideTip));
+      svg.append(gEl);
+      // failure loops: leave the top of the node and re-enter it
+      if (!L.planned) groupLoops(g, n.id).forEach(({ kind, list }, i) => {
+        const x1 = p.x + GW * 0.2 + i * 7, x2 = p.x + GW * 0.5 + i * 7, y = p.y, hgt = 16 + i * 9;
+        svg.append(s("path", { d: `M${x1} ${y} C${x1 - 4} ${y - hgt} ${x2 + 4} ${y - hgt} ${x2} ${y - 1}`, class: "gedge loop" }));
+        head(x2, y - 1, x2 + 4, y - hgt, "loop");
+        const last = list[list.length - 1];
+        svg.append(s("text", { class: "gloop", x: p.x + GW * 0.5 + 18, y: y - 5 - i * 12, "text-anchor": "start",
+          text: `${LOOPTXT[kind] || kind}${list.length > 1 ? ` ×${list.length}` : ""}${kind === "gate" && last.score != null ? ` · ${last.score}` : ""}` }));
+      });
+    });
+    const note = [];
+    if (!g.baseline) note.push(h("p", { class: "gnote", text: "No baseline recorded for this project yet: the initial plan is taken from the next sync-plan, so Planned shows the current plan." }));
+    const legend = h("ul", { class: "glegend", "aria-label": "Legend" },
+      [["done", "Done"], ["in_progress", "In progress"], ["blocked", "Blocked"], ["todo", "To do"]].map(([k, t]) => h("li", {}, h("span", { class: `swatch st-${k}`, "aria-hidden": "true" }), t)),
+      h("li", {}, h("span", { class: "lg-line loop", "aria-hidden": "true" }), "Failure loop (block, retry, failed gate)"),
+      h("li", {}, h("span", { class: "lg-line added", "aria-hidden": "true" }), "Added after the plan"),
+      parGroups.length ? h("li", {}, "∥ " + parGroups.map((p) => `${p.tag}: ${p.grp.join(", ")}`).join(" · ")) : h("li", { text: "No parallel execution yet" }));
+    const rows = g.nodes.filter((n) => n.id !== "GATE").map((n) => {
+      const deps = g.edges.filter((e) => e.to === n.id && e.kind !== "removed").map((e) => e.from).join(", ");
+      return h("tr", {}, h("td", { text: n.id }), h("td", { text: n.title || "" }), h("td", { text: String(n.status).replace("_", " ") }), h("td", { text: deps || "—" }),
+        h("td", { text: String(n.attempts) }), h("td", { text: String(n.blocks) }));
+    });
+    fill(box, note, legend, h("div", { class: "graph-scroll", tabindex: "0", role: "region", "aria-label": "Execution graph (scrollable)" }, svg),
+      h("details", { class: "table-view" }, h("summary", { text: "Show as table" }),
+        h("table", { class: "gtable" }, h("thead", {}, h("tr", {}, ["Task", "Title", "Status", "Depends on", "Attempts", "Blocks"].map((c) => h("th", { text: c })))), h("tbody", {}, rows))));
+  }
+
   // ------------------------------------------------------------------ agents (fed by plugin hooks)
   function fmtDur(sec) {
     sec = Math.max(0, Math.round(sec));
@@ -434,7 +600,7 @@
     banner.hidden = true;
     const curId = currentId();
     const m = data.milestones.find((x) => x.id === curId) || null;
-    renderHeader(); renderTabs(); renderHero(m); renderTiles(m); renderAgents(); renderKanban(m);
+    renderHeader(); renderTabs(); renderHero(m); renderTiles(m); renderAgents(); renderKanban(m); renderBoardView(m);
     renderBurndown(m); renderVelocity(curId); renderBacklog(curId); renderImpediments(); renderDoD(); renderFeed();
     $("main").setAttribute("aria-busy", "false");
   }

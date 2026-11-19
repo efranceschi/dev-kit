@@ -217,6 +217,8 @@ Every skill keeps a structured, high-level log of the session, for the user to f
 - **Stage grades** (fixed formula, `dev_telemetry.stage_report`): start at 100; −10 per round beyond the first of each review or gate, plus −10 per round beyond `max_fix_rounds_per_gate`; forced pass −25 by the user, −15 by policy; −10 each time a scope's score drops between rounds; −5 per error (max −30); −5 per agent without parsable JSON; −10 per failed and −5 per parked skill run; feedback of the stage's area −3 per `failed` and +2 per `worked` item (net −15…+6); a review or gate still failing caps the stage at 60; clamp 0–100. Stages that did not run show `—`; the overall grade is the mean of the stages that ran. Every grade lists the reasons that produced it.
 - Logging never blocks work: if an event is rejected, fix the fields or drop it; never put project text into a field to make it pass.
 
+- **Graph inputs:** the board's execution graph reads `task` events (`add`, `start`, `done`, `block`, `unblock`) and `gate` events from this log, plus `.dev/plan-baseline.json`, the initial plan written by `sync-plan` (first write wins; QA fix and issue tasks never enter it).
+
 ## 14. Costs (`dev_cost.py`, skill `costs`)
 
 - **Source:** Claude Code's local transcripts of the project (`~/.claude/projects/<project>/<session>.jsonl` and `<session>/subagents/agent-*.jsonl`, or `$CLAUDE_CONFIG_DIR`). `dev_cost.py ingest` reads only usage numbers, model, agent type and ids, deduplicated by request, into `.dev/costs/usage.jsonl`. It is incremental and safe to run often. Message content is never read into the store. Without transcripts, the totals fall back to the `tokens` the skills logged in `agent_end` (marked partial).
