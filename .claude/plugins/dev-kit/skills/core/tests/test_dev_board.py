@@ -323,6 +323,59 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(fix_edges, {("GATE", "T-003"), ("T-003", "GATE")})
         self.assertIsNone(mod.graph_data(self.root, "M9"))
 
+    def _mod(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("dev_board", BOARD)
+        mod = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(BOARD.parent))
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _hook(self, event, agent_id, agent, ago_s=0):
+        from datetime import datetime, timedelta, timezone
+        ts = (datetime.now(timezone.utc) - timedelta(seconds=ago_s)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        run = self.root / ".dev" / "run"
+        run.mkdir(exist_ok=True)
+        with (run / "agents.jsonl").open("a") as f:
+            f.write(json.dumps({"ts": ts, "event": event, "session": "s1", "agent_id": agent_id, "agent": agent}) + "\n")
+
+    def test_live_agents_from_skill_log_without_hooks(self):
+        mod = self._mod()
+        self.ds("event", "agent_spawn", "--set", "agent=implementer", "--set", "scope=T-002", "--set", "slot=1")
+        self.ds("event", "agent_spawn", "--set", "agent=code-reviewer", "--set", "scope=M1", "--set", "slot=2")
+        self.ds("event", "agent_spawn", "--set", "agent=security-auditor", "--set", "scope=M1", "--set", "slot=3")
+        self.ds("event", "agent_end", "--set", "agent=security-auditor", "--set", "scope=M1", "--set", "slot=3",
+                "--set", "status=ok", "--set", "duration_s=40")
+        a = mod.live_agents(self.root)
+        self.assertFalse(a["hooks"])
+        self.assertEqual(sorted((x["agent"], x["node"]) for x in a["active"]),
+                         [("code-reviewer", "GATE:M1"), ("implementer", "T-002")])
+        gate = next(n for n in mod.graph_data(self.root, "M1")["nodes"] if n["id"] == "GATE")
+        self.assertEqual(gate["agents_done"][-1]["agent"], "security-auditor")
+        self.assertEqual(gate["agents_done"][-1]["duration_s"], 40)
+
+    def test_live_agents_hooks_link_only_when_unambiguous(self):
+        mod = self._mod()
+        self._hook("session_start", "", "")
+        self.ds("event", "agent_spawn", "--set", "agent=implementer", "--set", "scope=T-002", "--set", "slot=1")
+        self._hook("agent_start", "a1", "dev-kit:implementer")
+        self._hook("agent_start", "a2", "Explore")
+        a = {x["agent"]: x for x in mod.live_agents(self.root)["active"]}
+        self.assertTrue(mod.live_agents(self.root)["hooks"])
+        self.assertEqual(a["implementer"]["node"], "T-002")
+        self.assertIsNone(a["Explore"]["node"])
+        # a second implementer starting in the same window makes both ambiguous: no node for either
+        self.ds("event", "agent_spawn", "--set", "agent=implementer", "--set", "scope=T-001", "--set", "slot=2", "--set", "round=1")
+        self._hook("agent_start", "a3", "dev-kit:implementer")
+        nodes = [x["node"] for x in mod.live_agents(self.root)["active"] if x["agent"] == "implementer"]
+        self.assertEqual(nodes, [None, None])
+        # stopped hook agents leave the running set; a new one still sees two open spawns, so it stays unlinked
+        self._hook("agent_stop", "a1", "dev-kit:implementer")
+        self._hook("agent_stop", "a3", "dev-kit:implementer")
+        self._hook("agent_start", "a4", "dev-kit:implementer")
+        late = [x for x in mod.live_agents(self.root)["active"] if x["agent"] == "implementer"]
+        self.assertEqual([x["node"] for x in late], [None])
+
     def test_graph_endpoint(self):
         self.board("start", check=True)
         port = self.record()["port"]

@@ -59,16 +59,15 @@
 
     <section class="tiles" aria-label="Key figures" id="tiles"></section>
 
-    <section class="agents-strip" id="agents-card" aria-label="Agents" hidden>
-      <span class="agents-label" id="agents-label">Agents</span>
-      <div id="agents" class="agents-chips"></div>
-    </section>
-
     <section class="card board-card" aria-labelledby="board-h">
       <div class="card-head">
         <h2 id="board-h">Sprint board</h2>
         <div class="board-tools" id="board-tools"></div>
         <p class="card-sub" id="next-up"></p>
+      </div>
+      <div class="agents-strip" id="agents-card" role="group" aria-label="Agents not tied to a task" hidden>
+        <span class="agents-label" id="agents-label">Agents</span>
+        <div id="agents" class="agents-chips"></div>
       </div>
       <div class="kanban" id="kanban"></div>
       <div class="graph" id="graph" hidden></div>

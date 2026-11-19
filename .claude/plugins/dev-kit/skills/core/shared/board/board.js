@@ -172,6 +172,9 @@
         t.lane ? h("span", { class: `chip lane-${t.lane}`, text: t.lane }) : null,
         isNext ? h("span", { class: "chip next-chip", text: "next up" }) : null),
       h("div", { class: "tcard-title", text: t.title }),
+      agentsOn(t.id).length ? h("div", { class: "tcard-agents" }, agentsOn(t.id).map((x) => h("span", { class: "agent-chip small" },
+        h("span", { class: "agent-dot", "aria-hidden": "true" }), h("span", { class: "agent-name", text: x.agent }),
+        h("span", { class: "agent-time", "data-start": x.started_at, text: fmtDur((Date.now() - parseT(x.started_at)) / 1000) })))) : null,
       t.status === "blocked" && t.blocked_reason ? h("div", { class: "reason", text: t.blocked_reason }) : null,
       h("div", { class: "tcard-meta" },
         t.acceptance ? h("span", { text: `${t.acceptance} AC` }) : null,
@@ -406,7 +409,7 @@
       opts.map(([k, text]) => h("button", { type: "button", class: `seg-btn${cur === k ? " on" : ""}`, "aria-pressed": String(cur === k), text, onclick: () => onPick(k) })));
   }
   function renderBoardView(m) {
-    const tools = [segSwitch("View", [["graph", "Graph"], ["kanban", "Kanban"]], view, (k) => { view = k; store.set("board-view", k); renderBoardView(currentMilestone()); })];
+    const tools = [segSwitch("View", [["graph", "Graph"], ["kanban", "Kanban"]], view, (k) => { view = k; store.set("board-view", k); renderBoardView(currentMilestone()); renderAgents(); })];
     if (view === "graph") tools.push(segSwitch("Graph mode", [["actual", "Actual"], ["planned", "Planned"]], gmode, (k) => { gmode = k; drawGraph(); renderBoardView(currentMilestone()); }));
     fill($("board-tools"), tools);
     $("kanban").hidden = view !== "kanban";
@@ -484,6 +487,7 @@
       svg.append(s("path", { d: `M${tx} ${ty} L${bx + px} ${by + py} L${bx - px} ${by - py} Z`, class: `ghead ${cls}` }));
     };
     const P = (id) => L.pos[id];
+    let bottom = L.height;
     // dependency edges
     L.edges.forEach((e) => {
       const a = P(e.from), b = P(e.to);
@@ -515,8 +519,9 @@
       const label = n.id === "GATE" ? `QA gate${!L.planned && n.score != null ? ` · ${n.score}` : ""}` : n.id;
       const title = (n.title || "").length > 24 ? n.title.slice(0, 23) + "…" : n.title || "";
       const par = L.planned ? null : parOf[n.id];
+      const here = L.planned ? [] : agentsOn(n.id === "GATE" ? `GATE:${g.milestone}` : n.id);
       const gEl = s("g", { class: `gnode${n.external ? " ext" : ""}${n.added && !L.planned ? " added" : ""}${n.id === "GATE" ? " gate" : ""}`, transform: `translate(${p.x} ${p.y})`, tabindex: "0",
-        role: "img", "aria-label": `${n.id} ${n.title || ""}, ${String(n.status).replace("_", " ")}${n.attempts > 1 ? `, ${n.attempts} attempts` : ""}${par ? `, parallel group ${par.tag}` : ""}` },
+        role: "img", "aria-label": `${n.id} ${n.title || ""}, ${String(n.status).replace("_", " ")}${n.attempts > 1 ? `, ${n.attempts} attempts` : ""}${par ? `, parallel group ${par.tag}` : ""}${here.length ? `, agents running: ${here.map((x) => x.agent).join(", ")}` : ""}` },
         s("rect", { class: "gbox", width: GW, height: GH, rx: 9 }),
         s("rect", { class: "gbar", width: 5, height: GH - 12, x: 0, y: 6, rx: 2.5, style: `fill:${STCOL[st] || STCOL.todo}` }),
         s("text", { class: "gid", x: 14, y: 19, text: label + (n.external ? ` · ${n.milestone}` : "") }),
@@ -529,12 +534,31 @@
         if (dur > 0) rows.push([fmtDur(dur), "executing"]);
         if (n.id === "GATE") rows.push([String(n.qa_runs || 0), "QA runs"]);
         if (par) rows.push([`∥${par.tag}`, `with ${par.grp.filter((x) => x !== n.id).join(", ")}`]);
+        here.forEach((x) => rows.push([x.agent, `running ${fmtDur((Date.now() - parseT(x.started_at)) / 1000)}`]));
+        (n.agents_done || []).slice(-5).forEach((x) => rows.push([x.agent, [x.status || "done", x.duration_s != null ? fmtDur(x.duration_s) : null,
+          x.findings != null ? `${x.findings} findings` : null].filter(Boolean).join(" · ")]));
         n.history.slice(-8).forEach(([at, tr]) => rows.push([tr, Number.isFinite(parseT(at)) ? fmtDT(parseT(at)) : at]));
         showTip(evt, `${n.id}${n.title ? ` · ${n.title}` : ""}`, rows);
       };
       ["pointermove", "focus"].forEach((ev) => gEl.addEventListener(ev, tip));
       ["pointerleave", "blur"].forEach((ev) => gEl.addEventListener(ev, hideTip));
       svg.append(gEl);
+      // running agents on this node: pills under the box (max 3, then +N)
+      // stacked under the node: the gate is alone in its column, so it shows more rows (parallel auditors)
+      const rows = n.id === "GATE" ? 6 : 2, BH = 17, BG = 3;
+      const list = here.length > rows ? here.slice(0, rows - 1) : here;
+      list.forEach((x, k) => {
+        const dur = shortDur((Date.now() - parseT(x.started_at)) / 1000);
+        const w = Math.min(GW, 30 + x.agent.length * 6.3 + 34);
+        svg.append(s("g", { class: "gagent", transform: `translate(${p.x} ${p.y + GH + 5 + k * (BH + BG)})` },
+          s("rect", { width: w, height: BH, rx: BH / 2 }),
+          s("circle", { class: "agent-dot", cx: 9, cy: BH / 2, r: 3.5 }),
+          s("text", { class: "gagent-name", x: 17, y: 12.5, text: x.agent }),
+          s("text", { class: "agent-time gagent-time", x: w - 8, y: 12.5, "text-anchor": "end", "data-start": x.started_at, "data-short": "1", text: dur })));
+      });
+      bottom = Math.max(bottom, p.y + GH + 5 + (list.length + (here.length > list.length ? 1 : 0)) * (BH + BG) + 16);
+      if (here.length > list.length) svg.append(s("text", { class: "gagent-more", x: p.x + 6, y: p.y + GH + 5 + list.length * (BH + BG) + 12.5,
+        text: `+${here.length - list.length} more` }));
       // failure loops: leave the top of the node and re-enter it
       if (!L.planned) groupLoops(g, n.id).forEach(({ kind, list }, i) => {
         const x1 = p.x + GW * 0.2 + i * 7, x2 = p.x + GW * 0.5 + i * 7, y = p.y, hgt = 16 + i * 9;
@@ -551,12 +575,15 @@
       [["done", "Done"], ["in_progress", "In progress"], ["blocked", "Blocked"], ["todo", "To do"]].map(([k, t]) => h("li", {}, h("span", { class: `swatch st-${k}`, "aria-hidden": "true" }), t)),
       h("li", {}, h("span", { class: "lg-line loop", "aria-hidden": "true" }), "Failure loop (block, retry, failed gate)"),
       h("li", {}, h("span", { class: "lg-line added", "aria-hidden": "true" }), "Added after the plan"),
+      h("li", {}, h("span", { class: "agent-dot", "aria-hidden": "true" }), (data.agents && data.agents.hooks) ? "Agent running" : "Agent running (agents outside dev-kit skills need plugin hooks)"),
       parGroups.length ? h("li", {}, "∥ " + parGroups.map((p) => `${p.tag}: ${p.grp.join(", ")}`).join(" · ")) : h("li", { text: "No parallel execution yet" }));
     const rows = g.nodes.filter((n) => n.id !== "GATE").map((n) => {
       const deps = g.edges.filter((e) => e.to === n.id && e.kind !== "removed").map((e) => e.from).join(", ");
       return h("tr", {}, h("td", { text: n.id }), h("td", { text: n.title || "" }), h("td", { text: String(n.status).replace("_", " ") }), h("td", { text: deps || "—" }),
         h("td", { text: String(n.attempts) }), h("td", { text: String(n.blocks) }));
     });
+    if (bottom > L.height) { svg.setAttribute("height", bottom); svg.setAttribute("viewBox", `0 0 ${L.width} ${bottom}`); }
+    renderAgents();
     fill(box, note, legend, h("div", { class: "graph-scroll", tabindex: "0", role: "region", "aria-label": "Execution graph (scrollable)" }, svg),
       h("details", { class: "table-view" }, h("summary", { text: "Show as table" }),
         h("table", { class: "gtable" }, h("thead", {}, h("tr", {}, ["Task", "Title", "Status", "Depends on", "Attempts", "Blocks"].map((c) => h("th", { text: c })))), h("tbody", {}, rows))));
@@ -567,27 +594,29 @@
     sec = Math.max(0, Math.round(sec));
     return sec < 60 ? `${sec} s` : sec < 3600 ? `${Math.floor(sec / 60)} min ${sec % 60} s` : `${Math.floor(sec / 3600)} h ${Math.floor((sec % 3600) / 60)} min`;
   }
+  const activeAgents = () => ((data && data.agents && data.agents.active) || []);
+  const agentsOn = (key) => activeAgents().filter((x) => x.node === key);
   function renderAgents() {
-    const a = data.agents || { hooks: false, active: [] };
-    const card = $("agents-card");
-    card.classList.toggle("disabled", !a.hooks);
-    if (!a.hooks) {
-      card.hidden = false;
-      card.title = "Live agents need plugin hooks (hooks/hooks.json). The strip turns on by itself when the first agent starts.";
-      $("agents-label").textContent = "Agents · disabled";
-      fill($("agents"), h("span", { class: "agents-note", text: "plugin hooks have not fired in this project" }));
-      return;
-    }
-    card.removeAttribute("title");
-    card.hidden = a.active.length === 0;
-    $("agents-label").textContent = "Agents";
-    fill($("agents"), a.active.map((x) => h("span", { class: "agent-chip" },
+    // agents placed on a visible graph node are shown there; the strip keeps the rest
+    const onGraph = new Set();
+    if (view === "graph" && gdata) gdata.nodes.forEach((n) => onGraph.add(n.id === "GATE" ? `GATE:${gdata.milestone}` : n.id));
+    const loose = activeAgents().filter((x) => !x.node || !onGraph.has(x.node));
+    $("agents-card").hidden = loose.length === 0;
+    fill($("agents"), loose.map((x) => h("span", { class: "agent-chip" },
       h("span", { class: "agent-dot", "aria-hidden": "true" }),
-      h("span", { class: "agent-name", text: String(x.agent).replace(/^dev-kit:/, "") }),
+      h("span", { class: "agent-name", text: x.agent }),
+      x.node ? h("span", { class: "agent-node", text: x.node.replace("GATE:", "QA ") }) : null,
       h("span", { class: "agent-time", "data-start": x.started_at, text: fmtDur((Date.now() - parseT(x.started_at)) / 1000) }))));
   }
+  function shortDur(sec) {
+    sec = Math.max(0, Math.round(sec));
+    return sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m` : `${Math.floor(sec / 3600)}h${Math.floor((sec % 3600) / 60)}m`;
+  }
   function tickAgents() {
-    document.querySelectorAll(".agent-time[data-start]").forEach((el) => { el.textContent = fmtDur((Date.now() - parseT(el.dataset.start)) / 1000); });
+    document.querySelectorAll(".agent-time[data-start]").forEach((el) => {
+      const sec = (Date.now() - parseT(el.dataset.start)) / 1000;
+      el.textContent = el.dataset.short ? shortDur(sec) : fmtDur(sec);
+    });
   }
   setInterval(tickAgents, 1000);
 
