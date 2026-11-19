@@ -5,7 +5,10 @@ A [Claude Code](https://claude.com/claude-code) plugin that builds a complete ap
 You answer one thorough interview. The kit then writes the PRD, architecture and design, plans the work, implements it task by task with tests, audits every milestone and prepares the release. It stops only when it needs a decision from you, and everything it produces is kept in a `.dev/` folder inside your project, so you can stop and resume at any time.
 
 <p align="center">
-  <img src=".github/assets/dev-kit-board.png" alt="dev-kit board: what needs you, the agents running now and the next task, then the sprint goal, progress and kanban, updated in real time in the browser" width="900">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/dev-kit-board-dark.png">
+    <img src=".github/assets/dev-kit-board.png" alt="dev-kit board of a sample project: one blocked task and one open question waiting for you, three implementer agents and a test auditor running in parallel, then the sprint goal, progress and kanban, updated in real time in the browser" width="900">
+  </picture>
   <br>
   <sub><code>/dev-kit:board</code> shows the build in <b>real time</b> in your browser: what needs you, what is running, the sprint kanban, burndown and quality gates.</sub>
 </p>
