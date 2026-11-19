@@ -25,16 +25,17 @@ TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,39}$")
 COUNTS = {"critical", "high", "medium", "low"}
 DIMENSIONS = {"code", "security", "tests", "spec", "ux", "a11y", "visual", "copy", "performance", "data",
               "operations", "dependencies", "docs", "design", "requirements"}
-FEEDBACK_AREAS = {"interview", "prd", "architecture", "design", "plan", "implement", "qa", "usability", "deploy",
-                  "scoring", "isolation", "scripts", "prompts", "cost", "autopilot", "other"}
+FEEDBACK_AREAS = {"start", "interview", "prd", "architecture", "design", "plan", "implement", "test", "qa", "usability",
+                  "review", "deploy", "docs", "release", "issue", "board", "scoring", "isolation", "scripts", "prompts",
+                  "cost", "autopilot", "other"}
 FEEDBACK_LISTS = ("worked", "failed", "improve")
 
 # key -> kind: "num", "bool", "tok" (token or id), "counts", "dims", "delta", "mtok" ({"model","effort"}), "feedback"
 COMMON = {"duration_s": "num", "round": "num", "feedback": "feedback"}
 SCHEMA: dict[str, dict[str, str]] = {
     "session_start": {"trigger": "tok", "brownfield": "bool", "mode": "tok"},
-    "skill_start": {"skill": "tok", "args_kind": "tok"},
-    "skill_end": {"skill": "tok", "args_kind": "tok", "status": "tok"},
+    "skill_start": {"skill": "tok", "args_kind": "tok", "scope": "tok"},
+    "skill_end": {"skill": "tok", "args_kind": "tok", "scope": "tok", "status": "tok"},
     "agent_spawn": {"agent": "tok", "model": "tok", "effort": "tok", "slot": "num", "scope": "tok", "background": "bool"},
     "agent_end": {"agent": "tok", "model": "tok", "effort": "tok", "slot": "num", "scope": "tok", "status": "tok",
                   "tokens": "num", "tokens_in": "num", "tokens_out": "num", "cache_read": "num", "cache_write": "num",
@@ -222,7 +223,9 @@ def safe_emit(dev: Path, event: str, fields: dict) -> None:
 
 def scope_token(scope: object) -> str:
     s = str(scope or "")
-    return s if (ID_RE.match(s) or TOKEN_RE.match(s)) else "other"
+    if ID_RE.match(s) or TOKEN_RE.match(s):
+        return s
+    return s.lower() if TOKEN_RE.match(s.lower()) else "other"
 
 
 def read_events(dev: Path) -> tuple[list[dict], int]:
@@ -345,17 +348,18 @@ SKILL_STAGE = {"start": "start", "status": "start", "board": "start", "interview
                "ux": "design", "ui": "design", "plan": "plan", "implement": "implement", "test": "implement", "qa": "qa",
                "usability": "usability", "deploy": "deploy", "docs": "docs_release", "release": "docs_release",
                "autopilot": "autopilot", "review": None, "feedback": None, "issue": "plan", "backlog": None,
-               "costs": None}
+               "costs": None, "help": None}
 AREA_STAGE = {"interview": "interview", "prd": "prd", "architecture": "architecture", "design": "design", "plan": "plan",
-              "implement": "implement", "qa": "qa", "usability": "usability", "deploy": "deploy", "autopilot": "autopilot",
-              "scripts": "scripts"}
+              "implement": "implement", "test": "implement", "qa": "qa", "usability": "usability", "deploy": "deploy",
+              "autopilot": "autopilot", "scripts": "scripts", "start": "start", "board": "start", "docs": "docs_release",
+              "release": "docs_release", "issue": "plan"}
 AGENT_STAGE = {"implementer": "implement", "architect": "architecture", "requirements-reviewer": None,
                "design-reviewer": "design", "docs-reviewer": "docs_release"}
 
 
 def scope_stage(scope: object) -> str | None:
     s = str(scope or "")
-    if re.fullmatch(r"M\d+", s):
+    if re.fullmatch(r"M\d+", s) or re.fullmatch(r"(?i)T-\d+", s) or s.lower().startswith("hotfix-"):
         return "qa"
     return {"prd": "prd", "design": "design", "plan": "plan", "ux": "usability", "docs": "docs_release",
             "release": "docs_release"}.get(s)
@@ -364,6 +368,8 @@ def scope_stage(scope: object) -> str | None:
 def stage_of(e: dict) -> str | None:
     ev = e["event"]
     if ev in ("skill_start", "skill_end"):
+        if e.get("skill") == "review":
+            return scope_stage(e.get("scope"))
         return SKILL_STAGE.get(e.get("skill", ""), None)
     if ev in ("score", "gate", "review"):
         return scope_stage(e.get("scope"))
@@ -388,7 +394,7 @@ def stage_report(events: list[dict], state: dict) -> dict:
     """Deterministic grade per stage (conventions.md §13), with the reasons that produced it."""
     max_rounds = int((state.get("autonomy") or {}).get("max_fix_rounds_per_gate", 3))
     st = {s: {"events": 0, "agents": 0, "duration_s": 0, "tokens": 0, "rounds": {}, "scores": {}, "forced": [],
-              "errors": {}, "unparsable": 0, "ends": {}, "final": {}, "feedback": {k: [] for k in FEEDBACK_LISTS}}
+              "errors": {}, "unparsable": 0, "ends": {}, "final": {}, "na": 0, "feedback": {k: [] for k in FEEDBACK_LISTS}}
           for s in STAGES}
     general = {k: [] for k in FEEDBACK_LISTS}
     for e in events:
@@ -419,6 +425,7 @@ def stage_report(events: list[dict], state: dict) -> dict:
             val = e.get("value")
             if val == "na":
                 x["final"][sc] = "n/a"
+                x["na"] += 1
             elif val in ("passed", "pending", "pass", "fail"):
                 x["rounds"][sc] = x["rounds"].get(sc, 0) + 1
                 x["final"][sc] = "pass" if val in ("passed", "pass") else "fail"
@@ -430,7 +437,7 @@ def stage_report(events: list[dict], state: dict) -> dict:
     out = []
     for s in STAGES:
         x = st[s]
-        ran = x["events"] > 0
+        ran = x["events"] > x["na"]  # a stage recorded only as n/a (brownfield) did not run
         reasons, score = [], 100
         if ran:
             for sc, n in sorted(x["rounds"].items()):

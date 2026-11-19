@@ -28,3 +28,7 @@ Scope (milestone or screens), language for prose. `.dev/brief.md` (blocks 2 and 
 - Do not review source-code comments or developer-only logs.
 
 End with a prose summary and the single JSON block from the contract (`auditor: "copy-reviewer"`).
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16, `Baseline:` line of your prompt): review only the strings added or changed since the baseline (`git diff <baseline_ref>..HEAD`). The terminology table starts from the words the existing UI already uses (the as-built PRD is partial): new strings must follow them; inconsistent wording that exists only in untouched screens is `"legacy": true`.

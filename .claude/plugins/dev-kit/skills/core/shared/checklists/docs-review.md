@@ -18,7 +18,7 @@ Verify that the documentation matches the product as built. **Execute what the d
 - OpenAPI/schema file, if generated, is up to date with the code.
 
 ## CHANGELOG and release notes
-- Every `[T-xxx]` feature/fix commit since the last tag is represented; version and date correct; fix tasks from QA listed; known limitations (open questions) disclosed.
+- Every feature/fix task commit since the last tag (SHAs recorded in `dev_state.py status --json`; subjects may follow the project's own style) is represented; version and date correct; fix tasks from QA listed; known limitations (open questions) disclosed.
 
 ## Developer docs
 - Architecture overview and ADR pointers present; how to add a feature/migration/test; commit convention; CLAUDE.md "dev-kit" section accurate (state location, resume command, test/lint commands).

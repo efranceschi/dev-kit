@@ -23,8 +23,13 @@
       "acceptance_ref": null,
       "task_ref": null,
       "effort": "S",
-      "confidence": "high"
+      "confidence": "high",
+      "legacy": false
     }
   ],
+  "previous": [
+    {"id": "F-003", "state": "closed", "evidence": ""}
+  ],
+  "kit_feedback": {"worked": [], "failed": [], "improve": []},
   "verdict": "pass"
 }

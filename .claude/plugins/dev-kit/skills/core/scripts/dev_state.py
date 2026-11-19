@@ -11,6 +11,7 @@ Subcommands
   done T        mark task done (optionally --commit SHA)
   block T       mark task blocked (--reason)
   unblock T     blocked -> todo
+  drop T        drop a task removed by a replan (--reason); it no longer counts for milestones or release
   add-task      create a task in state and plan.md
   add-question  append a non-blocking question to open-questions.md
   gate M        set milestone gate: passed | pending | skipped (passed needs --score >= cut-off)
@@ -27,7 +28,8 @@ Subcommands
   tip CTX       one contextual tip (tips each show at most twice); tips [--reset] lists them all
   deploy [ENV]  record a deploy (--sha --status ok|failed|rolled_back [--milestone M] [--migration REV])
   preview M     record the local deploy of a milestone (--url --sha [--pid]) or --stopped
-  set KEY VAL   set language | phase | project | autonomy.<field> (incl. autonomy.pause_policy.<point>)
+  set KEY VAL   set language | phase | project | stack.<field> | autonomy.<field>[.<sub>] (nested keys merge;
+                autonomy.level applies its preset; incl. autonomy.pause_policy.<point>)
   status        human (--short) or --json view; --quiet-if-missing for hooks
 
 Exit codes: 0 ok · 1 usage/invalid transition · 2 state not found · 3 nothing to do (next)
@@ -53,10 +55,11 @@ PHASES = [
     "implement", "qa", "usability", "docs", "done",
 ]
 TASK_TYPES = {"feature", "fix", "chore", "test", "docs"}
-TASK_STATUSES = {"todo", "in_progress", "done", "blocked"}
+TASK_STATUSES = {"todo", "in_progress", "done", "blocked", "dropped"}
+FINISHED = ("done", "dropped")  # a dropped task (replan) no longer holds a milestone or the release
 GATES = {"passed", "pending", "skipped"}
 BROWNFIELD_MODES = ("feature", "maintenance", "import")
-DEFAULT_COMMIT_STYLE = "[{task}] {type}: {summary}"
+DEFAULT_COMMIT_STYLE = "[{task}] {type}: {summary}"  # used when autonomy.commit_style is absent (conventions §5)
 # artifact that must exist before entering each phase (checked by `set phase`, warning only)
 PHASE_ARTIFACTS = [
     ("prd", "brief.md"), ("architecture", "prd.md"), ("ux", "architecture.md"),
@@ -109,6 +112,28 @@ DEFAULT_AUTONOMY = {
         },
     },
 }
+
+# Level presets (shared/interview/autonomy-policy.md). `set autonomy.level` applies them; the interview may
+# then override single fields. Quality numbers only ever go up through a preset.
+LEVEL_PRESETS = {
+    "high": {"decide_alone": DEFAULT_AUTONOMY["decide_alone"], "always_ask": DEFAULT_AUTONOMY["always_ask"], "quality": {}},
+    "balanced": {
+        "decide_alone": ["library_choice", "file_structure", "naming", "test_strategy", "dev_tooling"],
+        "always_ask": DEFAULT_AUTONOMY["always_ask"] + ["ui_details", "data_model_details", "minor_scope_tradeoffs"],
+        "quality": {},
+    },
+    "cautious": {
+        "decide_alone": ["naming", "file_structure"],
+        "always_ask": DEFAULT_AUTONOMY["always_ask"] + ["library_choice", "test_strategy", "ui_details",
+                                                       "data_model_details", "minor_scope_tradeoffs", "dev_tooling"],
+        "quality": {"min_overall": 90, "review_min_overall": 85, "min_dimension": 75,
+                    "dimension_min": {"security": 95, "tests": 85, "spec": 90, "a11y": 85}},
+    },
+    "unattended": {"decide_alone": DEFAULT_AUTONOMY["decide_alone"], "always_ask": DEFAULT_AUTONOMY["always_ask"], "quality": {}},
+}
+LEVELS = tuple(LEVEL_PRESETS)
+BOOL_FIELDS = ("commit_per_task", "may_install_deps", "may_run_servers", "may_push", "notify_on_park")
+INT_FIELDS = {"max_fix_rounds_per_gate": (1, 10), "task_time_budget_min": (5, 480)}
 
 MODEL_POLICY_MODES = ("ask", "preapproved", "off")
 MODEL_TIERS = ("speed", "balanced", "quality")
@@ -206,6 +231,94 @@ def check_pause_policy(pp: object) -> None:
 
 def pause_action(state: dict, point: str) -> str:
     return state.get("autonomy", {}).get("pause_policy", {}).get(point, {}).get("action", "ask")
+
+
+def _copy(x):
+    return json.loads(json.dumps(x))
+
+
+def merge_quality(q: dict, patch: dict) -> dict:
+    for k, v in patch.items():
+        if isinstance(v, dict) and isinstance(q.get(k), dict):
+            q[k].update(v)
+        else:
+            q[k] = v
+    return q
+
+
+def apply_level(state: dict, level: str) -> None:
+    """Apply a level preset. Leaving unattended restores the supervised pause and model policies.
+    Existing projects keep dirty_tree at ask (the tree may hold the user's own work, conventions §16)."""
+    if level not in LEVEL_PRESETS:
+        fail(f"autonomy.level must be {' | '.join(LEVELS)}")
+    auto = state.setdefault("autonomy", _copy(DEFAULT_AUTONOMY))
+    previous = auto.get("level")
+    preset = LEVEL_PRESETS[level]
+    auto["level"] = level
+    auto["decide_alone"] = list(preset["decide_alone"])
+    auto["always_ask"] = list(preset["always_ask"])
+    if state.get("brownfield") and "dev_tooling" in auto["decide_alone"]:
+        auto["decide_alone"].remove("dev_tooling")  # new runners, linters, formatters: always ask (§16)
+        auto["always_ask"].append("dev_tooling")
+    if preset["quality"]:
+        q = auto.setdefault("quality", _copy(DEFAULT_AUTONOMY["quality"]))
+        for k, v in preset["quality"].items():  # a preset never lowers a bar the user raised
+            if isinstance(v, dict):
+                cur = q.setdefault(k, {})
+                for dk, dv in v.items():
+                    cur[dk] = max(dv, cur.get(dk, 0))
+            else:
+                q[k] = max(v, q.get(k, 0))
+    if level == "unattended":
+        auto["pause_policy"] = _copy(UNATTENDED_PAUSE_POLICY)
+        auto["model_policy"] = {**auto.get("model_policy", {"tiers": {}}), "mode": "preapproved"}
+    elif previous == "unattended":
+        auto["pause_policy"] = {}
+        auto["model_policy"] = {**auto.get("model_policy", {"tiers": {}}), "mode": "ask"}
+    if state.get("brownfield"):
+        auto.setdefault("pause_policy", {})["dirty_tree"] = {"action": "ask"}
+
+
+def check_autonomy_field(field: str, val: object) -> object:
+    """Validate one top-level autonomy field (shared by init --autonomy-json and set). Returns the value to store."""
+    if field in BOOL_FIELDS:
+        if isinstance(val, str) and val.lower() in ("true", "yes", "on", "false", "no", "off"):
+            val = val.lower() in ("true", "yes", "on")
+        if not isinstance(val, bool):
+            fail(f"autonomy.{field} must be true or false")
+    elif field in INT_FIELDS:
+        lo, hi = INT_FIELDS[field]
+        if isinstance(val, str) and val.isdigit():
+            val = int(val)
+        if not isinstance(val, int) or isinstance(val, bool) or not lo <= val <= hi:
+            fail(f"autonomy.{field} must be an integer between {lo} and {hi}")
+    elif field == "issue_buffer_pct":
+        if isinstance(val, str) and val.isdigit():
+            val = int(val)
+        if not isinstance(val, int) or isinstance(val, bool) or not 0 <= val <= 50:
+            fail("autonomy.issue_buffer_pct must be an integer between 0 and 50")
+    elif field == "tips":
+        if val not in TIPS_MODES:
+            fail(f"autonomy.tips must be one of {', '.join(TIPS_MODES)}")
+    elif field == "on_park":
+        if val not in ON_PARK:
+            fail(f"autonomy.on_park must be one of {', '.join(ON_PARK)}")
+    elif field == "commit_style":
+        check_commit_style(val)
+    elif field == "model_policy":
+        check_model_policy(val)
+    elif field == "local_deploy":
+        check_local_deploy(val)
+    elif field == "cooldown":
+        if not isinstance(val, dict) or not isinstance(val.get("enabled", False), bool) or not isinstance(val.get("max_tasks", 5), int):
+            fail('autonomy.cooldown must be on | off or {"enabled": true, "max_tasks": 5}')
+    elif field in ("decide_alone", "always_ask"):
+        if not isinstance(val, list) or not all(isinstance(x, str) for x in val):
+            fail(f"autonomy.{field} must be a list of decision categories")
+    elif field == "quality":
+        if not isinstance(val, dict):
+            fail("autonomy.quality must be an object")
+    return val
 
 
 def check_policy_force(store: "Store", kind: str, name: str, scores: str | None) -> None:
@@ -340,7 +453,7 @@ class Store:
         return [t for t, v in self.tasks().items() if v["status"] == "in_progress"]
 
     def milestone_done(self, m: str) -> bool:
-        ts = [v for v in self.tasks().values() if v["milestone"] == m]
+        ts = [v for v in self.tasks().values() if v["milestone"] == m and v["status"] != "dropped"]
         return bool(ts) and all(v["status"] == "done" for v in ts)
 
     def gate_open_for(self, m: str) -> tuple[bool, str]:
@@ -349,7 +462,7 @@ class Store:
             if prev == m:
                 return True, ""
             gate = self.milestones()[prev].get("gate", "pending")
-            has_tasks = any(v["milestone"] == prev for v in self.tasks().values())
+            has_tasks = any(v["milestone"] == prev and v["status"] != "dropped" for v in self.tasks().values())
             if has_tasks and gate == "pending":
                 return False, f"gate of {prev} is pending (run qa {prev} or `gate {prev} skipped`)"
         return True, ""
@@ -504,19 +617,36 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
             fail("--brownfield-json must be a JSON object, e.g. {\"baseline_ref\": \"dev-kit-baseline\"}")
         if "mode" in bf and bf["mode"] not in BROWNFIELD_MODES:
             fail(f"brownfield.mode must be one of {', '.join(BROWNFIELD_MODES)}")
-        store.state["brownfield"] = {**store.state.get("brownfield", {}), **bf}
+        if "first_milestone" in bf and (not isinstance(bf["first_milestone"], int) or isinstance(bf["first_milestone"], bool)
+                                        or bf["first_milestone"] < 1):
+            fail("brownfield.first_milestone must be an integer >= 1 (the number of the first milestone, e.g. 1 for M1)")
+        old = store.state.get("brownfield", {})
+        store.state["brownfield"] = {**old, **bf}
+        if old.get("mode") == "maintenance" and bf.get("mode") in ("feature", "import"):
+            # leaving maintenance: the as-built n/a reviews no longer apply to the new PRD, design and plan
+            for name, r in (store.state.get("reviews") or {}).items():
+                if r.get("verdict") == "n/a":
+                    r.update({"verdict": "pending", "note": f"reopened: mode {old['mode']} -> {bf['mode']}", "at": now()})
+                    print(f"review {name}: n/a -> pending (mode changed to {bf['mode']})")
+        auto = store.state.setdefault("autonomy", _copy(DEFAULT_AUTONOMY))
+        auto.setdefault("pause_policy", {})["dirty_tree"] = {"action": "ask"}
     if a.autonomy_json:
         try:
             patch = json.loads(a.autonomy_json)
         except json.JSONDecodeError as e:
             fail(f"--autonomy-json is not valid JSON: {e}")
-        auto = store.state.setdefault("autonomy", json.loads(json.dumps(DEFAULT_AUTONOMY)))
+        if not isinstance(patch, dict):
+            fail("--autonomy-json must be a JSON object")
+        auto = store.state.setdefault("autonomy", _copy(DEFAULT_AUTONOMY))
         q_patch = patch.pop("quality", None)
-        if "model_policy" in patch:
-            check_model_policy(patch["model_policy"])
-        if patch.get("level") == "unattended":
-            auto["pause_policy"] = json.loads(json.dumps(UNATTENDED_PAUSE_POLICY))
-            auto["model_policy"] = {**auto.get("model_policy", {"tiers": {}}), "mode": "preapproved"}
+        if q_patch is not None:
+            check_autonomy_field("quality", q_patch)
+        level = patch.pop("level", None)
+        if level is not None:
+            apply_level(store.state, level)  # preset first; explicit fields below override it
+        for f in list(patch):
+            if f not in ("pause_policy", "production", "local_deploy"):
+                patch[f] = check_autonomy_field(f, patch[f])
         if "pause_policy" in patch:
             check_pause_policy(patch["pause_policy"])
             patch["pause_policy"] = {**auto.get("pause_policy", {}), **patch["pause_policy"]}
@@ -526,19 +656,17 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
         if "local_deploy" in patch:
             check_local_deploy(patch["local_deploy"])
             patch["local_deploy"] = {**DEFAULT_AUTONOMY["local_deploy"], **auto.get("local_deploy", {}), **patch["local_deploy"]}
-        if "commit_style" in patch:
-            check_commit_style(patch["commit_style"])
-        if "on_park" in patch and patch["on_park"] not in ON_PARK:
-            fail(f"autonomy.on_park must be one of {', '.join(ON_PARK)}")
+        if "cooldown" in patch:
+            patch["cooldown"] = {**DEFAULT_AUTONOMY["cooldown"], **auto.get("cooldown", {}), **patch["cooldown"]}
         auto.update(patch)
         if q_patch is not None:
-            q = auto.setdefault("quality", json.loads(json.dumps(DEFAULT_AUTONOMY["quality"])))
-            for k, v in q_patch.items():
-                if isinstance(v, dict) and isinstance(q.get(k), dict):
-                    q[k].update(v)
-                else:
-                    q[k] = v
+            merge_quality(auto.setdefault("quality", _copy(DEFAULT_AUTONOMY["quality"])), q_patch)
+        if store.state.get("brownfield"):
+            auto.setdefault("pause_policy", {})["dirty_tree"] = {"action": "ask"}
     store.save()
+    gi = store.dev / ".gitignore"
+    if not gi.exists():  # machine-local files never belong in git; the rest of .dev/ is versioned with the code
+        gi.write_text("# written by dev_state.py init\nrun/\npreview/\ntmp/\ntelemetry-session\n", encoding="utf-8")
     oq = store.dev / "open-questions.md"
     if not oq.exists():
         oq.write_text(
@@ -634,7 +762,7 @@ def pick_next(store: Store, milestone: str | None) -> tuple[str | None, str]:
     ts = store.tasks()
     if not ts:
         return None, "no tasks; run plan then sync-plan"
-    if all(v["status"] == "done" for v in ts.values()):
+    if all(v["status"] in FINISHED for v in ts.values()):
         return None, "all tasks done"
     order = store.milestone_order()
     if milestone:
@@ -647,7 +775,7 @@ def pick_next(store: Store, milestone: str | None) -> tuple[str | None, str]:
     if hot:
         return sorted(hot, key=lambda t: int(t[2:]))[0], ""
     for m in order:
-        pending = {t: v for t, v in ts.items() if v["milestone"] == m and v["status"] != "done"}
+        pending = {t: v for t, v in ts.items() if v["milestone"] == m and v["status"] not in FINISHED}
         if not pending:
             continue
         ok, why = store.gate_open_for(m)
@@ -695,8 +823,8 @@ def cmd_next(store: Store, a: argparse.Namespace) -> None:
 def cmd_start(store: Store, a: argparse.Namespace) -> None:
     store.load()
     t = store.task(a.task)
-    if t["status"] == "done":
-        fail(f"{a.task} is already done")
+    if t["status"] in FINISHED:
+        fail(f"{a.task} is already {t['status']}")
     if t["status"] == "in_progress":
         print(f"{a.task} already in_progress")
         return
@@ -725,8 +853,17 @@ def cmd_done(store: Store, a: argparse.Namespace) -> None:
     store.load()
     t = store.task(a.task)
     if t["status"] == "done":
-        print(f"{a.task} already done")
+        if a.commit and a.force and a.commit != t.get("commit"):
+            old = t.get("commit")
+            t["commit"] = a.commit
+            store.save()
+            store.log(f"done {a.task} commit corrected {old or '-'} -> {a.commit}")
+            print(f"{a.task} already done · commit corrected to {a.commit[:12]}")
+        else:
+            print(f"{a.task} already done" + (" (pass --force with --commit to correct the recorded SHA)" if a.commit else ""))
         return
+    if t["status"] == "dropped":
+        fail(f"{a.task} was dropped; add a new task instead")
     if t["status"] != "in_progress" and not a.force:
         fail(f"{a.task} is {t['status']}, not in_progress (use --force to override)")
     t["status"] = "done"
@@ -740,17 +877,20 @@ def cmd_done(store: Store, a: argparse.Namespace) -> None:
     m = t["milestone"]
     msg = f"{a.task} done"
     if t.get("lane") == "hotfix":
-        msg += f" · hotfix: run qa --scope {a.task}, then deploy and release --hotfix"
+        msg += f" · hotfix: run qa --scope {a.task}, then release --hotfix (it deploys)"
     elif store.milestone_done(m):
         msg += f" · milestone {m} complete -> run qa {m}"
+        if store.state.get("phase") == "implement":
+            store.state["phase"] = "qa"
+            store.save()
     print(msg)
 
 
 def cmd_block(store: Store, a: argparse.Namespace) -> None:
     store.load()
     t = store.task(a.task)
-    if t["status"] == "done":
-        fail(f"{a.task} is done; cannot block")
+    if t["status"] in FINISHED:
+        fail(f"{a.task} is {t['status']}; cannot block")
     t["status"] = "blocked"
     t["blocked_reason"] = a.reason
     store.save()
@@ -772,6 +912,26 @@ def cmd_unblock(store: Store, a: argparse.Namespace) -> None:
     print(f"{a.task} todo")
 
 
+def cmd_drop(store: Store, a: argparse.Namespace) -> None:
+    """A task removed by a replan: kept for history, no longer counted by milestones, next or release."""
+    store.load()
+    t = store.task(a.task)
+    if t["status"] == "done":
+        fail(f"{a.task} is done; a delivered task is reverted by a new task, not dropped")
+    if t["status"] == "dropped":
+        print(f"{a.task} already dropped")
+        return
+    t["status"] = "dropped"
+    t["blocked_reason"] = None
+    t["dropped_reason"] = a.reason
+    t["dropped_at"] = now()
+    issue_sync(store, t)
+    store.save()
+    store.log(f"drop {a.task}: {a.reason}")
+    store.event("task", task=a.task, transition="drop", type=t.get("type"), milestone=t.get("milestone"))
+    print(f"{a.task} dropped: {a.reason}")
+
+
 def cmd_add_task(store: Store, a: argparse.Namespace) -> None:
     store.load()
     if a.type not in TASK_TYPES:
@@ -784,6 +944,12 @@ def cmd_add_task(store: Store, a: argparse.Namespace) -> None:
         if not a.milestone_title:
             fail(f"milestone {a.milestone} does not exist; pass --milestone-title to create it")
         store.milestones()[a.milestone] = {"title": a.milestone_title, "gate": "pending", "qa_runs": 0}
+    elif store.milestones()[a.milestone].get("gate") == "passed" and a.lane != "hotfix" and not a.force:
+        nxt = f"M{max(int(m[1:]) for m in store.milestones()) + 1}"
+        later = [m for m in store.milestone_order() if int(m[1:]) > int(a.milestone[1:])
+                 and store.milestones()[m].get("gate", "pending") == "pending"]
+        fail(f"gate of {a.milestone} already passed; add the task to {later[0] if later else nxt}"
+             + ("" if later else f" (--milestone {nxt} --milestone-title \"...\")") + ", use --lane hotfix, or --force")
     issue = None
     if getattr(a, "issue", None):
         issue = store.state.get("issues", {}).get(a.issue)
@@ -931,6 +1097,9 @@ def _parse_set(pairs: list[str] | None) -> dict:
 
 def cmd_event(store: Store, a: argparse.Namespace) -> None:
     """Append a structured event to .dev/telemetry.jsonl (allowlisted keys and values only)."""
+    if not store.exists():  # logging never blocks work: before `init` there is no session to log into
+        print("event skipped: no state yet (run init first; the session starts after it)", file=sys.stderr)
+        return
     store.load()
     fields = _parse_set(a.set)
     if a.json:
@@ -1204,7 +1373,7 @@ def issue_sync(store: Store, task: dict) -> None:
     if i is None or i["status"] in ("done", "wontfix", "duplicate"):
         return
     states = [store.tasks()[x]["status"] for x in i.get("tasks", []) if x in store.tasks()]
-    if states and all(s == "done" for s in states):
+    if states and all(s in FINISHED for s in states) and "done" in states:
         i["status"], i["closed_at"] = "done", now()
         issue_event(store, iid, "done")
     elif task["status"] == "in_progress" and i["status"] != "in_progress":
@@ -1218,11 +1387,11 @@ def write_issues_md(store: Store) -> None:
     open_ = {k: v for k, v in rows.items() if v["status"] not in ("done", "wontfix", "duplicate")}
     closed = {k: v for k, v in rows.items() if k not in open_}
     out = ["# Issues", "", "Generated by dev_state.py; edit through `/dev-kit:issue`. Classes: conventions.md §15.", "",
-           "## Open", "| id | class | type | severity | effort | status | scheduled in | tasks | title |", "|---|---|---|---|---|---|---|---|---|"]
+           "## Open", "| id | class | type | severity | effort | status | scheduled in | tasks | origin | title |", "|---|---|---|---|---|---|---|---|---|---|"]
     order = {c: n for n, c in enumerate(ISSUE_CLASSES)}
     for k, v in sorted(open_.items(), key=lambda kv: (order.get(kv[1].get("class"), 9), SEV_RANK.get(kv[1].get("severity"), 4), kv[0])):
         out.append(f"| {k} | {v.get('class')} | {v.get('type')} | {v.get('severity') or '-'} | {v.get('effort') or '-'} | {v['status']} | "
-                   f"{v.get('scheduled_in') or '-'} | {', '.join(v.get('tasks', [])) or '-'} | {v['title'].replace('|', '/')} |")
+                   f"{v.get('scheduled_in') or '-'} | {', '.join(v.get('tasks', [])) or '-'} | {v.get('origin') or '-'} | {v['title'].replace('|', '/')} |")
     out += ["", "## Closed", "| id | status | closed | tasks | title |", "|---|---|---|---|---|"]
     for k, v in sorted(closed.items()):
         out.append(f"| {k} | {v['status']} | {str(v.get('closed_at') or '-')[:10]} | {', '.join(v.get('tasks', [])) or '-'} | {v['title'].replace('|', '/')} |")
@@ -1409,7 +1578,7 @@ def deferred_findings(store: Store) -> list[dict]:
             items += [f for f in ((data.get("findings") or []) if isinstance(data, dict) else data)
                       if isinstance(f, dict) and str(f.get("severity")) in ("medium", "low")]
             for f in items:
-                if isinstance(f, dict):
+                if isinstance(f, dict) and not f.get("legacy") and f.get("status") != "closed":
                     out.append({"scope": scope_dir.name, "id": f.get("id"), "severity": f.get("severity"), "title": f.get("title")})
     return out
 
@@ -1426,7 +1595,7 @@ def backlog_data(store: Store) -> dict:
         rows = [{"task": k, "status": v["status"], "type": v["type"], "lane": v.get("lane"), "title": v["title"],
                  "issue": str(v.get("source") or "")[6:] if str(v.get("source") or "").startswith("issue:") else None,
                  "blocked_reason": v.get("blocked_reason")}
-                for k, v in sorted(ts.items(), key=lambda kv: int(kv[0][2:])) if v["milestone"] == m and v["status"] != "done"]
+                for k, v in sorted(ts.items(), key=lambda kv: int(kv[0][2:])) if v["milestone"] == m and v["status"] not in FINISHED]
         if rows:
             pending[m] = rows
     nxt = next((m for m in store.milestone_order() if store.milestones()[m].get("gate", "pending") == "pending"), None)
@@ -1435,8 +1604,8 @@ def backlog_data(store: Store) -> dict:
         warnings.append(f"{hot_in_cur} hotfixes in {cur}: expedite is being overused")
     deploy = [d for env in sorted(store.state.get("deploys") or {}) if (d := deploy_drift(store, env))]
     return {
-        "current_milestone": cur, "hotfix_open": hot_open,
-        "issues": {k: {**{f: v.get(f) for f in ("title", "type", "class", "severity", "effort", "status", "scheduled_in", "tasks", "created_at")}}
+        "current_milestone": cur, "hotfix_open": hot_open, "brownfield": store.state.get("brownfield"),
+        "issues": {k: {**{f: v.get(f) for f in ("title", "type", "class", "severity", "effort", "status", "scheduled_in", "tasks", "created_at", "origin", "note")}}
                    for k, v in iss.items() if v["status"] not in ("done", "wontfix", "duplicate")},
         "queue": q, "buffer": buffer_info(store, nxt) if nxt else None,
         "tasks": pending, "open_questions": count_open_questions(store),
@@ -1541,7 +1710,6 @@ def cmd_tips(store: Store, a: argparse.Namespace) -> None:
 
 
 REVIEW_VALUES = {"pass", "fail", "pending", "n/a"}
-REVIEW_SATISFIED = {"pass", "n/a"}
 
 
 def cmd_review(store: Store, a: argparse.Namespace) -> None:
@@ -1608,72 +1776,49 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
         store.state[key] = val
     elif key.startswith("autonomy."):
         field = key.split(".", 1)[1]
-        auto = store.state.setdefault("autonomy", dict(DEFAULT_AUTONOMY))
+        auto = store.state.setdefault("autonomy", _copy(DEFAULT_AUTONOMY))
+        try:
+            parsed = json.loads(val)
+        except json.JSONDecodeError:
+            parsed = val
+        top, _, sub = field.partition(".")
         if field == "level":
-            if val not in ("high", "balanced", "cautious", "unattended"):
-                fail("autonomy.level must be high | balanced | cautious | unattended")
-            auto["level"] = val
-            if val == "unattended":
-                auto["pause_policy"] = json.loads(json.dumps(UNATTENDED_PAUSE_POLICY))
-                auto["model_policy"] = {**auto.get("model_policy", {"tiers": {}}), "mode": "preapproved"}
-        elif field == "pause_policy" or field.startswith("pause_policy."):
-            try:
-                rule = json.loads(val)
-            except json.JSONDecodeError:
-                rule = {"action": val}
-            patch = rule if field == "pause_policy" else {field.split(".", 1)[1]: rule}
+            apply_level(store.state, val)
+        elif top == "pause_policy":
+            rule = parsed if isinstance(parsed, dict) else {"action": val}
+            patch = rule if not sub else {sub: rule}
             check_pause_policy(patch)
             auto["pause_policy"] = {**auto.get("pause_policy", {}), **patch}
-        elif field == "production":
-            try:
-                pr = json.loads(val)
-            except json.JSONDecodeError:
-                fail("autonomy.production must be a JSON object")
-            merged = {**DEFAULT_AUTONOMY["production"], **auto.get("production", {}), **pr}
-            check_production(merged)
-            auto["production"] = merged
-        elif field == "local_deploy":
-            try:
-                ld = json.loads(val)
-            except json.JSONDecodeError:
-                ld = {"mode": val}
-            check_local_deploy(ld)
-            auto["local_deploy"] = {**DEFAULT_AUTONOMY["local_deploy"], **auto.get("local_deploy", {}), **ld}
-        elif field == "issue_buffer_pct":
-            if not val.isdigit() or not 0 <= int(val) <= 50:
-                fail("autonomy.issue_buffer_pct must be an integer between 0 and 50")
-            auto["issue_buffer_pct"] = int(val)
-        elif field == "cooldown":
-            try:
-                cd = json.loads(val)
-            except json.JSONDecodeError:
-                cd = {"enabled": val in ("on", "true", "yes")} if val in ("on", "off", "true", "false", "yes", "no") else None
-            if not isinstance(cd, dict) or not isinstance(cd.get("enabled", False), bool) or not isinstance(cd.get("max_tasks", 5), int):
-                fail('autonomy.cooldown must be on | off or {"enabled": true, "max_tasks": 5}')
-            auto["cooldown"] = {**DEFAULT_AUTONOMY["cooldown"], **auto.get("cooldown", {}), **cd}
-        elif field == "tips":
-            if val not in TIPS_MODES:
-                fail(f"autonomy.tips must be one of {', '.join(TIPS_MODES)}")
-            auto["tips"] = val
-        elif field == "commit_style":
-            check_commit_style(val)
-            auto["commit_style"] = val
-        elif field == "on_park":
-            if val not in ON_PARK:
-                fail(f"autonomy.on_park must be one of {', '.join(ON_PARK)}")
-            auto["on_park"] = val
-        elif field == "model_policy":
-            try:
-                mp = json.loads(val)
-            except json.JSONDecodeError:
-                mp = {"mode": val}
-            check_model_policy(mp)
-            auto["model_policy"] = {"mode": mp.get("mode", "ask"), "tiers": mp.get("tiers", {})}
+            if store.state.get("brownfield") and pause_action(store.state, "dirty_tree") != "ask":
+                print("note: existing project; dirty_tree is no longer ask, so the user's own uncommitted work may be stashed", file=sys.stderr)
+        elif sub:
+            # nested key, e.g. autonomy.quality.min_overall or autonomy.production.when: merge into the object
+            cur = auto.get(top)
+            if not isinstance(cur, dict):
+                fail(f"autonomy.{top} is not an object; set it as a whole")
+            node = merged = _copy(cur)
+            parts = sub.split(".")
+            for part in parts[:-1]:
+                node = node.setdefault(part, {})
+                if not isinstance(node, dict):
+                    fail(f"autonomy.{field}: {part} is not an object")
+            node[parts[-1]] = parsed
+            store_autonomy_object(auto, top, merged)
+        elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy"):
+            if top == "local_deploy" and not isinstance(parsed, dict):
+                parsed = {"mode": val}
+            elif top == "model_policy" and not isinstance(parsed, dict):
+                parsed = {"mode": val}
+            elif top == "cooldown" and not isinstance(parsed, dict):
+                if val not in ("on", "off", "true", "false", "yes", "no"):
+                    fail('autonomy.cooldown must be on | off or {"enabled": true, "max_tasks": 5}')
+                parsed = {"enabled": val in ("on", "true", "yes")}
+            if not isinstance(parsed, dict):
+                fail(f"autonomy.{top} must be a JSON object")
+            base = _copy(auto.get(top) or DEFAULT_AUTONOMY.get(top) or {})
+            store_autonomy_object(auto, top, merge_quality(base, parsed) if top == "quality" else {**base, **parsed})
         else:
-            try:
-                auto[field] = json.loads(val)
-            except json.JSONDecodeError:
-                auto[field] = val
+            auto[field] = check_autonomy_field(field, val if field in ("commit_style", "tips", "on_park") else parsed)
     elif key.startswith("stack."):
         store.state.setdefault("stack", {})[key.split(".", 1)[1]] = val
     else:
@@ -1686,6 +1831,22 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
     print(f"{key} = {val}")
 
 
+def store_autonomy_object(auto: dict, top: str, obj: dict) -> None:
+    """Validate and store a whole autonomy sub-object after a merge."""
+    if top == "production":
+        check_production({**DEFAULT_AUTONOMY["production"], **obj})
+        obj = {**DEFAULT_AUTONOMY["production"], **obj}
+    elif top == "model_policy":
+        check_model_policy(obj)
+        obj = {"mode": obj.get("mode", "ask"), "tiers": obj.get("tiers", {})}
+    elif top == "local_deploy":
+        check_local_deploy(obj)
+        obj = {**DEFAULT_AUTONOMY["local_deploy"], **obj}
+    elif top in ("cooldown", "quality"):
+        check_autonomy_field(top, obj)
+    auto[top] = obj
+
+
 def render_short(store: Store) -> str:
     s = store.state
     p = store.progress()
@@ -1696,7 +1857,10 @@ def render_short(store: Store) -> str:
     inprog = store.in_progress()
     open_q = count_open_questions(store)
     name = s.get("project") or store.root.name
-    l1 = f"[dev-kit] {name} · phase: {s.get('phase')} · language: {s.get('language') or '?'} · tasks done {p['done']}/{p['total']} · gates: {gates}"
+    bf = s.get("brownfield")
+    l1 = (f"[dev-kit] {name} · phase: {s.get('phase')} · language: {s.get('language') or '?'}"
+          + (f" · existing project: {bf.get('mode', 'feature')} (baseline {bf.get('baseline_ref', '?')})" if bf else "")
+          + f" · tasks done {p['done']}/{p['total'] - p['dropped']} · gates: {gates}")
     if inprog:
         t = store.tasks()[inprog[0]]
         l2 = f"[dev-kit] in progress: {inprog[0]} {t['title']} (since {t.get('started_at')})"
@@ -1751,6 +1915,8 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
     bf = s.get("brownfield")
     if bf:
         print(f"Brownfield: mode {bf.get('mode', 'feature')} · baseline {bf.get('baseline_ref', '?')} ({str(bf.get('baseline_sha') or '?')[:7]})"
+              + (f" · first milestone M{bf['first_milestone']}" if bf.get("first_milestone") else "")
+              + f" · commit style {s.get('autonomy', {}).get('commit_style') or DEFAULT_COMMIT_STYLE}"
               + (" · test baseline: .dev/qa/baseline.md" if (store.dev / "qa" / "baseline.md").exists() else ""))
     revs = s.get("reviews") or {}
     if revs:
@@ -1798,17 +1964,20 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
     bl = board_line(store)
     if bl:
         print(bl)
-    print(f"Tasks: {p['done']}/{p['total']} done · {p['in_progress']} in progress · {p['blocked']} blocked · {p['todo']} todo")
+    print(f"Tasks: {p['done']}/{p['total'] - p['dropped']} done · {p['in_progress']} in progress · {p['blocked']} blocked · {p['todo']} todo"
+          + (f" · {p['dropped']} dropped" if p["dropped"] else ""))
     for m in store.milestone_order():
         info = store.milestones()[m]
         ts = {t: v for t, v in store.tasks().items() if v["milestone"] == m}
         done = sum(1 for v in ts.values() if v["status"] == "done")
+        live = sum(1 for v in ts.values() if v["status"] != "dropped")
         sc = f" score {info['score']}" if info.get("score") is not None else ""
-        print(f"\n{m} — {info.get('title')} [{done}/{len(ts)}] gate: {info.get('gate', 'pending')}{sc} (qa runs: {info.get('qa_runs', 0)})")
+        print(f"\n{m} — {info.get('title')} [{done}/{live}] gate: {info.get('gate', 'pending')}{sc} (qa runs: {info.get('qa_runs', 0)})")
         for tid in sorted(ts, key=lambda x: int(x[2:])):
             v = ts[tid]
-            mark = {"done": "x", "in_progress": ">", "blocked": "!", "todo": " "}[v["status"]]
+            mark = {"done": "x", "in_progress": ">", "blocked": "!", "todo": " ", "dropped": "-"}[v["status"]]
             extra = f" — blocked: {v['blocked_reason']}" if v["status"] == "blocked" else ""
+            extra += f" — dropped: {v.get('dropped_reason')}" if v["status"] == "dropped" else ""
             extra += f" ({v['commit'][:7]})" if v.get("commit") else ""
             print(f"  [{mark}] {tid} ({v['type']}) {v['title']}{extra}")
     tid, why = pick_next(store, None)
@@ -1830,7 +1999,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("init"); s.set_defaults(fn=cmd_init)
     s.add_argument("--project"); s.add_argument("--language"); s.add_argument("--phase")
     s.add_argument("--stack-json"); s.add_argument("--autonomy-json"); s.add_argument("--force", action="store_true")
-    s.add_argument("--brownfield-json", help='existing-project marker, e.g. {"baseline_ref":"dev-kit-baseline","baseline_sha":"<sha>"}')
+    s.add_argument("--brownfield-json", help='existing-project marker, e.g. {"baseline_ref":"dev-kit-baseline","baseline_sha":"<sha>","mode":"feature","first_milestone":1}')
 
     s = sub.add_parser("sync-plan"); s.set_defaults(fn=cmd_sync_plan); s.add_argument("--plan")
 
@@ -1841,6 +2010,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("done"); s.set_defaults(fn=cmd_done); s.add_argument("task"); s.add_argument("--commit"); s.add_argument("--force", action="store_true")
     s = sub.add_parser("block"); s.set_defaults(fn=cmd_block); s.add_argument("task"); s.add_argument("--reason", required=True)
     s = sub.add_parser("unblock"); s.set_defaults(fn=cmd_unblock); s.add_argument("task")
+    s = sub.add_parser("drop"); s.set_defaults(fn=cmd_drop); s.add_argument("task"); s.add_argument("--reason", required=True)
 
     s = sub.add_parser("add-task"); s.set_defaults(fn=cmd_add_task)
     s.add_argument("--milestone", required=True); s.add_argument("--milestone-title")

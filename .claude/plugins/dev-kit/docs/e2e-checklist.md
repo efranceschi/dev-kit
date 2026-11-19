@@ -1,6 +1,6 @@
 # dev-kit end-to-end checklist (manual)
 
-Install the plugin (`/plugin install dev-kit@dev-kit`) or run `claude --plugin-dir .claude/plugins/dev-kit` in a scratch project, then start Claude Code there.
+Install the plugin (`/plugin marketplace add efranceschi/dev-kit`, then `/plugin install dev-kit@dev-kit`) or run `claude --plugin-dir .claude/plugins/dev-kit` in a scratch project, then start Claude Code there.
 
 Tick each item; note the Claude Code version used.
 
@@ -38,7 +38,7 @@ Tick each item; note the Claude Code version used.
 - [ ] `review prd`, `design` and `plan` each spawn the right reviewer, write `.dev/reviews/<target>/scores.json`, and `dev_state.py status` shows `reviews: prd:pass(NN) ...`. A failing review sends the artifact back to its producing skill and re-scores with a fresh reviewer.
 - [ ] `autopilot` does not start `architecture` before review `prd` passes, `plan` before `design`, `implement` before `plan`.
 - [ ] `qa M1` on a UI milestone runs the 11 auditors that apply (core 4, operations, data, dependencies, performance, a11y, visual, copy) and skips the rest with a reason; `.dev/qa/M1/scores.json` lists all dimensions.
-- [ ] `python3 -I .claude/plugins/dev-kit/skills/core/scripts/dev_state.py gate M1 passed --score 80` is refused (below 85); with the real score it succeeds and `status` shows `M1:passed(NN)`.
+- [ ] `python3 -I .claude/plugins/dev-kit/skills/core/scripts/dev_state.py gate M1 passed --score 80` is refused (below 85); with the real score it succeeds and `status --short` shows `M1:passed(NN)`.
 - [ ] A seeded flaw (e.g. an unauthenticated route) produces a `critical` security finding, a security score ≤ 40, gate `pending`, and a fix task that is picked first by `next`.
 
 ## 4. Brownfield onboarding
@@ -47,7 +47,11 @@ Tick each item; note the Claude Code version used.
 - [ ] `prd` tags ACs `existing`/`new`; `plan` has no walking-skeleton M1 and no tasks for `existing` ACs; `architecture` keeps the stack.
 - [ ] `qa M1` scores only `git diff dev-kit-baseline..HEAD`; a legacy flaw in untouched code is reported `"legacy": true`, becomes an `intangible` issue and does not block the gate.
 - [ ] Repo with Conventional Commits, `docs/adr/0001-*.md`, tag `v2.3.0` and a deploy workflow: `discovery.md` §11 proposes `commit_style` `{type}: {summary}`, the ADR appears as `source: imported`, `production.method` is `external`; a task commit is `feat: …` with trailer `Refs: T-001`; `release --dry-run` proposes `v2.4.0`.
-- [ ] Mode **maintenance**: after onboarding the phase is `implement`, `plan.md` has an empty `## M1 — Maintenance`, reviews `prd`/`design`/`plan` are `n/a`; `/dev-kit:issue` with a high bug creates a hotfix task in M1; `status` shows the `Brownfield:` line.
+- [ ] Mode **maintenance** with first milestone `7`: after onboarding the phase is `implement`, `plan.md` has an empty `## M7 — Maintenance`, reviews `prd`/`design`/`plan` are `n/a`; `/dev-kit:issue` with a medium bug schedules a task in M7 (no queue); `status --short` says `existing project: maintenance`; when the task is done `implement` points to `qa M7`; after the gate passes, the next issue opens `M8 — Maintenance` (`add-task` into M7 is refused).
+- [ ] Onboarding order: `.dev/state.json` exists before discovery; a failing test at the baseline becomes issue `origin: baseline` (visible in `backlog --json`); `session_start` and the onboarding's `skill_start` are in `telemetry.jsonl`.
+- [ ] With `autonomy.level unattended` in the existing project, `pause_policy.dirty_tree` is still `ask`; an uncommitted file of the user is never stashed.
+- [ ] Switching maintenance → feature (`/dev-kit:start "add X"`) reopens reviews `prd`/`design`/`plan` as `pending`.
+- [ ] A repo with only `setup.py` (or only PHP files, or `apps/web/package.json`) is detected as existing (`"greenfield": false`) and onboarded.
 - [ ] Mode **import** with a `docs/prd.md`: the interview asks only blocks the document does not cover and `prd` cites the original ids.
 - [ ] Delete `.dev/prd.md` and run `/dev-kit:start`: it routes to `prd` and says the stage was skipped; `dev_state.py set phase plan` without `prd.md` prints a warning.
 
@@ -59,4 +63,14 @@ Tick each item; note the Claude Code version used.
 
 ## 6. Autonomy policy
 - [ ] With `autonomy.level = cautious`, `implement` asks before a library choice; with `high` it logs an ADR instead.
-- [ ] A `paid_services` decision always triggers a question regardless of level.
+- [ ] A `paid_services` decision triggers a question at every supervised level; under `unattended` it is parked (`pause_policy.paid_services` = `park`), never decided alone.
+- [ ] `dev_state.py set autonomy.level cautious` raises the cut-offs to 90/85/75 and moves `library_choice` to `always_ask`; back to `high` restores the lists.
+
+## 7. Board, costs, feedback, deploy, issues
+- [ ] `/dev-kit:board` opens once (a second call reuses it); `--host 0.0.0.0` prints an access link and the page answers "Access link required" without it; `stop` ends it. In a folder with an unrelated `.dev/` and no state, the hook and `board status` create nothing.
+- [ ] `/dev-kit:costs` shows a table by stage; in an existing project `--all` starts at the adoption.
+- [ ] `/dev-kit:feedback` writes `feedback-report-<stamp>.md` and `telemetry-export-<stamp>.json`; stages recorded only as `n/a` show `—`.
+- [ ] `/dev-kit:deploy --dry-run` changes and records nothing; a real deploy records `Production:` in `status`; with `method external` it runs no install command.
+- [ ] Hotfix: `/dev-kit:issue` with a critical bug → `implement` → `qa --scope T-xxx` records review `hotfix-T-xxx` and leaves the milestone gate as it was → `release --hotfix` tags a patch and deploys once.
+- [ ] Buffer and cool-down: queued standard issues enter the next milestone through `pull-issues`; with cool-down on, small ones enter right after a gate.
+- [ ] `plan replan` dropping a task uses `dev_state.py drop`; the milestone can still complete and `release` does not wait for it.

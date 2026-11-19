@@ -295,8 +295,22 @@ def cost_of(r: dict, prices: dict) -> float | None:
     return usd
 
 
-def period_filter(usage: list[dict], events: list[dict], mode: str, since: str | None) -> tuple[list[dict], dict]:
+def adoption_start(dev: Path):
+    """Existing projects only: when dev-kit was adopted (state created_at). Claude Code sessions in the project
+    before that were not dev-kit work and stay out of `--all`."""
+    try:
+        st = json.loads((dev / "state.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return parse_ts(st.get("created_at")) if st.get("brownfield") else None
+
+
+def period_filter(usage: list[dict], events: list[dict], mode: str, since: str | None,
+                  dev: Path | None = None) -> tuple[list[dict], dict]:
     if mode == "all":
+        start = adoption_start(dev) if dev is not None else None
+        if start is not None:  # existing project: sessions before dev-kit was adopted are not dev-kit work
+            return [r for r in usage if (parse_ts(r.get("ts")) or start) >= start], {"mode": "all", "from": start.isoformat()}
         return usage, {"mode": "all"}
     if mode == "since":
         start = parse_ts(f"{since}T00:00:00+00:00")
@@ -313,7 +327,7 @@ def period_filter(usage: list[dict], events: list[dict], mode: str, since: str |
 def build_report(dev: Path, by: str, mode: str, since: str | None) -> dict:
     events, _ = tel.read_events(dev)
     usage = attribute(load_usage(dev), events)
-    usage, period = period_filter(usage, events, mode, since)
+    usage, period = period_filter(usage, events, mode, since, dev)
     prices = load_prices(dev)
     rows: dict[str, dict] = {}
     unknown: set[str] = set()
@@ -395,7 +409,7 @@ def stamped(folder: Path, prefix: str, ext: str, stamp: str | None) -> Path:
 
 def export_csv(dev: Path, mode: str, since: str | None, stamp: str | None) -> Path:
     events, _ = tel.read_events(dev)
-    usage, _ = period_filter(attribute(load_usage(dev), events), events, mode, since)
+    usage, _ = period_filter(attribute(load_usage(dev), events), events, mode, since, dev)
     prices = load_prices(dev)
     agg: dict[tuple, dict] = {}
     for r in usage:

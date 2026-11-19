@@ -34,7 +34,7 @@ Step by step: [getting started](docs/getting-started.md).
 | adopt the kit in an existing project | `/dev-kit:start <the change you want>` (runs the onboarding first) |
 | know what to do next | `/dev-kit:help` |
 | let the kit build it | `/dev-kit:autopilot` |
-| build it step by step | `/dev-kit:prd` → `architecture` → `ux` → `ui` → `plan` → `implement` → `qa` |
+| build it step by step | `/dev-kit:prd` → `review prd` → `architecture` → `ux` → `ui` → `review design` → `plan` → `review plan` → `implement` → `qa` |
 | see where things stand | `/dev-kit:status` |
 | watch it live in the browser | `/dev-kit:board` (`/dev-kit:board stop` to stop) |
 | report a bug or ask for an improvement | `/dev-kit:issue "what happens"` |

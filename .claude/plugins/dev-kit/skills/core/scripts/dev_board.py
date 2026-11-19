@@ -379,7 +379,7 @@ def graph_data(root: Path, milestone: str) -> dict | None:
                 f = e.get("findings") if isinstance(e.get("findings"), dict) else {}
                 done_by.setdefault(node, []).append({"agent": _short(e.get("agent")), "at": e.get("ts"), "status": e.get("status"),
                                                      "duration_s": e.get("duration_s"), "findings": sum(v for v in f.values() if isinstance(v, (int, float))) if f else None})
-    mine = {tid: t for tid, t in tasks.items() if t.get("milestone") == milestone}
+    mine = {tid: t for tid, t in tasks.items() if t.get("milestone") == milestone and t.get("status") != "dropped"}
     nodes, edges, loops, spans = {}, [], [], {}
 
     def planned(tid: str, t: dict) -> bool:
@@ -536,6 +536,8 @@ def build_state(root: Path, board: dict | None = None) -> dict:
     goals = milestone_goals(_read(store.dev / "plan.md"))
     tasks = {}
     for tid, t in sorted(store.tasks().items(), key=lambda kv: int(kv[0][2:])):
+        if t.get("status") == "dropped":
+            continue  # removed by a replan: history only, not on the board
         tasks[tid] = {k: t.get(k) for k in ("title", "milestone", "type", "status", "lane", "deps", "commit",
                                             "blocked_reason", "started_at", "done_at", "source")}
         tasks[tid]["acceptance"] = len(t.get("acceptance") or [])
@@ -564,6 +566,8 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "phase": s.get("phase"), "phases": ds.PHASES, "language": s.get("language"),
         "created_at": s.get("created_at"), "updated_at": s.get("updated_at"),
         "autonomy": (s.get("autonomy") or {}).get("level"),
+        "brownfield": ({k: (s.get("brownfield") or {}).get(k) for k in ("mode", "baseline_ref", "first_milestone")}
+                       if s.get("brownfield") else None),
         "stack": {k: v for k, v in (s.get("stack") or {}).items() if k != "detected_from" and v},
         "progress": store.progress(),
         "current_milestone": ds.current_milestone(store),
@@ -935,6 +939,9 @@ def print_exposure(rec: dict) -> None:
 
 
 def cmd_stop(root: Path, a: argparse.Namespace) -> int:
+    if not run_dir(root).is_dir():  # nothing was ever started here: do not create .dev/run/ just to say so
+        print("not running")
+        return 0
     with Lock(root):
         code, msg = stop_locked(root)
     print(msg, file=sys.stderr if code else sys.stdout)
@@ -984,8 +991,11 @@ def _zombie(pid: int) -> bool:
 
 
 def cmd_status(root: Path, a: argparse.Namespace) -> int:
-    with Lock(root):
-        rec = live_record(root)
+    if not run_dir(root).is_dir():
+        rec = None
+    else:
+        with Lock(root):
+            rec = live_record(root)
     out = {"running": bool(rec), **({k: rec.get(k) for k in ("url", "pid", "port", "started_at", "host", "exposed", "access_urls")}
                                     if rec else {})}
     if a.json:

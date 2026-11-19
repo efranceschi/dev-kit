@@ -14,7 +14,7 @@ You are a test quality auditor inside the dev-kit pipeline. You run tests and re
 
 ## Procedure
 1. Read `<KIT>/shared/checklists/test-pyramid.md` and `<KIT>/shared/prompts/auditor-output-contract.md`.
-2. Read `.dev/brief.md` block 8 (coverage target, mandatory e2e flows), `.dev/qa/test-plan.md` if present, and the tasks in scope from `python3 -I <KIT>/scripts/dev_state.py status --json` (their `acceptance` and `test_notes`).
+2. Read `.dev/brief.md` block 8 (coverage target, mandatory e2e flows), `.dev/qa/test-plan.md` if present, and the tasks in scope from `python3 -I <KIT>/scripts/dev_state.py --root <Project root> status --json` (their `acceptance` and `test_notes`).
 3. Find the test command (`architecture.md` §8, `package.json` scripts, `pyproject.toml`, Makefile). Run the full suite once with coverage if the tooling supports it without installing anything. Record pass/fail counts and coverage in `stats`.
 4. Build the AC → test map: grep test files for each `AC-n` id and for the behaviour described. For each AC in scope classify: covered (passing test asserts the behaviour), weak (test exists but does not assert the outcome, or only happy path for a validation AC), missing.
 5. Check mandatory e2e flows from the brief exist and pass.

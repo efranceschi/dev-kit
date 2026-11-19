@@ -8,6 +8,8 @@
 
 Overall: **{{overall}}** / cut-off {{cutoff}} → {{PASS|FAIL}}. Reasons if failed: {{reasons from scores.json}}. Previous run: {{score or n/a}} (trend {{up|down|same}}).
 
+Round {{n}} (delta mode from round 2): closed {{n}} · still open {{n}} · new {{n}} · deferred lows {{n}}.
+
 ## Summary
 | Auditor | Verdict | critical | high | medium | low |
 |---|---|---|---|---|---|
@@ -16,7 +18,9 @@ Overall: **{{overall}}** / cut-off {{cutoff}} → {{PASS|FAIL}}. Reasons if fail
 | test-auditor | | | | | |
 | spec-tracer | | | | | |
 
-Tests: {{passed}}/{{total}} passing · Coverage: {{coverage or n/a}} · Lint: {{clean|n issues}}
+Tests: {{passed}}/{{total}} passing · Coverage: {{coverage or n/a}} · Lint: {{clean|n issues}} · Test baseline (existing projects): {{failures already failing at the baseline, from qa/baseline.md}}
+
+Auditors skipped: {{auditor — reason}}.
 
 ## Blocking findings (critical / high)
 | id | severity | title | file:line | AC | fix task |
@@ -26,8 +30,18 @@ Tests: {{passed}}/{{total}} passing · Coverage: {{coverage or n/a}} · Lint: {{
 | id | severity | title | file:line | action |
 |---|---|---|---|---|
 
+## Deferred findings
+New lows of this round and mediums not turned into tasks; promote with `/dev-kit:issue --from <F-id> {{scope}}`.
+
+## Pre-existing (not scored) — existing projects only
+| id | severity | title | file:line | issue |
+|---|---|---|---|---|
+
+## Local deploy
+Mode {{off|smoke|keep_running}} · {{URL, install path or command}} · result {{ok|failed}} · how to stop it.
+
 ## Acceptance traceability (from spec-tracer)
-| AC | tasks | tests | status |
+| AC | tasks | tests | status (complete · partial · untested · missing · existing-verified) |
 |---|---|---|---|
 
 ## Decisions taken during this gate

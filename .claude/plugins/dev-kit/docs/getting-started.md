@@ -5,6 +5,7 @@ Your first project with the dev-kit, step by step. Inside Claude Code, `/dev-kit
 ## 1. Install
 
 ```
+/plugin marketplace add efranceschi/dev-kit
 /plugin install dev-kit@dev-kit
 ```
 
@@ -38,16 +39,16 @@ This writes and reviews the PRD, architecture, UX/UI specs and the plan, then st
 /dev-kit:autopilot
 ```
 
-It implements each milestone test-first (one commit per task), runs the quality gate (`qa`), fixes what failed and moves to the next milestone. Prefer to drive it yourself? `/dev-kit:implement --milestone M1`, then `/dev-kit:qa M1`.
+It implements each milestone test-first (one commit per task), runs the quality gate (`qa`), fixes what failed and moves to the next milestone. Prefer to drive it yourself? After each document, its review: `/dev-kit:prd` → `/dev-kit:review prd` → `/dev-kit:architecture` → `/dev-kit:ux` → `/dev-kit:ui` → `/dev-kit:review design` → `/dev-kit:plan` → `/dev-kit:review plan`; then `/dev-kit:implement --milestone M1` and `/dev-kit:qa M1`. `release` checks that every review passed.
 
 ## Already have a project?
 
-Run `/dev-kit:start <the change you want>` in the repository root (commit pending work first). In a codebase that was not built with dev-kit, `start` first runs an **onboarding**: it tags the current commit `dev-kit-baseline`, writes `.dev/discovery.md` (stack, commands, your commit/version/CHANGELOG conventions, existing docs and ADRs), records the current test results in `.dev/qa/baseline.md`, and asks for an entry mode:
+Run `/dev-kit:start <the change you want>` in the repository root (commit pending work first). In a codebase that was not built with dev-kit, `start` first runs an **onboarding**: it tags the current commit `dev-kit-baseline`, writes `.dev/discovery.md` (stack, commands, your commit/version/CHANGELOG conventions, existing docs and ADRs), records the current test results in `.dev/qa/baseline.md`, and asks for an entry mode and the number of the first milestone (default `M1`; continue your own numbering if you have one):
 
 | mode | use it when | what happens |
 |---|---|---|
 | feature | you want a new capability | short interview about the change, then PRD (as-built + new), plan and build |
-| maintenance | you only fix bugs and make small improvements | no PRD or plan to write: report work with `/dev-kit:issue` |
+| maintenance | you only fix bugs and make small improvements | an as-built PRD and an empty maintenance milestone are written for you; report work with `/dev-kit:issue`, and `/dev-kit:qa` gates each batch |
 | import | you already have a PRD, specs or ADRs | they become the source; only the gaps are asked |
 
 Nothing in your code, docs or history is changed by the onboarding. From then on QA scores only what changed since the baseline, and problems that were already there become low-priority issues instead of blocking the gate. Commits follow your project's style. If a stage was skipped, `/dev-kit:start` routes to it; a stage that does not apply (e.g. design when there is no new UI) is recorded as `n/a`.
@@ -57,6 +58,7 @@ Nothing in your code, docs or history is changed by the onboarding. From then on
 | You want | Run |
 |---|---|
 | where the project stands | `/dev-kit:status` |
+| a live board in the browser (or on your phone) | `/dev-kit:board` (`--host 0.0.0.0` to share it) |
 | what is pending and what to do next | `/dev-kit:backlog` |
 | report a bug or an idea | `/dev-kit:issue "what happens"` |
 | how much it cost | `/dev-kit:costs` |

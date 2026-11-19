@@ -8,11 +8,11 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 
 | Skill | What it does |
 |---|---|
-| [`start`](#start) | Entry point: starts a new project or resumes the current one and routes to the next skill. |
+| [`start`](#start) | Entry point: starts a new project, adopts an existing codebase (feature, maintenance or import mode) or resumes, and routes to the next skill. |
 | [`help`](#help) | Help inside Claude Code: what to do next, how each skill works, recipes and concepts. |
 | [`interview`](#interview) | Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md with the autonomy policy. |
 | [`status`](#status) | Read-only dashboard: phase, milestones, gates, scores, issues, preview, production drift, cost so far. |
-| [`board`](#board) | Live Scrum board in the browser: sprint goal, kanban, burndown, velocity, backlog, impediments, definition of done. |
+| [`board`](#board) | Live Scrum board in the browser: sprint goal, kanban and execution graph with live agents, burndown, velocity, backlog, impediments; local, or shared on your network with an access link. |
 
 ## Specify
 
@@ -64,7 +64,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 
 ### start
 
-Entry point: starts a new project or resumes the current one and routes to the next skill.
+Entry point: starts a new project, adopts an existing codebase (feature, maintenance or import mode) or resumes, and routes to the next skill.
 
 **When:** First command in any project, and whenever you come back and want to know where things stopped.
 
@@ -99,6 +99,7 @@ Help inside Claude Code: what to do next, how each skill works, recipes and conc
 | `skill` | card of one skill |
 | `question` | the recipe or concept that answers it |
 | `agents` | the agents and who calls them |
+| `concept` | a term such as gate, buffer or baseline: its definition |
 
 **Examples:**
 
@@ -154,11 +155,11 @@ Read-only dashboard: phase, milestones, gates, scores, issues, preview, producti
 
 ### board
 
-Live Scrum board in the browser: sprint goal, kanban, burndown, velocity, backlog, impediments, definition of done.
+Live Scrum board in the browser: sprint goal, kanban and execution graph with live agents, burndown, velocity, backlog, impediments; local, or shared on your network with an access link.
 
 **When:** When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.
 
-**Usage:** `/dev-kit:board [stop | status | --open | --no-open | --port N | --host IP]`
+**Usage:** `/dev-kit:board [stop | status | --open | --no-open | --port N | --host IP | --idle-min N]`
 
 | Argument | Meaning |
 |---|---|
@@ -167,6 +168,7 @@ Live Scrum board in the browser: sprint goal, kanban, burndown, velocity, backlo
 | `status` | whether it is running, its URL and PID |
 | `--open | --no-open | --port N` | force a new tab, do not open a tab, preferred port (default 8765) |
 | `--host IP` | listen address (default 127.0.0.1); 0.0.0.0 shares the board on the network, opened only with the access link it prints |
+| `--idle-min N` | stop after N minutes with no open tab (default 120; 0 = never) |
 
 **Examples:**
 
@@ -340,6 +342,7 @@ Implements ready tasks test-first, full suite, one commit per task; hotfix lane 
 | `T-003` | one task |
 | `--milestone M1 | --tasks N` | a milestone or N tasks |
 | `--parallel N` | N isolated implementers in git worktrees |
+| `--skip-gate` | work past a pending gate (records an ADR and sets the gate skipped) |
 
 **Examples:**
 
@@ -430,7 +433,7 @@ Report a bug, improvement or scope change in plain words; the kit classifies and
 | `I-003` | show or update |
 | `--from F-012 M3` | promote a deferred QA finding |
 | `--schedule I-003 M8` | bring into an existing milestone |
-| `--close I-003 wontfix|duplicate` | close |
+| `--close I-003 wontfix | duplicate I-001` | close (as duplicate of another issue) |
 
 **Examples:**
 
@@ -475,7 +478,7 @@ Production deploy of an approved milestone or release: preflight, backup, dry-ru
 |---|---|
 | `M3` | deploy a milestone |
 | `--check` | only show the drift |
-| `--dry-run` | simulate |
+| `--dry-run` | preflight and the method's own dry-run; nothing installed or recorded |
 
 **Examples:**
 

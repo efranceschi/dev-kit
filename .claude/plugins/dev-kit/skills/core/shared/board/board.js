@@ -89,6 +89,7 @@
     $("project").textContent = data.project;
     document.title = `${data.project} · dev-kit board`;
     $("kit-ver").textContent = data.kit && data.kit !== "unknown" ? `v${data.kit}` : "";
+    $("bf-mode").textContent = data.brownfield ? `existing project · ${data.brownfield.mode || "feature"} · since ${data.brownfield.baseline_ref || "baseline"}` : "";
     const phases = data.phases.filter((p) => p !== "init");
     const idx = phases.indexOf(data.phase);
     fill($("phases"), phases.map((p, i) => h("li", {
@@ -340,7 +341,7 @@
     $("pb-sub").textContent = `${queued.length} queued issues · ${future.length} tasks in later sprints`;
     const issueLi = (i) => h("li", {}, h("span", { class: "id", text: i.id }), h("span", { text: i.title || "" }),
       h("span", { class: `chip${i.c === "expedite" ? " lane-hotfix" : ""}`, text: i.c || i.status }),
-      h("span", { class: "sub", text: [i.type, i.severity, i.scheduled_in ? `→ ${i.scheduled_in}` : null].filter(Boolean).join(" · ") }));
+      h("span", { class: "sub", text: [i.type, i.severity, i.origin === "baseline" ? "pre-existing" : null, i.scheduled_in ? `→ ${i.scheduled_in}` : null].filter(Boolean).join(" · ") }));
     const buf = b.buffer;
     fill($("product-backlog"),
       listBlock("Issue queue", queued.map(issueLi), "No issues waiting.", true),

@@ -9,9 +9,10 @@ user-invocable: false
 
 Source of truth for the dev-kit suite; there is no generated copy.
 
-- `shared/`: conventions, interview script and autonomy policy, templates, checklists, auditor output contract.
-- `scripts/`: `dev_state.py` (project state in `.dev/`), `dev_score.py` (quality scores), `dev_detect_stack.py`, `dev_board.py` (local read-only board server for `/dev-kit:board`; its page lives in `shared/board/`).
-- `tests/`: `test_dev_state.py` and `lint_suite.py`, for whoever maintains the suite. Not used at run time.
-- `docs/`: README, flow diagram and the manual end-to-end checklist.
+- `shared/`: conventions, onboarding of existing projects, interview script and autonomy policy, templates, checklists, auditor output and isolation contracts, `help.json` and `tips.json` catalogs, and the board page (`board/`).
+- `scripts/`: `dev_state.py` (project state in `.dev/`), `dev_score.py` (quality scores), `dev_telemetry.py` (session log and stage grades), `dev_cost.py` (token usage and cost), `dev_docs.py` (generated docs and help answers), `dev_detect_stack.py`, `dev_board.py` (local read-only board server for `/dev-kit:board`) and `dev_agent_hook.py` (hook that feeds the board's live agents).
+- `tests/`: `lint_suite.py` and the `test_*.py` suites, for whoever maintains the kit. Not used at run time.
+
+The plugin's user docs, flow diagram and manual end-to-end checklist live in the plugin's `docs/` folder, not here.
 
 The other dev-kit skills reference these files as `${CLAUDE_SKILL_DIR}/../core/...`, and agents receive the same path as `Kit root:` in their prompt.

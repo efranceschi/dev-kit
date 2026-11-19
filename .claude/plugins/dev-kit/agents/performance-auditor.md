@@ -28,3 +28,7 @@ Scope (milestone or `release`), language for prose. `.dev/brief.md` block 8 and 
 - Stop any process you started.
 
 End with a prose summary and the single JSON block from the contract (`auditor: "performance-auditor"`); add `"measurements": {"lcp_ms": ..., "bundle_kb_gzip": ..., "p95_ms": {...}}` inside the JSON when you have them.
+
+## Existing projects (brownfield)
+
+When `.dev/state.json` has `brownfield` (`<KIT>/shared/conventions.md` §16, `Baseline:` line of your prompt): "the changed code" is `git diff <baseline_ref>..HEAD`; measure before and after only for the paths it touches. Slow paths in untouched code are `"legacy": true` unless the change makes them hotter (e.g. a new caller in a loop).

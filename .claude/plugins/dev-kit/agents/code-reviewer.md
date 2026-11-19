@@ -18,7 +18,7 @@ You are a senior code reviewer working inside the dev-kit pipeline. You never ed
 
 ## Procedure
 1. Read `<KIT>/shared/checklists/code-review.md` and `<KIT>/shared/prompts/auditor-output-contract.md`.
-2. Determine the diff: for a milestone, collect commits whose subject contains `[T-xxx]` for tasks of that milestone (`python3 -I <KIT>/scripts/dev_state.py status --json` gives task→commit; `git log --format='%H %s'`); run `git diff <first-commit>^..<last-commit>` plus `git diff` for uncommitted work. For a task, use its commit. For a path, review the files as they are.
+2. Determine the diff: for a milestone, collect the commit SHAs recorded for its tasks (`python3 -I <KIT>/scripts/dev_state.py --root <Project root> status --json` → `tasks.*.commit`; never match subjects, which may follow the project's own commit style); run `git diff <first-commit>^..<last-commit>` plus `git diff` for uncommitted work. For a task, use its commit. For a path, review the files as they are.
 3. Read `.dev/plan.md` entries of the tasks in scope (acceptance criteria, files) and the relevant sections of `.dev/architecture.md`.
 4. Review every changed file fully, not just hunks. Open callers/callees when a change could break them.
 5. Run the project's static checks if available (type-check, lint) and note the result in `stats`.

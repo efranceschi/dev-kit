@@ -25,9 +25,11 @@ flowchart LR
 |---|---|---|---|---|
 
 ## 4. Screen inventory
-| Screen id | Name | Purpose | Primary action | Reached from | Stories |
-|---|---|---|---|---|---|
-| S-01 | | | | | |
+| Screen id | Name | Purpose | Primary action | Reached from | Stories | Tag |
+|---|---|---|---|---|---|---|
+| S-01 | | | | | | new |
+
+`Tag` is used in existing projects only: `existing` (one line with route and file; no states or forms specified), `changed` or `new` (fully specified below). New projects leave it empty.
 
 ## 5. States per screen
 For each screen: loading · empty (first use) · partial · error (network, validation, permission) · success/confirmation · offline (if applicable). Specify copy and the recovery action for each.

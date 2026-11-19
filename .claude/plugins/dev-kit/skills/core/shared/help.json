@@ -34,7 +34,7 @@
     {
       "name": "start",
       "category": "start",
-      "one_line": "Entry point: starts a new project or resumes the current one and routes to the next skill.",
+      "one_line": "Entry point: starts a new project, adopts an existing codebase (feature, maintenance or import mode) or resumes, and routes to the next skill.",
       "when": "First command in any project, and whenever you come back and want to know where things stopped.",
       "args": [
         {
@@ -88,6 +88,10 @@
         {
           "arg": "agents",
           "meaning": "the agents and who calls them"
+        },
+        {
+          "arg": "concept",
+          "meaning": "a term such as gate, buffer or baseline: its definition"
         }
       ],
       "examples": [
@@ -169,7 +173,7 @@
     {
       "name": "board",
       "category": "start",
-      "one_line": "Live Scrum board in the browser: sprint goal, kanban, burndown, velocity, backlog, impediments, definition of done.",
+      "one_line": "Live Scrum board in the browser: sprint goal, kanban and execution graph with live agents, burndown, velocity, backlog, impediments; local, or shared on your network with an access link.",
       "when": "When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.",
       "args": [
         {
@@ -191,6 +195,10 @@
         {
           "arg": "--host IP",
           "meaning": "listen address (default 127.0.0.1); 0.0.0.0 shares the board on the network, opened only with the access link it prints"
+        },
+        {
+          "arg": "--idle-min N",
+          "meaning": "stop after N minutes with no open tab (default 120; 0 = never)"
         }
       ],
       "examples": [
@@ -433,6 +441,10 @@
         {
           "arg": "--parallel N",
           "meaning": "N isolated implementers in git worktrees"
+        },
+        {
+          "arg": "--skip-gate",
+          "meaning": "work past a pending gate (records an ADR and sets the gate skipped)"
         }
       ],
       "examples": [
@@ -569,8 +581,8 @@
           "meaning": "bring into an existing milestone"
         },
         {
-          "arg": "--close I-003 wontfix|duplicate",
-          "meaning": "close"
+          "arg": "--close I-003 wontfix | duplicate I-001",
+          "meaning": "close (as duplicate of another issue)"
         }
       ],
       "examples": [
@@ -638,7 +650,7 @@
         },
         {
           "arg": "--dry-run",
-          "meaning": "simulate"
+          "meaning": "preflight and the method's own dry-run; nothing installed or recorded"
         }
       ],
       "examples": [
@@ -979,6 +991,57 @@
         "/dev-kit:interview --gaps to revisit decisions",
         "Or directly: dev_state.py set autonomy.<field> <value> (level, quality, cooldown, issue_buffer_pct, tips, model_policy, pause_policy…)"
       ]
+    },
+    {
+      "id": "board",
+      "title": "Watch the project on a board (or share it)",
+      "topics": [
+        "board",
+        "dashboard",
+        "panel",
+        "kanban",
+        "share",
+        "phone",
+        "network"
+      ],
+      "steps": [
+        "/dev-kit:board opens the live board in the browser (one server per project)",
+        "/dev-kit:board --host 0.0.0.0 shares it on your network: open the access link it prints on the other device",
+        "/dev-kit:board stop (or the Stop server button) when done"
+      ]
+    },
+    {
+      "id": "release",
+      "title": "Ship a version",
+      "topics": [
+        "release",
+        "ship",
+        "version",
+        "tag",
+        "publish"
+      ],
+      "steps": [
+        "/dev-kit:docs all, then /dev-kit:review docs",
+        "/dev-kit:release --dry-run to see the checklist and the version it would use",
+        "/dev-kit:release (tags; pushes and deploys only as the brief allows)"
+      ]
+    },
+    {
+      "id": "usability",
+      "title": "Check that the app is usable and accessible",
+      "topics": [
+        "usability",
+        "accessibility",
+        "a11y",
+        "ux",
+        "polish",
+        "screens"
+      ],
+      "steps": [
+        "/dev-kit:usability (or --url http://localhost:3000 for an app already running)",
+        "/dev-kit:implement to run the fix tasks it created",
+        "/dev-kit:usability again until review ux passes"
+      ]
     }
   ],
   "glossary": [
@@ -1036,7 +1099,7 @@
     },
     {
       "term": "park",
-      "definition": "In unattended runs, record what needs you as a question, block only what depends on it and go on."
+      "definition": "Pause-point action: never wait; record the question with the recommended answer, block only what depends on it and continue (the default of most points under the unattended level, available at any level)."
     },
     {
       "term": "pause policy",
@@ -1061,6 +1124,50 @@
     {
       "term": "Brownfield",
       "definition": "An existing project not built with dev-kit. start runs the onboarding (baseline tag, discovery, test baseline, entry mode); audits score only the changes since the baseline and legacy problems become issues (conventions §16)."
+    },
+    {
+      "term": "legacy",
+      "definition": "A finding in code that existed before dev-kit (existing projects): reported with \"legacy\": true, never scored, turned into an issue."
+    },
+    {
+      "term": "entry mode",
+      "definition": "How an existing project is adopted: feature (new capability), maintenance (bugs and small improvements through issues) or import (existing PRD/specs are the source)."
+    },
+    {
+      "term": "maintenance milestone",
+      "definition": "In maintenance mode, the milestone M<n> — Maintenance that issues fill; its gate runs like any other, then the next issue opens M<n+1>."
+    },
+    {
+      "term": "existing / changed / new",
+      "definition": "Tags of ACs and screens in existing projects: existing works already (no task), changed gets a task, new is built from scratch."
+    },
+    {
+      "term": "n/a review",
+      "definition": "A review that does not apply (e.g. design with no new UI); recorded with a note, it satisfies prerequisites and is not graded."
+    },
+    {
+      "term": "discovery",
+      "definition": "The onboarding report of an existing project (.dev/discovery.md): stack, layout, commands, conventions, existing docs and ADRs."
+    },
+    {
+      "term": "external deploy",
+      "definition": "production.method external: the project's own CI/CD deploys; the kit only confirms and records the commit."
+    },
+    {
+      "term": "local preview",
+      "definition": "The approved milestone built and run on 127.0.0.1 (keep_running or smoke), per autonomy.local_deploy."
+    },
+    {
+      "term": "dropped task",
+      "definition": "A task removed by a replan (dev_state.py drop): kept for history, never counted by milestones, next or release."
+    },
+    {
+      "term": "access link",
+      "definition": "The private URL printed by /dev-kit:board --host 0.0.0.0; other devices open the shared board only through it."
+    },
+    {
+      "term": "expedite",
+      "definition": "The class of service for a critical/high bug in delivered work: a hotfix task that runs before everything (WIP 1)."
     }
   ],
   "agents_called_by": {

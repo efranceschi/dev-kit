@@ -469,3 +469,30 @@ class BoardTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNoStateProjects(unittest.TestCase):
+    """Outside a dev-kit project the hook and the board must leave no trace."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / ".dev").mkdir()  # an unrelated tool's .dev/ folder, no state.json
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_hook_ignores_dev_folder_without_state(self):
+        hook = CORE / "scripts" / "dev_agent_hook.py"
+        payload = {"hook_event_name": "SessionStart", "session_id": "s1", "cwd": str(self.root)}
+        subprocess.run([sys.executable, "-I", str(hook)], input=json.dumps(payload), text=True, check=True,
+                       capture_output=True, env={**os.environ, "CLAUDE_PROJECT_DIR": str(self.root)})
+        self.assertFalse((self.root / ".dev" / "run").exists())
+
+    def test_stop_and_status_do_not_create_run_dir(self):
+        for args in (["stop"], ["status"], ["status", "--json"]):
+            p = subprocess.run([sys.executable, "-I", str(BOARD), "--root", str(self.root), *args],
+                               capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn("not running" if "--json" not in args else '"running": false', p.stdout)
+        self.assertFalse((self.root / ".dev" / "run").exists())
