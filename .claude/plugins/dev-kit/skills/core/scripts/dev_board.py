@@ -492,17 +492,29 @@ def open_runs(events: list[dict], now: float) -> list[dict]:
     return [o for o in open_ if now - _ts(o["started_at"]) < RUN_STALE_S]
 
 
-def live_agents(root: Path, qa_default: str | None = None) -> dict:
+def live_agents(root: Path, qa_default: str | None = None, tasks: dict | None = None) -> dict:
     """Running agents and the board node (task, or QA gate of a milestone) each one works on.
 
     Skills log agent_spawn/agent_end with a scope (task or milestone) in telemetry; plugin hooks, where the
     environment runs them, log exact start/stop of every agent but without the task. With hooks, the running set
-    is the hook set and an agent gets a node only when exactly one skill spawn of the same type started within
-    LINK_WINDOW_S of it and vice versa; any ambiguity leaves it without a node (better none than a wrong one).
+    is the hook set and each agent is linked to a node by the first rule that applies:
+      1. time: exactly one skill spawn of the same type started within LINK_WINDOW_S of it, and vice versa;
+      2. type: every open spawn of its type points to the same node;
+      3. qa_run: an auditor while qa runs on a milestone belongs to that milestone's QA gate;
+      4. batch: the agents of one type still unlinked are as many as the open spawns of that type still free
+         (implement --parallel starts N implementers for N tasks at once): paired in start order. Agents of the same
+         type started together look the same on the board, so the pairing cannot mislead;
+      5. task: implementers with no open spawn at all (the skill did not log them) are as many as the in-progress
+         tasks with no agent: paired in start order.
+    Anything else stays without a node (better none than a wrong one). `tasks` (id -> {status, started_at}) drops
+    spawns of tasks already done, dropped or blocked, whose agent_end was never logged.
     Without hooks, the open skill spawns are the running set."""
     now = time.time()
     events = _task_events(root)
     spawns = open_spawns(events, now)
+    if tasks:
+        spawns = [o for o in spawns if not (_node_of(o["scope"]) or "").startswith("T-")
+                  or (tasks.get(o["scope"]) or {}).get("status") not in ("done", "dropped", "blocked")]
     runs = open_runs(events, now)
     # the milestone a running qa skill audits: its scope, or (older runs without scope) the milestone waiting for its gate
     qa_runs = [r for r in runs if r["skill"] == "qa"]
@@ -536,6 +548,24 @@ def live_agents(root: Path, qa_default: str | None = None) -> dict:
         if not node and h["agent"] in QA_AGENTS and qa_node:
             node, how = qa_node, "qa_run"
         active.append({"agent": h["agent"], "started_at": h["started_at"], "node": node, "slot": slot, "linked_by": how})
+    by_start = lambda x: (_ts(x["started_at"]), int(x["slot"]) if str(x.get("slot") or "").isdigit() else 0)  # noqa: E731
+    for ag in sorted({a["agent"] for a in active if not a["node"]}):
+        loose = sorted((a for a in active if a["agent"] == ag and not a["node"]), key=by_start)
+        taken = {a["node"] for a in active if a["node"]}
+        # 4. as many unlinked agents of this type as open spawns of this type whose node is still free
+        free = sorted((o for o in spawns if o["agent"] == ag and _node_of(o["scope"]) and _node_of(o["scope"]) not in taken),
+                      key=by_start)
+        if len(free) == len(loose) and len({_node_of(o["scope"]) for o in free}) == len(free):
+            for a, o in zip(loose, free):
+                a.update(node=_node_of(o["scope"]), slot=o["slot"], linked_by="batch")
+            continue
+        # 5. implementers the skill did not log at all, as many as the in-progress tasks with no agent
+        if ag == "implementer" and tasks and not any(o["agent"] == ag for o in spawns):
+            idle = sorted(({"node": t, "started_at": v.get("started_at")} for t, v in tasks.items()
+                           if v.get("status") == "in_progress" and t not in taken), key=by_start)
+            if len(idle) == len(loose):
+                for a, t in zip(loose, idle):
+                    a.update(node=t["node"], linked_by="task")
     return {"hooks": True, "active": active, "runs": runs}
 
 
@@ -635,7 +665,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
     qa_default = next((m for m in order if store.milestones()[m].get("gate", "pending") == "pending"
                        and [t for t in tasks.values() if t["milestone"] == m]
                        and all(t["status"] == "done" for t in tasks.values() if t["milestone"] == m)), None)
-    agents = live_agents(root, qa_default)
+    agents = live_agents(root, qa_default, tasks)
     qa_run = next((r for r in reversed(agents["runs"]) if r["skill"] == "qa"), None)
     qa_scope = (qa_run.get("scope") or qa_default) if qa_run else None
     milestones = []
