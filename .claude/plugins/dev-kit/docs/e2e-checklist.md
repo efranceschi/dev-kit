@@ -89,11 +89,16 @@ Tick each item; note the Claude Code version used.
 - [ ] (1.18) `/dev-kit:costs --time` shows time per agent and skill and the ledger reuse table.
 - [ ] (1.19) A consumer task's `dev_state.py brief` shows the producer's contract; `xref` flags `consumes` without `contract`; two parallel tasks cannot hold the same `lock`; `docs` merges `changelog.d/`.
 
-## 9. Requests from the board (1.23–1.24)
-These need a real Claude Code with the plugin's hooks; they also decide how the executor runs unattended (planned next).
-- [ ] `/dev-kit:board` prints `requests: on`; ▶ next to "Next step" queues `/dev-kit:implement` and the session banner (at the next prompt or at the end of the turn) says `1 request waiting · run /dev-kit:worker`; the status line shows `▣ 1`.
+## 9. Requests from the board (1.23–1.26)
+These need a real Claude Code with the plugin's hooks and monitors. The step-by-step script that records what this Claude Code version does, to send back to the kit's author, is [board-autonomy-check](board-autonomy-check.md).
+- [ ] `/dev-kit:board` prints `requests: on` and `listening`; the Requests card says "Claude Code: listening". ▶ next to "Next step" starts `/dev-kit:implement` in that session with nobody typing; the board shows the request running, then `done` with its note.
+- [ ] In a session that did not run `/dev-kit:board`, a queued request shows on the session banner (at the next prompt or at the end of the turn) as `1 request waiting · run /dev-kit:worker` and on the status line as `▣ 1`.
+- [ ] "Go on by itself": after a request the next step starts alone; it stops with the reason on an open question, a blocked task, a failed request and when the milestone closes; "Go on" resumes.
+- [ ] A permission prompt during a board request appears in Needs you with Allow, Allow for this session (when Claude Code suggests a rule) and Deny; the answer reaches Claude Code; with no answer it is denied after 10 minutes; outside a board request the terminal prompt works as before.
+- [ ] The tab title shows "(n) Needs you" and the icon gets its dot while a question or a permission waits.
+- [ ] `/dev-kit:board --trusted-host <name>` behind a reverse proxy: the page loads and its buttons work through the proxy's https address; another host name is refused.
 - [ ] `/dev-kit:worker` takes the request, runs the skill and closes it; the board shows `done` with the note. A second Claude Code session in the same project running `/dev-kit:worker` is refused while the first is alive.
 - [ ] A question raised while a request runs appears in Needs you with its options; the request shows "needs your answer"; answering on the board queues the answer, the worker records it and resumes the request.
 - [ ] Plan tab: drag a task and an open issue into a new milestone, Send; the worker runs `plan-apply` and `plan.md`, state and `issues.md` agree; a draft that breaks a dependency cannot be sent.
 - [ ] Cancel a running request: the worker stops at the next safe point and the task is blocked with the reason; Pause queue: nothing new is taken.
-- [ ] Check on this Claude Code version: (a) does a background Bash command that exits wake an idle session, and how long may it run; (b) does a `PermissionRequest` hook exist, which decision format and timeout it takes; (c) does a `Stop` hook with `decision: block` keep the session working; (d) does a `PreToolUse` deny reach subagents; (e) is `additionalContext` from `SessionStart` and `UserPromptSubmit` seen by the model.
+- [ ] Where plugin monitors do not start (an older Claude Code, `claude -p`): `/dev-kit:board` says "not listening", the card says "open, not listening", and `/dev-kit:worker` runs the queue when asked.

@@ -37,7 +37,10 @@ Files, all in <project>/.dev/run/, each with one writer, written atomically (tmp
   worker-watch.json       the listener's own heartbeat (watch)
   worker-continuous.json  the last step continuous mode queued, or why it stopped (executor)
   worker-mode.json        paused and continuous modes (board)
-  approvals/A-*.json      a permission request (hook); approvals/A-*.decision: allow | deny (board)
+  approvals/A-*.json      a permission request of Claude Code while it runs a board request (the PermissionRequest
+                          hook): tool, the command or path cut to 300 characters, the rule Claude Code suggests;
+                          approvals/A-*.decision: allow | allow_session | deny (board). Both are removed once the
+                          hook has its answer, or after 10 minutes with none (denied)
 
 Request statuses: pending -> running -> done | failed | cancelled | needs_input (waits for an answer, then is
 claimed again) · stale (running, and its executor is gone).
@@ -69,6 +72,8 @@ WATCH_FRESH_S = 90            # a listener not seen for this long is not listeni
 REMIND_S = 600                # a request nobody took is announced again after this long
 THINK_S = 10                  # how often an idle listener looks for the next step of continuous mode
 CONTINUE_OK = ("implement", "qa", "review", "docs", "usability")  # steps continuous mode takes on its own
+APPROVAL_WAIT_S = 600         # a permission request nobody answers on the board is denied after this long
+APPROVAL_TARGET = 300         # characters of the command or path shown on the board
 FINISHED = ("done", "failed", "cancelled", "stale")
 OPEN = ("pending", "running", "needs_input")
 EXECUTOR_STATES = ("idle", "running", "sleeping", "offline")
@@ -463,26 +468,87 @@ def listening(root: Path) -> bool:
 
 
 def approvals(root: Path) -> list[dict]:
+    """Permission requests waiting for the user's decision on the board (the expired ones are left out)."""
     d = run_dir(root) / "approvals"
     out = []
     for p in sorted(d.glob("A-*.json")) if d.exists() else []:
         a = _read(p)
-        if a and not p.with_suffix(".decision").exists():
-            out.append({k: a.get(k) for k in ("id", "ts", "tool", "target", "request")})
+        if a and not p.with_suffix(".decision").exists() and time.time() < float(a.get("expires_s") or 0):
+            out.append({**{k: a.get(k) for k in ("id", "ts", "tool", "target", "request", "rule")},
+                        "seconds_left": max(0, int(float(a["expires_s"]) - time.time()))})
     return out
 
 
 def decide(root: Path, aid: str, decision: object) -> None:
+    """The user's answer to a permission request: allow, allow_session (allow and keep the rule Claude Code
+    suggested until the session ends), or deny."""
     if not APPROVAL_ID.match(aid or ""):
         raise KeyError(aid)
-    if decision not in ("allow", "deny"):
-        raise Invalid(["decision must be allow or deny"])
+    if decision not in ("allow", "allow_session", "deny"):
+        raise Invalid(["decision must be allow, allow_session or deny"])
     d = run_dir(root) / "approvals"
-    if not (d / f"{aid}.json").exists():
+    a = _read(d / f"{aid}.json")
+    if a is None:
         raise KeyError(aid)
     if (d / f"{aid}.decision").exists():
         raise ValueError(f"{aid} was already decided")
+    if time.time() >= float(a.get("expires_s") or 0):
+        raise ValueError(f"{aid} is no longer waiting")
+    if decision == "allow_session" and not a.get("rule"):
+        raise Invalid(["this permission has no rule to keep for the session; allow it once or deny it"])
     (d / f"{aid}.decision").write_text(str(decision), encoding="utf-8")
+
+
+def board_run(root: Path) -> dict | None:
+    """The board request this process is part of: the executor is running one, and the executor's Claude Code
+    process is one of our parents (a hook or a subagent's hook of that session). None anywhere else."""
+    w = _read(run_dir(root) / "worker.json") or {}
+    if w.get("state") != "running" or not w.get("item") or not w.get("pid"):
+        return None
+    if int(w["pid"]) not in ancestors()[1:]:
+        return None
+    it = item(root, str(w["item"]))
+    return it if it and it["status"] == "running" else None
+
+
+def request_approval(root: Path, tool: str, target: str, request: str, rule: str | None, wait_s: float) -> str:
+    """Put a permission request on the board. Returns its id."""
+    errors: list[str] = []
+    aid = f"A-{secrets.token_hex(6)}"
+    rec = {"id": aid, "ts": now(), "tool": clean(tool, "tool", 80, errors, required=False)[:80],
+           "target": clean(target[:APPROVAL_TARGET], "target", APPROVAL_TARGET, errors, required=False, multiline=True),
+           "request": request, "rule": clean(rule, "rule", 200, errors, required=False)[:200] or None,
+           "expires_s": time.time() + wait_s}
+    _ensure(root)
+    d = run_dir(root) / "approvals"
+    for p in d.glob("A-*.json") if d.exists() else []:  # left behind by a hook that was killed while it waited
+        if time.time() > float((_read(p) or {}).get("expires_s") or 0) + 60:
+            p.unlink(missing_ok=True)
+            p.with_suffix(".decision").unlink(missing_ok=True)
+    _write(d / f"{aid}.json", rec)
+    return aid
+
+
+def wait_decision(root: Path, aid: str, wait_s: float, request: str | None = None, poll: float = 0.5) -> str:
+    """Wait for the board's decision. Returns allow | allow_session | deny | cancelled (the request was cancelled
+    on the board meanwhile) | timeout. The approval is removed either way."""
+    d = run_dir(root) / "approvals"
+    deadline = time.monotonic() + wait_s
+    try:
+        while True:
+            try:
+                got = (d / f"{aid}.decision").read_text(encoding="utf-8").strip()
+                return got if got in ("allow", "allow_session", "deny") else "deny"
+            except OSError:
+                pass
+            if request and (inbox_dir(root) / f"{request}.cancel").exists():
+                return "cancelled"
+            if time.monotonic() >= deadline:
+                return "timeout"
+            time.sleep(min(poll, max(0.05, deadline - time.monotonic())))
+    finally:
+        for suffix in (".json", ".decision"):
+            (d / f"{aid}{suffix}").unlink(missing_ok=True)
 
 
 def executor(root: Path) -> dict:
@@ -726,7 +792,7 @@ def watch(root: Path, poll: float = 2.0, once: bool = False, emit=None, grace: f
             a = armed(root)
             if a and a["pid"] in parents:
                 if not wrote or t - beat >= WATCH_BEAT_S:
-                    _write(path, {"pid": a["pid"], "watch_pid": os.getpid(), "last_seen": now()})
+                    _write(path, {"pid": a["pid"], "watch_pid": os.getpid(), "parents": parents[:8], "last_seen": now()})
                     beat, wrote = t, True
                 m = modes(root)
                 w = _read(run_dir(root) / "worker.json") or {}
