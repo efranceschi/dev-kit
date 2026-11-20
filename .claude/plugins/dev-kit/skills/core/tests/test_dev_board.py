@@ -411,11 +411,12 @@ class BoardTest(unittest.TestCase):
         self.assertTrue(mod.live_agents(self.root)["hooks"])
         self.assertEqual(a["implementer"]["node"], "T-002")
         self.assertIsNone(a["Explore"]["node"])
-        # a second implementer starting in the same window makes both ambiguous: no node for either
+        # a second implementer in the same window (implement --parallel): two agents for two spawns, paired as a batch
         self.ds("event", "agent_spawn", "--set", "agent=implementer", "--set", "scope=T-001", "--set", "slot=2", "--set", "round=1")
         self._hook("agent_start", "a3", "dev-kit:implementer")
-        nodes = [x["node"] for x in mod.live_agents(self.root)["active"] if x["agent"] == "implementer"]
-        self.assertEqual(nodes, [None, None])
+        impl = [x for x in mod.live_agents(self.root)["active"] if x["agent"] == "implementer"]
+        self.assertEqual(sorted(x["node"] for x in impl), ["T-001", "T-002"])
+        self.assertEqual({x["linked_by"] for x in impl}, {"batch"})
         # stopped hook agents leave the running set; a new one still sees two open spawns, so it stays unlinked
         self._hook("agent_stop", "a1", "dev-kit:implementer")
         self._hook("agent_stop", "a3", "dev-kit:implementer")
@@ -460,6 +461,54 @@ class BoardTest(unittest.TestCase):
         self._hook("agent_start", "h1", "dev-kit:spec-tracer")
         self.assertIsNone(mod.live_agents(self.root)["active"][0]["node"])
         self.assertEqual(mod.live_agents(self.root, "M1")["active"][0]["node"], "GATE:M1")
+
+    def test_parallel_implementers_link_to_their_tasks(self):
+        """implement --parallel 2: the skill logs both spawns, prepares the briefs, and the agents start a minute
+        later, together. Neither the time rule nor the type rule can tell them apart; the batch rule pairs them."""
+        mod = self._mod()
+        self.ds("start", "T-002", "--force")
+        self._hook("session_start", "", "")
+        self.ds("event", "agent_spawn", "--set", "agent=implementer", "--set", "scope=T-001", "--set", "slot=1")
+        self.ds("event", "agent_spawn", "--set", "agent=implementer", "--set", "scope=T-002", "--set", "slot=2")
+        self._hook("agent_start", "a1", "dev-kit:implementer", ago_s=-90)
+        self._hook("agent_start", "a2", "dev-kit:implementer", ago_s=-90)
+        tasks = {t: {"status": "in_progress", "started_at": None} for t in ("T-001", "T-002")}
+        impl = mod.live_agents(self.root, None, tasks)["active"]
+        self.assertEqual(sorted(x["node"] for x in impl), ["T-001", "T-002"])
+        self.assertEqual({x["linked_by"] for x in impl}, {"batch"})
+        # the same through /api/state: each running task carries one implementer, none is left "not linked"
+        d = mod.build_state(self.root)
+        self.assertEqual(sorted(a["node"] for a in d["agents"]["active"]), ["T-001", "T-002"])
+
+    def test_spawn_of_a_finished_task_does_not_block_the_link(self):
+        mod = self._mod()
+        self._hook("session_start", "", "")
+        # T-002's agent_end was never logged; T-002 is done since
+        self.ds("event", "agent_spawn", "--set", "agent=implementer", "--set", "scope=T-002", "--set", "slot=1")
+        self.ds("event", "agent_spawn", "--set", "agent=implementer", "--set", "scope=T-001", "--set", "slot=2")
+        self._hook("agent_start", "a1", "dev-kit:implementer")
+        tasks = {"T-001": {"status": "in_progress"}, "T-002": {"status": "done"}}
+        self.assertEqual([x["node"] for x in mod.live_agents(self.root)["active"]], [None])
+        self.assertEqual([(x["node"], x["linked_by"]) for x in mod.live_agents(self.root, None, tasks)["active"]],
+                         [("T-001", "time")])
+
+    def test_unlogged_implementers_link_to_the_tasks_in_progress(self):
+        mod = self._mod()
+        self.ds("start", "T-002", "--force")
+        self._hook("session_start", "", "")
+        self._hook("agent_start", "a1", "dev-kit:implementer")
+        self._hook("agent_start", "a2", "dev-kit:implementer")
+        self._hook("agent_start", "a3", "Explore")
+        tasks = {"T-001": {"status": "in_progress", "started_at": "2026-01-01T00:00:00Z"},
+                 "T-002": {"status": "in_progress", "started_at": "2026-01-01T00:00:05Z"}}
+        live = {x["agent"]: [] for x in mod.live_agents(self.root, None, tasks)["active"]}
+        for x in mod.live_agents(self.root, None, tasks)["active"]:
+            live[x["agent"]].append((x["node"], x["linked_by"]))
+        self.assertEqual(sorted(live["implementer"]), [("T-001", "task"), ("T-002", "task")])
+        self.assertEqual(live["Explore"], [(None, None)])
+        # three implementers for two tasks: no guess
+        self._hook("agent_start", "a4", "dev-kit:implementer")
+        self.assertEqual({x["node"] for x in mod.live_agents(self.root, None, tasks)["active"]}, {None})
 
     def test_type_link_stays_off_when_spawns_of_that_type_point_to_different_nodes(self):
         mod = self._mod()

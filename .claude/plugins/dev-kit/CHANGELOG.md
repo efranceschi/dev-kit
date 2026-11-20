@@ -2,6 +2,11 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.22.1 — 2026-11-20
+
+### Fixed
+- Board: the implementers of `implement --parallel` showed as "not linked" under "Running outside this milestone" while their tasks sat in Build with no agent. Two agents of the same type starting together matched neither the time rule nor the type rule, so neither was linked. Agents of one type are now paired with the open spawns of that type when the counts match (they look the same on the board, so the pairing cannot mislead); implementers the skill did not log are paired with the in-progress tasks when the counts match; and a spawn whose task is already done, dropped or blocked (its `agent_end` was never logged) no longer blocks the link.
+
 ## 1.22.0 — 2026-11-20
 
 The board shows what is actually happening, and a card that exceeds its agreed failure limit goes to Blocked.
