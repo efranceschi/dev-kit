@@ -540,18 +540,20 @@ Token usage and estimated US$ (API-equivalent) per stage, agent, model or sessio
 
 **When:** You want to know how much was spent and where.
 
-**Usage:** `/dev-kit:costs [--all | --since YYYY-MM-DD] [--by stage|agent|model|session] [--csv]`
+**Usage:** `/dev-kit:costs [--all | --since YYYY-MM-DD] [--by stage|agent|model|session] [--csv] [--time]`
 
 | Argument | Meaning |
 |---|---|
 | `--all | --since YYYY-MM-DD` | period (default: current session) |
 | `--by stage|agent|model|session` | grouping |
 | `--csv` | export every token count |
+| `--time` | time per agent and skill, and what the work ledger reused |
 
 **Examples:**
 
 - `/dev-kit:costs`: cost of this session by stage
 - `/dev-kit:costs --all --by agent --csv`: whole project by agent, with CSV
+- `/dev-kit:costs --time --all`: where the time went, and how much rework was avoided
 
 **Produces:** .dev/costs/ (usage, prices, CSV)
 

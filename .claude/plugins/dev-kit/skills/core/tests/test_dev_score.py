@@ -125,5 +125,45 @@ class TestDeltaRevision(Helpers):
         self.assertTrue(res["convergence"]["converged"])
 
 
+class TestConsolidateAndSelect(Helpers):
+    def test_round_ids_are_stable_and_deferred_apart(self) -> None:
+        a = self.write("code-reviewer.json", {"auditor": "code-reviewer", "findings": [
+            {"id": "X1", "severity": "high", "title": "null deref", "file": "src/a.py", "line": 3},
+            {"id": "X2", "severity": "low", "title": "naming", "file": "src/b.py", "line": 9}]})
+        b = self.write("security-auditor.json", {"auditor": "security-auditor", "findings": [
+            {"id": "S1", "severity": "critical", "title": "sql injection", "file": "src/a.py", "line": 3}]})
+        self.sc("consolidate", "--scope", "M1", "--round", "1", "--out-dir", str(self.root / "qa"), "--root", str(self.root), str(a), str(b), expect=0)
+        r1 = json.loads((self.root / "qa" / "findings-round-1.json").read_text(encoding="utf-8"))
+        self.assertEqual([f["id"] for f in r1["findings"]], ["F-001", "F-002", "F-003"])
+        self.assertEqual(r1["findings"][0]["severity"], "critical")             # most severe first
+        self.assertEqual(r1["findings"][0]["same_as"], ["F-002"])                # same line, other dimension
+        a2 = self.write("code-reviewer.json", {"auditor": "code-reviewer", "findings": [
+            {"id": "N1", "severity": "medium", "title": "new issue", "file": "src/c.py", "line": 1},
+            {"id": "N2", "severity": "low", "title": "nit", "file": "src/c.py", "line": 2}],
+            "previous": [{"id": "F-002", "state": "closed"}, {"id": "F-003", "state": "open"}]})
+        b2 = self.write("security-auditor.json", {"auditor": "security-auditor", "findings": [], "carried": True})
+        self.sc("consolidate", "--scope", "M1", "--round", "2", "--out-dir", str(self.root / "qa"), "--root", str(self.root),
+                "--previous", str(self.root / "qa" / "findings-round-1.json"), str(a2), str(b2), expect=0)
+        r2 = json.loads((self.root / "qa" / "findings.json").read_text(encoding="utf-8"))
+        ids = {f["id"]: f for f in r2["findings"]}
+        self.assertIn("F-001", ids)                                             # carried dimension: still open
+        self.assertIn("F-003", ids)                                             # open low keeps its id
+        self.assertNotIn("F-002", ids)                                          # closed
+        self.assertIn("F-004", ids)                                             # the new medium, next free id
+        self.assertEqual([d["original_id"] for d in r2["deferred"]], ["N2"])
+        self.assertEqual(r2["carried"], ["security-auditor"])
+
+    def test_select_reruns_only_what_has_work(self) -> None:
+        prev = self.write("prev.json", {"findings": [{"id": "F-001", "severity": "high", "title": "t", "auditor": "copy-reviewer"}]})
+        changed = self.root / "changed.txt"
+        changed.write_text("src/api/users.py\nmigrations/0003_add.sql\nREADME.md\n", encoding="utf-8")
+        out = json.loads(self.sc("select", "--previous", str(prev), "--changed-from", str(changed), "--json", "--auditors",
+                                 "code-reviewer,copy-reviewer,data-reviewer,deps-auditor,ops-reviewer,visual-reviewer,docs-reviewer", expect=0).stdout)
+        rerun = {x["auditor"]: x["why"] for x in out["rerun"]}
+        self.assertEqual(set(rerun), {"code-reviewer", "copy-reviewer", "data-reviewer", "docs-reviewer"})
+        self.assertIn("open finding", rerun["copy-reviewer"])
+        self.assertEqual(set(out["carry"]), {"deps-auditor", "ops-reviewer", "visual-reviewer"})
+
+
 if __name__ == "__main__":
     unittest.main()

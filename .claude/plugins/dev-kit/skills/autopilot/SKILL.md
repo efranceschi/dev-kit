@@ -28,7 +28,7 @@ Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` and the autonomy policy
 | ux | - | `ux` | → ui |
 | ui | - | `ui` | `review design` until pass → plan |
 | plan | `design` (UI products) | `plan` | `review plan` until pass → implement |
-| implement | `plan` | at the start of each milestone `DS pull-issues <M>` (issue buffer, §15); then `implement --milestone <current>` (or `--parallel N` if the brief allows and ≥ 3 independent tasks are ready) | when milestone complete → qa |
+| implement | `plan` | at the start of each milestone `DS pull-issues <M>` (issue buffer, §15); then `implement --milestone <current> --parallel N` whenever the brief allows parallel work and `DS next --batch N` returns more than one task (N from the brief, default 3), else `implement --milestone <current>`; log a `skill_end` for `implement` at the end of each milestone so the time of every milestone is recorded (`conventions.md` §13) | when milestone complete → qa |
 | qa | - | `qa <M>` (scores the milestone; local preview per §11 when enabled) | gate passed → `DS cooldown <M>` (if on, §15) → `deploy <M>` if `autonomy.production.when` is `per_milestone` (§12), then next milestone (implement) or, if last milestone → usability (`qa` sets the phase); gate pending → implement (fix tasks) and re-run qa; rounds > `max_fix_rounds_per_gate` → pause |
 | usability | - | `usability` (score recorded as review `ux`) | review `ux` pass → docs; fail → implement the fix tasks, re-audit |
 | docs | `ux` (UI products) | `docs all`, `review docs` until pass, then `release --dry-run`, and the real release only if the brief's definition of done includes one (`release` runs `deploy` when `production.when` is `on_release`) | done (`release` sets it) |

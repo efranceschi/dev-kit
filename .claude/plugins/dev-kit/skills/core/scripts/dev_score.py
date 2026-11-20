@@ -4,6 +4,12 @@
 Standard library only. Usage:
   python3 -I dev_score.py score --scope M1 [--kind gate|review] [--out FILE] [--root DIR] [--previous FINDINGS_JSON] [--round N] AUDITOR_JSON [AUDITOR_JSON ...]
   python3 -I dev_score.py check [--fix] [--json] AUDITOR_JSON [AUDITOR_JSON ...]
+  python3 -I dev_score.py consolidate --scope M1 --round N --out-dir DIR [--kind gate|review] [--previous F] AUDITOR_JSON ...
+  python3 -I dev_score.py select --previous FINDINGS --auditors a,b,c (--since SHA | --changed-from FILE) [--json]
+
+consolidate writes findings.json and findings-round-<N>.json (previous open findings keep their ids, new ones get
+the next ids, deferred and legacy listed apart). select says which auditors a re-run needs: those with open
+findings or with changed files in their dimension; the others keep their result ("carried": true).
 
 check validates auditor files against the output contract and normalises the common drift (previous[].status ->
 state, severity and state synonyms, missing or repeated ids, missing auditor taken from the file name, a JSON
@@ -44,6 +50,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -297,7 +304,8 @@ def load_previous(path: Path) -> list[dict]:
     return [f for f in items if isinstance(f, dict) and not f.get("legacy")]
 
 
-def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous: list[dict] | None = None) -> dict:
+def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous: list[dict] | None = None,
+             keep: dict | None = None) -> dict:
     dims: dict[str, dict] = {}
     problems: list[str] = []
     marks: dict[str, dict[str, str]] = {}  # dimension -> previous id -> closed|open
@@ -318,6 +326,8 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
         entry = dims.setdefault(dim, {"auditors": [], "findings": [], "score": 100})
         if auditor not in entry["auditors"]:
             entry["auditors"].append(auditor)
+        if data.get("carried"):
+            entry["carried"] = True  # not re-run this round: its result was kept (conventions.md §18)
         for f in findings:
             if not isinstance(f, dict):
                 continue
@@ -379,6 +389,7 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
                     delta["new_scored"] += 1
             entry["findings"] = kept
             entry["deferred"] = len(deferred)
+            entry["_deferred"] = deferred
             prev_med = sum(1 for f in prev if severity(f) == "medium")
             conv_prev[d] = prev_med
     for entry in dims.values():
@@ -415,8 +426,12 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
         trend = "falling" if mediums < mediums_prev else ("flat" if mediums == mediums_prev else "rising")
         convergence = {"blockers": len(blockers), "mediums": mediums, "mediums_prev": mediums_prev, "trend": trend,
                        "converged": not blockers and trend in ("falling", "flat")}
-    for v in dims.values():
-        v.pop("findings", None)
+    kept_all, deferred_all = [], []
+    for d, v in dims.items():
+        kept_all += [{**f, "dimension": d} for f in v.pop("findings", None) or []]
+        deferred_all += [{**f, "dimension": d} for f in v.pop("_deferred", None) or []]
+    if keep is not None:
+        keep["findings"], keep["deferred"] = kept_all, deferred_all
     return {
         "scope": scope, "kind": kind, "overall": overall, "cutoff": cut,
         "dimensions": dims, "blockers": blockers, "problems": problems,
@@ -453,6 +468,154 @@ def render(res: dict) -> str:
     for b in res["blockers"][:15]:
         lines.append(f"  * [{b['severity']}] {b['dimension']} {b['id']}: {b['title']} ({b['file']}:{b['line']})")
     return "\n".join(lines)
+
+
+PUBLIC_KEYS = ("id", "severity", "category", "title", "file", "files", "line", "evidence", "failure_scenario",
+               "recommendation", "acceptance_ref", "task_ref", "effort", "confidence", "partial", "in_change",
+               "contradicts", "severity_reported")
+
+
+def _public(f: dict) -> dict:
+    out = {k: f[k] for k in PUBLIC_KEYS if k in f and f[k] is not None}
+    auds = f.get("auditors") or ([f["_auditor"]] if f.get("_auditor") else []) or ([f["auditor"]] if f.get("auditor") else [])
+    out["auditor"] = auds[0] if auds else None
+    if len(auds) > 1:
+        out["auditors"] = auds
+    out["dimension"] = f.get("dimension")
+    if f.get("_previous"):
+        out["previous"] = True
+    return out
+
+
+def consolidate(inputs: list[Path], quality: dict, kind: str, scope: str, previous: list[dict] | None,
+                round_n: int) -> dict:
+    """The consolidated findings of a round (qa §3.3): previous findings still open keep their id (auditors mark
+    them by id in the next round), new scored findings get the next free ids, new lows and out-of-change findings
+    are listed as deferred, legacy ones are left out (they become issues)."""
+    keep: dict = {}
+    res = evaluate(inputs, quality, kind, scope, previous, keep)
+    if previous is None:  # round 1: merge_findings already merged duplicates per dimension
+        keep["deferred"] = []
+    used = {str(f.get("id")) for f in keep["findings"] if f.get("_previous")}
+    nums = [int(m.group(1)) for x in used for m in [re.match(r"F-(\d+)$", x)] if m]
+    nxt = max(nums, default=0) + 1
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    findings = []
+    for f in sorted(keep["findings"], key=lambda f: (not f.get("_previous"), order.get(severity(f), 4), str(f.get("file")), str(f.get("line")))):
+        pf = _public(f)
+        if not f.get("_previous"):
+            pf["original_id"] = f.get("id")
+            pf["id"] = f"F-{nxt:03d}"
+            nxt += 1
+        findings.append(pf)
+    deferred = []
+    for f in keep["deferred"]:
+        pf = _public(f)
+        pf["original_id"] = f.get("id")
+        pf["id"] = f"D-{len(deferred) + 1:03d}"
+        deferred.append(pf)
+    # the same file and line reported by several dimensions: listed once per dimension (each scores in its own),
+    # linked so fix-tasks creates one task
+    by_loc: dict[tuple, list[dict]] = {}
+    for f in findings:
+        if f.get("file") and f.get("line") not in (None, ""):
+            by_loc.setdefault((str(f["file"]).lower(), str(f["line"])), []).append(f)
+    for group in by_loc.values():
+        if len({g["dimension"] for g in group}) > 1:
+            for g in group:
+                g["same_as"] = [x["id"] for x in group if x is not g]
+    carried = sorted(a for d, v in res["dimensions"].items() if v.get("carried") for a in v["auditors"])
+    return {"scope": scope, "kind": kind, "round": round_n, "verdict": res["verdict"], "overall": res["overall"],
+            "findings": findings, "deferred": deferred, "legacy": res.get("legacy", []), "carried": carried,
+            "delta": res.get("delta"), "convergence": res.get("convergence")}
+
+
+DIMENSION_FILES = {
+    # what a change must touch for an auditor to have something new to look at in a re-run (conventions.md §18);
+    # an auditor with open findings always re-runs
+    "copy": r"\.(tsx|jsx|vue|svelte|astro|html?|hbs|ejs|erb|jinja2?|j2|liquid|twig|po|pot|xliff|arb|strings)$|(^|/)(locales?|i18n|lang|messages|translations)/",
+    "a11y": r"\.(tsx|jsx|vue|svelte|astro|html?|hbs|ejs|erb|jinja2?|j2|css|scss|sass|less|styl)$|(^|/)(components?|templates|views|pages|styles|theme)/",
+    "visual": r"\.(tsx|jsx|vue|svelte|astro|html?|hbs|ejs|erb|jinja2?|j2|css|scss|sass|less|styl|svg)$|(^|/)(components?|templates|views|pages|styles|theme|tokens)/",
+    "ux": r"\.(tsx|jsx|vue|svelte|astro|html?|hbs|ejs|erb|jinja2?|j2|css|scss)$|(^|/)(components?|templates|views|pages|routes)/",
+    "data": r"(^|/)(migrations?|alembic|prisma|db|database|models?|schema|repositor(y|ies)|entities|sql)/|\.(sql|prisma)$|schema\.",
+    "dependencies": r"(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|uv\.lock|Pipfile(\.lock)?|Cargo\.(toml|lock)|go\.(mod|sum)|Gemfile(\.lock)?|composer\.(json|lock))$",
+    "operations": r"(^|/)(Dockerfile[^/]*|docker-compose[^/]*|compose\.ya?ml|Makefile|Procfile|\.env\.example|\.github/|\.gitlab-ci|deploy|infra|ops|scripts|config|k8s|helm|systemd)(/|$|\.)|\.(service|ya?ml|toml|ini|conf)$",
+    "docs": r"\.(md|mdx|rst|adoc)$|(^|/)docs?/",
+}
+CODE_DIMENSIONS = {"code", "security", "tests", "spec", "performance"}
+NON_CODE = re.compile(r"(^|/)\.dev/|\.(md|mdx|rst|txt|png|jpe?g|gif|svg|ico)$|(^|/)docs?/")
+
+
+def select(auditors: list[str], previous: list[dict], changed: list[str]) -> dict:
+    open_dims: dict[str, int] = {}
+    for f in previous:
+        d = finding_dimension(f)
+        if d:
+            open_dims[d] = open_dims.get(d, 0) + 1
+    rerun, carry = [], []
+    for aud in auditors:
+        d = AUDITOR_DIMENSION.get(aud)
+        if d is None:
+            continue
+        if open_dims.get(d):
+            rerun.append({"auditor": aud, "why": f"{open_dims[d]} open finding(s)"})
+            continue
+        if d in CODE_DIMENSIONS:
+            hits = [c for c in changed if not NON_CODE.search(c)]
+        else:
+            pat = DIMENSION_FILES.get(d)
+            hits = [c for c in changed if pat and re.search(pat, c)]
+        if hits:
+            rerun.append({"auditor": aud, "why": f"{len(hits)} changed file(s) in its dimension", "files": hits[:50]})
+        else:
+            carry.append(aud)
+    return {"rerun": rerun, "carry": carry, "changed": len(changed)}
+
+
+def cmd_select(a: argparse.Namespace) -> int:
+    try:
+        previous = load_previous(Path(a.previous))
+    except (OSError, ValueError, json.JSONDecodeError) as e:
+        print(f"dev_score: cannot read --previous: {e}", file=sys.stderr)
+        return 2
+    if a.changed_from:
+        changed = [x.strip() for x in Path(a.changed_from).read_text(encoding="utf-8").splitlines() if x.strip()]
+    else:
+        r = subprocess.run(["git", "-C", a.root, "diff", "--name-only", a.since, "HEAD"], capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"dev_score: git diff {a.since}..HEAD failed: {r.stderr.strip()}", file=sys.stderr)
+            return 2
+        changed = [x for x in r.stdout.splitlines() if x.strip()]
+    res = select([x.strip() for x in a.auditors.split(",") if x.strip()], previous, changed)
+    if a.json:
+        print(json.dumps(res, indent=2))
+    else:
+        for x in res["rerun"]:
+            print(f"rerun {x['auditor']}: {x['why']}")
+        for x in res["carry"]:
+            print(f"carry {x}: nothing new in its dimension; keep its previous result with \"carried\": true")
+    return 0
+
+
+def cmd_consolidate(a: argparse.Namespace) -> int:
+    paths = [Path(x) for x in a.inputs]
+    previous = None
+    if a.previous:
+        try:
+            previous = load_previous(Path(a.previous))
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(f"dev_score: cannot read --previous: {e}", file=sys.stderr)
+            return 2
+    res = consolidate(paths, load_quality(Path(a.root).resolve()), a.kind, a.scope, previous, a.round)
+    out = Path(a.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(res, indent=2, ensure_ascii=False) + "\n"
+    (out / "findings.json").write_text(text, encoding="utf-8")
+    (out / f"findings-round-{a.round}.json").write_text(text, encoding="utf-8")
+    print(f"{a.scope} round {a.round}: {len(res['findings'])} finding(s) ({sum(1 for f in res['findings'] if f.get('previous'))} still open from before), "
+          f"{len(res['deferred'])} deferred, {len(res['legacy'])} legacy, carried: {', '.join(res['carried']) or 'none'} "
+          f"-> {out / 'findings.json'}, findings-round-{a.round}.json")
+    return 0
 
 
 def cmd_check(a: argparse.Namespace) -> int:
@@ -510,9 +673,24 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--fix", action="store_true", help="write the normalised result back to each file")
     c.add_argument("--json", action="store_true")
     c.add_argument("inputs", nargs="+")
+    k = sub.add_parser("consolidate")
+    k.add_argument("--scope", required=True); k.add_argument("--kind", choices=["gate", "review"], default="gate")
+    k.add_argument("--round", type=int, required=True); k.add_argument("--out-dir", required=True)
+    k.add_argument("--root", default="."); k.add_argument("--previous"); k.add_argument("inputs", nargs="+")
+    e = sub.add_parser("select")
+    e.add_argument("--previous", required=True); e.add_argument("--auditors", required=True)
+    e.add_argument("--since"); e.add_argument("--changed-from"); e.add_argument("--root", default=".")
+    e.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
     if a.cmd == "check":
         return cmd_check(a)
+    if a.cmd == "consolidate":
+        return cmd_consolidate(a)
+    if a.cmd == "select":
+        if not a.since and not a.changed_from:
+            print("dev_score: select needs --since <sha> or --changed-from <file>", file=sys.stderr)
+            return 2
+        return cmd_select(a)
     paths = [Path(x) for x in a.inputs]
     missing = [str(x) for x in paths if not x.exists()]
     if missing:

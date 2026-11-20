@@ -11,6 +11,7 @@
 | **Baseline** | The git tag dev-kit-baseline set by the onboarding: everything before it is legacy, everything after it is new work that QA scores. |
 | **Brownfield** | An existing project not built with dev-kit. start runs the onboarding (baseline tag, discovery, test baseline, entry mode); audits score only the changes since the baseline and legacy problems become issues (conventions §16). |
 | **buffer** | Share of each milestone (default 20%) reserved for queued issues. |
+| **carried result** | An auditor not re-run in a later round (no open finding, nothing changed in its dimension); its result is kept. |
 | **class of service** | How an issue is scheduled: expedite (hotfix), current, standard (buffer), intangible (cool-down) or change (replan). |
 | **convergence** | Round 2+ of a review: blocking findings and the medium trend versus the previous round; a review converged twice can stop. |
 | **cool-down** | Optional short slot after a gate where small issues are fixed before the next milestone. |
@@ -38,6 +39,8 @@
 | **QA harness** | Playwright with mocks that captures every screen and state (qa:shots) and runs axe (qa:a11y); added by plan to the first UI milestone. |
 | **recorded test run** | A green suite stored per commit (dev_state.py tests record); the test auditor and the gate reuse it until the code it covers changes. |
 | **session log** | .dev/telemetry.jsonl: structured, high-level events of the run, without project data. |
+| **shared baseline** | Suite, lint, type-check, data smoke and screenshots run once per QA round and read by every auditor. |
 | **slot** | Per-agent isolation number that gives each agent its own port, database and scratch folder. |
 | **stale artifact** | A PRD, architecture, design or plan whose sources changed after it was marked; dev_state.py stale lists them, review refreshes them first. |
 | **task checks** | Self-check plus cheap copy and static a11y agents at the end of each UI task (autonomy.task_checks), so the gate confirms instead of discovers. |
+| **work ledger** | Record of verified work with the fingerprint of its inputs (dev_state.py ledger); only unchanged ok work is reused, with spot checks. |

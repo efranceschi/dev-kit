@@ -752,6 +752,10 @@
         {
           "arg": "--csv",
           "meaning": "export every token count"
+        },
+        {
+          "arg": "--time",
+          "meaning": "time per agent and skill, and what the work ledger reused"
         }
       ],
       "examples": [
@@ -762,6 +766,10 @@
         {
           "command": "/dev-kit:costs --all --by agent --csv",
           "what": "whole project by agent, with CSV"
+        },
+        {
+          "command": "/dev-kit:costs --time --all",
+          "what": "where the time went, and how much rework was avoided"
         }
       ],
       "produces": ".dev/costs/ (usage, prices, CSV)",
@@ -1096,6 +1104,18 @@
     {
       "term": "recorded test run",
       "definition": "A green suite stored per commit (dev_state.py tests record); the test auditor and the gate reuse it until the code it covers changes."
+    },
+    {
+      "term": "work ledger",
+      "definition": "Record of verified work with the fingerprint of its inputs (dev_state.py ledger); only unchanged ok work is reused, with spot checks."
+    },
+    {
+      "term": "shared baseline",
+      "definition": "Suite, lint, type-check, data smoke and screenshots run once per QA round and read by every auditor."
+    },
+    {
+      "term": "carried result",
+      "definition": "An auditor not re-run in a later round (no open finding, nothing changed in its dimension); its result is kept."
     },
     {
       "term": "QA harness",

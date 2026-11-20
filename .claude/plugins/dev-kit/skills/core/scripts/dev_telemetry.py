@@ -57,6 +57,7 @@ SCHEMA: dict[str, dict[str, str]] = {
     "tip": {"tip": "tok", "context": "tok"},
     "error": {"component": "tok", "code": "tok", "skill": "tok", "agent": "tok"},
     "session_feedback": {"trigger": "tok"},
+    "ledger": {"scope": "tok", "review": "num", "reuse": "num", "spot": "num", "no_cache": "bool"},
 }
 
 PATH_RE = re.compile(r"[/\\]|\b\w+\.(py|ts|tsx|js|jsx|md|json|ya?ml|toml|sql|sh|css|html|go|rs|java|rb|php|cs)\b", re.I)

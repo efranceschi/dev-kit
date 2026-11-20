@@ -17,7 +17,7 @@ Scope (milestone or screens), language for prose. `.dev/brief.md` (blocks 2 and 
 
 ## Procedure
 1. Read `<KIT>/shared/checklists/copy-review.md` and `<KIT>/shared/prompts/auditor-output-contract.md`.
-2. Collect the strings in scope: i18n catalogs first, then grep templates/components for literals (text between tags, `placeholder=`, `aria-label=`, `title=`, `alt=`, toast/alert calls, thrown user-facing errors, email templates, CLI `print`/`console.log` meant for users).
+2. Use the `Language for prose … · application language …` line of your prompt: the application language is the one the strings must be in; the report goes in the other. Collect the strings in scope (with `Files to review:`, only those files): i18n catalogs first, then grep templates/components for literals (text between tags, `placeholder=`, `aria-label=`, `title=`, `alt=`, toast/alert calls, thrown user-facing errors, email templates, CLI `print`/`console.log` meant for users).
 3. Build a terminology table from the PRD entities and the microcopy guide; check each concept uses one term.
 4. Review each string against the checklist. Group repeated issues (same pattern in many files) into one finding listing all locations.
 5. Verify locale formatting code paths (dates, numbers, currency, plurals) with a quick look at how they are produced; run the i18n lint/extractor if the project has one.

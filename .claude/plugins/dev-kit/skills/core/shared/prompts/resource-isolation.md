@@ -16,6 +16,9 @@ Several agents may run at the same time on the same host, against the same proje
 - Never use `pkill`, `killall`, `kill` by name, or `pgrep -f`. Never wait with loops such as `until ! pgrep …` (they match their own command line and never end). Wait with `wait <pid>`, or poll a URL or file with a timeout (`timeout 60 sh -c 'until curl -fs …; do sleep 1; done'`).
 - Before your final message, stop exactly the PIDs you recorded (`kill <pid>`), check they are gone, and remove your pid file. Leave nothing running in the background. The orchestrator runs `dev_state.py cleanup` after you as a safety net, not as your cleanup.
 
+## Long commands
+A command that takes minutes (integration suite, build, scan, data load): start it in the background with its output in your scratch folder (`cmd > .dev/tmp/<name>-<N>/run.log 2>&1 & echo $! >> .dev/run/<name>-<N>.pids`), read code while it runs, then wait for it with `wait <pid>` or a bounded poll of the log. When your prompt has `Time budget: <min>`, stop starting new commands when it is spent and report what you measured.
+
 ## Files and git
 - Format and lint **only the files you changed** (`ruff format <files>`, `ruff check <files>`, `prettier --write <files>`, `eslint <files>`). Never run a formatter on the whole tree.
 - Never run `git stash`, `git checkout`, `git reset`, `git commit` or the pre-commit hooks; the orchestrator commits. Read-only git (`status`, `diff`, `log`) is fine.

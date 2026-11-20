@@ -37,6 +37,8 @@
 | Visual and a11y audits are "static reading, confidence low" | No browser or harness available | Let `plan` add the QA harness task (`qa:shots`, `qa:a11y`), or install Playwright and a Chromium; `dev_detect_stack.py --tools` shows what is found |
 | The same long test suite runs several times per gate | Runs were not recorded | `implement` and `qa` record green runs with `dev_state.py tests record`; `tests lookup` shows whether one is reusable (a dirty tree never is) |
 | Read-only commands keep asking for permission, or a guard refuses heredocs and `cd … &&` | The host's permission rules | Run `/fewer-permission-prompts`, or allow at least `Bash(python3 -I *dev_state.py*)`, `Bash(python3 -I *dev_score.py*)`, `Bash(python3 -I *dev_cost.py*)`, `Bash(python3 -I *dev_detect_stack.py*)`, `Bash(git status*)`, `Bash(git diff*)`, `Bash(git log*)`, `Bash(git rev-parse*)` and the project's test, lint and type-check commands |
+| A QA round re-audits files that did not change | The ledger has no record for them yet (round 1, or a checklist, spec or kit update invalidated them) | Expected once; `dev_state.py ledger plan … --json` shows each file's reason. `autonomy.incremental.enabled false` turns reuse off |
+| You suspect the cache hid a problem | Reuse only skips unchanged files that were clean | `dev_state.py ledger drop --prefix audit:<dimension>:` forces a full pass; `release` always audits without the cache |
 | You do not know which skill to use | — | `/dev-kit:help <your question>` |
 
 `dev_state.py` lives at `.claude/plugins/dev-kit/skills/core/scripts/dev_state.py` (or the installed plugin copy); run it with `python3 -I <path> --root . <command>`.

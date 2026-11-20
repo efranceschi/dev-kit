@@ -19,6 +19,7 @@ Mode (`prd` or `plan`) and the language for prose. Files under `.dev/`: `brief.m
 
 ## Procedure
 1. Read `<KIT>/shared/checklists/requirements-review.md` (the section for your mode), `<KIT>/shared/conventions.md` and `<KIT>/shared/prompts/auditor-output-contract.md`.
+1a. Form is checked by scripts before you run (`dev_state.py xref`: ids, parser contract, ACs without tasks, unknown ACs, screens without spec, unknown deps): do not spend findings on it. Judge merit: testability, gaps, contradictions, scope, risk. When your prompt has `Sections to review:` (the ledger, `conventions.md` §18), review those sections and what they affect; the others were verified unchanged.
 2. **prd mode**: build a table brief item → story → AC for every must-have and every NFR; list ACs with vague wording; read pairs of ACs for contradictions; compare scope against brief block 3 and ADRs. Check that edge/failure behaviour is specified for each main flow.
 3. **plan mode**: build the AC → task map and the screen → task map; check dependency order (no forward references, no cycles); check task size and testability; confirm the parser contract by running `python3 -I <KIT>/scripts/dev_state.py --root <temp copy>` only on a **copy** of `.dev/` in a temp directory (never against the real state); check that the riskiest unknowns are scheduled early.
 4. Classify per `shared/conventions.md` §7. An orphan must-have AC or a dependency cycle is `critical`.
