@@ -2781,6 +2781,15 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
         print("Reviews: " + ", ".join(f"{k}:{v.get('verdict')}" + (f"({v['score']})" if v.get("score") is not None else "") for k, v in revs.items()))
     q = quality_cfg(store)
     print(f"Quality cut-off: overall {q['min_overall']} · per dimension {q['min_dimension']} · reviews {q['review_min_overall']}")
+    if s.get("artifacts"):
+        st = stale_report(store)
+        items = [x["artifact"] for x in st["stale"]] + [f"review {x['review']}" for x in st["reviews"]]
+        if items:
+            print(f"Stale: {', '.join(items)} (the next review brings them up to date)")
+    ld = store.dev / "run" / "locks"
+    held = [(lp.stem, _lock_read(lp)) for lp in sorted(ld.glob("*.json"))] if ld.exists() else []
+    if held:
+        print("Locks: " + ", ".join(f"{n} by {(r or {}).get('holder', '?')}" + (" (expired)" if _lock_expired(r) else "") for n, r in held))
     pp = s.get("autonomy", {}).get("pause_policy", {})
     if pp:
         print("Pause policy: " + " · ".join(f"{k} {v.get('action')}" for k, v in sorted(pp.items())) + f" · on park: {s.get('autonomy', {}).get('on_park', 'stop_when_idle')}")

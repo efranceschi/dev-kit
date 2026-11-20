@@ -19,9 +19,9 @@
 | **cut-off** | Minimum score for a gate or review, set in the interview (standard 85, premium 92, prototype 70). |
 | **delta mode** | From round 2, auditors verify whether previous findings were closed; new low findings are recorded but not scored. |
 | **discovery** | The onboarding report of an existing project (.dev/discovery.md): stack, layout, commands, conventions, existing docs and ADRs. |
-| **dropped task** | A task removed by a replan (dev_state.py drop): kept for history, never counted by milestones, next or release. |
+| **dropped task** | A task removed by a replan: kept for history, never counted by milestones, next or release. |
 | **entry mode** | How an existing project is adopted: feature (new capability), maintenance (bugs and small improvements through issues) or import (existing PRD/specs are the source). |
-| **exclusive resource** | Something one agent may use at a time (remote session, shared DB, emulator), guarded by dev_state.py lock. |
+| **exclusive resource** | Something one agent may use at a time (remote session, shared DB, emulator), listed in the architecture and locked while in use. |
 | **existing / changed / new** | Tags of ACs and screens in existing projects: existing works already (no task), changed gets a task, new is built from scratch. |
 | **expedite** | The class of service for a critical/high bug in delivered work: a hotfix task that runs before everything (WIP 1). |
 | **external deploy** | production.method external: the project's own CI/CD deploys; the kit only confirms and records the commit. |
@@ -37,15 +37,15 @@
 | **model ladder** | Agents start on their base model and effort; failed dimensions are re-run one step higher, with consent. |
 | **n/a review** | A review that does not apply (e.g. design with no new UI); recorded with a note, it satisfies prerequisites and is not graded. |
 | **out of scope finding** | A problem in shared code the milestone did not change; it becomes an issue and does not score in the gate. |
-| **output file** | Where an auditor writes its JSON result (given in its prompt); dev_score.py check validates it, the agent answers in a few lines. |
+| **output file** | Where an auditor writes its result (given in its prompt); the kit validates it, and the agent answers in a few lines. |
 | **park** | Pause-point action: never wait; record the question with the recommended answer, block only what depends on it and continue (the default of most points under the unattended level, available at any level). |
 | **pause policy** | What the kit does at each pause point: ask, preauthorize within a limit, apply the recommendation, or park. |
 | **QA harness** | Playwright with mocks that captures every screen and state (qa:shots) and runs axe (qa:a11y); added by plan to the first UI milestone. |
-| **recorded test run** | A green suite stored per commit (dev_state.py tests record); the test auditor and the gate reuse it until the code it covers changes. |
+| **recorded test run** | A green suite stored per commit; the test auditor and the gate reuse it until the code it covers changes. |
 | **session log** | .dev/telemetry.jsonl: structured, high-level events of the run, without project data. |
 | **shared baseline** | Suite, lint, type-check, data smoke and screenshots run once per QA round and read by every auditor. |
 | **slot** | Per-agent isolation number that gives each agent its own port, database and scratch folder. |
-| **stale artifact** | A PRD, architecture, design or plan whose sources changed after it was marked; dev_state.py stale lists them, review refreshes them first. |
+| **stale artifact** | A PRD, architecture, design or plan whose sources changed after it was last updated; review brings it up to date before any reviewer runs. |
 | **task checks** | Self-check plus cheap copy and static a11y agents at the end of each UI task (autonomy.task_checks), so the gate confirms instead of discovers. |
-| **task contract** | What a task provides to others (table, route, fields) in plan.md contract:, given to consumers by dev_state.py brief. |
-| **work ledger** | Record of verified work with the fingerprint of its inputs (dev_state.py ledger); only unchanged ok work is reused, with spot checks. |
+| **task contract** | What a task provides to others (table, route, fields), written in plan.md as contract: and given to the tasks that consume it. |
+| **work ledger** | Record of verified work with the fingerprint of its inputs; only unchanged work that was clean is reused, with spot checks. |

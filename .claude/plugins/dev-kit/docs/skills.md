@@ -13,6 +13,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 | [`interview`](#interview) | Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md with the autonomy policy. |
 | [`status`](#status) | Read-only dashboard: phase, milestones, gates, scores, issues, preview, production drift, cost so far. |
 | [`board`](#board) | Live Scrum board in the browser: what needs you, what is running now, the sprint kanban with live agents and task details, burndown, velocity, quality and backlog; light or dark; local, or shared on your network with an access link. |
+| [`settings`](#settings) | Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips. |
 
 ## Specify
 
@@ -383,13 +384,14 @@ Milestone gate: auditors in parallel, 0-100 score per dimension, fix tasks until
 
 **When:** When a milestone's tasks are done, or to check one task (e.g. after a hotfix).
 
-**Usage:** `/dev-kit:qa [M1 | --only code,security,tests,spec,data,deps,ops,perf,a11y,visual,copy | --scope T-003]`
+**Usage:** `/dev-kit:qa [M1 | --only code,security,tests,spec,data,deps,ops,perf,a11y,visual,copy | --scope T-003 | --full]`
 
 | Argument | Meaning |
 |---|---|
 | `M1` | gate of a milestone |
 | `--scope T-003` | audit one task |
 | `--only code,security,...` | run a subset of auditors |
+| `--full` | audit everything again, without reusing earlier clean reviews |
 
 **Examples:**
 
@@ -467,6 +469,30 @@ Everything pending: hotfix, issue queue, next buffer, tasks, parked questions, d
 **Produces:** nothing (read-only)
 
 **Related:** [`issue`](#issue), [`status`](#status), [`interview`](#interview)
+
+### settings
+
+Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips.
+
+**When:** You want the kit more or less autonomous or strict, to turn something on or off, or to see the configuration.
+
+**Usage:** `/dev-kit:settings [show | <what to change, in words> | tips off|on|always|reset]`
+
+| Argument | Meaning |
+|---|---|
+| `show` | current settings and their effect |
+| `<what to change, in words>` | e.g. "run overnight", "stricter gates", "no tips" |
+| `tips off|on|always|reset` | tips; reset shows them again |
+
+**Examples:**
+
+- `/dev-kit:settings`: see how the kit is configured
+- `/dev-kit:settings run overnight without asking`: unattended level with the floors kept
+- `/dev-kit:settings tips off`: no more tips
+
+**Produces:** the changed setting in .dev/state.json and an ADR for decisions
+
+**Related:** [`interview`](#interview), [`status`](#status), [`help`](#help)
 
 ### deploy
 

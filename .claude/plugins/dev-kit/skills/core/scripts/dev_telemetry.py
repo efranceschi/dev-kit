@@ -350,7 +350,7 @@ SKILL_STAGE = {"start": "start", "status": "start", "board": "start", "interview
                "ux": "design", "ui": "design", "plan": "plan", "implement": "implement", "test": "implement", "qa": "qa",
                "usability": "usability", "deploy": "deploy", "docs": "docs_release", "release": "docs_release",
                "autopilot": "autopilot", "review": None, "feedback": None, "issue": "plan", "backlog": None,
-               "costs": None, "help": None}
+               "costs": None, "help": None, "settings": None}
 AREA_STAGE = {"interview": "interview", "prd": "prd", "architecture": "architecture", "design": "design", "plan": "plan",
               "implement": "implement", "test": "implement", "qa": "qa", "usability": "usability", "deploy": "deploy",
               "autopilot": "autopilot", "scripts": "scripts", "start": "start", "board": "start", "docs": "docs_release",

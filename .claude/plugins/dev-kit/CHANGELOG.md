@@ -2,6 +2,20 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.20.0 — 2026-11-20
+
+Nothing to run by hand: every action a user may need goes through a skill; the scripts are the skills' tools.
+
+### Added
+- `/dev-kit:settings`: shows and changes the project's settings in plain words (autonomy level and pause points, quality cut-offs, model escalation, review and fix rounds, incremental reuse and spot checks, task checks, issue buffer and cool-down, local preview, production deploy, permissions, tips on/off/always/reset), validated against the floors, with an ADR for decisions. Replaces the `dev_state.py set …` instructions in the docs.
+- `qa --full`: audits everything again without reusing earlier clean reviews; the QA report gains a "Reused work" line per dimension (reviewed, reused, spot-checked, and why).
+- `/dev-kit:start` housekeeping on resume: stops processes left by a crashed run and frees expired locks (`cleanup`), records the current documents as the reference for stale tracking in projects created before 1.16 (`artifact mark all`), and fixes a task whose recorded commit was rewritten (after asking).
+- `dev_state.py status` shows `Stale:` and `Locks:` lines; `/dev-kit:status` relays them.
+
+### Changed
+- Troubleshooting, recipes and glossary point to skills instead of script commands (cleanup, tips, dropped tasks, wrong commit, costs re-read, models per agent, QA tooling, reuse, exclusive resources).
+- 24 skills (plus `core`).
+
 ## 1.19.0 — 2026-11-20
 
 Specifications that prevent late rework: the second field report traced many late findings to facts nobody wrote down early (what one task hands to another, which texts are fixed, how to reach a screen state, what a data source really covers, which resource cannot be shared).

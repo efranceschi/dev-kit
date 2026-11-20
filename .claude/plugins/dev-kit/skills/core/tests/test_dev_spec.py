@@ -102,6 +102,10 @@ class TestLock(Base):
         self.ds("lock", "acquire", "remote-session", "--holder", "implementer-3")           # previous expired
         self.assertIn("implementer-3", self.ds("lock", "status").stdout)
         self.ds("lock", "acquire", "Bad Name", "--holder", "x", expect=1)
+        self.assertIn("Locks: remote-session by implementer-3", self.ds("status").stdout)
+        self.ds("lock", "acquire", "emulator", "--holder", "a", "--ttl", "0")
+        self.ds("cleanup")                                                   # frees expired locks
+        self.assertNotIn("emulator", self.ds("lock", "status").stdout)
 
 
 class TestStringsAndContrast(Base):

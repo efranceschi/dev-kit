@@ -21,7 +21,7 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 
 ## Let it run overnight
 
-1. Choose 'unattended with floors' in the interview (or: dev_state.py set autonomy.level unattended)
+1. Choose 'unattended with floors' in the interview, or later: /dev-kit:settings run overnight without asking
 2. Cover permission prompts: /fewer-permission-prompts and --permission-mode acceptEdits
 3. Run inside tmux: claude --permission-mode acceptEdits "/dev-kit:autopilot"
 4. In the morning: /dev-kit:status, /dev-kit:backlog, /dev-kit:costs, /dev-kit:interview --gaps
@@ -66,7 +66,7 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 
 1. /dev-kit:start to reconcile state with git
 2. /dev-kit:autopilot continues from the current phase
-3. dev_state.py cleanup if processes were left behind
+3. /dev-kit:start also stops processes and frees locks left by the crash
 
 ## Review the session or send feedback to the author
 
@@ -75,8 +75,8 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 
 ## Change autonomy, quality or other settings
 
-1. /dev-kit:interview --gaps to revisit decisions
-2. Or directly: dev_state.py set autonomy.<field> <value> (level, quality, cooldown, issue_buffer_pct, tips, model_policy, pause_policy…)
+1. /dev-kit:settings <what you want, in words> (level, quality bar, rounds, reuse, task checks, buffer, deploys, tips)
+2. /dev-kit:interview --gaps to revisit product decisions
 
 ## Watch the project on a board (or share it)
 
