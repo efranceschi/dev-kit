@@ -34,7 +34,8 @@ Use exactly these key names and values: `state` (not `status`) in `previous`, th
       "in_change": "true | false (re-runs of document reviews only, see below)",
       "contradicts": "F-nnn when the recommendation reverses an earlier one (optional)",
       "confidence": "high | low (optional; low counts half)",
-      "legacy": "true only in existing projects, for a problem in untouched code (optional)"
+      "legacy": "true only in existing projects, for a problem in untouched code (optional)",
+      "out_of_scope": "true for a problem in shared code this scope did not change, e.g. a global component (optional)"
     }
   ],
   "previous": [
@@ -70,6 +71,7 @@ Rules:
 - `verdict` is `fail` when any finding is `critical` or `high`.
 - Only report what you verified by reading code, running commands or inspecting artifacts. Mark anything inferred but unverified with `"confidence": "low"` in the finding.
 - No duplicate findings; merge instances of the same root cause into one finding listing all files.
+- Any project: a problem in a shared or global file that the scope did not change (layout, navigation, a widget used everywhere) gets `"out_of_scope": true`. It does not score or block this gate and becomes an issue (critical/high security ones are still reported to the user at once). Never use it for a file the scope changed.
 - Existing projects (`.dev/state.json` has `brownfield`, `conventions.md` §16): a problem that already existed at `brownfield.baseline_ref` and that the scope does not make worse gets `"legacy": true`. Legacy findings never score or block; the orchestrator turns them into `intangible` issues. Do not mark as legacy anything in lines the scope added or changed.
 - Keep `title` ≤ 60 characters. Severity follows `shared/conventions.md` §7.
 - Audit the `Audited commit:` of your prompt and copy it to `sha`. If you see the working tree change while you work (someone fixing in parallel), audit the commit anyway and say so in `summary`.

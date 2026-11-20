@@ -24,6 +24,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 4. Component inventory: every component the screens need, with variants, states (default/hover/focus-visible/disabled/loading/error) and a11y notes (roles, names, keyboard, focus trap, live regions, target size ≥ 24 px, prefer 44 px on touch).
 5. Layout patterns and responsive behaviour per breakpoint.
 6. One spec per screen id from `ux-flows.md`: purpose, ASCII/Mermaid wireframe, components used, copy in the application language, all states, responsive notes, accessibility (heading order, focus order, announcements).
+6a. Screen map: for every screen, its route, the states reachable by URL or mock, and its route files (the QA harness and the work ledger use it). Run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" contrast` on the tokens and fix the pairs it marks LOW before writing the spec.
 7. Accessibility baseline section and implementation notes (where tokens live, naming of components, visual regression if planned).
 8. Gaps → autonomy rule (`ui_details` is normally `decide_alone`); ADR for the library and identity choices. Write `.dev/design/ui-spec.md`. Run the self-check (`${CLAUDE_SKILL_DIR}/../core/shared/prompts/self-check.md`, which includes `dev_state.py xref`) and fix what it finds, then `dev_state.py artifact mark ui`. Then `dev_state.py set phase plan`; summarise; next: `review design` (independent score against the cut-off), then `plan`.
 

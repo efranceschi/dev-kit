@@ -9,7 +9,8 @@ Values are null when unknown. Exit 0 always (detection is best effort).
 a Chromium), accessibility and performance scanners (axe, Lighthouse), installed dependencies (node_modules, a
 virtualenv) and the QA harness scripts (shared/templates/qa-harness.md):
 {"playwright": {"available": bool, "via": ...}, "chromium": ..., "axe": ..., "lighthouse": ..., "node_modules": bool,
- "venv": bool, "harness": {"qa:shots": bool, "qa:a11y": bool}, "visual_ready": bool}
+ "venv": bool, "harness": {"qa:shots": bool, "qa:a11y": bool}, "visual_ready": bool,
+ "audit": {"<ecosystem>": {"available": [...], "suggest": "<tool to install>" | null}}}
 """
 from __future__ import annotations
 
@@ -243,6 +244,20 @@ def detect_tools(root: Path) -> dict:
         "harness": harness,
     }
     out["visual_ready"] = out["playwright"]["available"] and out["chromium"]["available"]
+    # dependency auditors per ecosystem present in the project: what deps-auditor and security-auditor can run,
+    # and what to suggest installing when missing (a dev_tooling decision)
+    eco = {
+        "node": ((root / "package.json").exists(), [("npm audit", bool(shutil.which("npm"))), ("pnpm audit", bool(shutil.which("pnpm"))),
+                                                     ("yarn npm audit", bool(shutil.which("yarn")))]),
+        "python": (any((root / f).exists() for f in ("pyproject.toml", "requirements.txt", "Pipfile", "setup.py")),
+                   [("pip-audit", bool(shutil.which("pip-audit")) or _py_has("pip_audit")), ("safety", bool(shutil.which("safety")))]),
+        "rust": ((root / "Cargo.toml").exists(), [("cargo audit", bool(shutil.which("cargo-audit")))]),
+        "go": ((root / "go.mod").exists(), [("govulncheck", bool(shutil.which("govulncheck")))]),
+        "ruby": ((root / "Gemfile").exists(), [("bundle audit", bool(shutil.which("bundle-audit")))]),
+        "php": ((root / "composer.json").exists(), [("composer audit", bool(shutil.which("composer")))]),
+    }
+    out["audit"] = {k: {"available": [n for n, ok in tools if ok], "suggest": None if any(ok for _, ok in tools) else tools[0][0]}
+                    for k, (present, tools) in eco.items() if present}
     return out
 
 

@@ -43,6 +43,13 @@ One per screen in `ux-flows.md` §4 (existing projects: only screens tagged `new
 - Responsive notes.
 - Accessibility: heading order, focus order, keyboard interactions, announcements.
 
+### Screen map (for QA and the harness)
+| screen | route | states reachable by URL or mock | route files |
+|---|---|---|---|
+| S-01 | /orders | `?state=empty`, `?state=error`, mock `orders-empty` | src/pages/orders.tsx, src/ui/OrderList.tsx |
+
+The route files feed the work ledger (`shot:` units, conventions §18): a screen is captured again only when they change.
+
 ## 6. Accessibility baseline
 Target level (brief, default WCAG 2.2 AA); checklist `shared/checklists/wcag-2.2-aa.md`; global rules (focus visible, skip link, reduced motion, text resizing to 200%).
 

@@ -22,6 +22,7 @@ Scope (milestone or `release`), language for prose. Manifests and lockfiles, `.d
 4. Run the matching vulnerability audit and summarise advisories by severity and reachability.
 5. For critical dependencies (auth, DB, payments, crypto, framework), check maintenance status and recent releases; use WebFetch on the official registry/repository page when needed and cite the URL in the evidence.
 6. Collect licences of direct dependencies with whatever tool exists, or from package metadata; compare with the project licence and the distribution model in the brief.
+6a. Outdated but safe upgrades you recommend deferring: list them in `deferred_upgrades` inside the JSON (package, current, latest, effort S/M/L, risk), not as findings; the orchestrator turns them into issues. When the ecosystem's audit tool is missing, say which one to install (`dev_detect_stack.py --tools` → `audit.<ecosystem>.suggest`).
 7. Check supply-chain hygiene (pinned CI actions/images, install scripts, git URL dependencies, typosquat-looking new names).
 
 ## Rules

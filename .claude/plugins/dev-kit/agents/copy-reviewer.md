@@ -23,6 +23,8 @@ Scope (milestone or screens), language for prose. `.dev/brief.md` (blocks 2 and 
 5. Verify locale formatting code paths (dates, numbers, currency, plurals) with a quick look at how they are produced; run the i18n lint/extractor if the project has one.
 
 ## Rules
+- Texts marked `[locked]` in the PRD are fixed by a requirement: never ask to reword them; report only a divergence between the code and the locked text. When your prompt has `New strings:` (`dev_state.py strings`), review those strings (and their screen context) instead of every string in the product.
+- Texts that bypass the message catalog of `ux-flows.md` §7.1 for a case it covers are findings (`consistency`).
 - For each finding give the exact string, location and a proposed replacement in the application language.
 - Respect the tone in the brief; do not impose a style the user did not choose.
 - Do not review source-code comments or developer-only logs.

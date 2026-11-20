@@ -2,6 +2,28 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.19.0 — 2026-11-20
+
+Specifications that prevent late rework: the second field report traced many late findings to facts nobody wrote down early (what one task hands to another, which texts are fixed, how to reach a screen state, what a data source really covers, which resource cannot be shared).
+
+### Added
+- Task contracts in `plan.md`: `contract:` (what a task provides), `consumes: T-nnn` (must also be a dependency; `sync-plan` checks) and `shared: yes` (runs alone in parallel batches). `dev_state.py brief` gives a consumer the producer's contract; `xref` reports `contract_missing`.
+- `dev_state.py lock acquire|release|status` for exclusive resources (one holder, `--ttl`, `--wait`, expired locks freed by `cleanup`), the architecture's "Exclusive resources and environment limits" table and an interview question.
+- `dev_state.py strings --since <sha>`: user-facing strings added since a commit (templates, UI attributes, message calls, i18n catalogs); `copy-reviewer` gets only those.
+- `dev_state.py contrast`: WCAG ratios of the colour token pairs in `ui-spec.md` (text 4.5, large text and UI parts 3.0); `ui` and `design-reviewer` use it instead of computing by hand.
+- `[locked]` literals in PRD ACs, a message catalog in `ux-flows.md` §7.1 and a screen → route → states map in `ui-spec.md` (also the input of the ledger's `shot:` units).
+- Data: interview question on external sources (coverage, freshness, quotas), the architecture's data sources table, a coverage assumption in data ACs, a data spike when a milestone reads a new source, a versioned data invariants file run by `data-reviewer`.
+- Performance scenarios file measured cold and warm against the previous round.
+- `"out_of_scope": true` for a problem in shared code the scope did not change (a global component): not scored, registered as an issue.
+- Changelog fragments (`changelog.d/T-xxx.md`, `docs/setup.d/T-xxx.md`) merged by `docs`; `release` refuses leftover fragments.
+- `dev_detect_stack.py --tools` reports the dependency audit tools per ecosystem and what to install; deferred upgrades become issues.
+
+### Changed
+- `pause_policy.paid_services` with `preauthorize` accepts `max_monthly: "unlimited"` only as an explicit value; anything else must be a positive amount.
+- `start` creates a minimal state before its first event (events were dropped before the interview's `init`); onboarding runs discovery, document review and the test baseline at the same time.
+- `test-pyramid.md`: axe checks in component tests and data invariants per data task; `operations.md`: a runbook rule for manual deploy steps.
+- `design-reviewer` flags ad-hoc texts outside the catalog and screens without a map; `architect` verifies data source coverage.
+
 ## 1.18.0 — 2026-11-20
 
 Incremental work. A second field report (52 h of activity on 1.14) showed the time going into redoing verified work: implementers running the whole integration suite per task (37% of the time), QA rounds of up to 150 minutes, every auditor running `make check` again, every screen captured again by two agents, whole documents re-read for a changed paragraph. Rule of this release: never redo verified work whose inputs did not change, and never let reuse lower the bar.

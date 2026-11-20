@@ -85,4 +85,7 @@ Tick each item; note the Claude Code version used.
 - [ ] A UI task runs the self-check and the haiku copy and static a11y checks into `.dev/qa/T-xxx/precheck/`.
 - [ ] A gate with fixes: all fix tasks run, then one `qa` round, one local preview, and production only after the gate passes.
 - [ ] `--parallel` implementers link `node_modules` instead of installing; `plan` adds the QA harness task when `dev_detect_stack.py --tools` finds none.
+- [ ] (1.18) Gate round 2 after one fix: `ledger plan` lists the fixed file, files with findings and one spot check; `SC select` carries the untouched dimensions; `consolidate` keeps the open ids; `release` audits with `--no-cache`.
+- [ ] (1.18) `/dev-kit:costs --time` shows time per agent and skill and the ledger reuse table.
+- [ ] (1.19) A consumer task's `dev_state.py brief` shows the producer's contract; `xref` flags `consumes` without `contract`; two parallel tasks cannot hold the same `lock`; `docs` merges `changelog.d/`.
 

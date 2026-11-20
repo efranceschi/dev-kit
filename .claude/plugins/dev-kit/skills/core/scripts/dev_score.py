@@ -301,7 +301,7 @@ def load_previous(path: Path) -> list[dict]:
     if not isinstance(items, list):
         raise ValueError("previous findings must be a list or {\"findings\": [...]}")
     # legacy findings (pre-existing debt in existing projects) never score, in any round (conventions §16)
-    return [f for f in items if isinstance(f, dict) and not f.get("legacy")]
+    return [f for f in items if isinstance(f, dict) and not f.get("legacy") and not f.get("out_of_scope")]
 
 
 def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous: list[dict] | None = None,
@@ -331,9 +331,12 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
         for f in findings:
             if not isinstance(f, dict):
                 continue
-            if f.get("legacy") is True:
+            if f.get("legacy") is True or f.get("out_of_scope") is True:
+                # pre-existing debt (brownfield) or a problem in shared code the scope did not touch (a global
+                # component): never scored here, registered as an issue by the orchestrator
                 legacy.append({"dimension": dim, "auditor": auditor, "id": f.get("id"), "severity": f.get("severity"),
-                               "title": f.get("title"), "file": f.get("file"), "line": f.get("line")})
+                               "title": f.get("title"), "file": f.get("file"), "line": f.get("line"),
+                               **({"reason": "out_of_scope"} if f.get("out_of_scope") is True and f.get("legacy") is not True else {})})
             else:
                 entry["findings"].append({**f, "_auditor": auditor, "_src": str(path)})
         entry["stats"] = data.get("stats", {})

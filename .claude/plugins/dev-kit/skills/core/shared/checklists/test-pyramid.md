@@ -17,6 +17,8 @@ Use when writing `qa/test-plan.md`, when `implement` decides which tests a task 
 4. Edge cases: empty, boundary, invalid type, unauthorised, concurrent/duplicate, locale-specific formats.
 5. No sleeps; deterministic data (fixed seeds/clocks); isolate external services with fakes at the boundary.
 6. Tests must run in CI from a clean checkout with one command recorded in `architecture.md`.
+7. UI components: component tests also run an accessibility check (`jest-axe`, `vitest-axe`, `@axe-core/react` or the framework's equivalent) on each state they render, so names, roles and labels are verified as the component is built; the a11y audit then focuses on keyboard, focus order and announcements.
+8. Data tasks: add or update the data invariants file named in `architecture.md` (row counts, sums, no orphans, coverage of the source) for what the task loads.
 
 ## Audit questions (test-auditor)
 - Does every AC in the milestone map to a passing test? (gap → `high`, `category: test-gap`)

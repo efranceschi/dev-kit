@@ -73,6 +73,8 @@ Short goal of the milestone (one paragraph).
 - files: src/auth/LoginForm.tsx, src/auth/validate.ts
 ```
 
+Optional fields: `contract:` (what other tasks consume from this one; one line or sub-items), `consumes: T-001` (tasks whose contract it uses; they must also be in `deps`), `shared: yes` (edits a file other tasks touch; runs alone in `--parallel`). `dev_state.py brief` gives a consumer the producer's contract, and `xref` reports a `consumes` without a contract.
+
 Rules: `type` ∈ `feature | fix | chore | test | docs`. `status` ∈ `todo | in_progress | done | blocked | dropped` (`dropped` = removed by a replan with `dev_state.py drop`; kept for history, never counted). `status` in plan.md is informative only; `state.json` wins on conflict. `deps` may be empty (`- deps:`). Tasks should be vertical slices completable in one sitting (roughly 30–90 minutes of work) with tests included.
 
 ## 5. Commits

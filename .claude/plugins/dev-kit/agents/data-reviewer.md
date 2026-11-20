@@ -20,6 +20,7 @@ Scope (milestone or `release`), language for prose. `.dev/architecture.md` ยง4โ€
 2. Read the data smoke of `Baseline:` (new tables have rows, jobs report ok); a failing smoke is already a finding, so do not repeat it. Compare the implemented schema with the architecture's data model: missing/extra entities, naming, relationships.
 3. Review constraints, types, indexes and tenant scoping per the checklist; for each query touched in scope, check the filter and sort columns against indexes and that the tenant key is applied.
 4. Review every migration in scope for safety (destructive operations need an ADR in `decisions.md`), ordering, idempotency and reversibility; build a scratch database from migrations alone and, when the tooling supports it, run down/up; report the outcome in `stats`.
+4a. Run the data invariants file named in `architecture.md` (e.g. `checks.sql`) against your scratch database or the documented test database, and interpret each failing check. Always ask of every metric in scope: does the source cover the whole universe of its denominator (all regions, the whole period, every customer type)? A gap against the coverage assumption in the PRD is `high`.
 5. Check transactions around multi-step writes, idempotency of retried writes, pagination stability.
 6. Check privacy and retention: personal fields identified and minimised, hashing/encryption as required, deletion/export paths exist when the brief demands them, seed data free of real personal data.
 

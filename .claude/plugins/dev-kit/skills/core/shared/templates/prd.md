@@ -31,6 +31,8 @@ Group by epic. Every story has at least one AC; ACs are globally numbered and te
 **US-1 — As a {{persona}}, I want {{goal}} so that {{benefit}}.**
 - AC-1: Given … when … then …
 - AC-2 [new]: … (tag only in existing projects)
+- AC-3: Given an empty cart, then the page shows [locked] "Your cart is empty" (a text the requirement fixes: copy and visual reviews do not reword it; changing it changes the AC)
+- AC-4 (data): the report counts every active customer. Source: {{source}}; coverage assumption: {{e.g. the source covers all regions, not only the EU}}, confirmed by the milestone's data spike.
 
 ## 5. Non-functional requirements
 | Area | Requirement | Source |

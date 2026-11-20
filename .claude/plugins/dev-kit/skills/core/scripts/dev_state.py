@@ -6,6 +6,9 @@ Standard library only. Run with: python3 -I dev_state.py <subcommand> [...]
 Subcommands
   init          create .dev/ and state.json (idempotent; updates given fields)
   sync-plan     read .dev/plan.md and add/update milestones and tasks (never touches status)
+  strings       user-facing strings added since a commit (--since SHA [--worktree]), for the copy review
+  contrast      WCAG contrast of the colour token pairs in ui-spec.md (--pairs fg/bg,… or automatic)
+  lock          acquire | release | status NAME: one holder at a time for an exclusive resource (--holder --ttl --wait)
   brief T       base prompt of an implementer for task T (languages, commands, verification rule, history)
   next          print the next task to work on (fix tasks first, deps satisfied, gate respected); --batch N: tasks
                 that can run in parallel (no common files, one serialising file at most)
@@ -56,6 +59,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -248,6 +252,11 @@ def check_pause_policy(pp: object) -> None:
             limit = rule.get("limit") or {}
             if not isinstance(limit, dict) or not limit.get(key):
                 fail(f"pause_policy.{point} preauthorize needs limit.{key}")
+            if point == "paid_services":
+                v = limit[key]
+                if not (v == "unlimited" or (isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0)):
+                    fail('pause_policy.paid_services limit.max_monthly must be a positive amount or "unlimited" '
+                         '(an explicit choice: no monthly cap, still recorded as an ADR per service)')
             if point == "delete_data" and any(str(e).lower() in PROD_NAMES for e in limit[key]):
                 fail("pause_policy.delete_data can never be preauthorized for production")
 
@@ -558,10 +567,19 @@ def parse_plan(text: str) -> tuple[dict, dict]:
                 task["plan_status"] = val.strip() or "todo"
             elif key == "test_notes":
                 task["test_notes"] = val
+            elif key == "contract":
+                task["contract"] = val  # what this task provides to others (columns, routes, field names), §4
+            elif key == "consumes":
+                task["consumes"] = [d.strip() for d in re.split(r"[,\s]+", val) if d.strip()]
+            elif key == "shared":
+                task["shared"] = val.strip().lower() not in ("", "no", "false", "0")
             else:
                 task.setdefault("extra", {})[key] = val
             continue
         s = SUBITEM_RE.match(raw)
+        if s and cur_field == "contract":
+            tasks[cur_t]["contract"] = "; ".join(x for x in (tasks[cur_t].get("contract") or "", s.group(1)) if x)
+            continue
         if s and cur_field == "acceptance":
             tasks[cur_t]["acceptance"].append(s.group(1))
             continue
@@ -763,6 +781,11 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
             cur = store.tasks()[tid]
             for k in ("title", "milestone", "type", "deps", "acceptance", "test_notes", "files"):
                 cur[k] = t[k]
+            for k in ("contract", "consumes", "shared"):
+                if k in t:
+                    cur[k] = t[k]
+                else:
+                    cur.pop(k, None)
             updated_t += 1
         else:
             store.tasks()[tid] = {
@@ -770,6 +793,7 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
                 "status": "todo", "deps": t["deps"], "acceptance": t["acceptance"],
                 "test_notes": t["test_notes"], "files": t["files"], "commit": None,
                 "blocked_reason": None, "source": None, "started_at": None, "done_at": None,
+                **{k: t[k] for k in ("contract", "consumes", "shared") if k in t},
             }
             added_t += 1
     store.state["next_task_id"] = max_id + 1
@@ -781,6 +805,11 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
         for d in t["deps"]:
             if d not in store.tasks():
                 problems.append(f"{tid}: dependency {d} does not exist")
+        for d in t.get("consumes") or []:
+            if d not in store.tasks():
+                problems.append(f"{tid}: consumes {d}, which does not exist")
+            elif d not in t["deps"]:
+                problems.append(f"{tid}: consumes {d} but does not depend on it (add it to deps)")
         if t["milestone"] not in store.milestones():
             problems.append(f"{tid}: milestone {t['milestone']} not declared")
     if store.state["phase"] in ("init", "interview", "prd", "architecture", "ux", "ui", "plan") and store.tasks():
@@ -1085,7 +1114,7 @@ def cmd_fix_tasks(store: Store, a: argparse.Namespace) -> None:
     existing = {str(t.get("source") or "") for t in store.tasks().values() if t.get("status") != "dropped"}
     created, skipped = [], []
     for f in items:
-        if not isinstance(f, dict) or f.get("legacy") or not f.get("id"):
+        if not isinstance(f, dict) or f.get("legacy") or f.get("out_of_scope") or not f.get("id"):
             continue
         sev = str(f.get("severity", "")).lower()
         if sev not in block_on and f["id"] not in extra:
@@ -1367,9 +1396,86 @@ def board_line(store: Store) -> str | None:
     return f"Board: {rec.get('url')} (pid {pid}){shared} · stop with /dev-kit:board stop"
 
 
+LOCK_NAME = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,59}$")
+
+
+def _lock_path(store: Store, name: str) -> Path:
+    if not LOCK_NAME.match(name):
+        fail("lock names are short lowercase tokens (e.g. remote-session, shared-db, emulator)")
+    return store.dev / "run" / "locks" / f"{name}.json"
+
+
+def _lock_read(path: Path) -> dict | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _lock_expired(rec: dict | None) -> bool:
+    if not rec:
+        return True
+    try:
+        at = datetime.fromisoformat(str(rec.get("at")).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    ttl = rec.get("ttl_min")
+    return (datetime.now(timezone.utc) - at).total_seconds() >= float(30 if ttl is None else ttl) * 60
+
+
+def cmd_lock(store: Store, a: argparse.Namespace) -> None:
+    """Exclusive resources (architecture.md "Exclusive resources"): one holder at a time, with expiry, so parallel
+    agents never share a remote session, a shared database or an emulator."""
+    store.load()
+    if a.action == "status":
+        d = store.dev / "run" / "locks"
+        recs = {p.stem: _lock_read(p) for p in sorted(d.glob("*.json"))} if d.exists() else {}
+        if a.json:
+            print(json.dumps({k: {**(v or {}), "expired": _lock_expired(v)} for k, v in recs.items()}, indent=2))
+        else:
+            print("\n".join(f"{k}: {v.get('holder')} since {v.get('at')}" + (" (expired)" if _lock_expired(v) else "")
+                            for k, v in recs.items() if v) or "no locks held")
+        return
+    if not a.name:
+        fail(f"lock {a.action} needs a resource name")
+    path = _lock_path(store, a.name)
+    if a.action == "release":
+        rec = _lock_read(path)
+        if rec and rec.get("holder") != a.holder and not a.force:
+            fail(f"{a.name} is held by {rec.get('holder')}, not {a.holder}; use --force only for a dead holder")
+        path.unlink(missing_ok=True)
+        print(f"released {a.name}")
+        return
+    if not a.holder:
+        fail("lock acquire needs --holder <agent-slot> (e.g. implementer-2)")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + max(0, a.wait or 0)
+    while True:
+        body = json.dumps({"holder": a.holder, "at": now(), "ttl_min": a.ttl, "note": (a.note or "")[:120]})
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(body)
+            print(f"acquired {a.name} for {a.holder} (expires in {a.ttl} min unless renewed)")
+            return
+        except FileExistsError:
+            rec = _lock_read(path)
+            if rec and rec.get("holder") == a.holder or _lock_expired(rec):
+                path.write_text(body, encoding="utf-8")  # renew own lock, or take over an expired one
+                print(f"acquired {a.name} for {a.holder}" + ("" if rec and rec.get("holder") == a.holder else " (previous lock expired)"))
+                return
+            if time.monotonic() >= deadline:
+                print(f"{a.name} is held by {rec.get('holder')} since {rec.get('at')}; retry later or pass --wait <seconds>")
+                sys.exit(3)
+            time.sleep(min(5.0, max(0.2, deadline - time.monotonic())))
+
+
 def cmd_cleanup(store: Store, a: argparse.Namespace) -> None:
     """Kill the background processes agents recorded in .dev/run/*.pids, but only those inside this project."""
     store.load()
+    for lp in sorted((store.dev / "run" / "locks").glob("*.json")) if (store.dev / "run" / "locks").exists() else []:
+        if _lock_expired(_lock_read(lp)) and not getattr(a, "dry_run", False):
+            lp.unlink(missing_ok=True)  # expired exclusive-resource locks
     root = store.root.resolve()
     run = store.dev / "run"
     files = sorted(run.glob("*.pids")) if run.exists() else []
@@ -1511,7 +1617,7 @@ def _finding_refs(store: Store, paths: list[str]) -> list[dict]:
             fail(f"cannot read findings from {src}: {e}")
         items = data.get("findings", []) if isinstance(data, dict) else data
         for f in items if isinstance(items, list) else []:
-            if not isinstance(f, dict) or f.get("legacy"):
+            if not isinstance(f, dict) or f.get("legacy") or f.get("out_of_scope"):
                 continue
             files = f.get("files") if isinstance(f.get("files"), list) else [f.get("file")]
             for x in files:
@@ -1671,11 +1777,142 @@ def cmd_brief(store: Store, a: argparse.Namespace) -> None:
             "suite once after merging, so do not run it more than once yourself.",
             "Worktree rules (resource-isolation.md): one simple command per Bash call; no heredocs and no `cd … &&` chains; "
             "write scripts and files with Write/Edit; link node_modules/.venv from the Project root instead of installing; "
-            "never commit or touch git state."]
+            "never commit or touch git state; take a lock (dev_state.py lock acquire <resource> --holder <you>) before "
+            "using an exclusive resource listed in architecture.md, and release it when done."]
     if hist:
         out += ["", f"Previous attempt ({hist.get('result')}, {hist.get('at')}): {hist.get('note') or '-'}"
                 + (f" · its work is on {hist['ref']}: start from it, do not redo what it finished" if hist.get("ref") else "")]
     print("\n".join(out))
+
+
+UI_FILE = re.compile(r"\.(tsx|jsx|vue|svelte|astro|html?|hbs|ejs|erb|jinja2?|j2|liquid|twig|php|po|pot|json|ya?ml|arb|strings|xliff)$")
+CATALOG = re.compile(r"(^|/)(locales?|i18n|lang|messages|translations)/|\.(po|pot|arb|strings|xliff)$")
+STR_PATTERNS = [
+    re.compile(r">\s*([^<>{}]*[^\W\d_][^<>{}]*?)\s*<"),
+    re.compile(r"\b(?:placeholder|aria-label|title|alt|label|helperText|errorMessage)\s*=\s*[\"']([^\"']+)[\"']"),
+    re.compile(r"\b(?:toast|alert|confirm|notify|message\.\w+|setError|showError|flash|t|i18n\.t|_)\(\s*[\"'`]([^\"'`]+)[\"'`]"),
+]
+CATALOG_PATTERNS = [re.compile(r"^\s*[\"']?[\w.-]+[\"']?\s*[:=]\s*[\"'](.+?)[\"'],?\s*$"), re.compile(r'^msgstr\s+"(.+)"\s*$')]
+
+
+def _user_string(t: str) -> bool:
+    t = t.strip()
+    if len(t) < 2 or not re.search(r"[^\W\d_]", t):
+        return False
+    if " " not in t and re.search(r"[-_./:#]|^[a-z]+[A-Z]", t):
+        return False  # identifiers, classes, paths, keys
+    return not re.fullmatch(r"\{\{?.*\}\}?|\$\{.*\}", t)
+
+
+def cmd_strings(store: Store, a: argparse.Namespace) -> None:
+    """User-facing strings added since a commit (copy-reviewer gets only these): literals in templates and
+    components, UI attributes, message calls and i18n catalogs. A heuristic: it lists candidates, not a verdict."""
+    store.load()
+    args = ["diff", "-U0", "--no-color", a.since] + (["HEAD"] if not a.worktree else []) + ["--", ".", ":(exclude).dev"]
+    diff = _git(store, *args)
+    if diff is None:
+        fail(f"git diff from {a.since} failed")
+    out, cur, ln = [], None, 0
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            cur = line[6:] if line.startswith("+++ b/") else None
+            continue
+        m = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)", line)
+        if m:
+            ln = int(m.group(1))
+            continue
+        if cur is None or not line.startswith("+") or line.startswith("+++"):
+            continue
+        text = line[1:]
+        if UI_FILE.search(cur) and (not cur.endswith((".json", ".yaml", ".yml")) or CATALOG.search(cur)):
+            pats = CATALOG_PATTERNS if CATALOG.search(cur) else STR_PATTERNS
+            for pat in pats:
+                for hit in pat.findall(text):
+                    if _user_string(hit):
+                        out.append({"file": cur, "line": ln, "text": hit.strip()[:200]})
+        ln += 1
+    seen, uniq = set(), []
+    for x in out:
+        k = (x["file"], x["text"])
+        if k not in seen:
+            seen.add(k)
+            uniq.append(x)
+    if a.json:
+        print(json.dumps({"since": a.since, "strings": uniq}, indent=2, ensure_ascii=False))
+    else:
+        print(f"{len(uniq)} new user-facing string(s) since {a.since}")
+        for x in uniq:
+            print(f"  {x['file']}:{x['line']}  {x['text']}")
+
+
+def _rgb(v: str) -> tuple[float, float, float] | None:
+    v = v.strip().lower()
+    m = re.fullmatch(r"#([0-9a-f]{3}|[0-9a-f]{6})(?:[0-9a-f]{2})?", v)
+    if m:
+        h = m.group(1)
+        h = "".join(c * 2 for c in h) if len(h) == 3 else h
+        return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
+    m = re.fullmatch(r"rgba?\(\s*(\d+)\s*,?\s*(\d+)\s*,?\s*(\d+).*\)", v)
+    if m:
+        return tuple(int(x) / 255 for x in m.groups())  # type: ignore[return-value]
+    return None
+
+
+def contrast_ratio(fg: str, bg: str) -> float | None:
+    a_, b_ = _rgb(fg), _rgb(bg)
+    if a_ is None or b_ is None:
+        return None
+    def lum(c):
+        lin = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    l1, l2 = sorted((lum(a_), lum(b_)), reverse=True)
+    return round((l1 + 0.05) / (l2 + 0.05), 2)
+
+
+TOKEN_LINE = [re.compile(r"^\s*\|\s*`?([\w.-]+)`?\s*\|\s*`?(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\))`?\s*\|"),
+              re.compile(r"^\s*(--[\w-]+|[\w.-]+)\s*:\s*(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\))\s*;?")]
+FG_NAME = re.compile(r"text|fg|foreground|on-|on_|link|icon|primary|danger|error|success|warning|accent|border|focus", re.I)
+BG_NAME = re.compile(r"bg|background|surface|canvas|base|paper|page", re.I)
+
+
+def cmd_contrast(store: Store, a: argparse.Namespace) -> None:
+    """WCAG contrast of colour token pairs read from the UI spec (design-reviewer interprets, never computes)."""
+    store.load()
+    spec = Path(a.spec) if a.spec and Path(a.spec).is_absolute() else store.root / (a.spec or ".dev/design/ui-spec.md")
+    if not spec.exists():
+        fail(f"{spec} not found")
+    tokens: dict[str, str] = {}
+    for ln in spec.read_text(encoding="utf-8", errors="replace").splitlines():
+        for pat in TOKEN_LINE:
+            m = pat.match(ln)
+            if m and _rgb(m.group(2)):
+                tokens.setdefault(m.group(1).lstrip("-"), m.group(2))
+                break
+    if a.pairs:
+        pairs = [tuple(x.split("/", 1)) for x in _csv(a.pairs) if "/" in x]
+    else:
+        fgs = [t for t in tokens if FG_NAME.search(t) and not BG_NAME.search(t)]
+        bgs = [t for t in tokens if BG_NAME.search(t)]
+        pairs = [(f, b) for f in fgs for b in bgs]
+    rows = []
+    for f, b in pairs:
+        if f not in tokens or b not in tokens:
+            rows.append({"fg": f, "bg": b, "ratio": None, "note": "token not found"})
+            continue
+        r = contrast_ratio(tokens[f], tokens[b])
+        ui = bool(re.search(r"border|focus|icon", f, re.I))
+        need = 3.0 if ui else 4.5
+        rows.append({"fg": f, "bg": b, "fg_value": tokens[f], "bg_value": tokens[b], "ratio": r,
+                     "required": need, "large_text_ok": r is not None and r >= 3.0, "ok": r is not None and r >= need})
+    if a.json:
+        print(json.dumps({"spec": str(spec), "tokens": len(tokens), "pairs": rows}, indent=2))
+    else:
+        print(f"{len(tokens)} colour token(s), {len(rows)} pair(s) (WCAG 2.2: 4.5 text, 3.0 large text and UI parts)")
+        for r in rows:
+            mark = "?" if r["ratio"] is None else ("ok " if r["ok"] else "LOW")
+            print(f"  {mark} {r['fg']} on {r['bg']}: " + (f"{r['ratio']}:1 (needs {r['required']})" if r["ratio"] else r.get("note", "")))
+    if a.strict and any(r["ratio"] is not None and not r["ok"] for r in rows):
+        sys.exit(1)
 
 
 def _int_tail(rev: str | None) -> int | None:
@@ -2272,6 +2509,10 @@ def xref_report(store: Store) -> dict:
         for d in t.get("deps") or []:
             if d not in store.tasks():
                 problems.append({"check": "dep_unknown", "id": tid, "detail": f"depends on {d}, which does not exist"})
+    for tid, t in tasks.items():
+        for c in t.get("consumes") or []:
+            if c in store.tasks() and not store.tasks()[c].get("contract"):
+                problems.append({"check": "contract_missing", "id": tid, "detail": f"consumes {c}, which declares no contract"})
     acn = lambda x: int(x.split("-")[1])  # noqa: E731
     if defined and tasks:
         for ac in sorted(defined - inactive - set(planned), key=acn):
@@ -2621,6 +2862,14 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("sync-plan"); s.set_defaults(fn=cmd_sync_plan); s.add_argument("--plan")
 
     s = sub.add_parser("brief"); s.set_defaults(fn=cmd_brief); s.add_argument("task")
+    s = sub.add_parser("strings"); s.set_defaults(fn=cmd_strings)
+    s.add_argument("--since", required=True); s.add_argument("--worktree", action="store_true"); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("contrast"); s.set_defaults(fn=cmd_contrast)
+    s.add_argument("--spec"); s.add_argument("--pairs"); s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
+    s = sub.add_parser("lock"); s.set_defaults(fn=cmd_lock)
+    s.add_argument("action", choices=["acquire", "release", "status"]); s.add_argument("name", nargs="?")
+    s.add_argument("--holder"); s.add_argument("--ttl", type=float, default=30); s.add_argument("--wait", type=float, default=0)
+    s.add_argument("--note"); s.add_argument("--force", action="store_true"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("next"); s.set_defaults(fn=cmd_next)
     s.add_argument("--milestone"); s.add_argument("--json", action="store_true")
     s.add_argument("--batch", type=int, help="up to N ready tasks that can run in parallel")

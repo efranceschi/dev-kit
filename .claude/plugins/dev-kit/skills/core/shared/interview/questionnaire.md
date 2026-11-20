@@ -37,6 +37,7 @@ Goal: leave the interview with **every decision the rest of the pipeline would o
 - Expected volume (users, records, requests/day) and growth.
 - Import/export needs, file uploads, reporting.
 - Retention, backup, deletion rules; personal data and legal constraints (LGPD/GDPR), audit logging.
+- External data sources the product reads (APIs, datasets, feeds): what each covers (regions, period, share of the universe a metric needs), how fresh it is, quotas and latency. A metric over "all customers" fed by a source that covers one region is found at QA otherwise; record each source and its coverage assumption for the architecture's data sources table.
 
 ### Block 5 — Stack and infrastructure
 - Language/framework preference per layer (frontend, backend, mobile) or "decide for me".
@@ -45,6 +46,7 @@ Goal: leave the interview with **every decision the rest of the pipeline would o
 - CI/CD expectations; containers; environments (dev/staging/prod).
 - Existing accounts, credentials, env vars or API keys the user can provide (record names only, never values).
 - Package manager and Node/Python/Go versions if constrained.
+- Exclusive resources and verification environment: anything only one agent or process may use at a time (a remote session, a shared database, a device or emulator, a rate-limited account) and where verification runs. They become locks (`dev_state.py lock`) in the architecture's exclusive resources table.
 
 ### Block 6 — Integrations and auth
 - Authentication: none, email+password, magic link, OAuth providers, SSO/SAML; session vs JWT; MFA.
@@ -69,7 +71,7 @@ Goal: leave the interview with **every decision the rest of the pipeline would o
 
 ### Block 9 — Process and autonomy
 - **How much of the run do you want to follow?** (ask first; recommended option first with its reason): `supervised` (recommended on a first project: the kit asks at every pause point), `unattended with floors` (the run never waits: pause points take the `unattended` values of `conventions.md` §10, `model_policy` `preapproved`), `custom` (walk the matrix). Explain in one line that unattended runs end with a report of parked items instead of waiting.
-- For `unattended` and `custom`: show the §10 matrix already filled (point · action · limit) and ask for confirmation or changes, at most 4 questions per round, each with the recommended action first and one line of reason. Collect the limits that `preauthorize` needs: monthly spend cap and currency (`paid_services`), environments where data may be deleted (`delete_data`, never production), deploy/publish targets (`public_exposure`). State the floors (§10) as facts, not as questions.
+- For `unattended` and `custom`: show the §10 matrix already filled (point · action · limit) and ask for confirmation or changes, at most 4 questions per round, each with the recommended action first and one line of reason. Collect the limits that `preauthorize` needs: monthly spend cap and currency (`paid_services`; `"unlimited"` is accepted only as an explicit answer, never as a default), environments where data may be deleted (`delete_data`, never production), deploy/publish targets (`public_exposure`). State the floors (§10) as facts, not as questions.
 - Then: when something is parked, end the run when nothing else can advance (`stop_when_idle`, recommended) or at the first parked item (`stop_first`); and whether to send an app notification per parked item (`notify_on_park`).
 - Remind unattended users that Claude Code's own permission prompts must be covered by a permission mode or allowlist (`/fewer-permission-prompts`).
 - Autonomy level: `high` (recommended for autonomous builds), `balanced`, `cautious` — see `autonomy-policy.md`; adjust `always_ask` list.

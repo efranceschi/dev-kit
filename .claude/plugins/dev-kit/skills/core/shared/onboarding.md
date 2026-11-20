@@ -13,6 +13,8 @@ Never modify existing source, docs, CI or git history during onboarding; only `.
 Create the state now, so every later step can log and register issues: `DS init --language <tag> --phase interview --project "<name>" --stack-json '<detected json>' --brownfield-json '{"baseline_ref":"dev-kit-baseline","baseline_sha":"<sha>"}'`. Existing projects keep `pause_policy.dirty_tree` at `ask` automatically (the tree may hold the user's own work). Then start the session: `DS event session_start --set trigger=start --set brownfield=true` and `DS event skill_start --set skill=start --set args_kind=onboarding`.
 
 ## 3. Discovery → `.dev/discovery.md`
+Steps 3, 4 and 5 are independent: run them at the same time (the test baseline in the background, one `Explore` agent for the code and one for the existing documents and decisions when the repository is large), then write the files.
+
 Write from `<KIT>/shared/templates/discovery.md`. Start from the detection JSON, then read README, CLAUDE.md, `docs/`, manifests, CI files, top-level folders, routes, models/migrations, `.env.example`. For repos with more than ~50 source files spawn the `Explore` agent with the project root and ask for: modules and responsibilities, entry points, routes/commands, screens and design system, data model, auth, external integrations, how to build/test/run. State facts only; mark anything unverified as `(inferred)`. If `discovery.md` already exists, resume: fill missing sections, do not rewrite.
 
 Also record the project's conventions (§11 of the template):
