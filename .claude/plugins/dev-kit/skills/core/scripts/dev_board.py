@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""dev_board.py - local, read-only Scrum board for a dev-kit project, served on 127.0.0.1.
+"""dev_board.py - local, read-only live board for a dev-kit project, served on 127.0.0.1.
 
 Standard library only. Run with: python3 -I dev_board.py [--root DIR] <subcommand>
 
@@ -69,6 +69,21 @@ LINK_WINDOW_S = 30  # a hook start and a skill spawn of the same agent type this
 AGENTS_DONE = 8  # a start with no stop after this long is treated as lost, not running
 AGENT_RECENT = 10
 LOG_TAIL = 60
+RUN_STALE_S = 4 * 3600  # a skill_start with no skill_end after this long is treated as abandoned
+LIVE_TAIL = 40  # telemetry events merged into the activity feed
+# Agents the qa skill runs as auditors: an unlinked one of these belongs to the QA gate of the milestone under audit.
+QA_AGENTS = {"code-reviewer", "security-auditor", "test-auditor", "spec-tracer", "data-reviewer", "deps-auditor",
+             "ops-reviewer", "performance-auditor", "a11y-auditor", "visual-reviewer", "copy-reviewer"}
+# What each agent does, in two or three words, for chips and tooltips (agents/*.md has the long description).
+AGENT_ROLE = {
+    "implementer": "implementing", "architect": "architecture advice", "code-reviewer": "code review",
+    "security-auditor": "security audit", "test-auditor": "test audit", "spec-tracer": "spec traceability",
+    "data-reviewer": "data review", "deps-auditor": "dependency audit", "ops-reviewer": "operations review",
+    "performance-auditor": "performance audit", "a11y-auditor": "accessibility audit", "visual-reviewer": "visual review",
+    "copy-reviewer": "copy review", "requirements-reviewer": "requirements review", "design-reviewer": "design review",
+    "docs-reviewer": "docs review", "usability-auditor": "usability audit",
+}
+AGENTS_DIR = SCRIPTS.parents[2] / "agents"
 
 
 # --------------------------------------------------------------------------- record and identity
@@ -281,6 +296,11 @@ def _ts(v: object) -> float:
     try:
         return datetime.strptime(str(v), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
     except ValueError:
+        pass
+    try:  # any other ISO form (offset, fraction); naive times are UTC
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp()
+    except ValueError:
         return 0.0
 
 
@@ -429,6 +449,13 @@ def open_spawns(events: list[dict], now: float) -> list[dict]:
         if ev == "agent_spawn":
             open_.append({"agent": _short(e.get("agent")), "scope": e.get("scope"), "slot": e.get("slot"),
                           "session": e.get("session"), "started_at": e.get("ts")})
+        elif ev == "skill_end":
+            # a skill that ended took its agents with it: qa's auditors (or anything on its scope) are no longer running
+            se, sc = e.get("session"), e.get("scope")
+            gone = [o for o in open_ if o["session"] == se and ((sc and o["scope"] == sc)
+                    or (not sc and e.get("skill") == "qa" and o["agent"] in QA_AGENTS))]
+            for o in gone:
+                open_.remove(o)
         elif ev == "agent_end":
             ag, sc, sl, se = _short(e.get("agent")), e.get("scope"), e.get("slot"), e.get("session")
             match = [o for o in open_ if o["session"] == se and o["agent"] == ag and o["scope"] == sc and o["slot"] == sl] \
@@ -438,7 +465,34 @@ def open_spawns(events: list[dict], now: float) -> list[dict]:
     return [o for o in open_ if now - _ts(o["started_at"]) < AGENT_STALE_S]
 
 
-def live_agents(root: Path) -> dict:
+def agent_roles() -> dict:
+    """Short role and the first sentence of the description of every kit agent (read from agents/*.md)."""
+    out = {}
+    for f in sorted(AGENTS_DIR.glob("*.md")):
+        m = re.search(r"^description:\s*(.+)$", f.read_text(encoding="utf-8"), re.M)
+        about = (m.group(1).split(". ")[0].rstrip(".") if m else "")[:160]
+        out[f.stem] = {"role": AGENT_ROLE.get(f.stem) or about[:40], "about": about}
+    return out
+
+
+AGENT_ROLES = agent_roles()
+
+
+def open_runs(events: list[dict], now: float) -> list[dict]:
+    """Skill runs logged with skill_start and no matching skill_end yet (same session and skill), newest last."""
+    open_: list[dict] = []
+    for e in events:
+        ev = e.get("event")
+        if ev == "skill_start":
+            open_.append({"skill": e.get("skill"), "scope": e.get("scope"), "session": e.get("session"), "started_at": e.get("ts")})
+        elif ev == "skill_end":
+            match = [o for o in open_ if o["session"] == e.get("session") and o["skill"] == e.get("skill")]
+            if match:
+                open_.remove(match[-1])
+    return [o for o in open_ if now - _ts(o["started_at"]) < RUN_STALE_S]
+
+
+def live_agents(root: Path, qa_default: str | None = None) -> dict:
     """Running agents and the board node (task, or QA gate of a milestone) each one works on.
 
     Skills log agent_spawn/agent_end with a scope (task or milestone) in telemetry; plugin hooks, where the
@@ -447,22 +501,42 @@ def live_agents(root: Path) -> dict:
     LINK_WINDOW_S of it and vice versa; any ambiguity leaves it without a node (better none than a wrong one).
     Without hooks, the open skill spawns are the running set."""
     now = time.time()
-    spawns = open_spawns(_task_events(root), now)
+    events = _task_events(root)
+    spawns = open_spawns(events, now)
+    runs = open_runs(events, now)
+    # the milestone a running qa skill audits: its scope, or (older runs without scope) the milestone waiting for its gate
+    qa_runs = [r for r in runs if r["skill"] == "qa"]
+    qa_scope = next((r["scope"] for r in reversed(qa_runs) if r.get("scope")), None) or (qa_default if qa_runs else None)
+    qa_node = _node_of(qa_scope) if qa_scope else None
     hooks = agents_data(root)
     if not hooks["hooks"]:
-        active = [{"agent": o["agent"], "started_at": o["started_at"], "node": _node_of(o["scope"]), "slot": o["slot"]}
-                  for o in spawns]
-        return {"hooks": False, "active": active}
+        active = []
+        for o in spawns:
+            node, how = _node_of(o["scope"]), "spawn"
+            if not node and o["agent"] in QA_AGENTS and qa_node:
+                node, how = qa_node, "qa_run"
+            active.append({"agent": o["agent"], "started_at": o["started_at"], "node": node, "slot": o["slot"], "linked_by": how if node else None})
+        return {"hooks": False, "active": active, "runs": runs}
     near = lambda h, o: h["agent"] == o["agent"] and abs(_ts(h["started_at"]) - _ts(o["started_at"])) <= LINK_WINDOW_S  # noqa: E731
     hs = [{"agent": _short(h["agent"]), "started_at": h["started_at"]} for h in hooks["active"]]
     active = []
     for h in hs:
+        node = slot = how = None
+        # 1. the start times match one spawn, and that spawn only this agent
         cands = [o for o in spawns if near(h, o)]
-        node = slot = None
         if len(cands) == 1 and sum(1 for x in hs if near(x, cands[0])) == 1:
-            node, slot = _node_of(cands[0]["scope"]), cands[0]["slot"]
-        active.append({"agent": h["agent"], "started_at": h["started_at"], "node": node, "slot": slot})
-    return {"hooks": True, "active": active}
+            node, slot, how = _node_of(cands[0]["scope"]), cands[0]["slot"], "time"
+        # 2. every open spawn of this agent type points to the same node (heavy auditors start later than they are logged)
+        if not node:
+            same = [o for o in spawns if o["agent"] == h["agent"]]
+            nodes = {_node_of(o["scope"]) for o in same}
+            if same and len(nodes) == 1 and None not in nodes:
+                node, slot, how = nodes.pop(), same[-1]["slot"], "type"
+        # 3. an auditor with no spawn while qa runs on a milestone belongs to that milestone's QA gate
+        if not node and h["agent"] in QA_AGENTS and qa_node:
+            node, how = qa_node, "qa_run"
+        active.append({"agent": h["agent"], "started_at": h["started_at"], "node": node, "slot": slot, "linked_by": how})
+    return {"hooks": True, "active": active, "runs": runs}
 
 
 def lifecycle(auto: dict) -> dict:
@@ -473,6 +547,69 @@ def lifecycle(auto: dict) -> dict:
     return {"local_deploy": ld.get("mode") or d["local_deploy"]["mode"],
             "deploy_when": pr.get("when") or d["production"]["when"],
             "max_fix_rounds": auto.get("max_fix_rounds_per_gate") or d["max_fix_rounds_per_gate"]}
+
+
+def qa_detail(dev: Path, m: str, info: dict, events: list[dict], run: dict | None) -> dict:
+    """QA rounds of one milestone: past rounds (gate events), the last score breakdown (qa/<M>/scores.json) and,
+    while a qa run is open on it, which auditors already finished and which are still running."""
+    rounds: dict[int, dict] = {}
+    for e in events:
+        if e.get("event") == "gate" and e.get("scope") == m and e.get("qa_runs"):
+            rounds[int(e["qa_runs"])] = {"n": int(e["qa_runs"]), "value": e.get("value"), "score": e.get("score"), "at": e.get("ts")}
+    out: dict = {"runs": int(info.get("qa_runs") or 0), "note": info.get("gate_note"), "history": [rounds[k] for k in sorted(rounds)]}
+    try:
+        sc = json.loads((dev / "qa" / m / "scores.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        sc = None
+    if isinstance(sc, dict):
+        dims = sc.get("dimensions") if isinstance(sc.get("dimensions"), dict) else {}
+        out["last"] = {"overall": sc.get("overall"), "cutoff": sc.get("cutoff"), "verdict": sc.get("verdict"),
+                       "blockers": len(sc.get("blockers") or []),
+                       "below": [{"dimension": d, "score": v.get("score"), "min": v.get("min")}
+                                 for d, v in sorted(dims.items()) if isinstance(v, dict) and v.get("ok") is False]}
+    if run:
+        start = _ts(run["started_at"])
+        mine = [e for e in events if e.get("session") == run["session"] and _ts(e.get("ts")) >= start
+                and e.get("event") in ("agent_spawn", "agent_end") and _short(e.get("agent")) in QA_AGENTS
+                and (not e.get("scope") or e.get("scope") == m)]
+        done = [{"agent": _short(e.get("agent")), "findings": e.get("findings"), "status": e.get("status"), "at": e.get("ts")}
+                for e in mine if e["event"] == "agent_end"]
+        started = [_short(e.get("agent")) for e in mine if e["event"] == "agent_spawn"]
+        out["round"] = {"n": out["runs"] + 1, "started_at": run["started_at"], "done": done,
+                        "spawned": len(started)}
+    return out
+
+
+def _findings_text(c: object) -> str:
+    if not isinstance(c, dict):
+        return ""
+    parts = [f"{c[k]} {k}" for k in ("critical", "high", "medium", "low") if c.get(k)]
+    return ", ".join(parts) if parts else "no findings"
+
+
+def _where(scope: object) -> str:
+    node = _node_of(scope)
+    return "" if not node else f" on {node}" if not node.startswith("GATE:") else f" · QA gate of {node[5:]}"
+
+
+def live_feed(events: list[dict], n: int = LIVE_TAIL) -> list[dict]:
+    """Skill and agent starts and ends from the session log, for the activity feed (log.md has the rest)."""
+    rows = []
+    for e in events:
+        ev, at = e.get("event"), e.get("ts")
+        if ev == "skill_start" and e.get("skill") != "board":
+            rows.append({"at": at, "kind": "live", "text": f"/dev-kit:{e.get('skill')} started" + (f" ({e['scope']})" if e.get("scope") else "")})
+        elif ev == "skill_end" and e.get("skill") != "board":
+            rows.append({"at": at, "kind": "live", "text": f"/dev-kit:{e.get('skill')} finished" + (f" ({e['scope']})" if e.get("scope") else "")
+                         + (f" · {e['status']}" if e.get("status") and e.get("status") != "ok" else "")})
+        elif ev == "agent_spawn":
+            a = _short(e.get("agent"))
+            rows.append({"at": at, "kind": "live", "text": f"{a} started ({AGENT_ROLE.get(a, 'agent')}){_where(e.get('scope'))}"})
+        elif ev == "agent_end":
+            a = _short(e.get("agent"))
+            f = _findings_text(e.get("findings"))
+            rows.append({"at": at, "kind": "live", "text": f"{a} finished{_where(e.get('scope'))}" + (f" · {f}" if f else "")})
+    return rows[-n:]
 
 
 def build_state(root: Path, board: dict | None = None) -> dict:
@@ -492,6 +629,15 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         tasks[tid] = {k: t.get(k) for k in ("title", "milestone", "type", "status", "lane", "deps", "commit",
                                             "blocked_reason", "started_at", "done_at", "source")}
         tasks[tid]["acceptance"] = len(t.get("acceptance") or [])
+    events = _task_events(root)
+    order = store.milestone_order()
+    # the milestone waiting for its gate (all tasks done): where a qa run without scope is auditing
+    qa_default = next((m for m in order if store.milestones()[m].get("gate", "pending") == "pending"
+                       and [t for t in tasks.values() if t["milestone"] == m]
+                       and all(t["status"] == "done" for t in tasks.values() if t["milestone"] == m)), None)
+    agents = live_agents(root, qa_default)
+    qa_run = next((r for r in reversed(agents["runs"]) if r["skill"] == "qa"), None)
+    qa_scope = (qa_run.get("scope") or qa_default) if qa_run else None
     milestones = []
     prod = [d for d in ((s.get("deploys") or {}).get("production") or {}).get("history") or [] if isinstance(d, dict)]
     for m in store.milestone_order():
@@ -501,6 +647,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
                            "score": info.get("score"), "qa_runs": info.get("qa_runs", 0), "passed_at": info.get("passed_at"),
                            "preview": info.get("preview"),
                            "deploy": {k: dep.get(k) for k in ("status", "sha", "at")} if dep else None,
+                           "qa": qa_detail(store.dev, m, info, events, qa_run if qa_scope == m else None),
                            "tasks": [tid for tid, t in tasks.items() if t["milestone"] == m]})
     nxt, why = ds.pick_next(store, None)
     try:
@@ -532,9 +679,9 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "lifecycle": lifecycle(s.get("autonomy") or {}),
         "backlog": backlog,
         "questions": open_questions(_read(store.dev / "open-questions.md")),
-        "log": log_tail(_read(store.dev / "log.md")),
+        "log": sorted(log_tail(_read(store.dev / "log.md")) + live_feed(events), key=lambda r: _ts(r.get("at")), reverse=True)[:LOG_TAIL],
         "costs": costs,
-        "agents": live_agents(root),
+        "agents": agents, "agent_roles": AGENT_ROLES,
         "kit": KIT_VERSION,
         "board": {k: board.get(k) for k in ("pid", "port", "url", "started_at", "host", "exposed")} if board else None,
         "generated_at": ds.now(),

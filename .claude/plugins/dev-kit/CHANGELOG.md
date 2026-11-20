@@ -2,6 +2,25 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.22.0 — 2026-11-20
+
+The board shows what is actually happening, and a card that exceeds its agreed failure limit goes to Blocked.
+
+### Changed
+- No more sprints: the board, docs and tips speak of milestones only (the milestone strip, the task board, "tasks done per milestone", "later milestones"); dev-kit is not Scrum. "Live Scrum board" is now "live board".
+- Board: **QA & fixes** is one stage with its rounds as a trail (`R1 ✕ 89 → 1/1 fix ✓ → R2 ●`), the auditors of the running round ("9 of 10 auditors done", the running ones with their role and time), and what to do next (`/dev-kit:qa M2` with a copy button) when no round is running. It replaces the separate QA gate and Fixes stages, whose straight line hid the loop.
+- Board: the gate badge says what is going on: "QA round 2 running", "Round 1 failed · copy 50, spec 72 below 75" (the reason, not overall / cut-off), "N QA rounds failed · needs your decision", "Gate passed · 91 in round 2".
+- Board: the milestone header shows the stage ("Stage 3 of 4 · QA & fixes") instead of a task percentage, with "All tasks done; the milestone closes after the QA gate"; a milestone whose tasks are all done shows "QA" on its tab.
+- Board activity merges skill and agent starts and ends from the session log (e.g. "a11y-auditor started (accessibility audit) · QA gate of M8"), so the feed moves while QA runs.
+- `qa` logs `skill_start`/`skill_end` with `scope=<M>`.
+
+### Fixed
+- A fix task whose finding is still open after the task was done went silently unnoticed (`fix-tasks` skipped it): it is now reopened, and blocked the second time (`rounds_exhausted`), with the reason on the card.
+- A QA round past `max_fix_rounds_per_gate` left its new fix tasks in To do, for `next` to pick: `gate --count-run` now blocks them, with the reason.
+- A new QA finding that reused the id of an earlier, closed one got no fix task (it was taken for the old one): it gets its own task under a round-qualified anchor; fix tasks record their QA round.
+- Board: an auditor started by a hook minutes after the skill logged it showed as "Also running" with no task; agents are now also linked by type (when every open spawn of that type points to the same task or gate) and, for auditors, by the qa run in progress. Agents left open by a skill that ended no longer count as running.
+- Board: "Cost US$ 0.00" when costs were never computed now reads "Cost not computed" with the command to copy.
+
 ## 1.21.1 — 2026-11-20
 
 ### Changed

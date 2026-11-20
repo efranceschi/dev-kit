@@ -173,7 +173,7 @@
     {
       "name": "board",
       "category": "start",
-      "one_line": "Live Scrum board in the browser: the sprint window (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA gate, fixes, smoke, deploy, closed) with what runs in each, the sprint kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link.",
+      "one_line": "Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link.",
       "when": "When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.",
       "args": [
         {

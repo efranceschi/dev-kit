@@ -13,7 +13,7 @@
     {"id": "qa-deferred", "context": "qa_deferred", "command": "/dev-kit:issue --from F-012 M3", "en": "Some findings were deferred. Promote the ones that matter to issues with /dev-kit:issue --from <F-id> <scope>."},
     {"id": "backlog-new-issue", "context": "backlog", "spinner": true, "command": "/dev-kit:issue", "en": "Found a bug or want an improvement? Just describe it: /dev-kit:issue \"what happens\". The kit classifies it for you."},
     {"id": "backlog-classes", "context": "backlog", "en": "Classes: expedite = hotfix now · current = this milestone · standard = next buffer · intangible = cool-down · change = replan."},
-    {"id": "status-board", "context": "status", "spinner": true, "command": "/dev-kit:board", "en": "Prefer a picture? /dev-kit:board opens a live Scrum board (kanban, burndown, impediments) in your browser."},
+    {"id": "status-board", "context": "status", "spinner": true, "command": "/dev-kit:board", "en": "Prefer a picture? /dev-kit:board opens a live board (milestone stages, QA rounds, kanban) in your browser."},
     {"id": "status-costs", "context": "status", "spinner": true, "command": "/dev-kit:costs", "en": "Curious how much each stage cost? /dev-kit:costs shows tokens and estimated US$ per stage."},
     {"id": "status-feedback", "context": "status", "spinner": true, "command": "/dev-kit:feedback", "en": "/dev-kit:feedback grades each stage of the session and suggests improvements to the kit."},
     {"id": "status-backlog", "context": "status", "spinner": true, "command": "/dev-kit:backlog", "en": "/dev-kit:backlog lists everything pending: issues, tasks, parked questions, deferred findings and deploys."},

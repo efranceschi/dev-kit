@@ -1108,7 +1108,12 @@ def cmd_add_task(store: Store, a: argparse.Namespace) -> None:
 
 def cmd_fix_tasks(store: Store, a: argparse.Namespace) -> None:
     """Create one fix task per blocking finding of a consolidated findings file (qa §4), deterministically and
-    idempotently: a finding that already has a task with the same source anchor is skipped."""
+    idempotently: a finding that already has a task with the same source anchor is skipped.
+
+    A finding still open from an earlier round (`previous`) whose fix task is done means the fix did not hold: the
+    task is reopened the first time and blocked the second (`rounds_exhausted`: the same finding came back twice),
+    so the card leaves Done and waits for a decision instead of disappearing. A new finding that reuses the id of an
+    earlier, closed one gets a round-qualified anchor, so it is not mistaken for the old one."""
     store.load()
     path = Path(a.src_file)
     if not path.is_absolute():
@@ -1126,7 +1131,10 @@ def cmd_fix_tasks(store: Store, a: argparse.Namespace) -> None:
     extra = {x.strip() for x in (a.include or "").split(",") if x.strip()}
     source = a.source or f"qa/{a.milestone}/report.md"
     existing = {str(t.get("source") or "") for t in store.tasks().values() if t.get("status") != "dropped"}
-    created, skipped = [], []
+    by_anchor = {str(t.get("source") or ""): tid for tid, t in store.tasks().items() if t.get("status") != "dropped"}
+    round_n = data.get("round") if isinstance(data, dict) and isinstance(data.get("round"), int) else \
+        int(store.milestones()[a.milestone].get("qa_runs", 0)) + 1
+    created, skipped, reopened, blocked = [], [], [], []
     for f in items:
         if not isinstance(f, dict) or f.get("legacy") or f.get("out_of_scope") or not f.get("id"):
             continue
@@ -1135,6 +1143,35 @@ def cmd_fix_tasks(store: Store, a: argparse.Namespace) -> None:
             continue
         anchor = f"{source}#{f['id']}"
         twins = {f"{source}#{x}" for x in f.get("same_as") or []}
+        tid = by_anchor.get(anchor)
+        if f.get("previous") and tid and store.tasks()[tid]["status"] == "done":
+            # still open after its fix was done: the fix did not hold
+            t = store.tasks()[tid]
+            returns = int(t.get("returns", 0)) + 1
+            if a.dry_run:
+                (blocked if returns >= 2 else reopened).append(f"{tid}={f['id']}")
+                continue
+            t["returns"] = returns
+            t.pop("done_at", None)
+            if returns >= 2:
+                t["status"] = "blocked"
+                t["blocked_reason"] = (f"{f['id']} is still open after {returns} fixes (rounds_exhausted): keep fixing, "
+                                       f"accept with an ADR, or change the spec")
+                blocked.append(f"{tid}={f['id']}")
+                store.log(f"block {tid}: {t['blocked_reason']}")
+                store.event("task", task=tid, transition="block", type=t.get("type"), milestone=t.get("milestone"))
+            else:
+                t["status"], t["blocked_reason"] = "todo", None
+                reopened.append(f"{tid}={f['id']}")
+                store.log(f"reopen {tid}: {f['id']} still open after the fix (round {round_n})")
+                store.event("task", task=tid, transition="reopen", type=t.get("type"), milestone=t.get("milestone"))
+            store.save()  # add_task below reloads the state from disk
+            continue
+        old_t = store.tasks()[tid] if tid else None
+        if (old_t and not f.get("previous") and not twins & existing and old_t["status"] == "done"
+                and old_t.get("qa_round", round_n - 1) != round_n):
+            # a new finding that reuses the id of an earlier, closed one: its own task, under a round-qualified anchor
+            anchor = f"{source}#{f['id']}-r{round_n}"
         if anchor in existing or twins & existing:
             skipped.append(f["id"])  # already has a task, or the same problem reported by another dimension has one
             continue
@@ -1153,13 +1190,19 @@ def cmd_fix_tasks(store: Store, a: argparse.Namespace) -> None:
                                 source=anchor, issue=None, lane=None, force=False)
         with contextlib.redirect_stdout(io.StringIO()) as buf:
             cmd_add_task(store, ns)
-        created.append(f"{buf.getvalue().strip()}={f['id']}")
+        new_id = buf.getvalue().strip()
+        if new_id in store.tasks():
+            store.tasks()[new_id]["qa_round"] = round_n
+            store.save()
+        created.append(f"{new_id}={f['id']}")
         existing.add(anchor)
     if a.json:
-        print(json.dumps({"created": created, "skipped": skipped, "dry_run": bool(a.dry_run)}))
+        print(json.dumps({"created": created, "skipped": skipped, "reopened": reopened, "blocked": blocked, "dry_run": bool(a.dry_run)}))
     else:
         verb = "would create" if a.dry_run else "created"
         print(f"fix-tasks {a.milestone}: {verb} {len(created)}" + (f" ({', '.join(created)})" if created else "")
+              + (f"; reopened (fix did not hold): {', '.join(reopened)}" if reopened else "")
+              + (f"; blocked (came back twice, rounds_exhausted): {', '.join(blocked)}" if blocked else "")
               + (f"; already had a task: {', '.join(skipped)}" if skipped else ""))
 
 
@@ -1224,12 +1267,28 @@ def cmd_gate(store: Store, a: argparse.Namespace) -> None:
         m["forced"] = True
     if a.count_run:
         m["qa_runs"] = int(m.get("qa_runs", 0)) + 1
+    # past the agreed number of fix rounds the next round is the user's (or the policy's) decision, not automatic:
+    # the open fix tasks of this milestone go to Blocked with the reason, so `next` stops picking them
+    max_rounds = int((store.state.get("autonomy") or {}).get("max_fix_rounds_per_gate") or DEFAULT_AUTONOMY["max_fix_rounds_per_gate"])
+    exhausted = []
+    if a.count_run and a.value == "pending" and m["qa_runs"] > max_rounds:
+        for tid, t in store.tasks().items():
+            if t.get("milestone") == a.milestone and t.get("type") == "fix" and t.get("status") in ("todo", "in_progress"):
+                t["status"] = "blocked"
+                t["blocked_reason"] = (f"QA round limit reached ({m['qa_runs'] - 1} fix rounds of {max_rounds}; rounds_exhausted): "
+                                       f"keep fixing, accept with an ADR, or replan")
+                exhausted.append(tid)
     store.save()
+    for tid in exhausted:
+        store.log(f"block {tid}: {store.tasks()[tid]['blocked_reason']}")
+        store.event("task", task=tid, transition="block", type="fix", milestone=a.milestone)
     store.event("gate", scope=a.milestone, value=a.value, score=a.score, qa_runs=m.get("qa_runs", 0),
                 forced=bool(a.force and a.value == "passed"),
                 force_source=("policy" if (a.note or "").startswith("policy:") else "user") if a.force and a.value == "passed" else None)
     store.log(f"gate {a.milestone} {a.value}" + (f" score={a.score}" if a.score is not None else "") + (f" ({a.note})" if a.note else ""))
     print(f"{a.milestone} gate: {a.value}" + (f" (score {a.score})" if a.score is not None else ""))
+    if exhausted:
+        print(f"{a.milestone}: {m['qa_runs'] - 1} fix rounds used of {max_rounds} (rounds_exhausted); blocked {', '.join(exhausted)}")
     if a.value == "passed" or a.count_run:
         queue_notice(store, f"dev-kit · {a.milestone} gate {a.value}" + (f" ({a.score})" if a.score is not None else "")
                      + f" · {next_command(store)}")

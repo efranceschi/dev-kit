@@ -178,7 +178,7 @@ Before any AskUserQuestion, a skill reads `autonomy.pause_policy.<point>.action`
 | `scope_change_major` | an AC or must-have would change | ask · park | park |
 | `security_model_change` | auth, permissions, token lifetime, crypto | ask · auto_recommend · park | auto_recommend |
 | `credentials` | a secret the user has not provided | ask · park | park |
-| `rounds_exhausted` | fix rounds exhausted, or the same finding came back twice | ask · auto_recommend · park | auto_recommend |
+| `rounds_exhausted` | fix rounds exhausted, or the same finding came back twice (`dev_state.py` blocks the cards involved, with the reason) | ask · auto_recommend · park | auto_recommend |
 | `dirty_tree` | uncommitted changes nobody owns | ask · auto_recommend (`git stash push -m "dev-kit auto <date>"`) | auto_recommend |
 | `blocked_env` | three tasks blocked in a row, tests or server cannot run | ask · park | park |
 | `production_deploy` | `deploy` to production (§12) | ask · preauthorize (`limit.targets`) · park | park |

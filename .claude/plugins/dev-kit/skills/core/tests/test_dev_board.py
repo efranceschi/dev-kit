@@ -423,6 +423,87 @@ class BoardTest(unittest.TestCase):
         late = [x for x in mod.live_agents(self.root)["active"] if x["agent"] == "implementer"]
         self.assertEqual([x["node"] for x in late], [None])
 
+    def test_late_auditor_links_by_type_or_by_the_open_qa_run(self):
+        mod = self._mod()
+        self._hook("session_start", "", "")
+        # the skill logged the spawn when it planned the batch; the heavy auditor really started 5 minutes apart
+        self.ds("event", "agent_spawn", "--set", "agent=a11y-auditor", "--set", "scope=M1", "--set", "slot=4")
+        self._hook("agent_start", "h1", "dev-kit:a11y-auditor", ago_s=300)
+        a = {x["agent"]: x for x in mod.live_agents(self.root)["active"]}
+        self.assertEqual((a["a11y-auditor"]["node"], a["a11y-auditor"]["linked_by"]), ("GATE:M1", "type"))
+        # no spawn at all, but qa is running on M1: an auditor belongs to that gate, an implementer does not
+        self.ds("event", "skill_start", "--set", "skill=qa", "--set", "scope=M1")
+        self._hook("agent_start", "h2", "dev-kit:copy-reviewer")
+        self._hook("agent_start", "h3", "dev-kit:implementer")
+        live = mod.live_agents(self.root)
+        a = {x["agent"]: x for x in live["active"]}
+        self.assertEqual((a["copy-reviewer"]["node"], a["copy-reviewer"]["linked_by"]), ("GATE:M1", "qa_run"))
+        self.assertIsNone(a["implementer"]["node"])
+        self.assertEqual([(r["skill"], r["scope"]) for r in live["runs"]], [("qa", "M1")])
+        # the run ends: nothing is inferred any more
+        self.ds("event", "skill_end", "--set", "skill=qa", "--set", "scope=M1", "--set", "status=ok")
+        self.assertEqual(mod.live_agents(self.root)["runs"], [])
+
+    def test_a_finished_qa_run_takes_its_unclosed_auditors_with_it(self):
+        mod = self._mod()
+        self.ds("event", "skill_start", "--set", "skill=qa", "--set", "scope=M1")
+        self.ds("event", "agent_spawn", "--set", "agent=a11y-auditor", "--set", "scope=M1", "--set", "slot=1")
+        self.ds("event", "agent_spawn", "--set", "agent=implementer", "--set", "scope=T-002", "--set", "slot=2")
+        self.assertEqual(len(mod.live_agents(self.root)["active"]), 2)
+        self.ds("event", "skill_end", "--set", "skill=qa", "--set", "scope=M1", "--set", "status=ok")
+        self.assertEqual([x["agent"] for x in mod.live_agents(self.root)["active"]], ["implementer"])
+
+    def test_qa_run_without_scope_uses_the_milestone_waiting_for_its_gate(self):
+        mod = self._mod()
+        self._hook("session_start", "", "")
+        self.ds("event", "skill_start", "--set", "skill=qa", "--set", "args_kind=milestone")
+        self._hook("agent_start", "h1", "dev-kit:spec-tracer")
+        self.assertIsNone(mod.live_agents(self.root)["active"][0]["node"])
+        self.assertEqual(mod.live_agents(self.root, "M1")["active"][0]["node"], "GATE:M1")
+
+    def test_type_link_stays_off_when_spawns_of_that_type_point_to_different_nodes(self):
+        mod = self._mod()
+        self._hook("session_start", "", "")
+        self.ds("event", "agent_spawn", "--set", "agent=code-reviewer", "--set", "scope=M1", "--set", "slot=1")
+        self.ds("event", "agent_spawn", "--set", "agent=code-reviewer", "--set", "scope=T-002", "--set", "slot=2")
+        self._hook("agent_start", "h1", "dev-kit:code-reviewer", ago_s=300)
+        self.assertIsNone(mod.live_agents(self.root)["active"][0]["node"])
+
+    def test_qa_detail_rounds_scores_and_running_auditors(self):
+        mod = self._mod()
+        self.ds("done", "T-001")
+        self.ds("start", "T-002"); self.ds("done", "T-002")
+        self.ds("gate", "M1", "pending", "--score", "89", "--count-run", "--note", "copy and spec below 75")
+        qa = self.root / ".dev" / "qa" / "M1"
+        qa.mkdir(parents=True)
+        (qa / "scores.json").write_text(json.dumps({"overall": 89, "cutoff": 85, "verdict": "fail", "blockers": [],
+            "dimensions": {"copy": {"score": 50, "min": 75, "ok": False}, "code": {"score": 95, "min": 75, "ok": True},
+                           "spec": {"score": 72, "min": 75, "ok": False}}}))
+        self.ds("event", "skill_start", "--set", "skill=qa", "--set", "scope=M1")
+        for agent in ("code-reviewer", "a11y-auditor"):
+            self.ds("event", "agent_spawn", "--set", f"agent={agent}", "--set", "scope=M1", "--set", "slot=1")
+        self.ds("event", "agent_end", "--set", "agent=code-reviewer", "--set", "scope=M1", "--set", "slot=1",
+                "--set", "status=ok", "--json", '{"findings": {"medium": 2}}')
+        d = mod.build_state(self.root)
+        q = d["milestones"][0]["qa"]
+        self.assertEqual(q["runs"], 1)
+        self.assertEqual([(r["n"], r["value"], r["score"]) for r in q["history"]], [(1, "pending", 89)])
+        self.assertEqual(q["last"]["below"], [{"dimension": "copy", "score": 50, "min": 75}, {"dimension": "spec", "score": 72, "min": 75}])
+        self.assertEqual(q["round"]["n"], 2)
+        self.assertEqual([x["agent"] for x in q["round"]["done"]], ["code-reviewer"])
+        self.assertEqual(q["round"]["spawned"], 2)
+        texts = [r["text"] for r in d["log"] if r.get("kind") == "live"]
+        self.assertIn("a11y-auditor started (accessibility audit) · QA gate of M1", texts)
+        self.assertIn("code-reviewer finished · QA gate of M1 · 2 medium", texts)
+        self.assertIn("/dev-kit:qa started (M1)", texts)
+
+    def test_every_agent_has_a_short_role(self):
+        mod = self._mod()
+        agents = sorted(p.stem for p in mod.AGENTS_DIR.glob("*.md"))
+        self.assertTrue(agents)
+        self.assertEqual([a for a in agents if a not in mod.AGENT_ROLE], [])
+        self.assertTrue(all(v["role"] and v["about"] for v in mod.AGENT_ROLES.values()))
+
     def test_graph_endpoint_is_gone(self):
         self.board("start", check=True)
         port = self.record()["port"]
