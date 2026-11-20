@@ -1,0 +1,8 @@
+[
+  {
+    "name": "board-requests",
+    "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_worker.py\" --root \"${CLAUDE_PROJECT_DIR}\" watch",
+    "description": "Requests queued on the dev-kit board",
+    "when": "on-skill-invoke:board"
+  }
+]

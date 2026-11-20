@@ -12,7 +12,8 @@ the hook payload from stdin.
 - SessionStart, UserPromptSubmit and Stop: when the board queued requests for Claude Code (dev_worker.py), one line
   with how many and the command that runs them (/dev-kit:worker); at a prompt or the end of a turn only when the
   set of waiting requests changed since the last notice. Only ids and counts: the text of a request never enters
-  the session from here.
+  the session from here. Silent while a session listens (the plugin's monitor, armed by /dev-kit:board, announces
+  each request by itself).
 
 Privacy: only ids and the agent type are kept; prompts, messages and tool data in the payload are ignored.
 It never fails a hook (always exits 0) and does nothing outside a dev-kit project (no .dev/state.json).
@@ -97,8 +98,11 @@ def take_notices(dev: Path) -> dict | None:
 
 
 def board_requests(root: Path, dev: Path, only_new: bool) -> dict | None:
-    """One line about the requests the board queued, or None (nothing waiting, or nothing new since the last one)."""
+    """One line about the requests the board queued, or None (nothing waiting, nothing new since the last one, or a
+    session is listening: its monitor announces each request by itself)."""
     import dev_worker as dw
+    if dw.listening(root):
+        return None
     waiting = [x for x in dw.items(root) if x["status"] == "pending"]
     nxt = dw.claimable(root)
     ids = [x["id"] for x in waiting]

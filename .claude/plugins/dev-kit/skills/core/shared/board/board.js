@@ -230,7 +230,6 @@
   // ------------------------------------------------------------------ header
   function renderHeader() {
     $("project").textContent = data.project;
-    document.title = `${data.project} · dev-kit board`;
     $("kit-ver").textContent = data.kit && data.kit !== "unknown" ? `v${data.kit}` : "";
     $("bf-mode").textContent = data.brownfield ? `existing project · ${data.brownfield.mode || "feature"} · since ${data.brownfield.baseline_ref || "baseline"}` : "";
     const phases = data.phases.filter((p) => p !== "init");
@@ -585,6 +584,7 @@
     const strip = $("needs");
     strip.hidden = !n;
     $("needs-count").textContent = n ? plural(n, "item") : "";
+    needsN = n;
     if (!n) { fill($("impediments")); return; }
     fill($("impediments"),
       approvals.length ? listBlock("Claude Code asks permission", approvals.map(approvalRow), "") : null,
@@ -905,7 +905,8 @@
     }
     return d;
   }
-  const workerHint = () => (inbox().executor.online ? "Claude Code takes it next." : "Run /dev-kit:worker in Claude Code to start it.");
+  const takesIt = (ex) => Boolean(ex.listening || (ex.online && ex.state === "running"));
+  const workerHint = () => (takesIt(inbox().executor) ? "Claude Code takes it." : "Run /dev-kit:worker in Claude Code to start it.");
   async function queue(action, args, quietErrors) {
     try {
       const d = await api("/api/inbox", { action, args });
@@ -941,7 +942,8 @@
     if (!ex.online) return ["off", "Claude Code: not running"];
     if (ex.paused) return ["paused", "Claude Code: paused"];
     if (ex.state === "running") return ["on", `Claude Code: working${ex.item ? ` on ${ex.item}` : ""}`];
-    return ["on", "Claude Code: ready"];
+    if (ex.listening) return ["on", "Claude Code: listening"];
+    return ["idle", "Claude Code: open, not listening"];
   }
   function renderRequests() {
     const ib = inbox();
@@ -957,12 +959,21 @@
     pb.hidden = !ib.actions;
     pb.setAttribute("aria-pressed", String(Boolean(ib.executor.paused)));
     pb.textContent = ib.executor.paused ? "Resume queue" : "Pause queue";
+    const cb = $("cont-btn");
+    cb.hidden = !ib.actions;
+    cb.setAttribute("aria-pressed", String(Boolean(ib.executor.continuous)));
     const waiting = ib.open.filter((x) => x.status === "pending").length;
+    const stopped = ib.executor.continuous && ib.executor.continuous_stopped;
+    const line = (...kids) => h("span", { class: "hint-line" }, kids);
     fill($("req-hint"),
-      !ib.actions ? "This board only shows the project: requests are off (start it with --actions on)." : null,
-      ib.actions && !ib.executor.online && waiting ? h("span", {}, `${plural(waiting, "request")} waiting. In Claude Code, run `, h("span", { class: "cmd" }, h("code", { text: "/dev-kit:worker" }), copyBtn("/dev-kit:worker"))) : null,
-      ib.actions && ib.executor.paused ? "Paused: Claude Code finishes what it is doing and takes nothing new." : null,
-      ib.actions && !ib.open.length && !ib.recent.length ? "Nothing queued. Use ▶ next to a command, answer a question, add an issue, or plan by dragging cards." : null);
+      !ib.actions ? line("This board only shows the project: requests are off (start it with --actions on).") : null,
+      ib.actions && !takesIt(ib.executor) && waiting ? line(`${plural(waiting, "request")} waiting. In Claude Code, run `, h("span", { class: "cmd" }, h("code", { text: "/dev-kit:worker" }), copyBtn("/dev-kit:worker"))) : null,
+      ib.actions && !ib.executor.online && !waiting ? line("No Claude Code session is listening. Run ", h("span", { class: "cmd" }, h("code", { text: "/dev-kit:board" }), copyBtn("/dev-kit:board")), " in one: requests then start by themselves.") : null,
+      ib.actions && ib.executor.paused ? line("Paused: Claude Code finishes what it is doing and takes nothing new.") : null,
+      ib.actions && ib.executor.continuous && !stopped ? line("Going on by itself: after each step Claude Code starts the next one, until something needs you or the milestone closes.") : null,
+      stopped ? h("span", { class: "hint-line bad" }, `It stopped going on by itself: ${stopped}. `,
+        h("button", { type: "button", class: "link-btn", text: "Go on", onclick: () => setContinuous(true) })) : null,
+      ib.actions && !ib.open.length && !ib.recent.length ? line("Nothing queued. Use ▶ next to a command, answer a question, add an issue, or plan by dragging cards.") : null);
     const row = (x, open) => h("li", { class: `req s-${x.status}` },
       h("span", { class: "id", text: x.id }),
       h("span", { class: "req-what" }, describeReq(x)),
@@ -979,6 +990,35 @@
     const paused = !inbox().executor.paused;
     try { await api("/api/worker/mode", { paused }); toast(paused ? "Queue paused." : "Queue resumed."); load(); } catch (e) { toast(e.message, true); }
   });
+  async function setContinuous(on) {
+    try {
+      await api("/api/worker/mode", { continuous: on });
+      toast(on ? `Going on by itself. ${takesIt(inbox().executor) ? "Claude Code starts the next step." : "It starts when a Claude Code session listens (/dev-kit:board)."}`
+        : "It now waits for you after each request.");
+      load();
+    } catch (e) { toast(e.message, true); }
+  }
+  $("cont-btn").addEventListener("click", () => setContinuous(!inbox().executor.continuous));
+
+  // the tab says when something waits on the user: "(2) Needs you" in the title and a dot on the icon
+  let needsN = 0;
+  let seenFail = Number(store.get("board-seen-fail", "0")) || 0;
+  function updateAttention() {
+    if (!data || !data.ok) return;
+    const fails = inbox().recent.filter((x) => (x.status === "failed" || x.status === "stale") && Number(x.id.slice(2)) > seenFail);
+    if (fails.length && document.visibilityState === "visible" && document.hasFocus()) {
+      seenFail = Math.max(...fails.map((x) => Number(x.id.slice(2))));  // looking at the board: they have been seen
+      store.set("board-seen-fail", String(seenFail));
+      fails.length = 0;
+    }
+    const n = needsN + fails.length;
+    document.title = n ? `(${n}) Needs you · ${data.project}` : `${data.project} · dev-kit board`;
+    const icon = document.querySelector('link[rel="icon"]');
+    const want = n ? "/assets/favicon-alert.svg" : "/assets/favicon.svg";
+    if (icon && icon.getAttribute("href") !== want) icon.setAttribute("href", want);
+  }
+  document.addEventListener("visibilitychange", updateAttention);
+  window.addEventListener("focus", updateAttention);
 
   // new issue: a short form; Claude Code classifies it and asks here when it needs to
   const idlg = $("issue-dialog");
@@ -1255,6 +1295,7 @@
       renderHeader(); renderTabs(); renderMilestone(m); renderImpediments(); renderStages(m); renderKanban(m); renderPlan();
       renderRequests(); renderFeed(); renderInsights(m, curId);
     });
+    updateAttention();
     $("main").setAttribute("aria-busy", "false");
     if (firstRender) {
       firstRender = false;

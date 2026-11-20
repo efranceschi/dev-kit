@@ -684,3 +684,11 @@ dialog p { color: var(--text-secondary); }
   .view-switch { order: 3; width: 100%; }
   .view-switch .seg-btn { flex: 1; }
 }
+
+/* ---------- listening and going on by itself */
+.exec.idle { color: var(--text-secondary); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.btn.toggle[aria-pressed="true"] { color: #fff; border-color: transparent; background: linear-gradient(135deg, var(--accent-a), color-mix(in srgb, var(--accent-b) 70%, var(--accent-a))); }
+.btn.toggle[aria-pressed="true"]::before { content: "✓"; font-weight: 800; }
+.hint-line { display: block; }
+.hint-line + .hint-line { margin-top: 4px; }
+.hint-line.bad { color: var(--critical-text); }

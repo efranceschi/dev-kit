@@ -173,8 +173,8 @@
     {
       "name": "board",
       "category": "start",
-      "one_line": "Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; with buttons that queue requests to Claude Code (run the next step, new issue, answer a question, a plan draft made by dragging cards); light or dark; local, or shared on your network with an access link.",
-      "when": "When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.",
+      "one_line": "Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy.",
+      "when": "When you want to watch the project visually or drive it from the browser, e.g. away from the console; it updates by itself.",
       "args": [
         {
           "arg": "(empty)",
@@ -201,8 +201,12 @@
           "meaning": "stop after N minutes with no open tab (default 120; 0 = never)"
         },
         {
-          "arg": "--actions auto|on|off",
-          "meaning": "let the page queue requests to Claude Code (auto: on when local, off when shared with --host)"
+          "arg": "--trusted-host NAME",
+          "meaning": "host name of your reverse proxy in front of the board (remembered for the project; none forgets it)"
+        },
+        {
+          "arg": "--actions on|off",
+          "meaning": "let the page queue requests to Claude Code (on by default; off makes the board show the project only)"
         }
       ],
       "examples": [
@@ -219,7 +223,7 @@
           "what": "stop the board server"
         }
       ],
-      "produces": "nothing in the project by itself (requests are run by /dev-kit:worker); its own files in .dev/run/",
+      "produces": "nothing in the project by itself (requests are run by /dev-kit:worker, started by the session that listens); its own files in .dev/run/",
       "related": [
         "worker",
         "status",
@@ -231,7 +235,7 @@
       "name": "worker",
       "category": "start",
       "one_line": "Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick.",
-      "when": "When the board, the session banner or the status line (▣) says requests are waiting; the board queues them, this session runs them.",
+      "when": "It starts by itself in the session that opened the board with /dev-kit:board, each time a request arrives. Run it by hand in any other session when the board, the session banner or the status line (▣) says requests are waiting.",
       "args": [
         {
           "arg": "(empty)",
@@ -1133,9 +1137,9 @@
         "remote"
       ],
       "steps": [
-        "/dev-kit:board opens the board; local boards accept requests (shared ones only with --actions on)",
-        "on the board: Run next to a command, New issue, answer a question in Needs you, or Plan to drag tasks and issues between milestones and Send",
-        "/dev-kit:worker in the Claude Code session runs the requests; questions come back to the board with answers to pick"
+        "/dev-kit:board in a Claude Code session opens the board and makes that session listen (keep it open, e.g. in tmux); away from the machine use an SSH tunnel, --host 0.0.0.0 with the access link, or --trusted-host behind your reverse proxy",
+        "on the board: Run next to a command, New issue, answer a question in Needs you, Plan to drag tasks and issues between milestones and Send, or Go on by itself",
+        "each request starts in the listening session by itself; questions come back to the board with answers to pick. In a session that is not listening, /dev-kit:worker runs the requests"
       ]
     },
     {

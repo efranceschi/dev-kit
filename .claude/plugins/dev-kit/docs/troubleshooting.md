@@ -30,10 +30,13 @@
 | Existing project: the version proposed by `release` looks wrong | Manifest and latest tag disagree | `release` asks which one is right; the tag prefix follows the project |
 | Existing project: QA flags old code | It should be `legacy` | Legacy findings never score and become issues; check that `brownfield` is in `state.json` (run `/dev-kit:start` to onboard) |
 | Board: "Access link required" | It was shared with `--host` and opened without the key | Open the `access link:` URL; `/dev-kit:board status` prints it again |
-| Board: a host name is refused | DNS rebinding protection | Open it by IP or `localhost` (SSH tunnel: `ssh -N -L 8765:127.0.0.1:<port> <host>`) |
-| Board stopped by itself | No open tab for 2 hours | Start it again; `--idle-min N` changes the limit (0 = never) |
-| Board: requests stay "waiting" | No Claude Code session is running them | In the project's Claude Code session run `/dev-kit:worker`; the Requests card says "Claude Code: not running" until one does |
-| Board: "actions off" or no ▶ buttons | The board is shared with `--host`, or was started with `--actions off` | `/dev-kit:board --actions on` (on a shared board anyone with the link can then queue work) |
+| Board: a host name is refused | DNS rebinding protection | Open it by IP or `localhost` (SSH tunnel: `ssh -N -L 8765:127.0.0.1:<port> <host>`); behind your reverse proxy, `/dev-kit:board --trusted-host <its host name>` |
+| Board behind a proxy: buttons answer "forbidden origin" | The proxy's host name is not trusted | `/dev-kit:board --trusted-host <name>` (without scheme or port) |
+| Board stopped by itself | No open tab and no session listening for 2 hours | Start it again; `--idle-min N` changes the limit (0 = never) |
+| Board: requests stay "waiting" | No Claude Code session is listening | Run `/dev-kit:board` in the project's Claude Code session (it then listens), or `/dev-kit:worker` to run the queue once; the Requests card says "Claude Code: not running" until one does |
+| Board: "Claude Code: open, not listening" | That session ran `/dev-kit:worker` but did not open the board, or its Claude Code has no plugin monitors | Run `/dev-kit:board` there; if it still says "not listening", update Claude Code, and meanwhile `/dev-kit:worker` runs the queue when you ask |
+| Board: "It stopped going on by itself" | Continuous mode met something that needs you; the card says what | Deal with it, then "Go on" |
+| Board: "actions off" or no ▶ buttons | It was started with `--actions off` | `/dev-kit:board --actions on` |
 | Board: "another session is the executor" | Two Claude Code sessions ran `/dev-kit:worker` | Keep one; the other is refused while the first is alive |
 | Board: "started by another version" | The kit was updated while it ran | `/dev-kit:board stop`, then start it again |
 | Agents in worktrees fail on `npm`/`node` with missing modules | Worktrees have no `node_modules` | Since 1.17.0 implementers link the main checkout's `node_modules` (never install there); check that `.gitignore` has `node_modules` without a trailing slash |

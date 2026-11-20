@@ -2,6 +2,21 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.25.0 — 2026-11-20
+
+The session that opened the board listens: a request on the page starts work in Claude Code with nobody at the console.
+
+### Added
+- **Listening session.** `/dev-kit:board` makes its Claude Code session the one that listens (`dev_worker.py arm`). A plugin monitor (`monitors/monitors.json`, started the first time `/dev-kit:board` runs) keeps `dev_worker.py watch` in the background: silent while it waits, it prints one line when a request arrives for that session, which Claude Code delivers as a notification, and `/dev-kit:worker` runs the queue. It speaks only for the armed session it runs under, not while the queue is paused, and not for a request the running queue takes by itself; a request nobody took is announced again after 10 minutes. Waiting costs no tokens. The Requests card shows "Claude Code: listening", "working on R-nnn", "open, not listening", "paused" or "not running"; the board no longer stops by itself while a session listens. Where plugin monitors are not available the board says so and `/dev-kit:worker` still runs the queue by hand.
+- **Go on by itself** (off by default), a switch on the Requests card: after each request Claude Code starts the project's next step (`implement`, `qa`, `review`, `docs`, `usability`) and stops, saying why, when a question or a request waits for an answer, a task is blocked, a request failed or a continuous one was cancelled, the milestone it was working on closed (one milestone per go), the next step is yours to start (deploy, release, plan), or the last step changed nothing. "Go on" resumes. `dev_worker.py continue-next`.
+- **Behind a reverse proxy:** `/dev-kit:board --trusted-host <name>` makes the board answer to that host name in `Host` and `Origin` (over http or https), and to no other name; remembered for the project in `.dev/run/board-config.json`, `--trusted-host none` forgets it.
+- The tab says when something needs you: "(2) Needs you · project" in the title and a red dot on the icon (questions, permission requests, blocked tasks, and failed requests you have not seen).
+- `/dev-kit:worker` closes a request left running by an interrupted turn before taking the next one.
+
+### Changed
+- Requests are on by default on a shared board too (`--host`): the board is a single-user tool and nobody opens a shared one without its access key. `--actions off` makes any board show the project only; `auto` now means on.
+- The session banner and the end-of-turn notice about waiting requests stay silent while a session listens.
+
 ## 1.24.0 — 2026-11-20
 
 The board asks Claude Code for work: buttons, answers, new issues and a plan drawn by dragging cards, run by `/dev-kit:worker` in your session.

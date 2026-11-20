@@ -11,8 +11,9 @@ How the plugin is built, tested and documented. Users do not need this page.
   docs/                          user docs (four of them generated, see below), e2e checklist, flow diagram
   CHANGELOG.md                   kit versions (bump .claude-plugin/plugin.json and add an entry for every change)
   agents/*.md                    17 agents (model + effort in the frontmatter, conventions §9)
-  hooks/hooks.json               optional SessionStart / SubagentStart / SubagentStop / Stop hooks: board's live agents,
-                                 session title and banner, desktop notifications
+  hooks/hooks.json               optional SessionStart / UserPromptSubmit / SubagentStart / SubagentStop / Stop hooks: board's
+                                 live agents, session title and banner, desktop notifications, requests waiting on the board
+  monitors/monitors.json         the board's listener (dev_worker.py watch), started the first time /dev-kit:board runs
   skills/*/SKILL.md              25 skills, invoked as /dev-kit:<name>
   skills/core/                   support skill, not invocable
     SKILL.md                     marker (disable-model-invocation: true, user-invocable: false)
@@ -20,7 +21,8 @@ How the plugin is built, tested and documented. Users do not need this page.
                                  fix-tasks, gate, review, artifact, stale, xref, tests, ledger, brief, lock, strings, contrast, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
                                  preview, deploy, cleanup, event, feedback, telemetry, tip, tips, notify,
                                  board plan edits (move-task, new-milestone, reorder, plan-apply), answer-question
-    scripts/dev_worker.py        the board's request queue to Claude Code: validation, lifecycle, executor, modes, approvals
+    scripts/dev_worker.py        the board's request queue to Claude Code: validation, lifecycle, executor, modes, approvals,
+                                 the listener (watch, arm) and continuous mode (continue-next)
     scripts/dev_score.py         0–100 score per dimension (low cap, dedupe, delta mode, legacy findings ignored)
     scripts/dev_ledger.py        work ledger: fingerprints of verified work, incremental plans, spot checks (conventions §18)
     scripts/dev_telemetry.py     allowlisted session log, stage grades (imported by the other scripts)
@@ -35,7 +37,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     shared/onboarding.md         adoption of an existing codebase (run by start)
     shared/help.json             catalog for help and the generated docs (English only)
     shared/tips.json             contextual tips (English only)
-    shared/board/                index.html, board.js, board.css, favicon of the board
+    shared/board/                index.html, board.js, board.css, favicon of the board (and its "needs you" variant)
     shared/interview/ templates/ checklists/ prompts/   interview script, artifact templates, review checklists, output and isolation contracts
     tests/                       lint_suite.py, test_dev_state.py, test_dev_state_gaps.py, test_dev_board.py,
                                  test_dev_cost.py, test_dev_docs.py, test_dev_score.py, test_dev_ledger.py, test_dev_spec.py,
@@ -51,6 +53,7 @@ Requirements: Python 3.10+ (standard library only) on Linux or macOS. Process ch
 - State commands use `${CLAUDE_PROJECT_DIR}` so they keep pointing at the project.
 - Scripts run with `python3 -I`; modules next to them are imported by inserting the script folder into `sys.path` explicitly.
 - One optional hook set (`hooks/hooks.json`: SessionStart, SubagentStart, SubagentStop, Stop) feeds the board's live Agents panel through `dev_agent_hook.py`, which stores only ids and the agent type in `.dev/run/agents.jsonl`. It writes only inside a dev-kit project (`.dev/state.json` exists). Nothing depends on it: where the environment does not run plugin hooks, the board still shows agents logged by the skills (`agent_spawn`/`agent_end`), and the live badges simply do not appear for agents outside dev-kit skills. The same handler sets the session title and a one-line banner with the next command on a new session (`autonomy.ui.title`), and at the end of each turn shows the notices `dev_state.py` queued in `.dev/run/notify.jsonl` (`autonomy.ui.notify`) as a chat line and an OSC 9 desktop notification.
+- The board reaches a session through one plugin monitor (`monitors/monitors.json`, `when: on-skill-invoke:board`): Claude Code starts `dev_worker.py watch` the first time `/dev-kit:board` runs in a session and delivers each line it prints to Claude as a notification. The watcher prints only for the session `/dev-kit:board` armed (`dev_worker.py arm --pid $PPID`: it checks that the armed process is one of its own parents), so it is silent everywhere else, including projects without `.dev/state.json`, where it exits at once. Monitors do not start with `claude -p`, and a Claude Code without plugin monitors ignores the file: the board then says "not listening" and `/dev-kit:worker` runs the queue by hand. Every line a monitor prints costs a turn, so the watcher never prints progress, only a request that waits.
 - A plugin cannot ship `settings.json`, so the spinner tips and the status line are written by `dev_ui.py` to the project's `.claude/settings.local.json` (added to `.git/info/exclude` when git does not ignore it yet). Ownership is by marker: tips starting with `dev-kit: ` and a `statusLine` whose command runs `dev_statusline.py`; nothing else in the file is touched, and a status line of the user's own is never replaced. The command holds the absolute script path (settings do not expand `${CLAUDE_PLUGIN_ROOT}`); `start` runs `dev_ui.py repair` so a plugin update does not leave it pointing at an old version. Project and local settings accept only plain-string spinner tips (no id, cooldown or label), which is why the prefix marks them.
 - Claude Code's prompt suggestion (greyed-out, Tab or Right arrow) cannot be set by a plugin; it is predicted from the conversation. Every skill ends its report with the next command on the last line (conventions §15), and `dev_state.py status --next` computes it the same way for the status line and the banner.
 
