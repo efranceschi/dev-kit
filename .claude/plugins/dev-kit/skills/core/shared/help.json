@@ -401,6 +401,10 @@
         {
           "arg": "--milestone M1",
           "meaning": "build only one milestone"
+        },
+        {
+          "arg": "--milestones N",
+          "meaning": "stop after N approved gates, to resume in a fresh session (cheaper long runs)"
         }
       ],
       "examples": [
@@ -415,6 +419,10 @@
         {
           "command": "/dev-kit:autopilot --milestone M1",
           "what": "one milestone, e.g. to gauge cost"
+        },
+        {
+          "command": "/dev-kit:autopilot --milestones 2",
+          "what": "two milestones, then resume in a new session"
         }
       ],
       "produces": "everything below, one commit per task",

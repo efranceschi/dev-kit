@@ -1,7 +1,7 @@
 ---
 name: ops-reviewer
 description: Read-only reviewer of resilience and operability - configuration and env validation, timeouts and retries, error handling, background jobs, structured logging, health checks, Docker and CI quality, one-command setup - scaled to the project's deployment target. Used by qa and release; returns findings in the shared JSON contract.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 effort: medium
 ---
@@ -27,7 +27,7 @@ Scope (milestone or `release`), language for prose. `.dev/brief.md` blocks 5, 8,
 - Crash or data loss on a plausible failure of a main path → `high`; missing timeouts on external calls used by main flows → `high`; missing health/logging/CI in something meant to be deployed → `medium`.
 - Each finding names the file, the missing mechanism and the fix in one sentence.
 
-End with a prose summary and the single JSON block from the contract (`auditor: "ops-reviewer"`).
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary (JSON: `auditor: "ops-reviewer"`).
 
 ## Existing projects (brownfield)
 

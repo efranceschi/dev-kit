@@ -92,6 +92,30 @@ class TestIngest(Base):
         self.assertTrue(any("no price for: claude-future-9" in w for w in rep["warnings"]))
         self.assertIn("*", self.sh(COST, "report", "--all", "--by", "model", "--transcripts", str(self.tdir)).stdout)
 
+    def test_placeholder_and_long_request_ids_stay_distinct(self) -> None:
+        def rec(rid, mid, uuid, out):
+            r = json.loads(line(rid, "claude-sonnet-5-5", "2026-11-18T10:00:00Z", out=out))
+            r["message"]["id"], r["uuid"] = mid, uuid
+            return json.dumps(r) + "\n"
+        long_id = "gw/" + "x" * 90
+        self.write_main(rec("unknown", "msg_a", "u1", 1) + rec("unknown", "msg_b", "u2", 2) +
+                        rec("", None, "u3", 3) + rec(long_id, None, "u4", 4) + rec(long_id + "y", None, "u5", 5))
+        rep = self.report()
+        self.assertEqual(rep["total"]["requests"], 5)
+        self.assertEqual(rep["total"]["output"], 15)
+
+    def test_gateway_model_names_are_priced(self) -> None:
+        self.write_main(line("r1", "system.ai.claude-opus-5-5", "2026-11-18T10:00:00Z", out=1_000_000) +
+                        line("r2", "us.anthropic.claude-sonnet-5-5-v1:0", "2026-11-18T10:00:01Z", out=1_000_000) +
+                        line("r3", "system.ai.opus-next", "2026-11-18T10:00:02Z", out=1_000_000))
+        rep = self.report("--by", "model")
+        by = {r["key"]: r for r in rep["rows"]}
+        self.assertAlmostEqual(by["claude-opus-5-5"]["usd"], 20)        # prefix stripped at ingest
+        self.assertAlmostEqual(by["claude-sonnet-5-5"]["usd"], 10)      # provider prefix and -v1:0 stripped
+        self.assertAlmostEqual(by["system.ai.opus-next"]["usd"], 20)    # family fallback: first opus listed
+        self.assertTrue(rep["total"]["usd_complete"])
+        self.assertTrue(any("priced as claude-opus-5-5" in w for w in rep["warnings"]))
+
 
 class TestAttribution(Base):
     def ev(self, *args: str) -> None:

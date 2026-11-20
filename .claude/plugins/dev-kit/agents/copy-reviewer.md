@@ -1,7 +1,7 @@
 ---
 name: copy-reviewer
 description: Read-only reviewer of every user-facing string - UI text, error and validation messages, empty states, emails, API error messages that reach users, CLI output - for language and locale correctness, tone, clarity, terminology consistency, actionable errors and spelling against the brief and microcopy guide. Used by qa on UI milestones and by usability; returns findings in the shared JSON contract.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: haiku
 effort: medium
 ---
@@ -27,7 +27,7 @@ Scope (milestone or screens), language for prose. `.dev/brief.md` (blocks 2 and 
 - Respect the tone in the brief; do not impose a style the user did not choose.
 - Do not review source-code comments or developer-only logs.
 
-End with a prose summary and the single JSON block from the contract (`auditor: "copy-reviewer"`).
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary (JSON: `auditor: "copy-reviewer"`).
 
 ## Existing projects (brownfield)
 

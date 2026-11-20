@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import re
@@ -76,6 +77,38 @@ def safe_token(s: object, default: str = "other") -> str:
     return v if re.fullmatch(r"[a-z0-9][a-z0-9_.:<>-]{0,59}", v) else default
 
 
+MISSING_IDS = {"", "unknown", "none", "null", "undefined", "n/a", "-"}
+FAMILIES = ("fable", "mythos", "opus", "sonnet", "haiku")
+
+
+def id_token(*candidates: object) -> str:
+    """First usable id among the candidates. Placeholders ("unknown", "null"...) count as missing; an id the
+    store cannot keep as is (too long, unusual characters) is kept as a short hash, so distinct requests stay
+    distinct instead of collapsing into one "unknown" record."""
+    for c in candidates:
+        v = str(c or "").strip()
+        if v.lower() in MISSING_IDS:
+            continue
+        tok = safe_token(v, "")
+        return tok or "h" + hashlib.sha1(v.encode("utf-8", "replace")).hexdigest()[:16]
+    return ""
+
+
+def clean_model(model: object) -> str:
+    """Model id without gateway or provider decoration: `system.ai.claude-opus-5-5`, `us.anthropic.claude-…-v1:0`,
+    `anthropic/claude-…`, `claude-…@20261001` and `claude-…[1m]` all become `claude-…`."""
+    v = str(model or "").strip().lower()
+    v = re.sub(r"\[[^\]]*\]$", "", v)
+    i = v.find("claude-")
+    if i > 0:
+        v = v[i:]
+    else:
+        v = v.rsplit("/", 1)[-1]
+    v = re.sub(r"@.*$", "", v)
+    v = re.sub(r"-v\d+(:\d+)?$", "", v)
+    return safe_token(v, "unknown")
+
+
 # ------------------------------------------------------------------ ingest
 
 def transcripts_dir(root: Path, override: str | None) -> Path:
@@ -103,7 +136,7 @@ def parse_file(path: Path, agent: str, agent_id: str | None) -> list[dict]:
             u = m.get("usage") or {}
             if not model or model.startswith("<") or not u:
                 continue
-            rid = str(r.get("requestId") or m.get("id") or r.get("uuid") or "")
+            rid = id_token(r.get("requestId"), m.get("id"), r.get("uuid"))
             if not rid:
                 continue
             cc = u.get("cache_creation") or {}
@@ -115,7 +148,7 @@ def parse_file(path: Path, agent: str, agent_id: str | None) -> list[dict]:
             by_req[rid] = {
                 "ts": r.get("timestamp"), "session": safe_token(r.get("sessionId"), "unknown"),
                 "agent": agent, "agent_id": safe_token(agent_id or r.get("agentId"), "main") if agent != "main" else "main",
-                "model": safe_token(model, "unknown"), "request": safe_token(rid, "unknown"),
+                "model": clean_model(model), "request": rid,
                 "input": int(u.get("input_tokens") or 0), "output": int(u.get("output_tokens") or 0),
                 "cache_write_5m": w5, "cache_write_1h": w1, "cache_read": int(u.get("cache_read_input_tokens") or 0),
                 "speed": "fast" if u.get("speed") == "fast" else "standard",
@@ -161,7 +194,8 @@ def ingest(dev: Path, root: Path, override: str | None = None) -> dict:
         src = safe_token(p.stem, "src") + ("@" + safe_token(p.parent.parent.name, "s") if agent != "main" else "")
         st = p.stat()
         sig = [st.st_size, int(st.st_mtime)]
-        if index.get(src) == sig and src in groups:
+        stale = any(r.get("request") == "unknown" for r in groups.get(src, []))  # stores written before 1.15.0
+        if index.get(src) == sig and src in groups and not stale:
             continue
         groups[src] = [{**r, "src": src} for r in parse_file(p, agent, aid)]
         index[src] = sig
@@ -272,12 +306,27 @@ def load_prices(dev: Path) -> dict:
     return DEFAULT_PRICES
 
 
-def price_for(model: str, prices: dict) -> dict | None:
+def price_key(model: str, prices: dict) -> tuple[str | None, bool]:
+    """(price table key, exact). Exact: the model or its longest listed prefix. Otherwise the first listed model of
+    the same family (fable, opus, sonnet, haiku), reported as "priced as" so the estimate is never silent."""
     models = prices.get("models", {})
-    if model in models:
-        return models[model]
-    keys = [k for k in models if model.startswith(k)]
-    return models[max(keys, key=len)] if keys else None
+    for cand in dict.fromkeys([model, clean_model(model)]):
+        if cand in models:
+            return cand, True
+        keys = [k for k in models if cand.startswith(k)]
+        if keys:
+            return max(keys, key=len), True
+    fam = next((f for f in FAMILIES if f in model.lower()), None)
+    if fam:
+        same = [k for k in models if fam in k]
+        if same:
+            return same[0], False
+    return None, False
+
+
+def price_for(model: str, prices: dict) -> dict | None:
+    key, _ = price_key(model, prices)
+    return prices.get("models", {}).get(key) if key else None
 
 
 def cost_of(r: dict, prices: dict) -> float | None:
@@ -331,7 +380,11 @@ def build_report(dev: Path, by: str, mode: str, since: str | None) -> dict:
     prices = load_prices(dev)
     rows: dict[str, dict] = {}
     unknown: set[str] = set()
+    approx: dict[str, str] = {}
     for r in usage:
+        key_, exact = price_key(str(r.get("model", "")), prices)
+        if key_ and not exact:
+            approx[str(r.get("model"))] = key_
         key = {"stage": r["stage"], "agent": r.get("agent"), "model": r.get("model"), "session": r.get("session")}[by] or "other"
         row = rows.setdefault(key, {"key": key, "requests": 0, **{f: 0 for f in TOKEN_FIELDS}, "usd": 0.0, "usd_complete": True})
         row["requests"] += 1
@@ -355,6 +408,9 @@ def build_report(dev: Path, by: str, mode: str, since: str | None) -> dict:
                 row = rows.setdefault(str(key), {"key": str(key), "requests": 0, **{f: 0 for f in TOKEN_FIELDS}, "usd": 0.0, "usd_complete": False})
                 row["requests"] += 1
                 row["input"] += int(e["tokens"])
+    if approx:
+        warnings.append("no exact price for: " + ", ".join(f"{m} (priced as {k})" for m, k in sorted(approx.items()))
+                        + "; add them to .dev/costs/prices.json for an exact estimate")
     if unknown:
         warnings.append("no price for: " + ", ".join(sorted(unknown)) + " (add them to .dev/costs/prices.json); their cost shows as n/d")
     as_of = parse_ts(f"{prices.get('as_of', '')}T00:00:00+00:00")

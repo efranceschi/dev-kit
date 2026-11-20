@@ -20,7 +20,10 @@
 | "event rejected" in a skill | A field or feedback area is not allowlisted | Use the areas in conventions §13; never put project text into an event. Before `init`, events are skipped on purpose |
 | "review … n/a needs --note" | `n/a` must say why | `dev_state.py review design n/a --note "no new UI"` |
 | `set phase` warns that an artifact is missing | An earlier stage was skipped | Run the skill named in the warning, or `/dev-kit:start` to be routed there |
-| An auditor result shows `F-000` "no parsable result" | The agent's answer had no JSON block, twice | Re-run `qa` (the gate cannot pass silently); report it with `/dev-kit:feedback` |
+| An auditor result shows `F-000` "no parsable result" | The agent wrote no valid result file, even after the `check` output was sent back | Re-run `qa` (the gate cannot pass silently); report it with `/dev-kit:feedback` |
+| `dev_score.py check` says a result is INVALID | Unknown severity or auditor, no `findings` list, broken JSON | Send the agent the `check` output; synonyms (`status`, `Major`, `nit`…) are fixed by `check --fix` on their own |
+| `/dev-kit:costs` shows very few requests or `n/d` | Transcripts with `requestId: "unknown"` or gateway model names (before 1.15.0) | Update the kit and run `dev_cost.py ingest` again: ids fall back to the message id and `system.ai.*`-style names are priced (a family match says "priced as") |
+| Auditors all run on the orchestrator's model | The host ignores the agent frontmatter | Since 1.15.0 every Agent call passes `model` and `effort`; check `agent_spawn` in `dev_state.py telemetry summary` |
 | A parallel implementer hit a merge conflict | Two tasks touched the same shared file | It is re-run alone after the others; mark such files as shared in the plan |
 | `release` stops on missing reviews | Every review must be `pass` (or `n/a` in existing projects) | Run `/dev-kit:review <target>` or `/dev-kit:usability` |
 | `deploy` stops before installing | A prerequisite is missing, the gate is not passed, or the tree is dirty outside `.dev/` | Provide the prerequisite (by name, never in the chat), pass the gate, commit; `--dry-run` shows what it would do |

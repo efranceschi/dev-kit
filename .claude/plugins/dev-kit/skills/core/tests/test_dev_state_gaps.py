@@ -210,5 +210,31 @@ class TestDetection(Base):
         self.assertTrue(self.detect()["greenfield"])
 
 
+class TestFixTasks(Base):
+    def test_blockers_become_fix_tasks_once(self) -> None:
+        self.init_with_plan()
+        f = self.root / ".dev" / "qa" / "M1" / "findings.json"
+        f.parent.mkdir(parents=True)
+        f.write_text(json.dumps({"findings": [
+            {"id": "F-001", "severity": "high", "title": "Login accepts empty password", "file": "src/a.py",
+             "recommendation": "reject empty password with 422", "acceptance_ref": "AC-2", "auditor": "code-reviewer"},
+            {"id": "F-002", "severity": "medium", "title": "Long function", "file": "src/b.py", "auditor": "code-reviewer"},
+            {"id": "F-003", "severity": "medium", "title": "Weak test", "file": "tests/t.py", "auditor": "test-auditor"},
+            {"id": "F-004", "severity": "critical", "title": "Old debt", "legacy": True, "auditor": "security-auditor"},
+        ]}), encoding="utf-8")
+        out = json.loads(self.run_state("fix-tasks", "--from", ".dev/qa/M1/findings.json", "--milestone", "M1",
+                                        "--include", "F-003", "--json").stdout)
+        self.assertEqual(len(out["created"]), 2)
+        tasks = {t["source"]: t for t in self.state()["tasks"].values() if t.get("type") == "fix"}
+        t1 = tasks["qa/M1/report.md#F-001"]
+        self.assertEqual(t1["files"], ["src/a.py"])
+        self.assertIn("AC-2 met", t1["acceptance"])
+        self.assertTrue(any(x.startswith("F-001 resolved: reject empty password") for x in t1["acceptance"]))
+        self.assertIn("qa/M1/report.md#F-003", tasks)
+        again = json.loads(self.run_state("fix-tasks", "--from", ".dev/qa/M1/findings.json", "--milestone", "M1",
+                                          "--include", "F-003", "--json").stdout)
+        self.assertEqual((again["created"], sorted(again["skipped"])), ([], ["F-001", "F-003"]))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,7 @@
 ---
 name: docs-reviewer
 description: Read-only reviewer that verifies documentation against the product as built - executes the README commands, checks env vars against code, compares the user guide with the real UI strings, validates API docs against routes and schemas, and checks CHANGELOG coverage of task commits. Used by review docs and release; returns findings in the shared JSON contract.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: haiku
 effort: medium
 ---
@@ -29,7 +29,7 @@ Language for prose. README.md, docs/, CHANGELOG.md, CLAUDE.md, `.env.example`, `
 - Every finding quotes the doc location and the observed reality, and says what to change in one sentence.
 - Stop any process you started; leave the working tree untouched.
 
-End with a prose summary and the single JSON block from the contract (`auditor: "docs-reviewer"`, `scope: "docs"` or `"release"`).
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary (JSON: `auditor: "docs-reviewer"`, `scope: "docs"` or `"release"`).
 
 ## Existing projects (brownfield)
 

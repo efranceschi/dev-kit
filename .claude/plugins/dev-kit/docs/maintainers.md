@@ -16,7 +16,7 @@ How the plugin is built, tested and documented. Users do not need this page.
   skills/core/                   support skill, not invocable
     SKILL.md                     marker (disable-model-invocation: true, user-invocable: false)
     scripts/dev_state.py         state: init, sync-plan, next, start, done, block, unblock, drop, add-task, add-question,
-                                 gate, review, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
+                                 fix-tasks, gate, review, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
                                  preview, deploy, cleanup, event, feedback, telemetry, tip, tips
     scripts/dev_score.py         0–100 score per dimension (low cap, dedupe, delta mode, legacy findings ignored)
     scripts/dev_telemetry.py     allowlisted session log, stage grades (imported by the other scripts)
@@ -25,7 +25,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     scripts/dev_detect_stack.py  stack detection (manifests, manifests in subfolders, source files)
     scripts/dev_board.py         local board server for /dev-kit:board (page in shared/board/)
     scripts/dev_agent_hook.py    hook handler that feeds the board's live agents (.dev/run/agents.jsonl)
-    shared/conventions.md        the rules every skill and agent follows (§0–§16)
+    shared/conventions.md        the rules every skill and agent follows (§0–§17)
     shared/onboarding.md         adoption of an existing codebase (run by start)
     shared/help.json             catalog for help and the generated docs (English only)
     shared/tips.json             contextual tips (English only)

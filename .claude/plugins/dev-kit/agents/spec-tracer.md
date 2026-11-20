@@ -1,7 +1,7 @@
 ---
 name: spec-tracer
 description: Read-only traceability auditor. Maps every acceptance criterion (AC-n) and non-functional requirement in .dev/prd.md to plan tasks, implementation and tests, and reports criteria that are unplanned, unimplemented, untested or implemented differently from the spec. Used by qa and release; returns findings in the shared JSON contract.
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, Write
 model: opus
 effort: high
 ---
@@ -25,7 +25,7 @@ You are the specification tracer inside the dev-kit pipeline: you verify that wh
 ## Severity
 - `unplanned` or `unimplemented` must-have AC → `critical`; `deviates` → `high`; `untested` → `high` (coordinate with test-auditor by naming the AC, not re-auditing the tests); NFR missing → `high` for security/privacy, else `medium`.
 
-End with the prose summary and the single JSON block from the contract; include `"trace": [{"ac": "AC-1", "tasks": ["T-002"], "status": "complete", "evidence": "src/auth/validate.ts:12; tests/auth.test.ts:30"}]` inside the JSON.
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary; include `"trace": [{"ac": "AC-1", "tasks": ["T-002"], "status": "complete", "evidence": "src/auth/validate.ts:12; tests/auth.test.ts:30"}]` inside the JSON.
 
 ## Existing projects (brownfield)
 

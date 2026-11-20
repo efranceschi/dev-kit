@@ -141,7 +141,7 @@ Escalation applies **only to the dimensions that failed** (re-run the failures, 
 | `balanced` | sonnet / medium | sonnet / high | opus / high |
 | `quality` | opus / high | opus / xhigh | ask (rule below) |
 
-Pass them in the Agent call (`model` alias and `effort`); they override the frontmatter. Effort is raised before the model, except in the `speed` tier, where the capability gap is real. Raising model or effort is a cost decision that belongs to the user:
+**Always pass them in the Agent call** (`model` alias and `effort`), from round 1: some hosts ignore an agent's frontmatter and run every agent on the orchestrator's model, which turns a haiku copy check into an opus one. The frontmatter is the documentation of row 1, not a guarantee. Log the model you asked for in `agent_spawn`. Effort is raised before the model, except in the `speed` tier, where the capability gap is real. Raising model or effort is a cost decision that belongs to the user:
 
 - `mode: ask` (default): before every escalation, ask with AskUserQuestion (see "Recommendation rule"); escalate only on yes.
 - `mode: preapproved`: escalate without asking, but only within this ladder; anything beyond it asks.
@@ -292,3 +292,14 @@ Applies when `state.json` has `brownfield` (written by `start`'s onboarding, `sh
 Switching from `maintenance` to `feature` or `import` (`dev_state.py init --brownfield-json '{"mode":"feature"}'`) reopens the reviews recorded `n/a` as `pending`: the new PRD, design and plan are reviewed.
 
 - **Missing stages.** On resume, `start` routes to the first missing artifact (brief → prd → architecture → design if new UI → plan) before following the phase; `dev_state.py set phase` warns when an earlier artifact is missing.
+
+## 17. Lean orchestration
+
+The orchestrating session (the skill that spawns agents, and `autopilot` above it) pays for its whole context again on every turn: in a long run that is the largest cost of all, larger than the agents. Keep it small:
+
+- **Files, not messages.** Agents write their results to the `Output file:` of their prompt (`shared/prompts/auditor-output-contract.md`) and answer in a few lines. Do not read raw results back into the conversation: `dev_score.py check` validates them, `dev_score.py score` prints the table you need, and the consolidated `findings.json` feeds `dev_state.py fix-tasks`.
+- **Short views.** Use `dev_state.py status --short` for routing and `status --json` only when you need a field; never print whole artifacts (PRD, plan, specs, reports) when an agent or a producing skill is the one that reads them. Name the files instead.
+- **Scripts over prose.** Prefer the deterministic command (`fix-tasks`, `check --fix`, `score`) to doing the same work by hand in the conversation.
+- **Do not re-run what is recorded.** A passing suite or a dimension whose files did not change keeps its result (§9, `qa` §2).
+- **Fresh sessions between milestones.** State lives in `.dev/`, so a run resumes from any session. For long builds, `autopilot --milestones N` stops after N approved gates with the command to resume; start a new session (or `/clear`) and run it. Within one session, Claude Code's own context compaction still applies.
+

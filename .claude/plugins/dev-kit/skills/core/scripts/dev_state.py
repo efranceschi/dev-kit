@@ -13,6 +13,7 @@ Subcommands
   unblock T     blocked -> todo
   drop T        drop a task removed by a replan (--reason); it no longer counts for milestones or release
   add-task      create a task in state and plan.md
+  fix-tasks     one fix task per blocking finding of a findings file (--from --milestone; idempotent)
   add-question  append a non-blocking question to open-questions.md
   gate M        set milestone gate: passed | pending | skipped (passed needs --score >= cut-off)
   review NAME   record a review (prd|design|plan|docs...): pass | fail | pending (pass needs --score >= cut-off)
@@ -37,6 +38,8 @@ Exit codes: 0 ok · 1 usage/invalid transition · 2 state not found · 3 nothing
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import re
@@ -980,6 +983,62 @@ def cmd_add_task(store: Store, a: argparse.Namespace) -> None:
     store.event("task", task=tid, transition="add", type=a.type, milestone=a.milestone)
     store.log(f"add-task {tid} [{a.milestone}] ({a.type}) {a.title} source={a.source or '-'}")
     print(tid)
+
+
+def cmd_fix_tasks(store: Store, a: argparse.Namespace) -> None:
+    """Create one fix task per blocking finding of a consolidated findings file (qa §4), deterministically and
+    idempotently: a finding that already has a task with the same source anchor is skipped."""
+    store.load()
+    path = Path(a.src_file)
+    if not path.is_absolute():
+        path = store.root / path
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        fail(f"cannot read {path}: {e}")
+    items = data.get("findings", []) if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        fail("findings file must be a list or {\"findings\": [...]}")
+    if a.milestone not in store.milestones():
+        fail(f"milestone {a.milestone} does not exist")
+    block_on = set(quality_cfg(store).get("block_on", ["critical", "high"]))
+    extra = {x.strip() for x in (a.include or "").split(",") if x.strip()}
+    source = a.source or f"qa/{a.milestone}/report.md"
+    existing = {str(t.get("source") or "") for t in store.tasks().values() if t.get("status") != "dropped"}
+    created, skipped = [], []
+    for f in items:
+        if not isinstance(f, dict) or f.get("legacy") or not f.get("id"):
+            continue
+        sev = str(f.get("severity", "")).lower()
+        if sev not in block_on and f["id"] not in extra:
+            continue
+        anchor = f"{source}#{f['id']}"
+        if anchor in existing:
+            skipped.append(f["id"])
+            continue
+        cond = str(f.get("recommendation") or f.get("failure_scenario") or "the finding no longer reproduces").strip()
+        acc = [f"{f['id']} resolved: {cond[:200]}"]
+        if f.get("acceptance_ref"):
+            acc.insert(0, f"{f['acceptance_ref']} met")
+        files = f.get("file") or ""
+        if isinstance(f.get("files"), list):
+            files = ",".join(str(x) for x in f["files"])
+        if a.dry_run:
+            created.append(f["id"])
+            continue
+        ns = argparse.Namespace(type="fix", milestone=a.milestone, milestone_title=None, title=str(f.get("title") or f["id"])[:80],
+                                deps=None, acceptance=acc, test_notes=f"regression test for {f['id']}", files=files,
+                                source=anchor, issue=None, lane=None, force=False)
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            cmd_add_task(store, ns)
+        created.append(f"{buf.getvalue().strip()}={f['id']}")
+        existing.add(anchor)
+    if a.json:
+        print(json.dumps({"created": created, "skipped": skipped, "dry_run": bool(a.dry_run)}))
+    else:
+        verb = "would create" if a.dry_run else "created"
+        print(f"fix-tasks {a.milestone}: {verb} {len(created)}" + (f" ({', '.join(created)})" if created else "")
+              + (f"; already had a task: {', '.join(skipped)}" if skipped else ""))
 
 
 def cmd_add_question(store: Store, a: argparse.Namespace) -> None:
@@ -2018,6 +2077,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--deps"); s.add_argument("--acceptance", action="append"); s.add_argument("--test-notes")
     s.add_argument("--files"); s.add_argument("--source"); s.add_argument("--issue"); s.add_argument("--lane")
     s.add_argument("--force", action="store_true")
+
+    s = sub.add_parser("fix-tasks"); s.set_defaults(fn=cmd_fix_tasks)
+    s.add_argument("--from", dest="src_file", required=True); s.add_argument("--milestone", required=True)
+    s.add_argument("--source"); s.add_argument("--include", help="comma-separated non-blocking finding ids to include")
+    s.add_argument("--dry-run", action="store_true"); s.add_argument("--json", action="store_true")
 
     s = sub.add_parser("add-question"); s.set_defaults(fn=cmd_add_question)
     s.add_argument("text"); s.add_argument("--skill"); s.add_argument("--assumption"); s.add_argument("--impact")
