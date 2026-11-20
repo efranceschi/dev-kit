@@ -18,7 +18,9 @@ How the plugin is built, tested and documented. Users do not need this page.
     SKILL.md                     marker (disable-model-invocation: true, user-invocable: false)
     scripts/dev_state.py         state: init, sync-plan, next, start, done, block, unblock, drop, add-task, add-question,
                                  fix-tasks, gate, review, artifact, stale, xref, tests, ledger, brief, lock, strings, contrast, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
-                                 preview, deploy, cleanup, event, feedback, telemetry, tip, tips, notify
+                                 preview, deploy, cleanup, event, feedback, telemetry, tip, tips, notify,
+                                 board plan edits (move-task, new-milestone, reorder, plan-apply), answer-question
+    scripts/dev_worker.py        the board's request queue to Claude Code: validation, lifecycle, executor, modes, approvals
     scripts/dev_score.py         0–100 score per dimension (low cap, dedupe, delta mode, legacy findings ignored)
     scripts/dev_ledger.py        work ledger: fingerprints of verified work, incremental plans, spot checks (conventions §18)
     scripts/dev_telemetry.py     allowlisted session log, stage grades (imported by the other scripts)
@@ -37,7 +39,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     shared/interview/ templates/ checklists/ prompts/   interview script, artifact templates, review checklists, output and isolation contracts
     tests/                       lint_suite.py, test_dev_state.py, test_dev_state_gaps.py, test_dev_board.py,
                                  test_dev_cost.py, test_dev_docs.py, test_dev_score.py, test_dev_ledger.py, test_dev_spec.py,
-                                 test_dev_ui.py
+                                 test_dev_ui.py, test_dev_worker.py
 ```
 
 Requirements: Python 3.10+ (standard library only) on Linux or macOS. Process checks (`cleanup`, board liveness) read `/proc` and are best effort on macOS; the board server uses `fcntl` and does not run on native Windows (use WSL).

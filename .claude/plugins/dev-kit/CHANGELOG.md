@@ -2,6 +2,19 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.23.0 — 2026-11-20
+
+The groundwork for driving Claude Code from the board: a request queue, plan edits that keep `plan.md` and state together, and questions with answers to pick. The page itself does not use them yet.
+
+### Added
+- `dev_worker.py`, the board's request queue to Claude Code and the only code that knows its files (`.dev/run/inbox/`, `worker.json`, `worker-mode.json`, `approvals/`). The board queues guided requests only: a kit command from a fixed list (`run`), a new issue, an answer to a question, or a plan draft; every field is validated and free text is cleaned and handed to the executor as data, never as an instruction. The executor (the Claude Code session) claims one request at a time (answers first, then requests parked on a question that got its answer, then the oldest), finishes it as done, failed, cancelled or waiting for an answer; one executor per project; a request whose executor died is marked stale and never runs twice; the queue can be paused; at most 20 open requests.
+- Board API: `POST /api/inbox`, `POST /api/inbox/<id>/cancel`, `POST /api/worker/mode` (pause, continuous), `POST /api/approvals/<id>` (allow or deny), all with the per-run token, an allowed Host and Origin, JSON of at most 16 KB. A plan draft is checked against the current state before it is queued, so the reasons come back at once. `/api/state` gains `inbox` (open and recent requests, executor, approvals waiting), `next.command` and the options of each open question. `dev_board.py start --actions auto|on|off`: requests are on by default only on loopback; a board shared with `--host` takes none unless started with `--actions on`. The server still never writes the project's state, plan or questions.
+- `dev_state.py move-task`, `new-milestone`, `reorder` and `plan-apply` (a draft from the board, or `--ops` JSON): every change is checked against the state the earlier ones left (tasks not started only, open milestones only, no task before a task it depends on, the issue buffer unless confirmed, expedite and change issues refused, the next milestone number only, one per draft), then `plan.md` and state are written together, or nothing is; `--dry-run` shows the changes.
+- `dev_state.py add-question --options "a|b" --recommended a [--request R-nnn]` and `answer-question Q-nnn --answer … [--ref …]`, which moves the question to Resolved.
+
+### Changed
+- `next` follows the order of the tasks in `plan.md` inside a milestone (`sync-plan` records it as `seq`) instead of the task number. For plans never reordered the order is the same.
+
 ## 1.22.1 — 2026-11-20
 
 ### Fixed

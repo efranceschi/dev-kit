@@ -19,7 +19,14 @@ Subcommands
   drop T        drop a task removed by a replan (--reason); it no longer counts for milestones or release
   add-task      create a task in state and plan.md
   fix-tasks     one fix task per blocking finding of a findings file (--from --milestone; idempotent)
-  add-question  append a non-blocking question to open-questions.md
+  add-question  append a non-blocking question to open-questions.md (--options a|b --recommended a: the board
+                offers them as answers)
+  answer-question Q  move an open question to Resolved with its answer (--answer --ref)
+  move-task T M move a task not started to another open milestone (--before T2), in plan.md and state
+  new-milestone M TITLE  add the next milestone (M<last+1>) to plan.md and state; milestones are never inserted
+  reorder M T…  new order of tasks not started inside a milestone (the order `next` follows)
+  plan-apply    apply a plan draft from the board (--draft R-nnn, or --ops JSON): all its changes or none
+                (--dry-run shows them)
   gate M        set milestone gate: passed | pending | skipped (passed needs --score >= cut-off)
   artifact mark NAME  record that an artifact (brief|prd|architecture|ux|ui|plan|all) is up to date with its upstream
   stale         artifacts whose upstream changed since they were marked, and passed reviews now out of date
@@ -771,15 +778,11 @@ def record_baseline(store: Store, tasks: dict) -> int:
     return added
 
 
-def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
-    store.load()
-    plan_path = Path(a.plan) if a.plan else store.dev / "plan.md"
-    if not plan_path.exists():
-        fail(f"plan not found: {plan_path}")
-    try:
-        milestones, tasks = parse_plan(plan_path.read_text(encoding="utf-8"))
-    except ValueError as e:
-        fail(str(e))
+def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int], list[str]]:
+    """Bring state in line with plan.md text, in memory: milestones and tasks added or updated (never status), each
+    task's position in the plan as `seq` (the order `next` follows within a milestone). Returns the parsed tasks,
+    the counts (milestones added, tasks added, tasks updated) and the problems found. Raises ValueError."""
+    milestones, tasks = parse_plan(text)
     added_m = added_t = updated_t = 0
     for m, info in milestones.items():
         if m not in store.milestones():
@@ -788,11 +791,12 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
         else:
             store.milestones()[m]["title"] = info["title"]
     max_id = int(store.state.get("next_task_id", 1)) - 1
-    for tid, t in tasks.items():
+    for seq, (tid, t) in enumerate(tasks.items(), 1):
+        t["seq"] = seq
         max_id = max(max_id, int(tid[2:]))
         if tid in store.tasks():
             cur = store.tasks()[tid]
-            for k in ("title", "milestone", "type", "deps", "acceptance", "test_notes", "files"):
+            for k in ("title", "milestone", "type", "deps", "acceptance", "test_notes", "files", "seq"):
                 cur[k] = t[k]
             for k in ("contract", "consumes", "shared"):
                 if k in t:
@@ -805,7 +809,7 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
                 "title": t["title"], "milestone": t["milestone"], "type": t["type"],
                 "status": "todo", "deps": t["deps"], "acceptance": t["acceptance"],
                 "test_notes": t["test_notes"], "files": t["files"], "commit": None,
-                "blocked_reason": None, "source": None, "started_at": None, "done_at": None,
+                "blocked_reason": None, "source": None, "started_at": None, "done_at": None, "seq": t["seq"],
                 **{k: t[k] for k in ("contract", "consumes", "shared") if k in t},
             }
             added_t += 1
@@ -827,12 +831,31 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
             problems.append(f"{tid}: milestone {t['milestone']} not declared")
     if store.state["phase"] in ("init", "interview", "prd", "architecture", "ux", "ui", "plan") and store.tasks():
         store.state["phase"] = "implement" if store.state["phase"] == "plan" else store.state["phase"]
+    return tasks, (added_m, added_t, updated_t), problems
+
+
+def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    plan_path = Path(a.plan) if a.plan else store.dev / "plan.md"
+    if not plan_path.exists():
+        fail(f"plan not found: {plan_path}")
+    try:
+        tasks, (added_m, added_t, updated_t), problems = sync_plan_text(store, plan_path.read_text(encoding="utf-8"))
+    except ValueError as e:
+        fail(str(e))
     store.save()
     record_baseline(store, tasks)
     store.log(f"sync-plan +{added_m} milestones, +{added_t} tasks, ~{updated_t} updated")
     print(f"synced: {added_m} new milestones, {added_t} new tasks, {updated_t} updated")
     if problems:
         print("warnings:\n  " + "\n  ".join(problems))
+
+
+def plan_order(ts: dict, tid: str) -> tuple[int, int]:
+    """Position of a task in plan.md (seq, set by sync-plan), then its id: a task added after the last sync sits
+    at the end of its milestone section, and so comes after the synced ones."""
+    seq = ts[tid].get("seq")
+    return (seq if isinstance(seq, int) else 10 ** 6, int(tid[2:]))
 
 
 def pick_next(store: Store, milestone: str | None) -> tuple[str | None, str]:
@@ -870,7 +893,7 @@ def pick_next(store: Store, milestone: str | None) -> tuple[str | None, str]:
             if blocked:
                 return None, f"only blocked tasks remain in {m}: {', '.join(blocked)}"
             return None, f"no ready task in {m} (unsatisfied dependencies)"
-        ready.sort(key=lambda t: (0 if ts[t].get("lane") == "cooldown" else 1, 0 if ts[t]["type"] == "fix" else 1, int(t[2:])))
+        ready.sort(key=lambda t: (0 if ts[t].get("lane") == "cooldown" else 1, 0 if ts[t]["type"] == "fix" else 1, plan_order(ts, t)))
         return ready[0], ""
     return None, "nothing to do"
 
@@ -894,7 +917,7 @@ def pick_batch(store: Store, milestone: str | None, n: int) -> tuple[list[str], 
     m = t0["milestone"]
     ready = [t for t, v in ts.items() if v["milestone"] == m and v["status"] == "todo" and v.get("lane") != "hotfix"
              and all(ts.get(d, {}).get("status") == "done" for d in v["deps"])]
-    ready.sort(key=lambda t: (t != first, 0 if ts[t].get("lane") == "cooldown" else 1, 0 if ts[t]["type"] == "fix" else 1, int(t[2:])))
+    ready.sort(key=lambda t: (t != first, 0 if ts[t].get("lane") == "cooldown" else 1, 0 if ts[t]["type"] == "fix" else 1, plan_order(ts, t)))
     chosen, files, serial_used = [], set(), False
     for t in ready:
         fs = set(ts[t].get("files") or [])
@@ -1208,6 +1231,13 @@ def cmd_fix_tasks(store: Store, a: argparse.Namespace) -> None:
 
 def cmd_add_question(store: Store, a: argparse.Namespace) -> None:
     store.load()
+    options = [o.strip().replace("|", "/") for o in (a.options or "").split("|") if o.strip()]
+    if a.options is not None and not 2 <= len(options) <= 6:
+        fail("--options takes 2 to 6 answers separated by |")
+    if a.recommended is not None and a.recommended.strip() not in options:
+        fail("--recommended must be one of --options")
+    if a.request is not None and not re.fullmatch(r"R-\d{3,6}", a.request):
+        fail("--request takes a board request id such as R-004")
     qid = store.new_question_id()
     path = store.dev / "open-questions.md"
     if not path.exists():
@@ -1227,6 +1257,9 @@ def cmd_add_question(store: Store, a: argparse.Namespace) -> None:
     lines.insert(j, row)
     path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
     store.save()
+    if options:  # the board shows them as answers to pick (conventions §10, board mode)
+        _write_json(question_sidecar(store, qid), {"id": qid, "options": options, "recommended": a.recommended,
+                                                   "request": a.request, "answered": False, "at": now()})
     store.log(f"add-question {qid} ({a.skill or '-'}): {a.text}")
     print(qid)
 
@@ -3007,6 +3040,362 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
     print_tip(store, "status", a)
 
 
+# --------------------------------------------------------------------------- questions with options (board)
+
+def question_sidecar(store: Store, qid: str) -> Path:
+    return store.dev / "run" / "questions" / f"{qid}.json"
+
+
+def _write_json(path: Path, obj: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def cmd_answer_question(store: Store, a: argparse.Namespace) -> None:
+    """Move a question from Open to Resolved in open-questions.md with its answer (the board's answers and
+    interview --gaps both use it)."""
+    store.load()
+    if not re.fullmatch(r"Q-\d{1,5}", a.id):
+        fail("question ids look like Q-3")
+    answer = re.sub(r"\s+", " ", a.answer).strip().replace("|", "/")
+    if not answer:
+        fail("--answer is empty")
+    path = store.dev / "open-questions.md"
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    section, row_i = None, None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("## "):
+            section = line.strip().lower()
+        elif section == "## open" and re.match(rf"^\|\s*{re.escape(a.id)}\s*\|", line):
+            row_i = i
+    if row_i is None:
+        fail(f"{a.id} is not an open question in .dev/open-questions.md")
+    del lines[row_i]
+    res = next((i for i, line in enumerate(lines) if line.strip().lower() == "## resolved"), None)
+    if res is None:
+        lines += ["", "## Resolved", "| id | resolved on | answer | ADR / task |", "|---|---|---|---|"]
+        res = len(lines) - 3
+    j = res + 1
+    while j < len(lines) and (lines[j].startswith("|") or not lines[j].strip() and j + 1 < len(lines) and lines[j + 1].startswith("|")):
+        j += 1
+    lines.insert(j, f"| {a.id} | {today()} | {answer} | {(a.ref or '-').replace('|', '/')} |")
+    path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    side = question_sidecar(store, a.id)
+    try:
+        q = json.loads(side.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        q = {"id": a.id}
+    _write_json(side, {**q, "answered": True, "answer": answer, "answered_at": now()})
+    store.log(f"answer-question {a.id}: {answer}")
+    print(f"{a.id} resolved: {answer}")
+
+
+# --------------------------------------------------------------------------- plan edits (board drafts)
+
+HEADING_RE = re.compile(r"^#{1,3}\s")
+TOP_HEADING_RE = re.compile(r"^#{1,2}\s")
+
+
+class PlanDoc:
+    """plan.md as segments: task sections (`### T-nnn` up to the next heading of level 3 or less) and text
+    segments (everything else, a new one at every `#`/`##` heading), so tasks and milestones can be moved
+    without touching the text around them."""
+
+    def __init__(self, text: str):
+        self.segs: list[dict] = []
+        cur: dict | None = None
+        for line in text.splitlines():
+            tm = TASK_RE.match(line)
+            if tm or TOP_HEADING_RE.match(line) or (cur and cur["kind"] == "task" and HEADING_RE.match(line)):
+                cur = {"kind": "task", "id": tm.group(1), "lines": [line]} if tm else {"kind": "text", "lines": [line]}
+                self.segs.append(cur)
+            elif cur is None:
+                cur = {"kind": "text", "lines": [line]}
+                self.segs.append(cur)
+            else:
+                cur["lines"].append(line)
+        for s in self.segs:
+            if s["kind"] == "task":
+                while len(s["lines"]) > 1 and not s["lines"][-1].strip():
+                    s["lines"].pop()
+
+    def milestone_of(self) -> list[str | None]:
+        out, m = [], None
+        for s in self.segs:
+            first = s["lines"][0] if s["lines"] else ""
+            mm = MILESTONE_RE.match(first)
+            if s["kind"] == "text" and mm:
+                m = mm.group(1)
+            elif s["kind"] == "text" and TOP_HEADING_RE.match(first):
+                m = None
+            out.append(m)
+        return out
+
+    def find(self, tid: str) -> int | None:
+        return next((i for i, s in enumerate(self.segs) if s["kind"] == "task" and s["id"] == tid), None)
+
+    def has_milestone(self, m: str) -> bool:
+        return m in self.milestone_of()
+
+    def _end_of(self, m: str) -> int:
+        owners = self.milestone_of()
+        idx = [i for i, o in enumerate(owners) if o == m]
+        return idx[-1] + 1
+
+    def put(self, seg: dict, m: str, before: str | None = None) -> None:
+        if before:
+            self.segs.insert(self.find(before), seg)  # type: ignore[arg-type]
+        else:
+            self.segs.insert(self._end_of(m), seg)
+
+    def move(self, tid: str, m: str, before: str | None = None) -> None:
+        seg = self.segs.pop(self.find(tid))  # type: ignore[arg-type]
+        self.put(seg, m, before)
+
+    def reorder(self, order: list[str]) -> None:
+        slots = sorted(self.find(x) for x in order)  # type: ignore[type-var]
+        segs = {x: self.segs[self.find(x)] for x in order}  # type: ignore[index]
+        for slot, x in zip(slots, order):
+            self.segs[slot] = segs[x]
+
+    def add_milestone(self, m: str, title: str) -> None:
+        owners = self.milestone_of()
+        nums = [(int(o[1:]), i) for i, o in enumerate(owners) if o]
+        at = (max(i for n, i in nums if n == max(n for n, _ in nums)) + 1) if nums else len(self.segs)
+        self.segs.insert(at, {"kind": "text", "lines": [f"## {m} — {title}", ""]})
+
+    def text(self) -> str:
+        out: list[str] = []
+        for s in self.segs:
+            lines = list(s["lines"])
+            if out and out[-1].strip() and lines and (s["kind"] == "task" or TOP_HEADING_RE.match(lines[0])):
+                out.append("")
+            out += lines
+            if s["kind"] == "task":
+                out.append("")
+        return "\n".join(out).rstrip("\n") + "\n"
+
+
+def plan_edit(store: Store, ops: list[dict], text: str) -> tuple[str, list[str], list[str], dict]:
+    """Apply a board draft to state (in memory) and to plan.md text. Every operation is checked against the state
+    as the earlier ones left it; nothing is written here. Returns (new plan text, changes, errors, effects)."""
+    doc = PlanDoc(text)
+    ts, ms = store.tasks(), store.milestones()
+    errors: list[str] = []
+    changes: list[str] = []
+    moved: set[str] = set()
+    effects: dict = {"new_milestones": [], "scheduled": [], "moved": []}
+
+    def gate(m: str) -> str:
+        return ms[m].get("gate", "pending") if m in ms else "missing"
+
+    def open_m(m: str, where: str) -> bool:
+        if m not in ms or not doc.has_milestone(m):
+            errors.append(f"{where}: milestone {m} does not exist")
+            return False
+        if gate(m) != "pending":
+            errors.append(f"{where}: the gate of {m} is {gate(m)}; a closed milestone takes no change")
+            return False
+        return True
+
+    def before_ok(before: str | None, m: str, where: str, tid: str | None = None) -> bool:
+        if not before:
+            return True
+        if before == tid or before not in ts or ts[before]["milestone"] != m or doc.find(before) is None:
+            errors.append(f"{where}: {before} is not a task of {m} in the plan")
+            return False
+        return True
+
+    for n, op in enumerate(ops, 1):
+        where, kind = f"change {n}", op.get("op")
+        if kind == "new_milestone":
+            m, title = op.get("milestone", ""), str(op.get("title") or "").strip()
+            nxt = f"M{max([int(x[1:]) for x in ms] or [0]) + 1}"
+            if effects["new_milestones"]:
+                errors.append(f"{where}: one new milestone per draft")
+            elif m != nxt:
+                errors.append(f"{where}: the new milestone must be {nxt} (milestones are never inserted or renumbered)")
+            elif not title:
+                errors.append(f"{where}: the new milestone needs a title")
+            else:
+                ms[m] = {"title": title, "gate": "pending", "qa_runs": 0}
+                doc.add_milestone(m, title)
+                effects["new_milestones"].append(m)
+                changes.append(f"new milestone {m} — {title}")
+        elif kind == "move_task":
+            tid, m, before = op.get("task", ""), op.get("milestone", ""), op.get("before")
+            t = ts.get(tid)
+            if t is None or t["status"] == "dropped" or doc.find(tid) is None:
+                errors.append(f"{where}: {tid} is not a task of the plan")
+            elif t["status"] != "todo":
+                errors.append(f"{where}: {tid} is {t['status']}; only tasks not started can move")
+            elif t.get("lane") == "hotfix":
+                errors.append(f"{where}: {tid} is a hotfix; it stays in its milestone")
+            elif gate(t["milestone"]) != "pending":
+                errors.append(f"{where}: {tid} is in {t['milestone']}, whose gate is {gate(t['milestone'])}")
+            elif open_m(m, where) and before_ok(before, m, where, tid):
+                old = t["milestone"]
+                doc.move(tid, m, before)
+                t["milestone"] = m
+                moved.add(tid)
+                effects["moved"].append((tid, old, m))
+                changes.append(f"{tid} {old} → {m}" + (f" (before {before})" if before else "") if old != m
+                               else f"{tid} placed before {before}" if before else f"{tid} to the end of {m}")
+        elif kind == "reorder":
+            m, order = op.get("milestone", ""), list(op.get("tasks") or [])
+            if not open_m(m, where):
+                continue
+            if len(set(order)) != len(order):
+                errors.append(f"{where}: a task appears twice in the new order")
+                continue
+            bad = [x for x in order if x not in ts or ts[x]["milestone"] != m or doc.find(x) is None]
+            if bad:
+                errors.append(f"{where}: {bad[0]} is not a task of {m} in the plan")
+                continue
+            fixed = [x for x in order if ts[x]["status"] not in ("todo", "blocked")]
+            if fixed:
+                errors.append(f"{where}: {fixed[0]} is {ts[fixed[0]]['status']}; only tasks not started are reordered")
+                continue
+            doc.reorder(order)
+            changes.append(f"{m}: order {', '.join(order)}")
+        elif kind == "schedule_issue":
+            iid, m, before = op.get("issue", ""), op.get("milestone", ""), op.get("before")
+            i = issues(store).get(iid)
+            if i is None:
+                errors.append(f"{where}: unknown issue {iid}")
+            elif i["status"] != "open":
+                errors.append(f"{where}: {iid} is {i['status']}, not open")
+            elif i.get("class") == "expedite":
+                errors.append(f"{where}: {iid} is expedite; it goes through the hotfix lane (/dev-kit:issue {iid})")
+            elif i.get("class") == "change" or i.get("type") == "change":
+                errors.append(f"{where}: {iid} changes the scope; it goes through the PRD first (/dev-kit:issue {iid})")
+            elif open_m(m, where) and before_ok(before, m, where):
+                info = buffer_info(store, m)
+                if m not in effects["new_milestones"] and info["free"] <= 0 and not op.get("force"):
+                    errors.append(f"{where}: the issue buffer of {m} is full ({info['used']} of {info['capacity']}); "
+                                  "confirm to go over it")
+                    continue
+                ttype = "fix" if i["type"] == "bug" else ("chore" if i.get("class") == "intangible" else "feature")
+                tid = store.new_task_id()
+                t = {"title": i["title"], "milestone": m, "type": ttype, "status": "todo", "deps": [],
+                     "acceptance": i.get("acceptance") or [f"{iid} resolved: {i['title']}"],
+                     "test_notes": f"start with a failing regression test that reproduces {iid}" if i["type"] == "bug"
+                     else f"cover the change with tests; see {iid}",
+                     "files": [], "commit": None, "blocked_reason": None, "source": f"issue:{iid}",
+                     "started_at": None, "done_at": None}
+                ts[tid] = t
+                doc.put({"kind": "task", "id": tid, "lines": task_block(tid, t).rstrip("\n").splitlines()}, m, before)
+                i.setdefault("tasks", []).append(tid)
+                i["status"], i["scheduled_in"] = "scheduled", m
+                effects["scheduled"].append((iid, tid, m))
+                changes.append(f"{iid} → {tid} in {m}" + (" (over the issue buffer)" if info["free"] <= 0 and m not in effects["new_milestones"] else ""))
+        else:
+            errors.append(f"{where}: unknown operation {kind}")
+
+    # a task never sits in an earlier milestone than a task it depends on (done dependencies do not count)
+    rank = {m: int(m[1:]) for m in ms}
+    for tid in sorted(moved):
+        t = ts[tid]
+        for d in sorted(set(t.get("deps", [])) | set(t.get("consumes") or [])):
+            dt = ts.get(d)
+            if dt and dt["status"] != "done" and rank.get(dt["milestone"], 0) > rank[t["milestone"]]:
+                errors.append(f"{tid} depends on {d}, which is in a later milestone ({dt['milestone']})")
+        for x, xt in sorted(ts.items()):
+            if tid in (xt.get("deps") or []) and xt["status"] not in FINISHED and rank.get(xt["milestone"], 0) < rank[t["milestone"]]:
+                errors.append(f"{x} depends on {tid}, which would come after it ({t['milestone']} after {xt['milestone']})")
+    return doc.text(), changes, sorted(set(errors), key=errors.index), effects
+
+
+def _load_draft(store: Store, a: argparse.Namespace) -> tuple[list[dict], str | None]:
+    import dev_worker as dw
+    if a.draft:
+        x = dw.item(store.root, a.draft)
+        if x is None or x.get("action") != "plan_draft":
+            fail(f"{a.draft} is not a plan draft from the board")
+        return x["args"].get("ops") or [], x["args"].get("base")
+    try:
+        raw = json.loads(Path(a.ops_file).read_text(encoding="utf-8") if a.ops_file else a.ops)
+    except (OSError, TypeError, json.JSONDecodeError) as e:
+        fail(f"the operations are not valid JSON: {e}")
+    try:
+        ops = dw.validate("plan_draft", {"ops": raw if isinstance(raw, list) else raw.get("ops")})["ops"]
+    except dw.Invalid as e:
+        fail("; ".join(e.errors))
+    return ops, None
+
+
+def apply_plan_ops(store: Store, ops: list[dict], *, dry_run: bool, as_json: bool, base: str | None = None,
+                   label: str = "plan-apply") -> None:
+    plan_path = store.dev / "plan.md"
+    if not plan_path.exists():
+        fail(f"plan not found: {plan_path}")
+    stale = bool(base) and base != store.state.get("updated_at")
+    phase_before = store.state.get("phase")
+    text, changes, errors, eff = plan_edit(store, ops, plan_path.read_text(encoding="utf-8"))
+    out = {"ok": not errors, "changes": changes, "errors": errors, "state_changed_since_draft": stale, "applied": False}
+    if not errors and not dry_run:
+        try:
+            _, _, problems = sync_plan_text(store, text)
+        except ValueError as e:
+            fail(f"the edited plan does not parse: {e}")
+        if (eff["scheduled"] or eff["moved"] or eff["new_milestones"]) and phase_before in ("usability", "docs", "done"):
+            store.state["phase"] = "implement"
+        tmp = plan_path.with_suffix(".md.tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, plan_path)
+        store.save()
+        write_issues_md(store)
+        for tid, old, new in eff["moved"]:
+            store.event("task", task=tid, transition="move", milestone=new)
+        for iid, tid, m in eff["scheduled"]:
+            issue_event(store, iid, "scheduled")
+        store.log(f"{label}: " + "; ".join(changes))
+        out.update(applied=True, warnings=problems + [f"{x['check']}: {x['id']} - {x['detail']}" for x in xref_report(store)["problems"]])
+    if as_json:
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+    else:
+        if stale:
+            print("the state changed since this draft was made; every change was checked again against the current state")
+        if errors:
+            print("nothing changed:\n  " + "\n  ".join(errors))
+        else:
+            print(("would apply" if dry_run else "applied") + ":\n  " + "\n  ".join(changes))
+            for w in out.get("warnings") or []:
+                print(f"  warning: {w}")
+    if errors:
+        sys.exit(1)
+
+
+def cmd_plan_apply(store: Store, a: argparse.Namespace) -> None:
+    """Apply a plan draft made on the board (or given as JSON): every change is checked first, then all are
+    written together (plan.md and state), or none."""
+    store.load()
+    if sum(bool(x) for x in (a.draft, a.ops, a.ops_file)) != 1:
+        fail("give exactly one of --draft R-nnn, --ops JSON or --ops-file FILE")
+    ops, base = _load_draft(store, a)
+    apply_plan_ops(store, ops, dry_run=a.dry_run, as_json=a.json, base=base)
+
+
+def cmd_move_task(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    op = {"op": "move_task", "task": a.task, "milestone": a.milestone, **({"before": a.before} if a.before else {})}
+    apply_plan_ops(store, [op], dry_run=a.dry_run, as_json=a.json, label="move-task")
+
+
+def cmd_new_milestone(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    apply_plan_ops(store, [{"op": "new_milestone", "milestone": a.milestone, "title": a.title}], dry_run=a.dry_run,
+                   as_json=a.json, label="new-milestone")
+
+
+def cmd_reorder(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    apply_plan_ops(store, [{"op": "reorder", "milestone": a.milestone, "tasks": a.tasks}], dry_run=a.dry_run,
+                   as_json=a.json, label="reorder")
+
+
 # --------------------------------------------------------------------------- cli
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3054,6 +3443,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("add-question"); s.set_defaults(fn=cmd_add_question)
     s.add_argument("text"); s.add_argument("--skill"); s.add_argument("--assumption"); s.add_argument("--impact")
+    s.add_argument("--options", help="answers the board offers, separated by | (2 to 6)")
+    s.add_argument("--recommended", help="the option recommended, first in the board"); s.add_argument("--request")
+    s = sub.add_parser("answer-question"); s.set_defaults(fn=cmd_answer_question)
+    s.add_argument("id"); s.add_argument("--answer", required=True); s.add_argument("--ref")
+    s = sub.add_parser("plan-apply"); s.set_defaults(fn=cmd_plan_apply)
+    s.add_argument("--draft", help="board request id of a plan draft (R-nnn)"); s.add_argument("--ops"); s.add_argument("--ops-file")
+    s.add_argument("--dry-run", action="store_true"); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("move-task"); s.set_defaults(fn=cmd_move_task)
+    s.add_argument("task"); s.add_argument("milestone"); s.add_argument("--before")
+    s.add_argument("--dry-run", action="store_true"); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("new-milestone"); s.set_defaults(fn=cmd_new_milestone)
+    s.add_argument("milestone"); s.add_argument("title")
+    s.add_argument("--dry-run", action="store_true"); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("reorder"); s.set_defaults(fn=cmd_reorder)
+    s.add_argument("milestone"); s.add_argument("tasks", nargs="+")
+    s.add_argument("--dry-run", action="store_true"); s.add_argument("--json", action="store_true")
 
     s = sub.add_parser("gate"); s.set_defaults(fn=cmd_gate)
     s.add_argument("milestone"); s.add_argument("value"); s.add_argument("--note"); s.add_argument("--count-run", action="store_true")

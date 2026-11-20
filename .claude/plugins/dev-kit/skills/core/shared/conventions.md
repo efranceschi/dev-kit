@@ -44,6 +44,8 @@ Paths written as `<KIT>/shared/...` and `<KIT>/scripts/...` are relative to the 
   discovery.md        existing projects only: facts about the code before dev-kit (§16)
   qa/baseline.md      existing projects only: test results at the baseline tag (§16)
   run/  preview/  tmp/   machine-local: board, pids, agent log, queued notifications, local preview worktree, scratch (ignored by .dev/.gitignore)
+  run/inbox/ run/worker*.json run/approvals/ run/questions/   the board's requests to Claude Code (dev_worker.py), the executor's
+                      heartbeat and modes, permission decisions, and the answers offered for each open question
 ```
 
 `.dev/` is versioned with the code except the machine-local folders, which `dev_state.py init` lists in `.dev/.gitignore`.
@@ -76,6 +78,8 @@ Short goal of the milestone (one paragraph).
 Optional fields: `contract:` (what other tasks consume from this one; one line or sub-items), `consumes: T-001` (tasks whose contract it uses; they must also be in `deps`), `shared: yes` (edits a file other tasks touch; runs alone in `--parallel`). `dev_state.py brief` gives a consumer the producer's contract, and `xref` reports a `consumes` without a contract.
 
 Rules: `type` ∈ `feature | fix | chore | test | docs`. `status` ∈ `todo | in_progress | done | blocked | dropped` (`dropped` = removed by a replan with `dev_state.py drop`; kept for history, never counted). `status` in plan.md is informative only; `state.json` wins on conflict. `deps` may be empty (`- deps:`). Tasks should be vertical slices completable in one sitting (roughly 30–90 minutes of work) with tests included.
+
+Order: inside a milestone, `next` takes ready tasks in the order of their sections in `plan.md` (after the cool-down lane and fix tasks); `sync-plan` records it as `seq`. Moving or reordering tasks goes through `dev_state.py move-task`, `reorder` or `plan-apply` (board drafts), which edit `plan.md` and state together, never through a hand edit of one of them.
 
 ## 5. Commits
 

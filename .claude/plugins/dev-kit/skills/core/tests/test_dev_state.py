@@ -1085,5 +1085,155 @@ class TestTips(Base):
         self.assertIn("💡", self.run_state("add-issue", "--type", "bug", "--class", "standard", "--title", "t", "--severity", "low").stdout)
 
 
+class TestBoardPlanEdits(Base):
+    """move-task, new-milestone, reorder and plan-apply: the plan edits a board draft asks for (all or nothing)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.init_with_plan()
+        self.plan = self.root / ".dev" / "plan.md"
+
+    def apply(self, ops, expect=0, *extra):
+        return self.run_state("plan-apply", "--ops", json.dumps(ops), *extra, expect=expect)
+
+    def test_sync_records_plan_order_and_next_follows_it(self) -> None:
+        self.assertEqual([self.state()["tasks"][t]["seq"] for t in ("T-001", "T-002", "T-003")], [1, 2, 3])
+        self.run_state("add-task", "--milestone", "M1", "--title", "Readme", "--type", "docs")  # T-004, end of M1
+        self.run_state("add-task", "--milestone", "M1", "--title", "Lint", "--type", "chore")   # T-005
+        self.assertTrue(self.run_state("next").stdout.startswith("T-001"))
+        # the listed tasks swap places; the others (T-002, T-004) keep theirs
+        self.run_state("reorder", "M1", "T-005", "T-001")
+        order = [l.split()[1] for l in self.plan.read_text().splitlines() if l.startswith("### T-")]
+        self.assertEqual(order, ["T-005", "T-002", "T-004", "T-001", "T-003"])
+        self.assertTrue(self.run_state("next").stdout.startswith("T-005"))
+        self.run_state("start", "T-005")
+        self.run_state("done", "T-005")
+        self.assertTrue(self.run_state("next").stdout.startswith("T-004"))  # T-002 waits on T-001
+
+    def test_new_milestone_and_move(self) -> None:
+        self.apply([{"op": "new_milestone", "milestone": "M3", "title": "Reports"},
+                    {"op": "move_task", "task": "T-003", "milestone": "M3"}])
+        s = self.state()
+        self.assertEqual(s["milestones"]["M3"], {"title": "Reports", "gate": "pending", "qa_runs": 0})
+        self.assertEqual(s["tasks"]["T-003"]["milestone"], "M3")
+        text = self.plan.read_text()
+        self.assertLess(text.index("## M2 — Dashboard"), text.index("## M3 — Reports"))
+        self.assertLess(text.index("## M3 — Reports"), text.index("### T-003"))
+        before = text
+        self.run_state("sync-plan")
+        self.assertEqual(self.plan.read_text(), before)
+        self.assertEqual(self.state()["tasks"]["T-003"]["milestone"], "M3")
+        self.run_state("xref")
+
+    def test_milestones_are_never_inserted(self) -> None:
+        out = self.apply([{"op": "new_milestone", "milestone": "M5", "title": "x"}], 1).stdout
+        self.assertIn("must be M3", out)
+        out = self.apply([{"op": "new_milestone", "milestone": "M3", "title": "a"},
+                          {"op": "new_milestone", "milestone": "M4", "title": "b"}], 1).stdout
+        self.assertIn("one new milestone per draft", out)
+
+    def test_a_bad_change_writes_nothing(self) -> None:
+        plan, state = self.plan.read_text(), (self.root / ".dev" / "state.json").read_text()
+        out = self.apply([{"op": "new_milestone", "milestone": "M3", "title": "Later"},
+                          {"op": "move_task", "task": "T-002", "milestone": "M3"}], 1).stdout
+        self.assertIn("T-003 depends on T-002, which would come after it", out)
+        self.assertEqual(self.plan.read_text(), plan)
+        self.assertEqual((self.root / ".dev" / "state.json").read_text(), state)
+        out = self.run_state("move-task", "T-002", "M2", "--dry-run").stdout
+        self.assertIn("would apply", out)
+        self.assertEqual(self.plan.read_text(), plan)
+
+    def test_what_cannot_move(self) -> None:
+        self.run_state("start", "T-001")
+        self.assertIn("in_progress", self.run_state("move-task", "T-001", "M2", expect=1).stdout)
+        self.run_state("done", "T-001")
+        self.run_state("start", "T-002")
+        self.run_state("done", "T-002")
+        self.run_state("gate", "M1", "passed", "--score", "95")
+        self.run_state("add-task", "--milestone", "M2", "--title", "Charts")  # T-004
+        out = self.run_state("move-task", "T-004", "M1", expect=1).stdout
+        self.assertIn("the gate of M1 is passed", out)
+        self.assertIn("not a task of the plan", self.run_state("move-task", "T-099", "M2", expect=1).stdout)
+        self.assertIn("does not exist", self.run_state("move-task", "T-004", "M7", expect=1).stdout)
+        out = self.run_state("move-task", "T-004", "M2", "--before", "T-001", expect=1).stdout
+        self.assertIn("T-001 is not a task of M2", out)
+        self.run_state("move-task", "T-004", "M2", "--before", "T-003")
+        text = self.plan.read_text()
+        self.assertLess(text.index("### T-004"), text.index("### T-003"))
+
+    def test_schedule_issue_respects_the_buffer(self) -> None:
+        self.run_state("add-issue", "--type", "bug", "--class", "standard", "--title", "Crash", "--severity", "medium")
+        self.run_state("add-issue", "--type", "improvement", "--class", "standard", "--title", "Faster")
+        self.run_state("add-issue", "--type", "bug", "--class", "expedite", "--title", "Down", "--severity", "critical")
+        out = self.apply([{"op": "schedule_issue", "issue": "I-003", "milestone": "M2"}], 1).stdout
+        self.assertIn("hotfix lane", out)
+        self.apply([{"op": "schedule_issue", "issue": "I-001", "milestone": "M2", "before": "T-003"}])
+        s = self.state()
+        self.assertEqual(s["issues"]["I-001"]["status"], "scheduled")
+        self.assertEqual(s["tasks"]["T-004"]["source"], "issue:I-001")
+        self.assertEqual(s["tasks"]["T-004"]["type"], "fix")
+        self.assertLess(self.plan.read_text().index("### T-004"), self.plan.read_text().index("### T-003"))
+        self.assertIn("I-001", (self.root / ".dev" / "issues.md").read_text())
+        # M2 has one planned task: a buffer of 1 (20%, rounded up), now used
+        out = self.apply([{"op": "schedule_issue", "issue": "I-002", "milestone": "M2"}], 1).stdout
+        self.assertIn("issue buffer of M2 is full", out)
+        self.assertIn("over the issue buffer", self.apply([{"op": "schedule_issue", "issue": "I-002", "milestone": "M2", "force": True}]).stdout)
+        self.assertIn("not open", self.apply([{"op": "schedule_issue", "issue": "I-002", "milestone": "M2"}], 1).stdout)
+
+    def test_a_new_milestone_takes_issues_without_a_buffer(self) -> None:
+        self.run_state("add-issue", "--type", "improvement", "--class", "intangible", "--title", "Polish")
+        self.apply([{"op": "new_milestone", "milestone": "M3", "title": "Polish"},
+                    {"op": "schedule_issue", "issue": "I-001", "milestone": "M3"}])
+        self.assertEqual(self.state()["tasks"]["T-004"]["milestone"], "M3")
+        self.assertEqual(self.state()["tasks"]["T-004"]["type"], "chore")
+
+    def test_finished_project_goes_back_to_implement(self) -> None:
+        self.run_state("set", "phase", "done")
+        self.apply([{"op": "new_milestone", "milestone": "M3", "title": "v2"}])
+        self.assertEqual(self.state()["phase"], "implement")
+
+    def test_draft_from_the_board_and_json_output(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        import dev_worker as dw
+        x = dw.submit(self.root, "plan_draft", {"ops": [{"op": "move_task", "task": "T-003", "milestone": "M1"}],
+                                                "base": "2000-01-01T00:00:00Z"})
+        out = json.loads(self.run_state("plan-apply", "--draft", x["id"], "--json").stdout)
+        self.assertTrue(out["ok"] and out["applied"] and out["state_changed_since_draft"])
+        self.assertEqual(out["changes"], ["T-003 M2 → M1"])
+        self.run_state("plan-apply", "--draft", "R-404", expect=1)
+        self.run_state("plan-apply", "--ops", "[]", expect=1)
+        self.run_state("plan-apply", expect=1)
+
+
+class TestQuestionsWithOptions(Base):
+    def setUp(self) -> None:
+        super().setUp()
+        self.init_with_plan()
+
+    def test_options_and_answer(self) -> None:
+        qid = self.run_state("add-question", "Which database?", "--options", "Postgres|SQLite", "--recommended", "Postgres",
+                             "--request", "R-004").stdout.strip()
+        side = json.loads((self.root / ".dev" / "run" / "questions" / f"{qid}.json").read_text())
+        self.assertEqual((side["options"], side["recommended"], side["request"], side["answered"]),
+                         (["Postgres", "SQLite"], "Postgres", "R-004", False))
+        self.assertIn("Open questions: 1", self.run_state("status").stdout)
+        self.run_state("answer-question", qid, "--answer", "SQLite | for now", "--ref", "ADR-007")
+        text = (self.root / ".dev" / "open-questions.md").read_text()
+        open_part, resolved = text.split("## Resolved")
+        self.assertNotIn(qid, open_part)
+        self.assertIn(f"| {qid} |", resolved)
+        self.assertIn("SQLite / for now | ADR-007", resolved)
+        self.assertTrue(json.loads((self.root / ".dev" / "run" / "questions" / f"{qid}.json").read_text())["answered"])
+        self.assertNotIn("Open questions", self.run_state("status").stdout)
+        self.run_state("answer-question", qid, "--answer", "again", expect=1)
+
+    def test_option_rules(self) -> None:
+        self.run_state("add-question", "q", "--options", "only one", expect=1)
+        self.run_state("add-question", "q", "--options", "a|b", "--recommended", "c", expect=1)
+        self.run_state("add-question", "q", "--request", "R-1; x", expect=1)
+        qid = self.run_state("add-question", "plain question").stdout.strip()
+        self.assertFalse((self.root / ".dev" / "run" / "questions" / f"{qid}.json").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""dev_board.py - local, read-only live board for a dev-kit project, served on 127.0.0.1.
+"""dev_board.py - local live board for a dev-kit project, served on 127.0.0.1.
 
 Standard library only. Run with: python3 -I dev_board.py [--root DIR] <subcommand>
 
@@ -8,7 +8,8 @@ Subcommands
           --port N (preferred port, default 8765; falls back to a free one) · --no-open · --open (force a tab
           even when the board was already running) · --idle-min N (auto-stop after N idle minutes, default 120)
           · --host IP (listen address, default 127.0.0.1; 0.0.0.0 or :: shares it with the network, see below;
-          a running board on another address is restarted)
+          a running board on another address is restarted) · --actions auto|on|off (requests to Claude Code from
+          the page; auto = on when listening on loopback only, off when shared with the network)
   stop    stop the board of this project (token-authenticated shutdown, then SIGTERM, then SIGKILL)
   status  print whether the board is running, its URL and PID (--json)
   serve   internal: the server process itself (spawned by start)
@@ -18,7 +19,11 @@ One board per project: .dev/run/board.json holds {pid, port, token, url, root, s
 is alive, its command line is this script serving this root, and /api/ping on the port answers with the
 same token fingerprint. Anything else is a stale record and is removed.
 
-The server never writes to .dev/ except its own files in .dev/run/ and needs the per-run token to shut down.
+The server never writes the project's state, plan or questions: it reads .dev/ and writes only in .dev/run/ - its
+own files and, with actions on, requests to Claude Code through dev_worker.py (the request queue, the modes of the
+executor and the decisions on permission requests). The Claude Code session that executes the requests is the only
+one that changes the project. Every POST needs the per-run token (X-Board-Token), an allowed Host and, when sent,
+the page's own Origin; requests are JSON of at most 16 KB.
 By default it binds 127.0.0.1 and answers Host headers that are localhost or an IP literal (tunnels, forwards),
 refusing host names (DNS rebinding). With --host on a non-loopback address the board is "exposed": every
 request except /api/ping needs the access key (the per-run token) from ?key= - traded for an HttpOnly,
@@ -53,6 +58,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))  # -I drops the script dir
 import dev_state as ds  # noqa: E402
+import dev_worker as dw  # noqa: E402
 
 ASSETS = SCRIPTS.parent / "shared" / "board"
 STATIC = {"/": "index.html", "/index.html": "index.html", "/assets/board.css": "board.css",
@@ -62,7 +68,9 @@ DEFAULT_PORT = 8765
 # of the kit (e.g. before a plugin update) and is restarted by `start` instead of reused.
 CODE_ID = hashlib.sha256(Path(__file__).resolve().read_bytes()).hexdigest()[:12]
 WATCHED = ("state.json", "log.md", "open-questions.md", "costs/summary.json", "plan.md", "run/agents.jsonl",
-           "telemetry.jsonl")
+           "telemetry.jsonl", "run/inbox", "run/worker.json", "run/worker-mode.json", "run/approvals", "run/questions")
+REQ_PATH = re.compile(r"^/api/inbox/(R-\d{3,6})/cancel$")
+APPROVAL_PATH = re.compile(r"^/api/approvals/(A-[0-9a-f]{8,32})$")
 KIT_VERSION = ds.tel.kit_version()  # read once: it is the version of the code this server is actually running
 AGENT_STALE_S = 3600
 LINK_WINDOW_S = 30  # a hook start and a skill spawn of the same agent type this close may be the same agent
@@ -282,6 +290,16 @@ def open_questions(text: str) -> list[dict]:
             out.append({"id": cells[0], "question": row.get("question", ""), "assumption": row.get("assumption used", ""),
                         "by": row.get("raised by", ""), "date": row.get("date", "")})
     return out
+
+
+def question_options(root: Path, qs: list[dict]) -> list[dict]:
+    """Open questions with the answers the board offers (written by add-question --options)."""
+    for q in qs:
+        side = dw._read(root / ".dev" / "run" / "questions" / f"{q['id']}.json") or {}
+        opts = [str(o) for o in side.get("options") or []][:6]
+        q["options"], q["recommended"] = opts, side.get("recommended") if side.get("recommended") in opts else None
+        q["request"] = side.get("request")
+    return qs
 
 
 def log_tail(text: str, n: int = LOG_TAIL) -> list[dict]:
@@ -702,20 +720,37 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "stack": {k: v for k, v in (s.get("stack") or {}).items() if k != "detected_from" and v},
         "progress": store.progress(),
         "current_milestone": ds.current_milestone(store),
-        "next": {"task": nxt, "reason": why},
+        "next": {"task": nxt, "reason": why, "command": ds.next_command(store)},
+        "inbox": {**dw.snapshot(root), "actions": bool((board or {}).get("actions"))},
         "milestones": milestones, "tasks": tasks,
         "reviews": s.get("reviews") or {},
         "quality": ds.quality_cfg(store),
         "lifecycle": lifecycle(s.get("autonomy") or {}),
         "backlog": backlog,
-        "questions": open_questions(_read(store.dev / "open-questions.md")),
+        "questions": question_options(root, open_questions(_read(store.dev / "open-questions.md"))),
         "log": sorted(log_tail(_read(store.dev / "log.md")) + live_feed(events), key=lambda r: _ts(r.get("at")), reverse=True)[:LOG_TAIL],
         "costs": costs,
         "agents": agents, "agent_roles": AGENT_ROLES,
         "kit": KIT_VERSION,
-        "board": {k: board.get(k) for k in ("pid", "port", "url", "started_at", "host", "exposed")} if board else None,
+        "board": {k: board.get(k) for k in ("pid", "port", "url", "started_at", "host", "exposed", "actions")} if board else None,
         "generated_at": ds.now(),
     }
+
+
+def draft_errors(root: Path, args: object) -> list[str]:
+    """A plan draft checked against the current state before it is queued, so the page shows the reasons at once.
+    Read-only: the edit runs on a copy of the state and the plan text, and nothing is written."""
+    try:
+        ops = dw.validate("plan_draft", args)["ops"]
+    except dw.Invalid as e:
+        return e.errors
+    store = ds.Store(root)
+    try:
+        store.load()
+        _, _, errors, _ = ds.plan_edit(store, ops, _read(store.dev / "plan.md"))
+    except (SystemExit, ValueError) as e:
+        return [f"the plan could not be read: {e}"]
+    return errors
 
 
 def signature(root: Path) -> tuple:
@@ -765,10 +800,12 @@ class Board(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, addr, root: Path, token: str, idle_s: int):
+    def __init__(self, addr, root: Path, token: str, idle_s: int, actions: str = "auto"):
         super().__init__(addr, Handler)
         self.root, self.token, self.idle_s = root, token, idle_s
         self.exposed = is_exposed(addr[0])  # listening beyond loopback: every request needs the access key
+        # requests to Claude Code: on by default only when nobody else on the network can reach the page
+        self.actions = actions == "on" or (actions == "auto" and not self.exposed)
         self.record: dict = {}
         self.stopping = threading.Event()
         self.last_activity = time.monotonic()
@@ -909,12 +946,67 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok() or not self._origin_ok():
             return self._json(403, {"ok": False, "error": "forbidden origin"})
         path = self.path.split("?", 1)[0]
-        if path != "/api/shutdown":
+        known = path in ("/api/shutdown", "/api/inbox", "/api/worker/mode") or REQ_PATH.match(path) or APPROVAL_PATH.match(path)
+        if not known:
             return self._json(404, {"ok": False, "error": "not found"})
         if not secrets.compare_digest(self.headers.get("X-Board-Token", ""), self.server.token):
             return self._json(403, {"ok": False, "error": "bad token"})
-        self._json(202, {"ok": True, "stopping": True})
-        self.server.stop()
+        if path == "/api/shutdown":
+            self._json(202, {"ok": True, "stopping": True})
+            self.server.stop()
+            return
+        if not self.server.actions:
+            return self._json(403, {"ok": False, "error": "actions off",
+                                    "hint": "this board only shows the project; start it with --actions on to send requests to Claude Code"})
+        body = self._body()
+        if body is None:
+            return
+        root = self.server.root
+        try:
+            if path == "/api/inbox":
+                action, args = body.get("action"), body.get("args") or {}
+                if action == "plan_draft":
+                    errors = draft_errors(root, args)
+                    if errors:
+                        return self._json(422, {"ok": False, "error": "invalid draft", "errors": errors})
+                return self._json(201, {"ok": True, "item": dw.submit(root, action, args)})
+            if path == "/api/worker/mode":
+                return self._json(200, {"ok": True, "modes": dw.set_mode(root, body.get("paused"), body.get("continuous"))})
+            m = REQ_PATH.match(path)
+            if m:
+                return self._json(200, {"ok": True, "item": dw.cancel(root, m.group(1))})
+            m = APPROVAL_PATH.match(path)
+            dw.decide(root, m.group(1), body.get("decision"))  # type: ignore[union-attr]
+            return self._json(200, {"ok": True})
+        except dw.Invalid as e:
+            return self._json(422, {"ok": False, "error": "invalid request", "errors": e.errors})
+        except dw.QueueFull as e:
+            return self._json(429, {"ok": False, "error": str(e)})
+        except KeyError:
+            return self._json(404, {"ok": False, "error": "unknown request"})
+        except ValueError as e:
+            return self._json(409, {"ok": False, "error": str(e)})
+
+    def _body(self) -> dict | None:
+        """The JSON object of a POST, or None after answering the error (wrong type, too large, not JSON)."""
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            self._json(415, {"ok": False, "error": "send application/json"})
+            return None
+        try:
+            n = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            n = -1
+        if n < 0 or n > dw.MAX_BODY:
+            self._json(413, {"ok": False, "error": f"a request is at most {dw.MAX_BODY} bytes"})
+            return None
+        try:
+            obj = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            obj = None
+        if not isinstance(obj, dict):
+            self._json(400, {"ok": False, "error": "the body must be a JSON object"})
+            return None
+        return obj
 
     def _events(self):
         srv = self.server
@@ -950,23 +1042,23 @@ class Handler(BaseHTTPRequestHandler):
                 srv.clients -= 1
 
 
-def bind(host: str, port: int, root: Path, token: str, idle_s: int) -> Board:
+def bind(host: str, port: int, root: Path, token: str, idle_s: int, actions: str = "auto") -> Board:
     cls = Board6 if ":" in host else Board
     try:
-        return cls((host, port), root, token, idle_s)
+        return cls((host, port), root, token, idle_s, actions)
     except OSError:
-        return cls((host, 0), root, token, idle_s)
+        return cls((host, 0), root, token, idle_s, actions)
 
 
 def cmd_serve(root: Path, a: argparse.Namespace) -> int:
     token = os.environ.pop("DEV_BOARD_TOKEN", "") or secrets.token_urlsafe(24)
     host = a.host or "127.0.0.1"
-    srv = bind(host, a.port, root, token, a.idle_min * 60)
+    srv = bind(host, a.port, root, token, a.idle_min * 60, a.actions or "auto")
     port = srv.server_address[1]
     conn = connect_addr(host)
     url = f"http://{hostport(conn, port)}/"
     srv.record = {"pid": os.getpid(), "port": port, "token": token, "url": url, "root": str(root),
-                  "host": host, "connect": conn, "exposed": srv.exposed,
+                  "host": host, "connect": conn, "exposed": srv.exposed, "actions": srv.actions,
                   "code": CODE_ID, "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     if srv.exposed:
         srv.record["open_url"] = f"{url}?key={token}"
@@ -1018,6 +1110,8 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
             why = "the running board was started by another version of the kit"
         elif rec and a.host and rec.get("host", "127.0.0.1") != a.host:
             why = f"the running board listens on {rec.get('host', '127.0.0.1')}, not {a.host}"
+        elif rec and a.actions and a.actions != "auto" and bool(rec.get("actions")) != (a.actions == "on"):
+            why = f"the running board has actions {'on' if rec.get('actions') else 'off'}"
         if why:
             code, msg = stop_locked(root)  # replace it rather than reuse it
             print(f"{why}; {msg}")
@@ -1032,7 +1126,8 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
             return 0
         log = open(run_dir(root) / "board.log", "a", encoding="utf-8")
         cmd = [sys.executable, "-I", str(Path(__file__).resolve()), "--root", str(root), "serve",
-               "--port", str(a.port), "--idle-min", str(a.idle_min), "--host", a.host or "127.0.0.1"]
+               "--port", str(a.port), "--idle-min", str(a.idle_min), "--host", a.host or "127.0.0.1",
+               "--actions", a.actions or "auto"]
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=str(root),
                                 start_new_session=True, close_fds=True)
         log.close()
@@ -1151,6 +1246,8 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--host", type=parse_bind, default=None,
                        help="IP address to listen on (default 127.0.0.1). 0.0.0.0 or :: shares the board with the "
                             "network: every request then needs the access key printed at start")
+        s.add_argument("--actions", choices=["auto", "on", "off"], default=None,
+                       help="let the page send requests to Claude Code (auto: on for loopback, off when shared)")
         if name == "start":
             g = s.add_mutually_exclusive_group()
             g.add_argument("--no-open", action="store_true", help="do not open a browser tab")
