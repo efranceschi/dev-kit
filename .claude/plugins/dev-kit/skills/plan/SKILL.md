@@ -31,6 +31,8 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 ## `replan`
 Start with `dev_state.py stale`: replan against the current PRD, architecture and design, and update any of them that is itself stale first. Keep done/in_progress tasks untouched; rewrite only `todo` tasks of remaining milestones; new tasks get new ids; mark dropped tasks by deleting their section and running `dev_state.py drop T-xxx --reason "dropped in replan ADR-nnn"` (state keeps them for history; they no longer count for the milestone, `next` or `release`).
 
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:review plan`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+
 ## Existing projects (brownfield)
 
 When state has `brownfield` (`conventions.md` §16): in `maintenance` mode `plan.md` is just `# Plan` and `## M<n> — Maintenance` (`n` = `brownfield.first_milestone`) with no tasks (issues fill it, and each passed gate makes the next issue open `M<n+1> — Maintenance`); record `dev_state.py review plan n/a --note "maintenance mode"`. In `replan` after switching from `maintenance` to `feature`, keep the maintenance milestones and their tasks and add the new milestones after the last one (the switch reopened review `plan`, so it is reviewed again). Task `files` follow the existing layout from `.dev/discovery.md` §4.

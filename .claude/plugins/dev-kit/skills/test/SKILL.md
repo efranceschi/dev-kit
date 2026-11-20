@@ -25,6 +25,8 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 - Behaviour over implementation; one reason to fail per test; deterministic data.
 - Do not change production code for testability without a note in the report; keep public contracts stable.
 
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:implement`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+
 ## Existing projects (brownfield)
 
 When state has `brownfield` (`conventions.md` §16): in `plan` mode, `test-plan.md` first documents what exists (framework, layout, commands, coverage and failures from `.dev/qa/baseline.md`) and then proposes only the gaps for `new` ACs; never replace the project's framework or move existing tests. Coverage targets apply to code changed since `brownfield.baseline_ref`. Characterisation tests for legacy behaviour that a `new` task touches are welcome (name the `existing` AC they pin down).

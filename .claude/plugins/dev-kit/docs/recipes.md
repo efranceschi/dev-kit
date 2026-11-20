@@ -78,6 +78,12 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 1. /dev-kit:settings <what you want, in words> (level, quality bar, rounds, reuse, task checks, buffer, deploys, tips)
 2. /dev-kit:interview --gaps to revisit product decisions
 
+## See progress in Claude Code itself (tips, status line, notifications)
+
+1. /dev-kit:settings status line (or spinner tips, notifications, session title) turns each one on or off
+2. Spinner tips and the status line go to .claude/settings.local.json, which stays out of git; tips show from the next session
+3. After each skill, the greyed-out suggestion in the prompt is usually the next /dev-kit command: press Tab or Right arrow, then Enter
+
 ## Watch the project on a board (or share it)
 
 1. /dev-kit:board opens the live board in the browser (one server per project)

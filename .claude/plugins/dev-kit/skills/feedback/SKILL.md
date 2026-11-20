@@ -37,3 +37,5 @@ This skill only reads the log and writes two files under `.dev/feedback/`. It do
 - Read-only apart from the two files in `.dev/feedback/` and the two log events of this skill.
 - Never change a grade, and never add data that is not in the log.
 - Never include project content; the export already excludes it, and the report must not reintroduce it.
+
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).

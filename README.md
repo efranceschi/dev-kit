@@ -7,10 +7,10 @@ You answer one thorough interview. The kit then writes the PRD, architecture and
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/dev-kit-board-dark.png">
-    <img src=".github/assets/dev-kit-board.png" alt="dev-kit board of a sample project: one blocked task and one open question waiting for you, three implementer agents and a test auditor running in parallel, then the sprint goal, progress and kanban, updated in real time in the browser" width="900">
+    <img src=".github/assets/dev-kit-board.png" alt="dev-kit board of a sample project: the project phase as a row of chevrons (step 7 of 11, implement), the current sprint between its neighbours with its goal and progress, a highlighted Needs you strip with one blocked task and one open question, and the milestone stages as chevrons with three implementer agents and a test auditor running in the Build stage" width="900">
   </picture>
   <br>
-  <sub><code>/dev-kit:board</code> shows the build in <b>real time</b> in your browser: what needs you, what is running, the sprint kanban, burndown and quality gates.</sub>
+  <sub><code>/dev-kit:board</code> shows the build in <b>real time</b> in your browser: the project phase, what needs you, the stage of the milestone with what is running in it, then the sprint kanban, quality gates, burndown and activity.</sub>
 </p>
 
 ## What it does

@@ -24,6 +24,8 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 6. **CLAUDE.md**: add or update a short section "dev-kit" telling future sessions that state lives in `.dev/`, how to resume (`/dev-kit:start`), the test/lint commands and the commit convention. Do not duplicate the whole brief.
 7. Verify every command in the docs actually runs (`--help` or dry run) and every file path exists. `dev_state.py set phase docs` if earlier; summarise files written. Next: `review docs` (the docs reviewer executes the commands and checks the guide against the UI), then `release`.
 
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:review docs`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+
 ## Existing projects (brownfield)
 
 When state has `brownfield` (`conventions.md` §16): step 5 keeps the existing CHANGELOG file and format and covers every commit (not only task commits) in the range from the later of the latest tag and `brownfield.baseline_ref` to `HEAD`; the release version follows the project's version source. Steps 2–4 merge into existing files and keep sections the kit did not write; the user guide covers `new` journeys and links to the existing guide for the rest.

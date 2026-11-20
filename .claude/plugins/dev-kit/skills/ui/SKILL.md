@@ -32,6 +32,8 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 - Every screen in `ux-flows.md` §4 has a spec; every component referenced by a spec is in the inventory.
 - Visual choices follow the brief's tone and density; when the brief delegated identity, pick a restrained, consistent system over novelty.
 
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:review design`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+
 ## Existing projects (brownfield)
 
 When state has `brownfield` (`conventions.md` §16): step 2 uses the UI library already in the code; step 3 extracts the existing tokens (theme files, CSS variables, Tailwind config) and documents them with computed contrast instead of defining new ones, adding tokens only when a `new` screen needs them; step 4 lists existing components with their file paths and specifies only new or changed ones; step 6 specs only `new`/`changed` screens (`existing` ones keep the one-line reference from `ux-flows.md`). Contrast or accessibility problems in inherited tokens become `intangible` issues (`dev_state.py add-issue`), not redesigns.

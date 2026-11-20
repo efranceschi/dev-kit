@@ -67,3 +67,5 @@ Verdict, overall score vs cut-off, the dimension table (one line each), the loca
 - Agents are read-only; every state change happens here. Never pass a gate by hand or with failing tests.
 - Fix tasks must be concrete (file, condition to verify) so `implement` can execute them without re-reading the report.
 - A re-run uses fresh auditor instances that receive the previous findings only to verify them (delta mode), never the previous verdicts; escalating model or effort is allowed only as `conventions.md` §9 says, and never silently.
+
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:implement` for a fix round, or `/dev-kit:implement` / `/dev-kit:usability` after a passed gate. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).

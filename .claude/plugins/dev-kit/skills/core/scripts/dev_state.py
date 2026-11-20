@@ -43,7 +43,8 @@ Subcommands
   preview M     record the local deploy of a milestone (--url --sha [--pid]) or --stopped
   set KEY VAL   set language | phase | project | stack.<field> | autonomy.<field>[.<sub>] (nested keys merge;
                 autonomy.level applies its preset; incl. autonomy.pause_policy.<point>)
-  status        human (--short) or --json view; --quiet-if-missing for hooks
+  status        human (--short) or --json view; --next prints only the next command; --quiet-if-missing for hooks
+  notify TEXT   queue a desktop notification shown at the end of the turn (only with autonomy.ui.notify on)
 
 Exit codes: 0 ok · 1 usage/invalid transition · 2 state not found · 3 nothing to do (next)
 """
@@ -112,6 +113,10 @@ DEFAULT_AUTONOMY = {
     "cooldown": {"enabled": False, "max_tasks": 5},
     # Contextual tips (shared/tips.json): on (each tip at most twice) | off | always.
     "tips": "on",
+    # Claude Code interface (conventions.md §15): offered = start already asked once; spinner_tips and statusline are
+    # written to the project's .claude/settings.local.json by dev_ui.py; title = session title and one-line banner at
+    # session start (hook); notify = desktop notification at the end of the turn for gates, blocks and autopilot.
+    "ui": {"offered": False, "spinner_tips": False, "statusline": False, "title": True, "notify": False},
     # Cheap checks at the end of each task (conventions.md §7): ui = copy and static a11y agents on tasks that touch
     # UI files (haiku) | all = also on other tasks with user-facing strings | off = implementer self-check only.
     "task_checks": "ui",
@@ -362,6 +367,10 @@ def check_autonomy_field(field: str, val: object) -> object:
     elif field == "quality":
         if not isinstance(val, dict):
             fail("autonomy.quality must be an object")
+    elif field == "ui":
+        if not isinstance(val, dict) or set(val) - set(UI_KEYS) or not all(isinstance(v, bool) for v in val.values()):
+            fail(f"autonomy.ui must be an object with true/false values for {', '.join(UI_KEYS)}")
+        val = {**DEFAULT_AUTONOMY["ui"], **val}
     return val
 
 
@@ -397,6 +406,7 @@ LANES = ("hotfix", "cooldown")
 CLASS_RANK = {"standard": 0, "intangible": 1}
 SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 TIPS_MODES = ("on", "off", "always")
+UI_KEYS = ("offered", "spinner_tips", "statusline", "title", "notify")
 
 
 MILESTONE_RE = re.compile(r"^##\s+(M\d+)\s*(?:[—–-]+\s*)?(.*?)\s*$")
@@ -698,7 +708,10 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
         if level is not None:
             apply_level(store.state, level)  # preset first; explicit fields below override it
         for f in list(patch):
-            if f not in ("pause_policy", "production", "local_deploy"):
+            if f == "ui":
+                check_autonomy_field(f, patch[f])
+                patch[f] = {**DEFAULT_AUTONOMY["ui"], **auto.get("ui", {}), **patch[f]}
+            elif f not in ("pause_policy", "production", "local_deploy"):
                 patch[f] = check_autonomy_field(f, patch[f])
         if "pause_policy" in patch:
             check_pause_policy(patch["pause_policy"])
@@ -1007,6 +1020,7 @@ def cmd_block(store: Store, a: argparse.Namespace) -> None:
     store.log(f"block {a.task}: {a.reason}")
     store.event("task", task=a.task, transition="block", type=t.get("type"), milestone=t.get("milestone"))
     print(f"{a.task} blocked: {a.reason}")
+    queue_notice(store, f"dev-kit · {a.task} blocked · {next_command(store)}")
 
 
 def cmd_unblock(store: Store, a: argparse.Namespace) -> None:
@@ -1216,6 +1230,9 @@ def cmd_gate(store: Store, a: argparse.Namespace) -> None:
                 force_source=("policy" if (a.note or "").startswith("policy:") else "user") if a.force and a.value == "passed" else None)
     store.log(f"gate {a.milestone} {a.value}" + (f" score={a.score}" if a.score is not None else "") + (f" ({a.note})" if a.note else ""))
     print(f"{a.milestone} gate: {a.value}" + (f" (score {a.score})" if a.score is not None else ""))
+    if a.value == "passed" or a.count_run:
+        queue_notice(store, f"dev-kit · {a.milestone} gate {a.value}" + (f" ({a.score})" if a.score is not None else "")
+                     + f" · {next_command(store)}")
     if a.value == "passed":
         print_tip(store, "gate_passed", a)
 
@@ -2647,6 +2664,8 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
         elif sub:
             # nested key, e.g. autonomy.quality.min_overall or autonomy.production.when: merge into the object
             cur = auto.get(top)
+            if cur is None and isinstance(DEFAULT_AUTONOMY.get(top), dict):  # object added in a later kit version
+                cur = _copy(DEFAULT_AUTONOMY[top])
             if not isinstance(cur, dict):
                 fail(f"autonomy.{top} is not an object; set it as a whole")
             node = merged = _copy(cur)
@@ -2657,7 +2676,7 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
                     fail(f"autonomy.{field}: {part} is not an object")
             node[parts[-1]] = parsed
             store_autonomy_object(auto, top, merged)
-        elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy"):
+        elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy", "ui"):
             if top == "local_deploy" and not isinstance(parsed, dict):
                 parsed = {"mode": val}
             elif top == "model_policy" and not isinstance(parsed, dict):
@@ -2697,6 +2716,8 @@ def store_autonomy_object(auto: dict, top: str, obj: dict) -> None:
         obj = {**DEFAULT_AUTONOMY["local_deploy"], **obj}
     elif top in ("cooldown", "quality"):
         check_autonomy_field(top, obj)
+    elif top == "ui":
+        obj = check_autonomy_field(top, obj)
     auto[top] = obj
 
 
@@ -2730,6 +2751,73 @@ def render_short(store: Store) -> str:
     return "\n".join([l1, l2, l3])
 
 
+PHASE_COMMAND = {"init": "interview", "interview": "interview", "prd": "prd", "architecture": "architecture",
+                 "ux": "ux", "ui": "ui", "plan": "plan", "usability": "usability", "done": "backlog"}
+
+
+def next_command(store: Store) -> str:
+    """The one command the user most likely runs next. Shown by the status line and the session banner, and the
+    last line of a skill's report (conventions.md §15), so Claude Code's prompt suggestion (Tab / Right arrow) offers it."""
+    s = store.state
+    phase = s.get("phase") or "interview"
+    ts = store.tasks()
+    revs = s.get("reviews") or {}
+
+    def reviewed(name: str) -> bool:
+        return (revs.get(name) or {}).get("verdict") in ("pass", "n/a")
+
+    hot = sorted((t for t, v in ts.items() if v.get("lane") == "hotfix" and v["status"] in ("todo", "in_progress")),
+                 key=lambda t: int(t[2:]))
+    if hot:
+        return f"/dev-kit:implement {hot[0]}"
+    if phase == "architecture" and (store.dev / "prd.md").exists() and not reviewed("prd"):
+        return "/dev-kit:review prd"
+    if phase == "plan" and (store.dev / "design" / "ui-spec.md").exists() and not reviewed("design"):
+        return "/dev-kit:review design"
+    if phase in ("implement", "qa"):
+        if (store.dev / "plan.md").exists() and not reviewed("plan") and not any(v["status"] == "done" for v in ts.values()):
+            return "/dev-kit:review plan"
+        if store.in_progress():
+            return "/dev-kit:implement"
+        for m in store.milestone_order():
+            live = [v for v in ts.values() if v["milestone"] == m and v["status"] != "dropped"]
+            if live and store.milestones()[m].get("gate", "pending") == "pending":
+                if all(v["status"] == "done" for v in live):
+                    return f"/dev-kit:qa {m}"
+                break
+        tid, _ = pick_next(store, None)
+        if tid:
+            return "/dev-kit:implement"
+        if any(v["status"] == "blocked" for v in ts.values()) or count_open_questions(store):
+            return "/dev-kit:interview --gaps"
+        if ts and all(v["status"] in FINISHED for v in ts.values()):
+            has_ui = (store.dev / "design" / "ui-spec.md").exists()
+            return "/dev-kit:usability" if has_ui and not reviewed("ux") else "/dev-kit:docs"
+        return "/dev-kit:plan" if not ts else "/dev-kit:backlog"
+    if phase == "docs":
+        if reviewed("docs"):
+            return "/dev-kit:release"
+        return "/dev-kit:review docs" if "docs" in revs or (store.root / "README.md").exists() else "/dev-kit:docs"
+    return f"/dev-kit:{PHASE_COMMAND.get(phase, 'start')}"
+
+
+def queue_notice(store: Store, text: str) -> None:
+    """Queue a desktop notification; the Stop hook (dev_agent_hook.py) shows it at the end of the turn. Only when
+    autonomy.ui.notify is on. Text only, never project data beyond ids and scores."""
+    if not (store.state.get("autonomy", {}).get("ui") or {}).get("notify"):
+        return
+    run = store.dev / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    clean = re.sub(r"[\x00-\x1f\x7f]", " ", text).strip()[:200]
+    with (run / "notify.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": now(), "text": clean}, ensure_ascii=False) + "\n")
+
+
+def cmd_notify(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    queue_notice(store, a.text)
+
+
 def count_open_questions(store: Store) -> int:
     path = store.dev / "open-questions.md"
     if not path.exists():
@@ -2751,11 +2839,15 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
             return
         fail(f"no state at {store.path}", 2)
     store.load()
+    if a.next:
+        print(next_command(store))
+        return
     if a.json:
         out = dict(store.state)
         out["progress"] = store.progress()
         tid, why = pick_next(store, None)
         out["next"] = {"task": tid, "reason": why}
+        out["next_command"] = next_command(store)
         out["open_questions"] = count_open_questions(store)
         out["stale"] = stale_report(store)
         print(json.dumps(out, indent=2, ensure_ascii=False))
@@ -2964,8 +3056,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("tips"); s.set_defaults(fn=cmd_tips); s.add_argument("--reset", action="store_true")
     s = sub.add_parser("status"); s.set_defaults(fn=cmd_status)
     s.add_argument("--short", action="store_true"); s.add_argument("--json", action="store_true")
+    s.add_argument("--next", action="store_true", help="print only the next command (status line, session banner)")
     s.add_argument("--quiet-if-missing", action="store_true")
     s.add_argument("--head-migration", help="current migration head in the checkout, to show how far production is behind")
+    s = sub.add_parser("notify"); s.set_defaults(fn=cmd_notify); s.add_argument("text")
     return p
 
 

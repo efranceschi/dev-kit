@@ -40,12 +40,14 @@
 | **output file** | Where an auditor writes its result (given in its prompt); the kit validates it, and the agent answers in a few lines. |
 | **park** | Pause-point action: never wait; record the question with the recommended answer, block only what depends on it and continue (the default of most points under the unattended level, available at any level). |
 | **pause policy** | What the kit does at each pause point: ask, preauthorize within a limit, apply the recommendation, or park. |
+| **prompt suggestion** | Claude Code's greyed-out guess of your next prompt; every dev-kit report ends with the next command so it is offered. Tab or Right arrow takes it. |
 | **QA harness** | Playwright with mocks that captures every screen and state (qa:shots) and runs axe (qa:a11y); added by plan to the first UI milestone. |
 | **recorded test run** | A green suite stored per commit; the test auditor and the gate reuse it until the code it covers changes. |
 | **session log** | .dev/telemetry.jsonl: structured, high-level events of the run, without project data. |
 | **shared baseline** | Suite, lint, type-check, data smoke and screenshots run once per QA round and read by every auditor. |
 | **slot** | Per-agent isolation number that gives each agent its own port, database and scratch folder. |
 | **stale artifact** | A PRD, architecture, design or plan whose sources changed after it was last updated; review brings it up to date before any reviewer runs. |
+| **status line** | Line under the Claude Code prompt; the dev-kit one shows phase, milestone progress, the running task and the next command. |
 | **task checks** | Self-check plus cheap copy and static a11y agents at the end of each UI task (autonomy.task_checks), so the gate confirms instead of discovers. |
 | **task contract** | What a task provides to others (table, route, fields), written in plan.md as contract: and given to the tasks that consume it. |
 | **work ledger** | Record of verified work with the fingerprint of its inputs; only unchanged work that was clean is reused, with spot checks. |

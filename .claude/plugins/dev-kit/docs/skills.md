@@ -12,8 +12,8 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 | [`help`](#help) | Help inside Claude Code: what to do next, how each skill works, recipes and concepts. |
 | [`interview`](#interview) | Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md with the autonomy policy. |
 | [`status`](#status) | Read-only dashboard: phase, milestones, gates, scores, issues, preview, production drift, cost so far. |
-| [`board`](#board) | Live Scrum board in the browser: what needs you, what is running now, the sprint kanban with live agents and task details, burndown, velocity, quality and backlog; light or dark; local, or shared on your network with an access link. |
-| [`settings`](#settings) | Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips. |
+| [`board`](#board) | Live Scrum board in the browser: the sprint window (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA gate, fixes, smoke, deploy, closed) with what runs in each, the sprint kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link. |
+| [`settings`](#settings) | Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips, status line and notifications. |
 
 ## Specify
 
@@ -156,7 +156,7 @@ Read-only dashboard: phase, milestones, gates, scores, issues, preview, producti
 
 ### board
 
-Live Scrum board in the browser: what needs you, what is running now, the sprint kanban with live agents and task details, burndown, velocity, quality and backlog; light or dark; local, or shared on your network with an access link.
+Live Scrum board in the browser: the sprint window (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA gate, fixes, smoke, deploy, closed) with what runs in each, the sprint kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link.
 
 **When:** When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.
 
@@ -472,11 +472,11 @@ Everything pending: hotfix, issue queue, next buffer, tasks, parked questions, d
 
 ### settings
 
-Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips.
+Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips, status line and notifications.
 
 **When:** You want the kit more or less autonomous or strict, to turn something on or off, or to see the configuration.
 
-**Usage:** `/dev-kit:settings [show | <what to change, in words> | tips off|on|always|reset]`
+**Usage:** `/dev-kit:settings [show | <what to change, in words> | tips off|on|always|reset | status line | notifications]`
 
 | Argument | Meaning |
 |---|---|

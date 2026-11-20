@@ -30,3 +30,5 @@ Let `DC` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root 
 - Read-only: the only files written are `.dev/costs/` (by `dev_cost.py`) and the CSV on request.
 - Never edit the price table on your own and never present the estimate as a real charge.
 - Never show transcript content; only the numbers in the report.
+
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).

@@ -103,7 +103,7 @@ class TestEnglishOnly(KitCopy):
 
     def test_tips_and_help_are_english_only(self) -> None:
         tips = json.loads((KIT / "skills/core/shared/tips.json").read_text(encoding="utf-8"))["tips"]
-        self.assertTrue(all(set(t) <= {"id", "context", "en", "command"} for t in tips))
+        self.assertTrue(all(set(t) <= {"id", "context", "en", "command", "spinner"} for t in tips))
         self.assertNotIn("pt-BR", (KIT / "skills/core/shared/help.json").read_text(encoding="utf-8"))
 
 

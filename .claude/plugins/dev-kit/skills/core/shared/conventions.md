@@ -43,7 +43,7 @@ Paths written as `<KIT>/shared/...` and `<KIT>/scripts/...` are relative to the 
   tips-seen.json      how many times each tip was shown (§15)
   discovery.md        existing projects only: facts about the code before dev-kit (§16)
   qa/baseline.md      existing projects only: test results at the baseline tag (§16)
-  run/  preview/  tmp/   machine-local: board, pids, agent log, local preview worktree, scratch (ignored by .dev/.gitignore)
+  run/  preview/  tmp/   machine-local: board, pids, agent log, queued notifications, local preview worktree, scratch (ignored by .dev/.gitignore)
 ```
 
 `.dev/` is versioned with the code except the machine-local folders, which `dev_state.py init` lists in `.dev/.gitignore`.
@@ -272,6 +272,8 @@ Every skill keeps a structured, high-level log of the session, for the user to f
 - **State:** `issues` in `state.json` and `.dev/issues.md` (generated). Tasks created for an issue carry `source: issue:I-nnn`; the issue moves `open → scheduled → in_progress → done` automatically with its tasks (`wontfix` and `duplicate` close it by hand).
 - **Overuse:** more than 2 hotfixes in one milestone is reported by `backlog` as a warning.
 - **Tips:** `dev_state.py tip <context>` returns one short tip from `shared/tips.json` (each at most twice; `autonomy.tips: on | off | always`; `tips --reset`). Scripts append it to their human output (`💡 …`); skills end their report with at most one tip, never inside a question and never invented.
+- **Next command last:** a skill's final report ends with the recommended next command, alone on the last line, in full and in an inline code span (`` `/dev-kit:qa M1` ``; `dev_state.py status --next` gives it when in doubt), after the tip. One command, never two; no question after it when the next step is clear. Claude Code predicts the user's next prompt from the conversation and shows it greyed out in the input (Tab or Right arrow takes it), so the command written last is the one it offers. No setting or hook can set that suggestion directly; this rule is how the kit steers it. When the next step needs a choice from the user, ask it (AskUserQuestion) instead.
+- **Claude Code interface** (`autonomy.ui`, changed by `settings`, offered once by `start`): a plugin cannot ship settings, so `dev_ui.py apply` writes to the project's personal `.claude/settings.local.json` (kept out of git) only what belongs to the kit: spinner tips (the `tips.json` entries with `spinner`, translated, each starting with `dev-kit: `) shown while Claude works, and a status line (`dev_statusline.py`: phase · milestone progress · running task · blocked · open questions · next command). A status line of the user's own is never replaced. The plugin's hooks add, without settings: a session title and a one-line banner with the next command at session start (`title`, on by default), and desktop notifications at the end of the turn for gates, blocks and the end of autopilot (`notify`; `dev_state.py notify "<text>"` queues one). All of it is display only; nothing depends on it.
 
 ## 16. Existing projects (brownfield)
 

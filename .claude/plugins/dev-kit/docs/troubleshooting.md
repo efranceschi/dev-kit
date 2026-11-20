@@ -44,3 +44,7 @@
 | You do not know which skill to use | — | `/dev-kit:help <your question>` |
 
 You never need to run the kit's scripts yourself: every fix above goes through a skill. `/dev-kit:help <question>` finds the right one.
+| The dev-kit status line does not appear | The project already had its own `statusLine` (kept), hooks or the status line are off (`disableAllHooks`), or a higher settings level sets one | `/dev-kit:settings` shows what is on; `/status` in Claude Code lists the settings files it loaded |
+| No dev-kit tips under the spinner | Tips load at session start, or `spinnerTipsEnabled` is false | Start a new session; turn tips on in `/config` (Show tips) and with `/dev-kit:settings` |
+| The grey suggestion is not the next command | Claude Code predicts it and skips it in plan mode, after an error, with a cold cache or with suggestions off | Type the command shown on the last line of the report (or in the status line); `promptSuggestionEnabled` turns suggestions back on |
+| No desktop notification | Notifications are off, or the terminal ignores OSC 9 | `/dev-kit:settings` notifications on; the same text also shows as a line in the chat at the end of the turn |

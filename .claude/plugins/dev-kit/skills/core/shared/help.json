@@ -173,7 +173,7 @@
     {
       "name": "board",
       "category": "start",
-      "one_line": "Live Scrum board in the browser: what needs you, what is running now, the sprint kanban with live agents and task details, burndown, velocity, quality and backlog; light or dark; local, or shared on your network with an access link.",
+      "one_line": "Live Scrum board in the browser: the sprint window (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA gate, fixes, smoke, deploy, closed) with what runs in each, the sprint kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link.",
       "when": "When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.",
       "args": [
         {
@@ -649,7 +649,7 @@
     {
       "name": "settings",
       "category": "start",
-      "one_line": "Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips.",
+      "one_line": "Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips, status line and notifications.",
       "when": "You want the kit more or less autonomous or strict, to turn something on or off, or to see the configuration.",
       "args": [
         {
@@ -1053,6 +1053,27 @@
       ]
     },
     {
+      "id": "claude-ui",
+      "title": "See progress in Claude Code itself (tips, status line, notifications)",
+      "topics": [
+        "status line",
+        "statusline",
+        "spinner",
+        "tips while waiting",
+        "notification",
+        "notify",
+        "suggestion",
+        "tab",
+        "right arrow",
+        "session title"
+      ],
+      "steps": [
+        "/dev-kit:settings status line (or spinner tips, notifications, session title) turns each one on or off",
+        "Spinner tips and the status line go to .claude/settings.local.json, which stays out of git; tips show from the next session",
+        "After each skill, the greyed-out suggestion in the prompt is usually the next /dev-kit command: press Tab or Right arrow, then Enter"
+      ]
+    },
+    {
       "id": "board",
       "title": "Watch the project on a board (or share it)",
       "topics": [
@@ -1284,6 +1305,14 @@
     {
       "term": "expedite",
       "definition": "The class of service for a critical/high bug in delivered work: a hotfix task that runs before everything (WIP 1)."
+    },
+    {
+      "term": "prompt suggestion",
+      "definition": "Claude Code's greyed-out guess of your next prompt; every dev-kit report ends with the next command so it is offered. Tab or Right arrow takes it."
+    },
+    {
+      "term": "status line",
+      "definition": "Line under the Claude Code prompt; the dev-kit one shows phase, milestone progress, the running task and the next command."
     }
   ],
   "agents_called_by": {

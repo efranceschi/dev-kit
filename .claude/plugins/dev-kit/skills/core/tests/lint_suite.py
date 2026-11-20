@@ -256,7 +256,7 @@ def cli_surface(script: Path) -> dict | None:
     return out
 
 
-ALIASES = {"DS": "dev_state.py", "SC": "dev_score.py", "DC": "dev_cost.py", "DB": "dev_board.py"}
+ALIASES = {"DS": "dev_state.py", "SC": "dev_score.py", "DC": "dev_cost.py", "DB": "dev_board.py", "UI": "dev_ui.py"}
 CODE_SPAN = re.compile(r"`([^`\n]+)`")
 
 

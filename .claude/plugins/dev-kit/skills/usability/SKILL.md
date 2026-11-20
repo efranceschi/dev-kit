@@ -27,6 +27,8 @@ Let `DS` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root
 Before `skill_end`, run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root "${CLAUDE_PROJECT_DIR}" ingest` (token usage per stage, `conventions.md` §14).
 9. Offer to promote relevant deferred findings with `/dev-kit:issue --from <F-id> ux`. Report: overall score vs cut-off, dimension table, screens reviewed, three strengths, fix tasks, next command.
 
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:docs` after a pass, `/dev-kit:implement` for the fix tasks. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+
 ## Existing projects (brownfield)
 
 When state has `brownfield` (`conventions.md` §16): the scope is the screens tagged `new` or `changed` in `.dev/design/ux-flows.md` plus the journeys that pass through them, not the whole product; `existing` screens are visited only as steps of those journeys. Tell every auditor so, with `Baseline: <brownfield.baseline_ref>`: a problem that exists only on an `existing` screen (or in untouched code) is reported with `"legacy": true`, does not score and becomes an issue (`DS add-issue --type <bug|improvement> --class intangible --title "<title>" --severity <severity> --origin usability --note "legacy: qa/ux/report.md"`); an `existing` screen has no full spec, so "differs from the spec" is not a finding there. The report adds a "Pre-existing (not scored)" section. If no `new`/`changed` screen exists, record `DS review ux n/a --note "no new UI"` and stop.
