@@ -1386,6 +1386,16 @@ def cmd_event(store: Store, a: argparse.Namespace) -> None:
         if not isinstance(extra, dict):
             fail("--json must be an object")
         fields.update(extra)
+    if a.type in ("agent_spawn", "agent_end") and not fields.get("scope"):
+        agent = str(fields.get("agent") or "").removeprefix("dev-kit:")
+        doing = [t for t, v in store.tasks().items() if v.get("status") == "in_progress"]
+        if agent == "implementer" and len(doing) == 1:
+            fields["scope"] = doing[0]
+            print(f"warning: {a.type} without scope: using {doing[0]}, the only task in progress "
+                  "(always pass --set scope=T-xxx)", file=sys.stderr)
+        else:
+            print(f"warning: {a.type} without scope: the board cannot place this agent on a task or QA gate "
+                  "(pass --set scope=T-xxx or Mn)", file=sys.stderr)
     try:
         rec = tel.emit(store.dev, a.type, fields, rotate_session=(a.type == "session_start"))
     except ValueError as e:
@@ -1866,7 +1876,7 @@ def cmd_brief(store: Store, a: argparse.Namespace) -> None:
     hist = led.load(store.dev).get(f"task:{a.task}")
     kit = Path(__file__).resolve().parents[1]
     out = [f"Task: {a.task} — {t['title']} (milestone {t['milestone']}, type {t['type']})",
-           f"Kit root: {kit}", f"Project root: {store.root}",
+           f"Scope: {a.task}", f"Kit root: {kit}", f"Project root: {store.root}",
            f"Language for prose (report): {store.state.get('language') or 'en'} · application language (UI copy): {app_lang}",
            f"Base commit: {_git(store, 'rev-parse', '--short', 'HEAD') or '-'}", "", "Acceptance:"]
     out += [f"  - {x}" for x in t.get("acceptance") or ["(none listed: ask the orchestrator)"]]

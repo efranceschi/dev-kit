@@ -2,6 +2,19 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.28.0 — 2026-11-20
+
+Running agents land on their task card by an exact link, carry the task id in Claude Code, and keep one color per agent in Claude Code and on the board.
+
+### Added
+- Board: a running agent is linked to its task or QA gate by the `Scope: T-xxx|Mn` line of its own prompt, read from the subagent's transcript (`linked_by: "id"`). Time, type, batch and task pairing remain only as fallbacks. The hook now also stores the path of the subagent's transcript in `.dev/run/agents.jsonl`; nothing from the transcript is kept or served.
+- `DS brief T-xxx` prints `Scope: T-xxx`. Agent calls use the `description` `<scope> <short title>`, so Claude Code shows `implementer(T-012 login form)` (conventions §13; implement and qa say so where they spawn).
+- Every agent declares a `color` (implementer green, architect purple, code-reviewer blue, security-auditor red, test-auditor yellow, traceability and docs cyan, data/deps/ops/performance orange, design/UX pink). Claude Code shows it and the board colors the agent's dot and chip with the same name, in light and dark themes. The lint requires it.
+
+### Fixed
+- Board: an `agent_spawn` logged without `scope` no longer leaves the agent under "Running outside this milestone". The time rule ignores spawns without a scope and never reports a link without a node. Implementers whose spawns have no scope are paired with the in-progress tasks, with or without hooks. An `agent_end` without scope closes the matching spawn.
+- `DS event agent_spawn|agent_end` without `scope` warns. For an implementer with exactly one task in progress, it fills in that task.
+
 ## 1.27.0 — 2026-11-20
 
 ### Changed
