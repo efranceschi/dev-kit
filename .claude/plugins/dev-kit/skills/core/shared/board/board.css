@@ -198,11 +198,31 @@ button.run-chip:hover { background: var(--surface-3); }
 .sprint::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; border-radius: var(--radius) var(--radius) 0 0; background: linear-gradient(90deg, var(--accent-a), var(--accent-b)); }
 .sprint-top { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .sprints-label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted); flex: none; }
-.tabs-row { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; flex-wrap: wrap; }
-#tabs { display: flex; gap: 6px; min-width: 0; }
-.more-tab { font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text-secondary); white-space: nowrap;
-  background: transparent; border: 1px dashed var(--border-strong); border-radius: 999px; padding: 4px 12px; min-height: 32px; }
-.more-tab:hover, .more-tab[aria-expanded="true"] { color: var(--text-primary); background: var(--surface-2); }
+.tabs-row { display: flex; align-items: stretch; gap: 0; min-width: 0; flex: 1; --tip: 12px; }
+#tabs { display: flex; gap: 0; min-width: 0; }
+.tabs-row .pop-wrap { display: flex; }
+/* one chevron strip: earlier list, the 3 sprints, later list */
+.schev, .more-tab { font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; border: 0; min-height: 36px;
+  display: inline-flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums;
+  padding: 4px calc(var(--tip) + 8px) 4px calc(var(--tip) + 12px); margin-left: calc(var(--tip) * -1 + 3px);
+  clip-path: polygon(0 0, calc(100% - var(--tip)) 0, 100% 50%, calc(100% - var(--tip)) 100%, 0 100%, var(--tip) 50%); }
+.schev.chev-first, .more-tab.chev-first { margin-left: 0; padding-left: 14px; border-radius: 9px 0 0 9px;
+  clip-path: polygon(0 0, calc(100% - var(--tip)) 0, 100% 50%, calc(100% - var(--tip)) 100%, 0 100%); }
+.schev.chev-last, .more-tab.chev-last { padding-right: 14px; border-radius: 0 9px 9px 0;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, var(--tip) 50%); }
+.schev.chev-first.chev-last { clip-path: none; border-radius: 9px; }
+.schev.st-upcoming { background: var(--surface-3); color: var(--text-secondary); }
+.schev.st-done { background: color-mix(in srgb, var(--good) 22%, var(--surface-2)); color: var(--text-primary); }
+.schev.st-current { background: color-mix(in srgb, var(--warning) 26%, var(--surface-2)); color: var(--text-primary); }
+.schev.here { background: linear-gradient(100deg, color-mix(in srgb, var(--accent-a) 75%, var(--surface-1)), color-mix(in srgb, var(--accent-b) 65%, var(--surface-1))); color: #fff; font-weight: 600; }
+.schev:not(.here):hover { filter: brightness(1.12); }
+:root[data-effective="light"] .schev:not(.here):hover { filter: brightness(.95); }
+.schev:focus-visible, .more-tab:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent-b); }
+.more-tab { font-size: 12px; font-weight: 600; color: var(--text-secondary); background: var(--surface-2); }
+.more-tab:hover, .more-tab[aria-expanded="true"] { color: var(--text-primary); background: var(--surface-3); }
+.more-tab.chev-first { padding-left: 12px; }
+.more-tab.chev-last { padding-right: 12px; }
+#tabs-back { margin-left: 10px; align-self: center; white-space: nowrap; }
 .sprint-pop { min-width: 300px; max-height: 60vh; overflow: auto; }
 .sprint-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .sprint-item { font: inherit; font-size: 13px; color: var(--text-primary); background: none; border: 0; cursor: pointer; width: 100%; text-align: left;
@@ -210,17 +230,13 @@ button.run-chip:hover { background: var(--surface-3); }
 .sprint-item:hover { background: var(--surface-3); }
 .sprint-item .si-title { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sprint-item .si-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
-#tabs [role="tab"] {
-  font: inherit; font-size: 13px; cursor: pointer; color: var(--text-secondary); white-space: nowrap; flex: none;
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px;
-  padding: 4px 12px; min-height: 32px; display: inline-flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums;
-}
-#tabs [role="tab"]:hover { border-color: var(--border-strong); color: var(--text-primary); }
-#tabs [role="tab"][aria-selected="true"] { color: var(--text-primary); border-color: var(--accent-a); background: color-mix(in srgb, var(--accent-a) 18%, var(--surface-1)); }
 .tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--todo); }
 .tab-dot.passed, .tab-dot.skipped { background: var(--good); }
 .tab-dot.active { background: var(--warning); }
 .tab-current { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-text); }
+.schev.here .tab-current { color: #fff; opacity: .9; }
+.tab-ok { flex: none; width: 16px; height: 16px; display: inline-grid; place-items: center; border-radius: 50%; background: var(--good); color: #fff; font-size: 10px; font-weight: 800; }
+.schev.here .tab-dot { background: #fff; }
 .sprint-facts { display: flex; align-items: center; gap: 10px; flex: none; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .sprint-body { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); gap: 28px; align-items: end; }
 #sprint-title { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.25; }
@@ -467,7 +483,6 @@ dialog p { color: var(--text-secondary); }
   .phase-chevrons .chev:not(.here) .chev-name { display: none; }
   .phase-chevrons .chev.here { flex: 1 1 auto; }
   .sprint-top { flex-wrap: wrap; }
-  .tabs-row { flex-wrap: nowrap; }
   .sprint-facts { flex-basis: 100%; }
   .stage-top { align-items: flex-start; }
   .stage-name, .stage-note { white-space: normal; overflow-wrap: normal; }
@@ -492,6 +507,7 @@ dialog p { color: var(--text-secondary); }
   .topbar, main { padding-left: 14px; padding-right: 14px; }
   .topbar { gap: 10px; }
   .kicker { display: none; }
+  .stage-run .run-chip { flex-wrap: wrap; row-gap: 2px; border-radius: 14px; }
   /* phases on a phone: previous, current and next only; "Step n of N" gives the rest */
   .phase-chevrons .chev:not(.here):not(.near) { display: none; }
   .phase-chevrons .chev:not(.here) { flex: 0 0 auto; }
@@ -499,9 +515,15 @@ dialog p { color: var(--text-secondary); }
   .phase-chevrons .chev.here .chev-name { font-size: 14.5px; }
   .sprint-top { flex-wrap: wrap; }
   .sprints-label { display: none; }
-  .tabs-row { flex-basis: 100%; flex-wrap: wrap; }
+  .tabs-row { flex-basis: 100%; --tip: 10px; }
+  .tabs-row .pop-wrap, #tabs, #tabs .schev { flex: 1 1 0; min-width: 0; }
+  #tabs { flex: 3 1 0; }
+  .schev, .more-tab { justify-content: center; padding-left: calc(var(--tip) + 6px); padding-right: calc(var(--tip) + 2px); }
+  .more-tab { width: 100%; }
+  .mt-word, .tab-count { display: none; }
+  #tabs-back { flex-basis: 100%; margin: 8px 0 0; }
+  .tabs-row { flex-wrap: wrap; }
   .sprint-facts { flex-wrap: wrap; white-space: normal; }
-  #tabs { flex-wrap: wrap; order: -1; flex-basis: 100%; }
   #tabs .tab-current { display: none; }
   .board-tools { width: 100%; }
   .search { flex: 1; }
@@ -519,6 +541,9 @@ dialog p { color: var(--text-secondary); }
 }
 @media (max-width: 420px) {
   .live #live-text { display: none; }
+  .tabs-row { --tip: 8px; }
+  #tabs .tab-dot, #tabs .tab-ok { display: none; }
+  .schev, .more-tab { padding-left: calc(var(--tip) + 4px); padding-right: calc(var(--tip) + 1px); font-size: 12.5px; }
   .brand { flex: 1 1 auto; }
   .live { padding: 6px; }
 }

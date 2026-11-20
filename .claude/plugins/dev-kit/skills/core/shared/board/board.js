@@ -262,21 +262,27 @@
     const cur = currentId();
     const ms = data.milestones;
     const [a, b] = tabWindow(ms.map((m) => m.id), cur);
-    const tabs = ms.slice(a, b).map((m) => {
+    // sprints as one chevron strip: [+N earlier] M-1 › M › M+1 [+N later], coloured by the milestone's state
+    const hasEarlier = a > 0, hasLater = b < ms.length;
+    const shown = ms.slice(a, b);
+    const tabs = shown.map((m, i) => {
       const x = sprintInfo(m);
+      const closed = m.gate === "passed" || m.gate === "skipped";
+      const state = m.id === cur ? "here" : closed ? "st-done" : x.active || m.id === data.current_milestone ? "st-current" : "st-upcoming";
+      const edge = `${i === 0 && !hasEarlier ? " chev-first" : ""}${i === shown.length - 1 && !hasLater ? " chev-last" : ""}`;
       return h("button", {
-        role: "tab", type: "button", id: `tab-${m.id}`, "aria-selected": String(m.id === cur), "aria-controls": "main",
+        role: "tab", type: "button", id: `tab-${m.id}`, class: `schev ${state}${edge}`, "aria-selected": String(m.id === cur), "aria-controls": "main",
         tabindex: m.id === cur ? "0" : "-1", title: `${m.title || m.id} · gate ${m.gate}`,
         onclick: () => selectSprint(m.id, true),
-      }, h("span", { class: `tab-dot ${x.active ? "active" : m.gate}`, "aria-hidden": "true" }), h("strong", { text: m.id }),
-      h("span", { text: `${x.done}/${x.total}` }),
+      }, closed ? h("span", { class: "tab-ok", "aria-hidden": "true", text: "✓" }) : h("span", { class: `tab-dot ${x.active ? "active" : m.gate}`, "aria-hidden": "true" }),
+      h("strong", { text: m.id }), h("span", { class: "tab-count", text: `${x.done}/${x.total}` }),
       m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null);
     });
     if (!tabs.length) tabs.push(h("span", { class: "card-sub" }, "No milestones yet. They appear after ", cmd("/dev-kit:plan"), "."));
     fill($("tabs"), tabs);
     const side = (key, list, word) => {
       $(`tabs-${key}-wrap`).hidden = !list.length;
-      $(`tabs-${key}`).textContent = `+${list.length} ${word}`;
+      fill($(`tabs-${key}`), `+${list.length}`, h("span", { class: "mt-word", text: ` ${word}` }));
       $(`tabs-${key}`).setAttribute("aria-label", `${plural(list.length, `${word} sprint`)}: choose one`);
       fill($(`tabs-${key}-list`), list.map((m) => {
         const x = sprintInfo(m);

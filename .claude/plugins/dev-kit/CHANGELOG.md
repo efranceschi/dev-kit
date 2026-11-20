@@ -2,6 +2,15 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.21.1 — 2026-11-20
+
+### Changed
+- Board: the sprint tabs are a chevron strip like the phase and the stages: "+N earlier", the selected sprint and its neighbours, "+N later", each coloured by its state (gate passed ✓, in progress, not started; the selected one highlighted). On a phone the strip keeps one line with short labels.
+- README screenshots show the sprint chevrons.
+
+### Fixed
+- Board on a 320 px screen: a running task with two agents no longer pushes the page sideways.
+
 ## 1.21.0 — 2026-11-20
 
 ### Added
