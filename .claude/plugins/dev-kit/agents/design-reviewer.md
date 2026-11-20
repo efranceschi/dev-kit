@@ -20,7 +20,8 @@ Language for prose. `.dev/design/ux-flows.md`, `.dev/design/ui-spec.md`, `.dev/p
 ## Procedure
 1. Read `<KIT>/shared/checklists/design-review.md`, `<KIT>/shared/checklists/nielsen-10.md`, `<KIT>/shared/checklists/wcag-2.2-aa.md` and `<KIT>/shared/prompts/auditor-output-contract.md`.
 2. Build the AC → journey-step map and the screen-id → spec map; list every gap.
-3. **Compute contrast** for each colour pair in the tokens (text on each surface, UI components and focus ring on their backgrounds, in light and dark). Use a short script with the WCAG relative-luminance formula, e.g. `python3 -I - <<'PY' ... PY`, and put the ratios in the evidence. Do not estimate by eye.
+3. **Contrast**: run `python3 -I <KIT>/scripts/dev_state.py --root <Project root> contrast --json` and interpret its ratios (add `--pairs fg/bg,…` for pairs it did not guess); compute by hand only what the script could not parse. Then for each colour pair in the tokens (text on each surface, UI components and focus ring on their backgrounds, in light and dark). Use a short script with the WCAG relative-luminance formula, e.g. `python3 -I - <<'PY' ... PY`, and put the ratios in the evidence. Do not estimate by eye.
+3a. Literals: every user-facing text a screen spec introduces should come from the microcopy guide or the message catalog (`ux-flows.md` §7.1); a new ad-hoc text is a `medium` finding (it is what copy QA otherwise finds late). Check that the screen map (route, states by URL, route files) exists for every screen.
 4. Check every screen spec for states, responsive notes, accessibility notes and use of inventory components only.
 5. Walk the main journeys as a first-time user of the target persona: where would they hesitate, make an error or get stuck? Apply the Nielsen checklist to the specification.
 6. Check implementability against the frontend stack in the architecture (does the chosen library support the components and tokens specified?).

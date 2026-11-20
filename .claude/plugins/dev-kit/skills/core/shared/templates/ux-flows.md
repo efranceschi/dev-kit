@@ -40,5 +40,18 @@ Field list per form, inline vs on-submit validation, error message pattern, auto
 ## 7. Microcopy guide
 Tone (brief block 7), button verbs, confirmation and destructive-action patterns, empty-state voice, examples in the application language(s).
 
+### 7.1 Message catalog (implementers use these; they do not invent texts)
+| key | when | text (application language) |
+|---|---|---|
+| required | a required field is empty | |
+| too_long | a value exceeds its limit (with the limit) | |
+| invalid_format | email, date, number… does not parse (with an example) | |
+| duplicate | the value already exists | |
+| not_allowed | the user lacks permission | |
+| not_found | the item no longer exists | |
+| network | the request failed or timed out (with the retry action) | |
+| saved / deleted | success confirmations | |
+| empty_list | a list with no items yet (with the first action) | |
+
 ## 8. Usability checkpoints
 Heuristics (`shared/checklists/nielsen-10.md`) that matter most here and how each flow satisfies them; accessibility implications for `ui-spec.md`.

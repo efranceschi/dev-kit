@@ -27,6 +27,7 @@ Scope (milestone or screen ids), language for prose, optional base URL. `.dev/de
 
 ## Rules
 - Every finding cites screen id, viewport, state and screenshot path, and says what to change (token, class, component) in one sentence.
+- Use the screen map in `ui-spec.md` (route, states by URL or mock) to reach each state directly instead of navigating by trial. Texts marked `[locked]` in the PRD are not yours to reword.
 - Judge against the spec and the brief's tone, not your taste. If the spec itself is the problem, say so and recommend a spec change.
 - Include two or three things done well in the summary.
 

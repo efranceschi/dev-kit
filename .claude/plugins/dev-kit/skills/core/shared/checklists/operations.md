@@ -23,6 +23,7 @@ Review how the system behaves when things go wrong and how operators can see and
 - CI runs lint, type-check, tests, build on every push; caches dependencies; fails on errors; matches the commands in `architecture.md`.
 - Migrations run as a deploy step with a rollback plan; zero-downtime considerations only if the brief requires.
 - Backups and restore procedure documented for stateful stores when the brief mentions retention.
+- Runbook: every change that needs a manual step at deploy time (a migration flag, a backfill, a new secret, a cron entry, a one-off script) has the exact command written in `architecture.md` §7 or the deploy docs, run by the deploy or checked by a script. An undocumented manual step is `high`; a documented one that nothing verifies is `medium`.
 
 ## Developer experience
 - Scripts for dev, test, lint, build, migrate, seed; README accurate; pre-commit hooks if the brief wants them.

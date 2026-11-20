@@ -40,6 +40,12 @@ erDiagram
 ```
 Per entity: fields, types, constraints, indexes, soft-delete/retention rules (from brief block 4).
 
+### Data sources
+| source | what it provides | coverage (regions, period, share of the universe) | latency / freshness | quotas | how verified |
+|---|---|---|---|---|---|
+
+Data invariants: `{{checks.sql or tests/data_invariants.*}}` holds the checks the data ACs promise (row counts, sums, no orphans), maintained by the tasks that load data and run by `data-reviewer`.
+
 ## 5. Contracts
 - API style (REST/GraphQL/RPC), versioning, error format, pagination.
 - Endpoint or operation inventory (method, path, auth, request/response summary, ACs served).
@@ -52,6 +58,14 @@ Auth & permissions model · validation strategy · error handling & logging · c
 dev / staging / prod, how each is run, migrations strategy, CI pipeline steps.
 Production (if `production.when` is not `none`): method and host · install command (with dry-run if any) · migrate command · rollback command · backup location · smoke checks · prerequisites (name → how it is provided; never the value).
 Local preview (if `local_deploy` is on): build + start command, port, bind address `127.0.0.1`, smoke check (URL or example command), stop command.
+
+### Exclusive resources and environment limits
+| resource | why exclusive (one user at a time, quota, single session) | lock name (`dev_state.py lock`) | limits (parallelism, rate, latency) |
+|---|---|---|---|
+
+Agents take the lock before using a listed resource and release it after; `implement --parallel` never runs two tasks that need the same one at once.
+
+Performance scenarios: `{{.dev/qa/perf-scenarios.md}}` lists the fixed queries, endpoints and parameters `performance-auditor` measures each round (cold and warm), with their targets.
 
 Long jobs (backfills, imports, pipelines) with how to tell they finished: QA starts the environment auditors only after them (`qa` §2).
 

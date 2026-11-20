@@ -1118,6 +1118,26 @@
       "definition": "An auditor not re-run in a later round (no open finding, nothing changed in its dimension); its result is kept."
     },
     {
+      "term": "task contract",
+      "definition": "What a task provides to others (table, route, fields) in plan.md contract:, given to consumers by dev_state.py brief."
+    },
+    {
+      "term": "locked literal",
+      "definition": "A text an AC fixes, marked [locked] in the PRD; copy and visual reviews never reword it."
+    },
+    {
+      "term": "exclusive resource",
+      "definition": "Something one agent may use at a time (remote session, shared DB, emulator), guarded by dev_state.py lock."
+    },
+    {
+      "term": "out of scope finding",
+      "definition": "A problem in shared code the milestone did not change; it becomes an issue and does not score in the gate."
+    },
+    {
+      "term": "changelog fragment",
+      "definition": "changelog.d/T-xxx.md written by a task instead of CHANGELOG.md, merged by docs and release; no merge conflicts."
+    },
+    {
       "term": "QA harness",
       "definition": "Playwright with mocks that captures every screen and state (qa:shots) and runs axe (qa:a11y); added by plan to the first UI milestone."
     },

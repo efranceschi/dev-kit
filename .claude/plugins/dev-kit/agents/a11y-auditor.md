@@ -23,6 +23,8 @@ Scope (milestone or screens, or a task `T-xxx` with `Mode: static` for the per-t
 5. **Contrast**: compute ratios from the actual CSS values for text and UI parts, including hover/disabled/focus states and dark mode; show numbers.
 6. Confirm each automated violation by reading the markup; discard false positives; record the WCAG criterion id for each finding.
 
+A problem in a global component (layout, navigation, shared widget) that this scope did not change is reported with `"out_of_scope": true`: it becomes an issue, without noise in this milestone's gate. Never use it for anything in a file the scope changed.
+
 ## Severity
 Blocks a task for keyboard or screen-reader users on a main flow → `critical`; WCAG A/AA failure on a main flow → `high`; on a secondary flow → `medium`; best-practice gap → `low`. The brief's target level sets the bar.
 
