@@ -24,6 +24,8 @@
   --critical: #d03b3b;
   --critical-text: #ff8a8a;
   --todo: #6b6a66;
+  --ag-red: #f87171; --ag-blue: #60a5fa; --ag-green: #4ade80; --ag-yellow: #facc15;  /* agent colors: the ones */
+  --ag-purple: #a78bfa; --ag-orange: #fb923c; --ag-pink: #f472b6; --ag-cyan: #22d3ee;  /* Claude Code shows */
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 32px -16px rgba(0, 0, 0, 0.7);
   --glow: radial-gradient(1200px 500px at 10% -10%, rgba(139, 92, 246, 0.18), transparent 60%),
           radial-gradient(900px 420px at 95% -5%, rgba(34, 211, 238, 0.12), transparent 60%);
@@ -50,6 +52,8 @@
     --good-text: #006300;
     --critical-text: #b42525;
     --todo: #a3a29c;
+    --ag-red: #dc2626; --ag-blue: #2563eb; --ag-green: #15803d; --ag-yellow: #a16207;
+    --ag-purple: #7c3aed; --ag-orange: #c2410c; --ag-pink: #db2777; --ag-cyan: #0e7490;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px -18px rgba(30, 20, 60, 0.25);
     --glow: radial-gradient(1200px 500px at 10% -10%, rgba(139, 92, 246, 0.10), transparent 60%),
             radial-gradient(900px 420px at 95% -5%, rgba(34, 211, 238, 0.08), transparent 60%);
@@ -73,6 +77,8 @@
   --good-text: #006300;
   --critical-text: #b42525;
   --todo: #a3a29c;
+  --ag-red: #dc2626; --ag-blue: #2563eb; --ag-green: #15803d; --ag-yellow: #a16207;
+  --ag-purple: #7c3aed; --ag-orange: #c2410c; --ag-pink: #db2777; --ag-cyan: #0e7490;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px -18px rgba(30, 20, 60, 0.25);
   --glow: radial-gradient(1200px 500px at 10% -10%, rgba(139, 92, 246, 0.10), transparent 60%),
           radial-gradient(900px 420px at 95% -5%, rgba(34, 211, 238, 0.08), transparent 60%);
@@ -191,6 +197,23 @@ button.run-chip:hover { background: var(--surface-3); }
 .agent-name { font-weight: 600; }
 .agent-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .agent-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); flex: none; animation: agent-pulse 1.6s ease-in-out infinite; }
+/* each kit agent's dot (and chip border) in the color of its agents/*.md frontmatter, the same Claude Code shows */
+.agent-dot.ag-red { background: var(--ag-red); }
+.agent-dot.ag-blue { background: var(--ag-blue); }
+.agent-dot.ag-green { background: var(--ag-green); }
+.agent-dot.ag-yellow { background: var(--ag-yellow); }
+.agent-dot.ag-purple { background: var(--ag-purple); }
+.agent-dot.ag-orange { background: var(--ag-orange); }
+.agent-dot.ag-pink { background: var(--ag-pink); }
+.agent-dot.ag-cyan { background: var(--ag-cyan); }
+.agent-chip:has(.ag-red), .run-chip:has(> .ag-red) { border-color: color-mix(in srgb, var(--ag-red) 55%, transparent); }
+.agent-chip:has(.ag-blue), .run-chip:has(> .ag-blue) { border-color: color-mix(in srgb, var(--ag-blue) 55%, transparent); }
+.agent-chip:has(.ag-green), .run-chip:has(> .ag-green) { border-color: color-mix(in srgb, var(--ag-green) 55%, transparent); }
+.agent-chip:has(.ag-yellow), .run-chip:has(> .ag-yellow) { border-color: color-mix(in srgb, var(--ag-yellow) 55%, transparent); }
+.agent-chip:has(.ag-purple), .run-chip:has(> .ag-purple) { border-color: color-mix(in srgb, var(--ag-purple) 55%, transparent); }
+.agent-chip:has(.ag-orange), .run-chip:has(> .ag-orange) { border-color: color-mix(in srgb, var(--ag-orange) 55%, transparent); }
+.agent-chip:has(.ag-pink), .run-chip:has(> .ag-pink) { border-color: color-mix(in srgb, var(--ag-pink) 55%, transparent); }
+.agent-chip:has(.ag-cyan), .run-chip:has(> .ag-cyan) { border-color: color-mix(in srgb, var(--ag-cyan) 55%, transparent); }
 @keyframes agent-pulse { 50% { opacity: .35; } }
 
 /* ---------- milestone */

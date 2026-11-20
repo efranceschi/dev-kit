@@ -4,7 +4,9 @@
 Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit, PermissionRequest and Stop hooks
 (hooks/hooks.json). Reads the hook payload from stdin.
 - SessionStart, SubagentStart, SubagentStop: append one JSON line to <project>/.dev/run/agents.jsonl:
-  {"ts": "...Z", "event": "session_start|agent_start|agent_stop", "session": "<id>", "agent_id": "<id>", "agent": "<type>"}
+  {"ts": "...Z", "event": "session_start|agent_start|agent_stop", "session": "<id>", "agent_id": "<id>", "agent": "<type>",
+   "transcript": "<path of the subagent's own transcript>"}; the board reads the `Scope:` line of the agent's prompt
+  from that transcript to put it on its task card (Claude Code sends no task with the hook).
 - SessionStart of a new session (source startup), with autonomy.ui.title on (default): set the session title
   ("dev-kit · <project> · <milestone or phase>") and show one line with the next command (systemMessage).
 - Stop, with autonomy.ui.notify on: show the notices queued by dev_state.py (gates, blocks, autopilot) as a
@@ -19,7 +21,7 @@ Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit, Permis
   until answered), the hook waits up to 10 minutes for Allow, Allow for this session or Deny, and answers Claude
   Code with it; no answer is a denial. Anywhere else it returns nothing and Claude Code's own prompt applies.
 
-Privacy: only ids and the agent type are kept; prompts, messages and tool data in the payload are ignored, except
+Privacy: only ids, the agent type and the subagent transcript's path are kept; prompts, messages and tool data in the payload are ignored, except
 the tool and target of a permission request while it waits on the board.
 It never fails a hook (always exits 0) and does nothing outside a dev-kit project (no .dev/state.json).
 """
@@ -53,6 +55,27 @@ def ui_flags(dev: Path) -> dict:
         return {"title": True, "notify": False}
 
 
+SUBAGENT_FILE = re.compile(r"agent-[A-Za-z0-9_\-]{1,128}\.jsonl")
+
+
+def subagent_transcript(payload: dict) -> str | None:
+    """Path of a subagent's own transcript: given on SubagentStop (agent_transcript_path); on SubagentStart derived
+    from the session transcript, as <dir>/<session>/subagents/agent-<agent_id>.jsonl. Only that shape is kept."""
+    if payload.get("hook_event_name") not in ("SubagentStart", "SubagentStop"):
+        return None
+    given = payload.get("agent_transcript_path")
+    if isinstance(given, str) and given:
+        p = Path(given).expanduser()
+    else:
+        main_tr, sid, aid = payload.get("transcript_path"), tok(payload.get("session_id")), tok(payload.get("agent_id"))
+        if not (isinstance(main_tr, str) and main_tr and sid and aid):
+            return None
+        p = Path(main_tr).expanduser().parent / sid / "subagents" / f"agent-{aid.removeprefix('agent-')}.jsonl"
+    if not (SUBAGENT_FILE.fullmatch(p.name) and p.parent.name == "subagents" and p.is_absolute()) or CONTROL.search(str(p)):
+        return None
+    return str(p)
+
+
 def record_agent(dev: Path, event: str, payload: dict) -> None:
     run = dev / "run"
     run.mkdir(exist_ok=True)
@@ -62,6 +85,9 @@ def record_agent(dev: Path, event: str, payload: dict) -> None:
     rec = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "event": event,
            "session": tok(payload.get("session_id")), "agent_id": tok(payload.get("agent_id")),
            "agent": tok(payload.get("agent_type"))}
+    tr = subagent_transcript(payload)
+    if tr:
+        rec["transcript"] = tr
     if path.exists() and path.stat().st_size > MAX_BYTES:
         lines = path.read_text(encoding="utf-8").splitlines()[-KEEP_LINES:]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")

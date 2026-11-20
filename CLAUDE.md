@@ -21,7 +21,7 @@ Try the plugin without installing: `claude --plugin-dir ./.claude/plugins/dev-ki
 
 ## Architecture
 
-- `skills/<name>/SKILL.md` — 25 user-invocable skills (`/dev-kit:<name>`), prompts only. `agents/*.md` — 17 agents (implementer, architect, read-only reviewers); each must declare `model` and `effort` in frontmatter.
+- `skills/<name>/SKILL.md` — 25 user-invocable skills (`/dev-kit:<name>`), prompts only. `agents/*.md` — 17 agents (implementer, architect, read-only reviewers); each must declare `model`, `effort` and `color` in frontmatter (the color is shown by Claude Code and by the board).
 - `skills/core/` — a non-invocable support skill that holds everything shared: `scripts/` (`dev_state.py` is the central state machine over `.dev/state.json`; `dev_board.py` the board web server; `dev_worker.py` the board's request queue; `dev_score.py` QA scoring; plus ledger, telemetry, cost, docs, UI, hooks handler), `shared/` (`conventions.md` = rules every skill/agent follows, checklists, interview, templates, `help.json`, board front-end), and `tests/`.
 - Path resolution: skills use `${CLAUDE_SKILL_DIR}/../core/...`; agents and shared files get no variable substitution and use `<KIT>` (the spawning skill passes `Kit root: <abs path>`); state commands use `${CLAUDE_PROJECT_DIR}`. Scripts import siblings by inserting their own folder in `sys.path`.
 - `hooks/hooks.json` (all routed to `dev_agent_hook.py`) and `monitors/monitors.json` (board listener) are optional; nothing may depend on them.

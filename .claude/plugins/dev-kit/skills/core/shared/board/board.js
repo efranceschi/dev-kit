@@ -120,7 +120,9 @@
   const activeAgents = () => ((data && data.agents && data.agents.active) || []);
   const agentsOn = (key) => activeAgents().filter((x) => x.node === key);
   const roleOf = (name) => ((data && data.agent_roles) || {})[name] || {};
-  const agentBits = (x, withRole) => [h("span", { class: "agent-dot", "aria-hidden": "true" }),
+  const AGENT_COLORS = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];  // same names as Claude Code
+  const agentDot = (name) => { const c = roleOf(name).color; return "agent-dot" + (AGENT_COLORS.includes(c) ? ` ag-${c}` : ""); };
+  const agentBits = (x, withRole) => [h("span", { class: agentDot(x.agent), "aria-hidden": "true" }),
     h("span", { class: "agent-name", text: x.agent, title: roleOf(x.agent).about || null }),
     withRole && roleOf(x.agent).role ? h("span", { class: "agent-role", text: roleOf(x.agent).role }) : null,
     h("span", { class: "agent-time", "data-start": x.started_at, text: dur((Date.now() - parseT(x.started_at)) / 1000) })].filter(Boolean);

@@ -358,7 +358,7 @@ def agents_data(root: Path) -> dict:
             dur = max(0, round(_ts(r.get("ts")) - _ts(st.get("ts")))) if st else None
             recent.append({"agent": r.get("agent") or (st or {}).get("agent") or "agent", "agent_id": aid,
                            "started_at": (st or {}).get("ts"), "ended_at": r.get("ts"), "duration_s": dur})
-    active = [{"agent": r.get("agent") or "agent", "agent_id": aid, "started_at": r.get("ts")}
+    active = [{"agent": r.get("agent") or "agent", "agent_id": aid, "started_at": r.get("ts"), "transcript": r.get("transcript")}
               for aid, r in running.items()
               if now - _ts(r.get("ts")) < AGENT_STALE_S and (session is None or r.get("session") == session)]
     return {"hooks": True, "active": active, "recent": recent[-AGENT_RECENT:][::-1]}
@@ -465,6 +465,50 @@ def _node_of(scope: object) -> str | None:
     return None
 
 
+SCOPE_LINE = re.compile(r"(?m)^\s*Scope:\s*(T-\d{1,5}|M\d{1,3})\b")
+_SCOPE_CACHE: dict[str, str] = {}
+
+
+def _first_prompt(path: Path) -> str:
+    """Text of the first user message of a subagent transcript (its prompt), from the first 64 KB only."""
+    with path.open("rb") as f:
+        head = f.read(64 * 1024).decode("utf-8", "replace")
+    for line in head.splitlines():
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(r, dict) or r.get("type") != "user":
+            continue
+        c = (r.get("message") or {}).get("content") if isinstance(r.get("message"), dict) else None
+        if isinstance(c, str):
+            return c
+        if isinstance(c, list):
+            return "\n".join(b.get("text", "") for b in c if isinstance(b, dict) and isinstance(b.get("text"), str))
+        return ""
+    return ""
+
+
+def scope_from_transcript(agent_id: object, transcript: object) -> str | None:
+    """Board node named by the `Scope: T-xxx|Mn` line the skill writes in an agent's prompt (conventions.md §13),
+    read from the subagent's own transcript: an exact link, no guessing. Found scopes are cached by agent id;
+    a transcript not written yet is tried again on the next call. Nothing else from the transcript is kept."""
+    aid = str(agent_id or "")
+    if aid and aid in _SCOPE_CACHE:
+        return _SCOPE_CACHE[aid]
+    p = Path(str(transcript or ""))
+    if not transcript or p.parent.name != "subagents" or not re.fullmatch(r"agent-[A-Za-z0-9_\-]{1,128}\.jsonl", p.name):
+        return None
+    try:
+        m = SCOPE_LINE.search(_first_prompt(p))
+    except OSError:
+        return None
+    node = _node_of(m.group(1)) if m else None
+    if node and aid:
+        _SCOPE_CACHE[aid] = node
+    return node
+
+
 def open_spawns(events: list[dict], now: float) -> list[dict]:
     """agent_spawn events logged by the skills that have no matching agent_end yet (and are not stale)."""
     open_: list[dict] = []
@@ -483,19 +527,26 @@ def open_spawns(events: list[dict], now: float) -> list[dict]:
         elif ev == "agent_end":
             ag, sc, sl, se = _short(e.get("agent")), e.get("scope"), e.get("slot"), e.get("session")
             match = [o for o in open_ if o["session"] == se and o["agent"] == ag and o["scope"] == sc and o["slot"] == sl] \
-                or [o for o in open_ if o["session"] == se and o["agent"] == ag and o["scope"] == sc]
+                or [o for o in open_ if o["session"] == se and o["agent"] == ag and o["scope"] == sc] \
+                or ([o for o in open_ if o["session"] == se and o["agent"] == ag] if not sc else [])
             if match:
                 open_.remove(match[-1])
     return [o for o in open_ if now - _ts(o["started_at"]) < AGENT_STALE_S]
 
 
+AGENT_COLORS = ("red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan")  # Claude Code's subagent colors
+
+
 def agent_roles() -> dict:
-    """Short role and the first sentence of the description of every kit agent (read from agents/*.md)."""
+    """Short role, first sentence of the description and color (the one Claude Code shows) of every kit agent,
+    read from agents/*.md."""
     out = {}
     for f in sorted(AGENTS_DIR.glob("*.md")):
         m = re.search(r"^description:\s*(.+)$", f.read_text(encoding="utf-8"), re.M)
         about = (m.group(1).split(". ")[0].rstrip(".") if m else "")[:160]
-        out[f.stem] = {"role": AGENT_ROLE.get(f.stem) or about[:40], "about": about}
+        c = re.search(r"^color:\s*([a-z]+)\s*$", f.read_text(encoding="utf-8"), re.M)
+        out[f.stem] = {"role": AGENT_ROLE.get(f.stem) or about[:40], "about": about,
+                       "color": c.group(1) if c and c.group(1) in AGENT_COLORS else None}
     return out
 
 
@@ -522,17 +573,20 @@ def live_agents(root: Path, qa_default: str | None = None, tasks: dict | None = 
     Skills log agent_spawn/agent_end with a scope (task or milestone) in telemetry; plugin hooks, where the
     environment runs them, log exact start/stop of every agent but without the task. With hooks, the running set
     is the hook set and each agent is linked to a node by the first rule that applies:
-      1. time: exactly one skill spawn of the same type started within LINK_WINDOW_S of it, and vice versa;
+      0. id: the `Scope:` line of its own prompt, read from its transcript (exact; the other rules are fallbacks
+         for agents spawned without it);
+      1. time: exactly one skill spawn of the same type, with a scope, started within LINK_WINDOW_S of it, and vice versa;
       2. type: every open spawn of its type points to the same node;
       3. qa_run: an auditor while qa runs on a milestone belongs to that milestone's QA gate;
       4. batch: the agents of one type still unlinked are as many as the open spawns of that type still free
          (implement --parallel starts N implementers for N tasks at once): paired in start order. Agents of the same
          type started together look the same on the board, so the pairing cannot mislead;
-      5. task: implementers with no open spawn at all (the skill did not log them) are as many as the in-progress
-         tasks with no agent: paired in start order.
+      5. task: implementers with no open spawn carrying a scope (the skill did not log them, or logged no scope)
+         are as many as the in-progress tasks with no agent: paired in start order.
     Anything else stays without a node (better none than a wrong one). `tasks` (id -> {status, started_at}) drops
     spawns of tasks already done, dropped or blocked, whose agent_end was never logged.
-    Without hooks, the open skill spawns are the running set."""
+    Without hooks, the open skill spawns are the running set; implementer spawns logged without scope are paired
+    with the in-progress tasks with no agent when the counts match."""
     now = time.time()
     events = _task_events(root)
     spawns = open_spawns(events, now)
@@ -552,15 +606,22 @@ def live_agents(root: Path, qa_default: str | None = None, tasks: dict | None = 
             if not node and o["agent"] in QA_AGENTS and qa_node:
                 node, how = qa_node, "qa_run"
             active.append({"agent": o["agent"], "started_at": o["started_at"], "node": node, "slot": o["slot"], "linked_by": how if node else None})
+        _link_to_tasks(active, tasks)
         return {"hooks": False, "active": active, "runs": runs}
     near = lambda h, o: h["agent"] == o["agent"] and abs(_ts(h["started_at"]) - _ts(o["started_at"])) <= LINK_WINDOW_S  # noqa: E731
-    hs = [{"agent": _short(h["agent"]), "started_at": h["started_at"]} for h in hooks["active"]]
+    hs = [{"agent": _short(h["agent"]), "started_at": h["started_at"],
+           "node": scope_from_transcript(h.get("agent_id"), h.get("transcript"))} for h in hooks["active"]]
+    scoped = [o for o in spawns if _node_of(o["scope"])]
     active = []
     for h in hs:
-        node = slot = how = None
-        # 1. the start times match one spawn, and that spawn only this agent
-        cands = [o for o in spawns if near(h, o)]
-        if len(cands) == 1 and sum(1 for x in hs if near(x, cands[0])) == 1:
+        node, slot, how = h["node"], None, None
+        # 0. the agent's own prompt names its task or milestone
+        if node:
+            how = "id"
+            slot = next((o["slot"] for o in reversed(scoped) if o["agent"] == h["agent"] and _node_of(o["scope"]) == node), None)
+        # 1. the start times match one spawn with a scope, and that spawn only this agent
+        cands = [o for o in scoped if near(h, o)] if not node else []
+        if len(cands) == 1 and sum(1 for x in hs if not x["node"] and near(x, cands[0])) == 1:
             node, slot, how = _node_of(cands[0]["scope"]), cands[0]["slot"], "time"
         # 2. every open spawn of this agent type points to the same node (heavy auditors start later than they are logged)
         if not node:
@@ -583,14 +644,24 @@ def live_agents(root: Path, qa_default: str | None = None, tasks: dict | None = 
             for a, o in zip(loose, free):
                 a.update(node=_node_of(o["scope"]), slot=o["slot"], linked_by="batch")
             continue
-        # 5. implementers the skill did not log at all, as many as the in-progress tasks with no agent
-        if ag == "implementer" and tasks and not any(o["agent"] == ag for o in spawns):
-            idle = sorted(({"node": t, "started_at": v.get("started_at")} for t, v in tasks.items()
-                           if v.get("status") == "in_progress" and t not in taken), key=by_start)
-            if len(idle) == len(loose):
-                for a, t in zip(loose, idle):
-                    a.update(node=t["node"], linked_by="task")
+        # 5. implementers with no spawn carrying a scope, as many as the in-progress tasks with no agent
+        if ag == "implementer" and not any(o["agent"] == ag for o in scoped):
+            _link_to_tasks(active, tasks)
     return {"hooks": True, "active": active, "runs": runs}
+
+
+def _link_to_tasks(active: list[dict], tasks: dict | None) -> None:
+    """Rule 5: implementers with no node, as many as the in-progress tasks no agent is on, paired in start order."""
+    if not tasks:
+        return
+    by_start = lambda x: (_ts(x["started_at"]), int(x["slot"]) if str(x.get("slot") or "").isdigit() else 0)  # noqa: E731
+    loose = sorted((a for a in active if a["agent"] == "implementer" and not a["node"]), key=by_start)
+    taken = {a["node"] for a in active if a["node"]}
+    idle = sorted(({"node": t, "started_at": v.get("started_at"), "slot": None} for t, v in tasks.items()
+                   if v.get("status") == "in_progress" and t not in taken), key=by_start)
+    if loose and len(idle) == len(loose):
+        for a, t in zip(loose, idle):
+            a.update(node=t["node"], linked_by="task")
 
 
 def lifecycle(auto: dict) -> dict:

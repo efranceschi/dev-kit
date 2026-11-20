@@ -30,6 +30,7 @@ import re
 import sys
 from pathlib import Path
 
+AGENT_COLORS = ("red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan")  # Claude Code subagent colors; the board uses the same names
 KNOWN_TOOLS = {"Read", "Write", "Edit", "MultiEdit", "Grep", "Glob", "Bash", "WebSearch", "WebFetch", "Agent", "Task",
                "AskUserQuestion", "Skill", "NotebookEdit", "TodoWrite", "ToolSearch", "LS"}
 KIT_REF = re.compile(r"<KIT>/([A-Za-z0-9_./\-]+)")
@@ -153,6 +154,8 @@ def main(argv: list[str]) -> int:
             err(f"{rel}: agent model must be haiku | sonnet | opus (not inherit), got '{fm.get('model')}'")
         if fm.get("effort") not in ("low", "medium", "high", "xhigh", "max"):
             err(f"{rel}: agent must declare effort low | medium | high | xhigh | max, got '{fm.get('effort')}'")
+        if fm.get("color") not in AGENT_COLORS:
+            err(f"{rel}: agent must declare color {' | '.join(AGENT_COLORS)} (shown by Claude Code and the board), got '{fm.get('color')}'")
         if not fm.get("tools"):
             warnings.append(f"{rel}: no tools declared (inherits all)")
         for tool in [t.strip() for t in fm.get("tools", "").split(",") if t.strip()]:

@@ -86,6 +86,26 @@ class Base(unittest.TestCase):
         self.run_state("sync-plan")
 
 
+class TestAgentEventScope(Base):
+    def spawns(self) -> list[dict]:
+        lines = (self.root / ".dev" / "telemetry.jsonl").read_text(encoding="utf-8").splitlines()
+        return [r for r in map(json.loads, lines) if r.get("event") == "agent_spawn"]
+
+    def test_missing_scope_is_filled_with_the_only_task_in_progress(self) -> None:
+        self.init_with_plan()
+        self.run_state("start", "T-001")
+        p = self.run_state("event", "agent_spawn", "--set", "agent=dev-kit:implementer")
+        self.assertIn("using T-001", p.stderr)
+        self.assertEqual(self.spawns()[-1]["scope"], "T-001")
+        self.assertIn("Scope: T-001", self.run_state("brief", "T-001").stdout)
+        self.run_state("start", "T-002", "--force")
+        p = self.run_state("event", "agent_spawn", "--set", "agent=implementer")
+        self.assertIn("cannot place", p.stderr)
+        self.assertNotIn("scope", self.spawns()[-1])
+        p = self.run_state("event", "agent_spawn", "--set", "agent=code-reviewer", "--set", "scope=M1")
+        self.assertNotIn("warning", p.stderr)
+
+
 class TestInitAndSync(Base):
     def test_init_creates_state_and_files(self) -> None:
         out = self.run_state("init", "--language", "pt-BR", "--project", "demo",

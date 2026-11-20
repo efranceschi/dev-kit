@@ -4,6 +4,7 @@ description: Read-only visual QA of the rendered interface. Runs or inspects the
 tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 effort: medium
+color: pink
 ---
 
 > Kit root: `<KIT>` is the absolute path given on the `Kit root:` line of your prompt (the folder with `shared/` and `scripts/`). If your prompt has none, look for `skills/core` inside the dev-kit plugin folder (`.claude/plugins/dev-kit/` in this repo, or the installed copy under `~/.claude/plugins/`), then `.claude/skills/core`, and use that.

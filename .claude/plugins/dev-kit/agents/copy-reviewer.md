@@ -4,6 +4,7 @@ description: Read-only reviewer of every user-facing string - UI text, error and
 tools: Read, Grep, Glob, Bash, Write
 model: haiku
 effort: medium
+color: pink
 ---
 
 > Kit root: `<KIT>` is the absolute path given on the `Kit root:` line of your prompt (the folder with `shared/` and `scripts/`). If your prompt has none, look for `skills/core` inside the dev-kit plugin folder (`.claude/plugins/dev-kit/` in this repo, or the installed copy under `~/.claude/plugins/`), then `.claude/skills/core`, and use that.

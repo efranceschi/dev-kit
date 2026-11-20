@@ -660,6 +660,13 @@ class BoardTest(unittest.TestCase):
         self.assertEqual([a["agent_id"] for a in d["active"]], ["a2"])
         self.assertEqual(d["recent"][0]["agent"], "dev-kit:code-reviewer")
         self.assertNotIn("SECRET", (self.root / ".dev" / "run" / "agents.jsonl").read_text())
+        # the subagent's own transcript path: derived on start (with or without the agent- prefix), given on stop
+        fire("SubagentStart", agent_id="agent-b1", agent_type="dev-kit:implementer", transcript_path="/h/.claude/projects/p/s1.jsonl")
+        fire("SubagentStart", agent_id="b2", agent_type="dev-kit:implementer", transcript_path="/h/.claude/projects/p/s1.jsonl")
+        fire("SubagentStop", agent_id="b2", agent_type="dev-kit:implementer", agent_transcript_path="/etc/passwd")
+        recs = [json.loads(x) for x in (self.root / ".dev" / "run" / "agents.jsonl").read_text().splitlines()]
+        self.assertEqual([r.get("transcript") for r in recs[-3:]],
+                         ["/h/.claude/projects/p/s1/subagents/agent-b1.jsonl", "/h/.claude/projects/p/s1/subagents/agent-b2.jsonl", None])
 
     def _mod(self):
         import importlib.util
@@ -669,13 +676,88 @@ class BoardTest(unittest.TestCase):
         spec.loader.exec_module(mod)
         return mod
 
-    def _hook(self, event, agent_id, agent, ago_s=0):
+    def _hook(self, event, agent_id, agent, ago_s=0, transcript=None):
         from datetime import datetime, timedelta, timezone
         ts = (datetime.now(timezone.utc) - timedelta(seconds=ago_s)).strftime("%Y-%m-%dT%H:%M:%SZ")
         run = self.root / ".dev" / "run"
         run.mkdir(exist_ok=True)
+        rec = {"ts": ts, "event": event, "session": "s1", "agent_id": agent_id, "agent": agent}
+        if transcript:
+            rec["transcript"] = str(transcript)
         with (run / "agents.jsonl").open("a") as f:
-            f.write(json.dumps({"ts": ts, "event": event, "session": "s1", "agent_id": agent_id, "agent": agent}) + "\n")
+            f.write(json.dumps(rec) + "\n")
+
+    def _transcript(self, agent_id, prompt=None):
+        """Path of a fake subagent transcript; written only when a prompt is given (blocks form, as Claude Code does)."""
+        p = self.root / "cc" / "s1" / "subagents" / f"agent-{agent_id}.jsonl"
+        if prompt is not None:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": prompt}]}})
+                         + "\n" + json.dumps({"type": "assistant", "message": {"content": "Scope: T-099"}}) + "\n")
+        return p
+
+    def test_agents_link_by_the_scope_line_of_their_prompt(self):
+        """Two implementers started together, spawns logged without scope: only the prompt can tell them apart."""
+        mod = self._mod()
+        self.ds("start", "T-002", "--force")
+        self._hook("session_start", "", "")
+        for _ in range(3):
+            self.ds("event", "agent_spawn", "--set", "agent=implementer")
+        self._hook("agent_start", "a1", "dev-kit:implementer", transcript=self._transcript("a1", "Task: T-002 — x\nScope: T-002\n"))
+        self._hook("agent_start", "a2", "dev-kit:implementer", transcript=self._transcript("a2", "Task: T-001\nScope: T-001"))
+        self._hook("agent_start", "a3", "dev-kit:implementer", transcript=self._transcript("a3"))  # not written yet
+        tasks = {t: {"status": "in_progress"} for t in ("T-001", "T-002", "T-003")}
+        live = mod.live_agents(self.root, None, tasks)["active"]
+        self.assertEqual(sorted((x["node"], x["linked_by"]) for x in live[:2]), [("T-001", "id"), ("T-002", "id")])
+        # the third falls back to the task rule: the one in-progress task with no agent
+        self.assertEqual((live[2]["node"], live[2]["linked_by"]), ("T-003", "task"))
+        self._transcript("a3", "Scope: M1")
+        self.assertEqual(mod.live_agents(self.root, None, tasks)["active"][2]["node"], "GATE:M1")
+        # nothing from the transcript reaches /api/state
+        self.assertNotIn("transcript", json.dumps(mod.build_state(self.root)["agents"]))
+
+    def test_spawn_without_scope_never_links_by_time_to_nothing(self):
+        mod = self._mod()
+        self._hook("session_start", "", "")
+        # written directly: dev_state would fill the scope in (one task in progress)
+        tel = self.root / ".dev" / "telemetry.jsonl"
+        sess = json.loads(tel.read_text().splitlines()[-1]).get("session") if tel.exists() else None
+        from datetime import datetime, timezone
+        with tel.open("a") as f:
+            f.write(json.dumps({"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "event": "agent_spawn",
+                                "session": sess, "agent": "implementer"}) + "\n")
+        self._hook("agent_start", "a1", "dev-kit:implementer")
+        tasks = {"T-001": {"status": "in_progress"}}
+        self.assertEqual([(x["node"], x["linked_by"]) for x in mod.live_agents(self.root, None, tasks)["active"]],
+                         [("T-001", "task")])
+        self.assertEqual([(x["node"], x["linked_by"]) for x in mod.live_agents(self.root)["active"]], [(None, None)])
+
+    def test_unscoped_spawn_without_hooks_links_to_the_task_and_closes(self):
+        mod = self._mod()
+        tel = self.root / ".dev" / "telemetry.jsonl"
+        sess = json.loads(tel.read_text().splitlines()[-1]).get("session")
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with tel.open("a") as f:
+            f.write(json.dumps({"ts": now, "event": "agent_spawn", "session": sess, "agent": "implementer"}) + "\n")
+        tasks = {"T-001": {"status": "in_progress"}}
+        self.assertEqual([(x["node"], x["linked_by"]) for x in mod.live_agents(self.root, None, tasks)["active"]],
+                         [("T-001", "task")])
+        with tel.open("a") as f:
+            f.write(json.dumps({"ts": now, "event": "agent_end", "session": sess, "agent": "implementer", "status": "ok"}) + "\n")
+        self.assertEqual(mod.live_agents(self.root, None, tasks)["active"], [])
+
+    def test_agent_colors_match_claude_code_and_the_board(self):
+        mod = self._mod()
+        roles = mod.agent_roles()
+        self.assertEqual(len(roles), 17)
+        self.assertEqual({r["color"] for r in roles.values()} - set(mod.AGENT_COLORS), set())
+        self.assertEqual(roles["architect"]["color"], "purple")
+        self.assertEqual(roles["implementer"]["color"], "green")
+        css = (CORE / "shared" / "board" / "board.css").read_text()
+        for c in mod.AGENT_COLORS:
+            self.assertEqual(css.count(f"--ag-{c}:"), 3, c)  # dark, light by preference, light by switch
+            self.assertIn(f".agent-dot.ag-{c} ", css)
 
     def test_live_agents_from_skill_log_without_hooks(self):
         mod = self._mod()
