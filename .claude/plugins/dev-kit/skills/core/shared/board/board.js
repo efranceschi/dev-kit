@@ -103,8 +103,10 @@
   let expanded = new Set();  // kanban columns showing every card
   let mobileCol = null;      // column shown on narrow screens (null = pick the most useful one)
   let goalOpen = false;      // milestone goal expanded
-  const INS_KEY = "board-insight-v2";  // v2: Quality became the default tab
-  let insTab = INS.includes(store.get(INS_KEY, "")) ? store.get(INS_KEY, "") : "quality";
+  // one card, one row of tabs: the board views (tasks, plan) and the insights
+  const VIEWS = ["tasks", "plan", ...INS];
+  const VIEW_KEY = "board-view-v1";
+  let view = VIEWS.includes(store.get(VIEW_KEY, "")) ? store.get(VIEW_KEY, "") : "tasks";
   let firstRender = true;
 
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + "s"}`;
@@ -386,7 +388,7 @@
   }
 
   function renderKanban(m) {
-    if (view === "plan") return;
+    if (view !== "tasks") return;
     const ts = tasksOf(m);
     const types = [...new Set(ts.map((t) => t.type).filter(Boolean))].sort();
     const sel = $("type-filter");
@@ -849,29 +851,11 @@
   }
 
   function renderInsights(m, curId) {
-    INS.forEach((k) => {
-      const tab = $(`ins-tab-${k}`);
-      tab.setAttribute("aria-selected", String(k === insTab));
-      tab.tabIndex = k === insTab ? 0 : -1;
-      $(`ins-${k}`).hidden = k !== insTab;
-    });
-    if (insTab === "burndown") renderBurndown(m);
-    else if (insTab === "velocity") renderVelocity(curId);
-    else if (insTab === "quality") renderDoD();
-    else renderBacklog(curId);
+    if (view === "burndown") renderBurndown(m);
+    else if (view === "velocity") renderVelocity(curId);
+    else if (view === "quality") renderDoD();
+    else if (view === "backlog") renderBacklog(curId);
   }
-  function pickInsight(k, focus) {
-    insTab = k; store.set(INS_KEY, k);
-    if (data && data.ok) renderInsights(currentMilestone(), currentId());
-    if (focus) $(`ins-tab-${k}`).focus();
-  }
-  $("ins-tabs").addEventListener("click", (e) => { const t = e.target.closest("[data-ins]"); if (t) pickInsight(t.dataset.ins, false); });
-  $("ins-tabs").addEventListener("keydown", (e) => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
-    let i = INS.indexOf(insTab);
-    i = e.key === "Home" ? 0 : e.key === "End" ? INS.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + INS.length) % INS.length;
-    pickInsight(INS[i], true); e.preventDefault();
-  });
 
   function tickAgents() {
     document.querySelectorAll(".agent-time[data-start]").forEach((el) => { el.textContent = dur((Date.now() - parseT(el.dataset.start)) / 1000); });
@@ -1075,7 +1059,6 @@
   setInterval(() => document.querySelectorAll(".approval-left[data-deadline]").forEach((el) => { el.textContent = leftText(Number(el.dataset.deadline) - Date.now()); }), 1000);
 
   // ------------------------------------------------------------------ plan: drag tasks and issues between open milestones, add the next milestone, send the draft
-  let view = "tasks";
   let draft = { ops: [], base: null, serverErrors: [], buffer: false };
   const MS_NUM = (id) => Number(String(id).slice(1));
   const cmpSeq = (a, b) => ((data.tasks[a].seq ?? 1e6) - (data.tasks[b].seq ?? 1e6)) || (Number(a.slice(2)) - Number(b.slice(2)));
@@ -1184,7 +1167,7 @@
         isTask && x.status !== "todo" ? h("span", { class: `chip st-chip s-${x.status}`, text: stLabel(x.status) }) : null,
         isTask && x.lane ? h("span", { class: `chip lane-${x.lane}`, text: x.lane }) : null,
         !isTask && x.severity ? h("span", { class: "chip", text: x.severity }) : null),
-      h("div", { class: "tcard-title", text: x.title || "" }),
+      h("div", { class: "tcard-title", text: x.title || "", title: x.title || null }),
       sel);
     if (movable) {
       el.addEventListener("dragstart", (e) => { dragging = c; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.id); el.classList.add("dragging"); });
@@ -1220,20 +1203,36 @@
     });
   }
   let newMsTitle = "";
+  const doneOpen = new Set();  // plan columns whose done tasks are expanded, kept across live updates
   function renderPlan() {
     const box = $("planner");
     if (view !== "plan" || !data || !data.ok) { box.hidden = true; return; }
     if (dragging) return;  // a live update in the middle of a drag would pull the card from under the pointer
     box.hidden = false;
+    // the plan is rebuilt on every update: keep where the user had scrolled to
+    const lanes = box.querySelector(".plan-cols");
+    const scrollX = lanes ? lanes.scrollLeft : 0;
+    const scrollY = {};
+    box.querySelectorAll(".pcol-list[data-key]").forEach((l) => { scrollY[l.dataset.key] = l.scrollTop; });
     const model = planModel();
     const column = (key, title, sub, cards, extra, isNew) => {
-      const list = h("ol", { class: "pcol-list", "aria-label": `${title}, ${plural(cards.length, "card")}` }, cards.map((c) => planCard(c, model, key === "queue" ? null : key)).filter(Boolean));
-      if (!cards.length) list.append(h("li", { class: "col-empty", text: key === "queue" ? "No open issue" : "Drop tasks or issues here" }));
+      // done tasks never move: they fold away under the open ones
+      const done = cards.filter((c) => c.kind === "task" && data.tasks[c.id].status === "done");
+      const open = cards.filter((c) => !done.includes(c));
+      const list = h("ol", { class: "pcol-list", "data-key": key, "aria-label": `${title}, ${plural(open.length, "open card")}` }, open.map((c) => planCard(c, model, key === "queue" ? null : key)).filter(Boolean));
+      if (!open.length) list.append(h("li", { class: "col-empty", text: key === "queue" ? "No open issue" : "Drop tasks or issues here" }));
       dropZone(list, key, model);
-      return h("section", { class: `pcol${key === "queue" ? " queue" : ""}${isNew ? " new" : ""}` },
+      let folded = null;
+      if (done.length) {
+        folded = h("details", { class: "pcol-done" }, h("summary", { text: `${plural(done.length, "task")} done` }),
+          h("ol", { class: "pcol-list done-list", "aria-label": `${title}, done tasks` }, done.map((c) => planCard(c, model, key)).filter(Boolean)));
+        folded.open = doneOpen.has(key);
+        folded.addEventListener("toggle", () => { if (folded.open) doneOpen.add(key); else doneOpen.delete(key); });
+      }
+      return h("section", { class: `pcol${key === "queue" ? " queue" : ""}${isNew ? " new" : ""}`, "aria-label": key === "queue" ? "Issue queue" : `${key} ${title}` },
         h("div", { class: "col-head" }, h("strong", { text: key === "queue" ? "Issue queue" : key }), key === "queue" || title === key ? null : h("span", { class: "pcol-title", text: title, title }),
-          h("span", { class: "count", text: String(cards.length) })),
-        sub ? h("p", { class: "card-sub", text: sub }) : null, list, extra);
+          h("span", { class: "count", title: done.length ? `${open.length} open, ${done.length} done` : null, text: !done.length ? String(open.length) : open.length ? `${open.length} · ${done.length} ✓` : `${done.length} ✓` })),
+        sub ? h("p", { class: "card-sub", text: sub }) : null, list, folded, extra);
     };
     const newNum = `M${Math.max(0, ...data.milestones.map((m) => MS_NUM(m.id)), ...draft.ops.filter((o) => o.op === "new_milestone").map((o) => MS_NUM(o.milestone))) + 1}`;
     const hasNew = draft.ops.some((o) => o.op === "new_milestone");
@@ -1277,16 +1276,45 @@
           h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: "Undo", onclick: () => { draft.ops.pop(); draft.serverErrors = []; renderPlan(); } }),
           h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: "Discard", onclick: () => { draft = { ops: [], base: null, serverErrors: [], buffer: false }; renderPlan(); } }),
           sendBtn)));
+    box.querySelector(".plan-cols").scrollLeft = scrollX;
+    box.querySelectorAll(".pcol-list[data-key]").forEach((l) => { if (scrollY[l.dataset.key]) l.scrollTop = scrollY[l.dataset.key]; });
   }
-  function setView(v) {
-    view = v;
-    document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === v)));
-    $("board-card").classList.toggle("planning", v === "plan");
-    $("board-h").textContent = v === "plan" ? "Plan the milestones" : "Task board";
-    renderKanban(currentMilestone());
-    renderPlan();
+  const VIEW_TITLE = { tasks: "Task board", plan: "Plan the milestones", quality: "Quality", burndown: "Burndown", velocity: "Velocity", backlog: "Backlog" };
+  const viewsShown = () => VIEWS.filter((v) => v !== "plan" || actionsOn());
+  /** Tabs, panels, heading and layout for the current view (Plan only while the board takes requests). */
+  function applyView() {
+    if (!viewsShown().includes(view)) view = "tasks";
+    $("tab-plan").hidden = !actionsOn();
+    document.querySelectorAll("#view-switch [role=tab]").forEach((b) => {
+      const on = b.dataset.view === view;
+      b.setAttribute("aria-selected", String(on));
+      b.tabIndex = on ? 0 : -1;
+    });
+    $("view-tasks").hidden = view !== "tasks";
+    INS.forEach((k) => { $(`ins-${k}`).hidden = k !== view; });
+    $("board-card").dataset.view = view;
+    $("board-card").classList.toggle("planning", view === "plan");
+    $("workspace").classList.toggle("planning", view === "plan");
+    $("board-h").textContent = VIEW_TITLE[view];
   }
-  $("view-switch").addEventListener("click", (e) => { const b = e.target.closest("[data-view]"); if (b) setView(b.dataset.view); });
+  function setView(v, focus) {
+    view = v; store.set(VIEW_KEY, v);
+    applyView();
+    if (data && data.ok) {
+      renderKanban(currentMilestone());
+      renderPlan();
+      renderInsights(currentMilestone(), currentId());
+    }
+    if (focus) document.querySelector(`#view-switch [data-view="${view}"]`).focus();
+  }
+  $("view-switch").addEventListener("click", (e) => { const b = e.target.closest("[data-view]"); if (b) setView(b.dataset.view, false); });
+  $("view-switch").addEventListener("keydown", (e) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    const vs = viewsShown();
+    let i = vs.indexOf(view);
+    i = e.key === "Home" ? 0 : e.key === "End" ? vs.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + vs.length) % vs.length;
+    setView(vs[i], true); e.preventDefault();
+  });
 
   // ------------------------------------------------------------------ main render + data flow
   function render() {
@@ -1300,8 +1328,7 @@
     const curId = currentId();
     const m = data.milestones.find((x) => x.id === curId) || null;
     keepFocus(() => {
-      $("view-switch").hidden = !actionsOn();
-      if (!actionsOn() && view === "plan") { view = "tasks"; $("board-card").classList.remove("planning"); $("board-h").textContent = "Task board"; }
+      applyView();
       renderHeader(); renderTabs(); renderMilestone(m); renderImpediments(); renderStages(m); renderKanban(m); renderPlan();
       renderRequests(); renderFeed(); renderInsights(m, curId);
     });
