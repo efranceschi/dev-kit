@@ -65,6 +65,13 @@ Pyramid per layer, tools, what must be e2e, coverage target.
 | type-check | |
 | build | |
 | e2e | |
+| test (integration only), if separate | |
+| QA screenshots (`qa:shots`, `shared/templates/qa-harness.md`) | |
+| QA accessibility scan (`qa:a11y`) | |
+
+Integration paths (what invalidates a recorded integration run, for `dev_state.py tests lookup --paths`): e.g. `src/db,migrations,src/api`.
+
+**QA access** (how visual, a11y and usability auditors see screens behind a login, never with production credentials): seed user or local read token created by `<command>`, read from env var `<NAME>` in the local `.env` (the name only, never the value, goes into prompts and docs); or "mocks only" when the harness serves every screen with mocked data.
 
 Skills and agents run exactly these commands (`implement`, `qa`, `test`, `release`, `resource-isolation.md`). Existing projects: copy them from `discovery.md` §3–4.
 

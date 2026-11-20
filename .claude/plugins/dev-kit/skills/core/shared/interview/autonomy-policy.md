@@ -28,7 +28,8 @@ Stored in `.dev/state.json` under `autonomy`. Set by `interview` (block 9); chan
   "cooldown": {"enabled": false, "max_tasks": 5},
   "local_deploy": {"mode": "off", "port": null, "notify": false},
   "production": {"when": "none", "method": null, "host": null, "targets": [], "smoke": [], "prerequisites": []},
-  "tips": "on"
+  "tips": "on",
+  "task_checks": "ui"
 }
 ```
 

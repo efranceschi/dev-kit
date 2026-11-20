@@ -2,6 +2,23 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.17.0 — 2026-11-20
+
+Third release from the field report: gates that confirm instead of discover, and less repeated work (test suites run three times, a deploy per fix batch, auditors reporting fixes made while they read, agents without browsers or dependencies in their worktree).
+
+### Added
+- `dev_state.py tests record|lookup`: green suites recorded per commit in `.dev/run/test-runs.jsonl` (`--kind unit|integration|e2e|all`, `--paths`); `lookup` reuses a run on the same commit or when nothing it covers changed since (docs and `.dev/` do not count), never a failing run or a dirty tree, and exits 3 otherwise. `implement` records after each commit, `qa` reuses or records its baseline, and `test-auditor` reads it before running anything (`stats.tests_reused`).
+- Checks inside the task: the implementer's self-check (AC ↔ test, copy, static WCAG on what it touched, harness screen entry) and `autonomy.task_checks` (`ui` default, `all`, `off`): `copy-reviewer` and `a11y-auditor` (`Mode: static`) on haiku for UI tasks, into `.dev/qa/T-xxx/precheck/`, blocking findings fixed before the commit.
+- `dev_detect_stack.py --tools`: Playwright, Chromium (also from `PLAYWRIGHT_BROWSERS_PATH`), axe, Lighthouse, `node_modules`, virtualenv and the QA harness scripts. `qa` and `plan` use it.
+- `shared/templates/qa-harness.md` and a "QA harness" chore task that `plan` adds to the first UI milestone when none exists: Playwright with mocks, every screen × state × viewport (`qa:shots`), axe per screen (`qa:a11y`). `visual-reviewer` and `a11y-auditor` run it when present.
+- `architecture.md` §8 template: integration-only command, harness commands, integration paths and **QA access** (a local seed user or read token, by env var name, never production credentials).
+
+### Changed
+- `qa` freezes the tree while auditors run and gives them `Audited commit:` (recorded as `sha` in each result); fixes start only after all have returned.
+- One deploy per approved gate (conventions §12): fix tasks are one batch, then one `qa` round with at most one local preview; `deploy` never runs mid-round, and `dev_state.py deploy` warns when the milestone's gate is not passed.
+- `resource-isolation.md`: worktrees link `node_modules`/`.venv` from the main checkout (with the `git check-ignore` check for symlinks) and never install; QA credentials rule; one simple command per Bash call, Read/Grep/Glob for reading, no heredocs or `cd … &&` chains.
+- Troubleshooting: an allowlist for read-only commands, worktree dependencies, static-only visual audits, repeated suites.
+
 ## 1.16.0 — 2026-11-19
 
 Second release from the field report: document reviews that converge. Long runs had the PRD in 8 rounds, the plan in 9 and the design in 6, because each round re-read everything, documents drifted apart, and a fix a reviewer suggested became the next round's regression.

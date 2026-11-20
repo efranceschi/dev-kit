@@ -28,6 +28,7 @@ Before `skill_end`, run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cos
 10. Log `skill_end` with `status` and a short `feedback` on the kit. Report: what was deployed (milestone, commit, migrations), smoke results, the `Production:` line, and how to roll back.
 
 ## Rules
+- One production deploy per approved gate: never deploy during a fix round to "check" a fix (that is what the local preview and the smoke check of `qa` are for); the only repeat deploy of a milestone is the fix of a failed deploy. `DS deploy` warns when the gate is not passed.
 - Never deploy a milestone whose gate is not passed (a hotfix goes out only through `release --hotfix`), from a dirty tree, or with production credentials pasted into the conversation.
 - Never skip the backup when the method supports one.
 - Production data is never deleted by this skill (`conventions.md` §10 floors).

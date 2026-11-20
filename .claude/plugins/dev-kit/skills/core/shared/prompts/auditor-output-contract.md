@@ -14,6 +14,7 @@ Use exactly these key names and values: `state` (not `status`) in `previous`, th
 {
   "auditor": "code-reviewer",
   "scope": "M1 | T-003 | path/",
+  "sha": "the Audited commit given in the prompt (or git rev-parse HEAD)",
   "summary": "one sentence",
   "stats": {"files_reviewed": 12, "tests_run": true, "tests_passed": 48, "tests_failed": 0},
   "findings": [
@@ -65,6 +66,7 @@ Rules:
 - No duplicate findings; merge instances of the same root cause into one finding listing all files.
 - Existing projects (`.dev/state.json` has `brownfield`, `conventions.md` §16): a problem that already existed at `brownfield.baseline_ref` and that the scope does not make worse gets `"legacy": true`. Legacy findings never score or block; the orchestrator turns them into `intangible` issues. Do not mark as legacy anything in lines the scope added or changed.
 - Keep `title` ≤ 60 characters. Severity follows `shared/conventions.md` §7.
+- Audit the `Audited commit:` of your prompt and copy it to `sha`. If you see the working tree change while you work (someone fixing in parallel), audit the commit anyway and say so in `summary`.
 - If the scope is empty or cannot be found, return `findings: []`, `verdict: "pass"` and explain in `summary`.
 - Write nothing to the repository except your `Output file:`. You are read-only otherwise, except for running tests/linters, scratch builds, and saving screenshots/raw tool output under `.dev/qa/<scope>/` when your own instructions say so.
 - The `auditor` value must be your exact agent name: `dev_score.py` maps it to a scoring dimension (code, security, tests, spec, ux, a11y, visual, copy, performance, data, operations, dependencies, docs, design, requirements). The score is computed from your findings by a fixed formula, so severity and confidence must be honest: inflating or hiding findings changes the gate outcome.
