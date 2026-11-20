@@ -420,9 +420,57 @@ class BoardTest(unittest.TestCase):
         self.assertIn("actions off", out)
         self.assertTrue(self.record()["actions"])
         self.board("stop")
-        # shared with the network: off unless asked for
-        self.board("start", "--host", "0.0.0.0", check=True)
-        self.assertFalse(self.record()["actions"])
+        # shared with the network: still on (a single-user board; nobody gets in without the access key)
+        out = self.board("start", "--host", "0.0.0.0", check=True).stdout
+        rec = self.record()
+        self.assertTrue(rec["actions"])
+        self.assertIn("anyone with a link can also queue work", out)
+        self.assertEqual(request(rec["port"], "GET", "/api/state")[0], 401)
+        body = {"action": "run", "args": {"command": "/dev-kit:docs"}}
+        self.assertEqual(post(rec["port"], "/api/inbox", body, "wrong")[0], 403)
+        self.assertEqual(post(rec["port"], "/api/inbox", body, rec["token"])[0], 201)
+
+    def test_trusted_host_names_for_a_reverse_proxy(self):
+        self.board("start", check=True)
+        self.assertEqual(request(self.record()["port"], "GET", "/api/state", {"Host": "board.example.com"})[0], 403)
+        out = self.board("start", "--trusted-host", "Board.Example.com", check=True).stdout
+        self.assertIn("the trusted host names changed", out)
+        self.assertIn("trusted host names: board.example.com", out)
+        rec = self.record()
+        port, tok = rec["port"], rec["token"]
+        self.assertEqual(request(port, "GET", "/api/state", {"Host": "board.example.com"})[0], 200)
+        self.assertEqual(request(port, "GET", "/api/state", {"Host": "board.example.com:8443"})[0], 200)
+        self.assertEqual(request(port, "GET", "/api/state", {"Host": "evil.example.com"})[0], 403)
+        body = {"action": "run", "args": {"command": "/dev-kit:docs"}}
+        # the proxy serves the page over https, and may keep the Host header or rewrite it to the local address
+        self.assertEqual(post(port, "/api/inbox", body, tok, {"Origin": "https://board.example.com", "Host": "board.example.com"})[0], 201)
+        self.assertEqual(post(port, "/api/inbox", body, tok, {"Origin": "https://board.example.com"})[0], 201)
+        self.assertEqual(post(port, "/api/inbox", body, tok, {"Origin": "https://evil.example.com"})[0], 403)
+        self.assertEqual(post(port, "/api/inbox", body, tok, {"Origin": "https://board.example.com/x"})[0], 403)
+        self.assertEqual(post(port, "/api/inbox", body, tok, {"Origin": "ftp://board.example.com"})[0], 403)
+        # remembered for the project, until "none"
+        self.board("stop")
+        self.board("start", check=True)
+        self.assertEqual(self.record()["trusted_hosts"], ["board.example.com"])
+        self.board("start", "--trusted-host", "none", check=True)
+        self.assertEqual(self.record()["trusted_hosts"], [])
+        self.assertEqual(request(self.record()["port"], "GET", "/api/state", {"Host": "board.example.com"})[0], 403)
+        self.assertEqual(self.board("start", "--trusted-host", "http://x").returncode, 2)
+
+    def test_hooks_stay_quiet_while_a_session_listens(self):
+        sys.path.insert(0, str(CORE / "scripts"))
+        import dev_worker as dw
+        dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
+        dw.arm(self.root, os.getppid())
+        dw.watch(self.root, once=True, emit=lambda line: None, grace=0)  # leaves the listener's heartbeat
+        self.assertTrue(dw.listening(self.root))
+        payload = {"hook_event_name": "SessionStart", "session_id": "s1", "cwd": str(self.root), "source": "startup"}
+        out = subprocess.run([sys.executable, "-I", str(CORE / "scripts" / "dev_agent_hook.py")], input=json.dumps(payload),
+                             text=True, check=True, capture_output=True, env={**os.environ, "CLAUDE_PROJECT_DIR": str(self.root)}).stdout
+        self.assertNotIn("request", out)
+        self.board("start", check=True)
+        ex = json.loads(request(self.record()["port"], "GET", "/api/state")[1])["inbox"]["executor"]
+        self.assertEqual((ex["listening"], ex["online"], ex["state"], ex["continuous_stopped"]), (True, True, "idle", None))
 
     def test_hooks_tell_about_board_requests_once(self):
         hook = CORE / "scripts" / "dev_agent_hook.py"
@@ -460,8 +508,9 @@ class BoardTest(unittest.TestCase):
         d = json.loads(request(self.record()["port"], "GET", "/api/state")[1])
         self.assertEqual([d["tasks"][t]["seq"] for t in ("T-001", "T-002")], [1, 2])
         html = request(self.record()["port"], "GET", "/")[1].decode()
-        for el in ('id="req-card"', 'id="view-switch"', 'id="planner"', 'id="issue-dialog"', 'id="toast"'):
+        for el in ('id="req-card"', 'id="view-switch"', 'id="planner"', 'id="issue-dialog"', 'id="toast"', 'id="cont-btn"'):
             self.assertIn(el, html)
+        self.assertEqual(request(self.record()["port"], "GET", "/assets/favicon-alert.svg")[0], 200)  # the tab's "needs you" icon
 
     def test_state_endpoint_is_read_only_and_complete(self):
         state_file = self.root / ".dev" / "state.json"

@@ -17,14 +17,25 @@ Subcommands (executor side)
   wait          block until a request can be claimed (--timeout S, default 7200); prints one line and exits 0,
                 exits 3 on timeout (re-arm)
   heartbeat     record the executor: --session S [--pid P] [--state idle|running|sleeping|offline] [--item ID]
-  status        the executor (online, working, paused, offline), the modes and the counts (--json)
+  status        the executor (listening, working, paused, offline), the modes and the counts (--json)
+  arm --pid P   make the Claude Code process P the session that listens for requests (--wait S: wait for its
+                watcher to answer); disarm undoes it
+  watch         the listener, started by Claude Code as the plugin's monitor (monitors/monitors.json): a long,
+                silent process that prints one line when a request waits for the armed session it runs under, and
+                again every 10 minutes while nobody takes it. Each line reaches Claude as a notification, so an
+                idle session starts working. Prints nothing in any other session. (--once: one pass, for tests)
+  continue-next continuous mode: queue the project's next step when the mode is on, nothing is queued and nothing
+                needs the user; exit 3 with the reason otherwise
 
 Files, all in <project>/.dev/run/, each with one writer, written atomically (tmp + rename):
-  inbox/R-nnn.json        the request, immutable (board)
+  inbox/R-nnn.json        the request, immutable (board, or continuous mode)
   inbox/R-nnn.state.json  status, timestamps, note (executor); absent = pending
   inbox/R-nnn.cancel      cancel flag (board); a pending request is cancelled at once, a running one at the next
                           safe point
   worker.json             executor heartbeat (executor)
+  worker-armed.json       the Claude Code process that listens (executor: arm)
+  worker-watch.json       the listener's own heartbeat (watch)
+  worker-continuous.json  the last step continuous mode queued, or why it stopped (executor)
   worker-mode.json        paused and continuous modes (board)
   approvals/A-*.json      a permission request (hook); approvals/A-*.decision: allow | deny (board)
 
@@ -41,6 +52,7 @@ import json
 import os
 import re
 import secrets
+import subprocess
 import sys
 import time
 import unicodedata
@@ -52,6 +64,11 @@ MAX_OPEN = 20                 # pending + running + needs_input
 KEEP_FINISHED = 200           # finished requests kept for the board's history
 STALE_S = 6 * 3600            # a running request whose executor was not seen for this long is stale
 ONLINE_S = 15 * 60            # an executor seen this recently counts as online when its pid is unknown
+WATCH_BEAT_S = 20             # how often the listener refreshes its heartbeat
+WATCH_FRESH_S = 90            # a listener not seen for this long is not listening
+REMIND_S = 600                # a request nobody took is announced again after this long
+THINK_S = 10                  # how often an idle listener looks for the next step of continuous mode
+CONTINUE_OK = ("implement", "qa", "review", "docs", "usability")  # steps continuous mode takes on its own
 FINISHED = ("done", "failed", "cancelled", "stale")
 OPEN = ("pending", "running", "needs_input")
 EXECUTOR_STATES = ("idle", "running", "sleeping", "offline")
@@ -171,6 +188,24 @@ def _alive(pid: object) -> bool:
         return not Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1].startswith("Z")
     except (OSError, IndexError):
         return True
+
+
+def ancestors(pid: int | None = None) -> list[int]:
+    """A process and its parents, nearest first. The Claude Code process that started a hook, a monitor or a Bash
+    command is among them, however many shells sit in between."""
+    out: list[int] = []
+    cur = int(pid or os.getpid())
+    while cur > 1 and cur not in out and len(out) < 64:
+        out.append(cur)
+        try:
+            cur = int(Path(f"/proc/{cur}/stat").read_text().rsplit(") ", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            try:  # no /proc (macOS)
+                res = subprocess.run(["ps", "-o", "ppid=", "-p", str(cur)], capture_output=True, text=True, timeout=3)
+                cur = int(res.stdout.strip() or 0)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                break
+    return out
 
 
 # --------------------------------------------------------------------------- validation
@@ -327,25 +362,30 @@ def _prune(root: Path) -> None:
             (inbox_dir(root) / f"{rid}{suffix}").unlink(missing_ok=True)
 
 
+def _enqueue(root: Path, action: object, canonical: dict, by: str) -> str:
+    """Write a validated request; the caller holds the lock. Returns its id."""
+    if sum(1 for x in items(root) if x["status"] in OPEN) >= MAX_OPEN:
+        raise QueueFull(f"{MAX_OPEN} requests are already waiting; cancel one or wait")
+    last = _ids(root)
+    seq_path = inbox_dir(root) / ".seq"
+    try:
+        n = int(seq_path.read_text().strip())
+    except (OSError, ValueError):
+        n = 0
+    n = max(n, int(last[-1][2:]) if last else 0) + 1
+    seq_path.write_text(str(n), encoding="utf-8")
+    rid = f"R-{n:03d}"
+    _write(inbox_dir(root) / f"{rid}.json", {"id": rid, "ts": now(), "action": action, "args": canonical, "by": by})
+    _prune(root)
+    return rid
+
+
 def submit(root: Path, action: object, args: object, by: str = "board") -> dict:
     """Queue a request from the board. Raises Invalid (422) or QueueFull (429)."""
     canonical = validate(action, args)
     with _Lock(root):
-        if sum(1 for x in items(root) if x["status"] in OPEN) >= MAX_OPEN:
-            raise QueueFull(f"{MAX_OPEN} requests are already waiting; cancel one or wait")
-        last = _ids(root)
-        seq_path = inbox_dir(root) / ".seq"
-        try:
-            n = int(seq_path.read_text().strip())
-        except (OSError, ValueError):
-            n = 0
-        n = max(n, int(last[-1][2:]) if last else 0) + 1
-        seq_path.write_text(str(n), encoding="utf-8")
-        rid = f"R-{n:03d}"
-        req = {"id": rid, "ts": now(), "action": action, "args": canonical, "by": by}
-        _write(inbox_dir(root) / f"{rid}.json", req)
-        _prune(root)
-    return item(root, rid) or req
+        rid = _enqueue(root, action, canonical, by)
+    return item(root, rid)  # type: ignore[return-value]
 
 
 def cancel(root: Path, rid: str) -> dict:
@@ -365,15 +405,61 @@ def modes(root: Path) -> dict:
 
 
 def set_mode(root: Path, paused: object = None, continuous: object = None) -> dict:
+    path = run_dir(root) / "worker-mode.json"
+    since = _since(_read(path) or {})
     m = modes(root)
     for k, v in (("paused", paused), ("continuous", continuous)):
         if v is not None:
             if not isinstance(v, bool):
                 raise Invalid([f"{k} must be true or false"])
             m[k] = v
+    if continuous is True:
+        since = time.time()  # turning it on (again) clears whatever had stopped it
     _ensure(root)
-    _write(run_dir(root) / "worker-mode.json", {**m, "at": now()})
+    _write(path, {**m, "continuous_since": since if m["continuous"] else None, "at": now()})
     return m
+
+
+def _since(raw: dict) -> float:
+    """When continuous mode was last turned on (epoch seconds with fractions: a stop and a "go on" can share a second)."""
+    try:
+        return float(raw.get("continuous_since") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def armed(root: Path) -> dict | None:
+    """The Claude Code process that listens for this project's requests, while it is alive."""
+    a = _read(run_dir(root) / "worker-armed.json")
+    return a if a and _alive(a.get("pid")) else None
+
+
+def arm(root: Path, pid: object) -> dict:
+    if not _alive(pid):
+        raise Invalid(["--pid must be the running Claude Code process ($PPID in a Bash command)"])
+    _ensure(root)
+    rec = {"pid": int(pid), "session": f"claude-{int(pid)}", "at": now()}  # type: ignore[arg-type]
+    _write(run_dir(root) / "worker-armed.json", rec)
+    return rec
+
+
+def disarm(root: Path) -> None:
+    (run_dir(root) / "worker-armed.json").unlink(missing_ok=True)
+
+
+def listening(root: Path) -> bool:
+    """True while the armed session's listener (watch) is alive: a request queued now wakes that session."""
+    a = armed(root)
+    w = _read(run_dir(root) / "worker-watch.json") or {}
+    return bool(a and w.get("pid") == a["pid"] and _alive(w.get("watch_pid"))
+                and time.time() - _ts(w.get("last_seen")) < WATCH_FRESH_S)
 
 
 def approvals(root: Path) -> list[dict]:
@@ -400,8 +486,9 @@ def decide(root: Path, aid: str, decision: object) -> None:
 
 
 def executor(root: Path) -> dict:
-    """The executor as the board shows it: online (idle / working / sleeping), paused, or offline."""
+    """The executor as the board shows it: listening (a request wakes it), working, idle, paused, or offline."""
     w = _read(run_dir(root) / "worker.json") or {}
+    raw = _read(run_dir(root) / "worker-mode.json") or {}
     m = modes(root)
     seen = _ts(w.get("last_seen"))
     if not w or w.get("state") == "offline":
@@ -410,9 +497,12 @@ def executor(root: Path) -> dict:
         live = _alive(w["pid"])
     else:
         live = time.time() - seen < ONLINE_S
-    state = (w.get("state") or "idle") if live else "offline"
-    return {"state": state, "online": live, "paused": m["paused"], "continuous": m["continuous"],
-            "item": w.get("item") if live else None, "last_seen": w.get("last_seen")}
+    hears = listening(root)
+    state = (w.get("state") or "idle") if live else ("idle" if hears else "offline")
+    cont = _read(run_dir(root) / "worker-continuous.json") or {}
+    stopped = cont.get("stopped") if m["continuous"] and float(cont.get("at_s") or 0) >= _since(raw) else None
+    return {"state": state, "online": live or hears, "listening": hears, "paused": m["paused"], "continuous": m["continuous"],
+            "continuous_stopped": stopped, "item": w.get("item") if live else None, "last_seen": w.get("last_seen")}
 
 
 def snapshot(root: Path, recent: int = 15) -> dict:
@@ -539,6 +629,137 @@ def wait(root: Path, timeout: float, poll: float = 1.0) -> dict | None:
         time.sleep(min(poll, max(0.05, deadline - time.monotonic())))
 
 
+def continue_next(root: Path) -> tuple[dict | None, str]:
+    """Continuous mode: queue the project's next step when the mode is on, nothing is queued and nothing needs the
+    user. Returns (request, "") or (None, why); a reason that needs the user is kept for the board.
+
+    It stops, and says why, when: a request or an open question waits for an answer, a task is blocked, the last
+    request failed or a continuous one was cancelled, the milestone it was working on closed (one milestone per
+    go), the next step is not one it takes alone (deploy, release, plan...), or the last step changed nothing.
+    Turning the mode on again on the board clears a stop."""
+    raw = _read(run_dir(root) / "worker-mode.json") or {}
+    if raw.get("continuous") is not True:
+        return None, "continuous mode is off"
+    if raw.get("paused") is True:
+        return None, "the queue is paused on the board"
+    import dev_state as ds  # the project's next step is dev_state's to say
+    store = ds.Store(root)
+    try:
+        store.load()
+    except SystemExit:
+        return None, "the project state could not be read"
+    path = run_dir(root) / "worker-continuous.json"
+    since = _since(raw)
+    with _Lock(root):
+        all_ = items(root)
+        if any(x["status"] in ("pending", "running") for x in all_):
+            return None, "a request is already queued"
+        rec = _read(path) or {}
+        if float(rec.get("at_s") or 0) < since:
+            rec = {}  # turned on again since: start fresh
+        ended = lambda x: max(_mtime(inbox_dir(root) / f"{x['id']}.state.json"), _mtime(inbox_dir(root) / f"{x['id']}.cancel"))  # noqa: E731
+        gate = lambda m: (store.milestones().get(m) or {}).get("gate", "pending")  # noqa: E731
+        waiting = [x for x in all_ if x["status"] == "needs_input"]
+        last = next((x for x in reversed(all_) if x["status"] in ("done", "failed")
+                     or (x["status"] == "cancelled" and x.get("by") == "continuous")), None)
+        blocked = sorted(t for t, v in store.tasks().items() if v.get("status") == "blocked")
+        questions = ds.count_open_questions(store)
+        cur = ds.current_milestone(store)
+        cmd = ds.next_command(store)
+        skill = cmd.split()[0].removeprefix("/dev-kit:")
+        stop = None
+        if waiting:
+            stop = f"{waiting[0]['id']} waits for your answer"
+        elif questions:
+            stop = f"{questions} open question{'s' if questions != 1 else ''} wait{'' if questions != 1 else 's'} for your answer"
+        elif blocked:
+            stop = f"{blocked[0]} is blocked" + (f" (and {len(blocked) - 1} more)" if len(blocked) > 1 else "")
+        elif last and last["status"] != "done" and ended(last) >= since:
+            stop = f"{last['id']} {'failed' if last['status'] == 'failed' else 'was cancelled'}"
+        elif rec.get("milestone") and rec.get("gate") == "pending" and gate(rec["milestone"]) != "pending":
+            stop = f"{rec['milestone']} is closed; turn it on again for the next milestone"
+        elif skill not in CONTINUE_OK or not any(rx.match(cmd) for rx in RUN_COMMANDS):
+            stop = f"the next step is {cmd}, which is yours to start"
+        elif rec.get("command") == cmd and rec.get("state_at") == store.state.get("updated_at"):
+            stop = f"{cmd} changed nothing; look at its result"
+        if stop:
+            if rec.get("stopped") != stop:
+                _write(path, {**rec, "at_s": rec.get("at_s") or time.time(), "stopped": stop, "at": now()})
+            return None, stop
+        rid = _enqueue(root, "run", {"command": cmd}, "continuous")
+        _write(path, {"milestone": cur, "gate": gate(cur) if cur else None, "command": cmd,
+                      "state_at": store.state.get("updated_at"), "request": rid, "at_s": time.time(), "at": now(),
+                      "stopped": None})
+    return item(root, rid), ""
+
+
+def _watch_sig(root: Path) -> tuple:
+    out = []
+    for p in (inbox_dir(root), run_dir(root) / "worker-mode.json", run_dir(root) / "worker.json",
+              run_dir(root) / "questions", root / ".dev" / "open-questions.md", root / ".dev" / "state.json"):
+        try:
+            st = p.stat()
+            out.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
+def watch(root: Path, poll: float = 2.0, once: bool = False, emit=None, grace: float = 3.0) -> int:
+    """The listener behind the plugin's monitor. Every line it prints reaches Claude as a notification, so it
+    prints only what should start a turn: a request waiting for the armed session this process runs under.
+    Silent in every other session, while the queue is paused, and for a request the session takes by itself
+    within `grace` seconds; while that session is running the queue, a request is announced only if nobody
+    took it after REMIND_S, and then again every REMIND_S."""
+    emit = emit or (lambda line: print(line, flush=True))
+    parents = ancestors()[1:]
+    path = run_dir(root) / "worker-watch.json"
+    first: dict[str, float] = {}
+    told: dict[str, float] = {}
+    beat = think = scanned = 0.0
+    sig: tuple | None = None
+    nxt: dict | None = None
+    wrote = False
+    try:
+        while True:
+            t = time.monotonic()
+            a = armed(root)
+            if a and a["pid"] in parents:
+                if not wrote or t - beat >= WATCH_BEAT_S:
+                    _write(path, {"pid": a["pid"], "watch_pid": os.getpid(), "last_seen": now()})
+                    beat, wrote = t, True
+                m = modes(root)
+                w = _read(run_dir(root) / "worker.json") or {}
+                busy = w.get("state") == "running" and _alive(w.get("pid"))
+                cur = _watch_sig(root)
+                if cur != sig or t - scanned >= THINK_S:
+                    sig, scanned = cur, t
+                    nxt = None if m["paused"] else claimable(root)
+                    if nxt is None and m["continuous"] and not m["paused"] and not busy and t - think >= THINK_S:
+                        think = t
+                        try:
+                            nxt, _ = continue_next(root)
+                        except Exception:  # noqa: BLE001 - the listener outlives a bad state file
+                            nxt = None
+                if nxt and not m["paused"]:
+                    rid = nxt["id"]
+                    seen, last = first.setdefault(rid, t), told.get(rid)
+                    # a session running the queue takes the request itself: speak only if it never does
+                    due = t - seen >= (REMIND_S if busy else grace) if last is None else t - last >= REMIND_S
+                    if due:
+                        told[rid] = t
+                        emit(f"dev-kit board: request {rid} is waiting; /dev-kit:worker runs the board's requests")
+            elif wrote:
+                path.unlink(missing_ok=True)  # another session took over (or disarm): stop claiming to listen
+                wrote, sig = False, None
+            if once or os.getppid() == 1:  # one pass (tests), or the session that started us is gone
+                return 0
+            time.sleep(poll)
+    finally:
+        if wrote and not once:
+            path.unlink(missing_ok=True)
+
+
 # --------------------------------------------------------------------------- CLI
 
 def describe(x: dict) -> str:
@@ -565,14 +786,38 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("heartbeat"); s.add_argument("--session", required=True); s.add_argument("--pid", type=int)
     s.add_argument("--state", default="idle"); s.add_argument("--item")
     s = sub.add_parser("status"); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("arm"); s.add_argument("--pid", type=int, required=True); s.add_argument("--wait", type=float, default=0)
+    sub.add_parser("disarm")
+    s = sub.add_parser("watch"); s.add_argument("--once", action="store_true"); s.add_argument("--poll", type=float, default=2.0)
+    sub.add_parser("continue-next")
     a = p.parse_args(argv)
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import dev_state as ds
     root = ds.find_root(a.root)
     if not (root / ".dev" / "state.json").exists():
+        if a.cmd == "watch":
+            return 0  # the monitor starts in every project: nothing to listen for here, and nothing to say
         print(f"dev_worker: no dev-kit state at {root / '.dev' / 'state.json'}", file=sys.stderr)
         return 2
     try:
+        if a.cmd == "watch":
+            return watch(root, a.poll, a.once, grace=0 if a.once else 3.0)
+        if a.cmd == "arm":
+            rec = arm(root, a.pid)
+            end = time.monotonic() + max(0.0, a.wait)
+            while not listening(root) and time.monotonic() < end:
+                time.sleep(0.3)
+            print(f"armed: {rec['session']} · " + ("listening: a request on the board starts work here" if listening(root)
+                                                  else "not listening: run /dev-kit:worker when the board has requests"))
+            return 0
+        if a.cmd == "disarm":
+            disarm(root)
+            print("disarmed")
+            return 0
+        if a.cmd == "continue-next":
+            x, why = continue_next(root)
+            print(f"queued {describe(x)}" if x else f"not continuing: {why}")
+            return 0 if x else 3
         if a.cmd == "list":
             xs = [x for x in items(root) if a.all or x["status"] in OPEN]
             _print({"items": xs}, a.json, "\n".join(describe(x) for x in xs) or "no requests")
@@ -606,8 +851,10 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "status":
             snap = snapshot(root)
             e = snap["executor"]
-            _print(snap, a.json, f"executor {e['state']}" + (" · queue paused" if e["paused"] else "")
-                   + (" · continuous" if e["continuous"] else "") + f" · {len(snap['open'])} open request(s)"
+            _print(snap, a.json, f"executor {e['state']}" + (" · listening" if e["listening"] else "")
+                   + (" · queue paused" if e["paused"] else "")
+                   + (" · continuous" + (f" (stopped: {e['continuous_stopped']})" if e["continuous_stopped"] else "") if e["continuous"] else "")
+                   + f" · {len(snap['open'])} open request(s)"
                    + (f" · {len(snap['approvals'])} approval(s) waiting" if snap["approvals"] else ""))
     except Invalid as e:
         print("dev_worker: " + "; ".join(e.errors), file=sys.stderr)

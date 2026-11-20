@@ -209,6 +209,138 @@ class WorkerTest(unittest.TestCase):
         finally:
             dw.KEEP_FINISHED = old
 
+    # ------------------------------------------------------------------ the listener (plugin monitor)
+
+    def heard(self, **kw) -> list[str]:
+        lines: list[str] = []
+        dw.watch(self.root, once=True, emit=lines.append, grace=0, **kw)
+        return lines
+
+    def test_watch_speaks_only_for_the_armed_session_it_runs_under(self):
+        dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
+        self.assertEqual(self.heard(), [])  # nobody armed
+        self.assertFalse(dw.listening(self.root))
+        sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            dw.arm(self.root, sleeper.pid)  # another Claude Code process: not one of our parents
+            self.assertEqual(self.heard(), [])
+        finally:
+            sleeper.kill()
+            sleeper.wait()
+        self.assertIsNone(dw.armed(self.root))  # its process is gone
+        dw.arm(self.root, os.getppid())
+        self.assertEqual(self.heard(), ["dev-kit board: request R-001 is waiting; /dev-kit:worker runs the board's requests"])
+        ex = dw.executor(self.root)
+        self.assertEqual((ex["listening"], ex["online"], ex["state"]), (True, True, "idle"))
+        dw.set_mode(self.root, paused=True)
+        self.assertEqual(self.heard(), [])
+        dw.set_mode(self.root, paused=False)
+        dw.disarm(self.root)
+        self.assertEqual(self.heard(), [])
+        self.assertFalse(dw.listening(self.root))
+        with self.assertRaises(dw.Invalid):
+            dw.arm(self.root, 999999999)
+
+    def test_watch_leaves_a_running_session_alone(self):
+        dw.arm(self.root, os.getppid())
+        dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
+        dw.submit(self.root, "run", {"command": "/dev-kit:costs"})
+        dw.claim(self.root, "claude-1", os.getpid())  # this session runs R-001 and will take R-002 itself
+        self.assertEqual(self.heard(), [])
+        dw.finish(self.root, "R-001", "done")
+        dw.heartbeat(self.root, "claude-1", os.getpid(), "idle")
+        self.assertEqual(len(self.heard()), 1)
+
+    def test_watch_cli(self):
+        dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
+        self.assertEqual(self.cli("watch", "--once").stdout, "")
+        out = self.cli("arm", "--pid", str(os.getpid())).stdout  # this test is a parent of the CLI process
+        self.assertIn("armed: claude-", out)
+        self.assertIn("not listening", out)
+        self.assertIn("request R-001 is waiting", self.cli("watch", "--once").stdout)
+        self.assertIn("disarmed", self.cli("disarm").stdout)
+        self.assertEqual(self.cli("watch", "--once").stdout, "")
+        nowhere = subprocess.run([sys.executable, "-I", str(WORKER), "--root", str(Path(self.tmp.name) / "none"), "watch"],
+                                 capture_output=True, text=True, timeout=10)
+        self.assertEqual((nowhere.returncode, nowhere.stdout, nowhere.stderr), (0, "", ""))
+
+    # ------------------------------------------------------------------ continuous mode
+
+    def plan(self):
+        state = [sys.executable, "-I", str(STATE), "--root", str(self.root)]
+        (self.root / ".dev" / "plan.md").write_text(
+            "# Plan\n\n## M1 — One\n\n### T-001 A\n- status: todo\n- deps:\n- type: feature\n- acceptance:\n  - AC-1: a\n"
+            "- test_notes: t\n- files: a.py\n\n## M2 — Two\n\n### T-002 B\n- status: todo\n- deps:\n- type: feature\n"
+            "- acceptance:\n  - AC-2: b\n- test_notes: t\n- files: b.py\n", encoding="utf-8")
+        for args in (["set", "phase", "plan"], ["sync-plan"], ["review", "plan", "pass", "--score", "90"]):
+            subprocess.run(state + args, check=True, capture_output=True)
+        return lambda *a: subprocess.run(state + list(a), check=True, capture_output=True, text=True)
+
+    def test_continuous_queues_the_next_step_once(self):
+        ds = self.plan()
+        self.assertEqual(dw.continue_next(self.root), (None, "continuous mode is off"))
+        dw.set_mode(self.root, continuous=True)
+        x, why = dw.continue_next(self.root)
+        self.assertEqual((x["args"], x["by"], why), ({"command": "/dev-kit:implement"}, "continuous", ""))
+        self.assertEqual(dw.continue_next(self.root), (None, "a request is already queued"))
+        dw.claim(self.root, "s1")
+        dw.finish(self.root, x["id"], "done")
+        # the step changed nothing in the project: asking for it again would loop
+        _, why = dw.continue_next(self.root)
+        self.assertIn("changed nothing", why)
+        self.assertIn("changed nothing", dw.executor(self.root)["continuous_stopped"])
+        ds("start", "T-001")
+        ds("done", "T-001")
+        self.assertEqual(dw.continue_next(self.root)[0]["args"], {"command": "/dev-kit:qa M1"})
+        self.assertIsNone(dw.executor(self.root)["continuous_stopped"])
+        self.assertIn("not continuing: a request is already queued", self.cli("continue-next", expect=3).stdout)
+        dw.set_mode(self.root, paused=True)
+        self.assertEqual(dw.continue_next(self.root)[1], "the queue is paused on the board")
+
+    def test_continuous_stops_when_something_needs_the_user(self):
+        ds = self.plan()
+        dw.set_mode(self.root, continuous=True)
+        ds("add-question", "Which database?")
+        self.assertIn("1 open question waits for your answer", dw.continue_next(self.root)[1])
+        ds("answer-question", "Q-001", "--answer", "Postgres")
+        ds("block", "T-002", "--reason", "needs a key")
+        self.assertEqual(dw.continue_next(self.root)[1], "T-002 is blocked")
+        ds("unblock", "T-002")
+        x, _ = dw.continue_next(self.root)
+        dw.claim(self.root, "s1")
+        dw.finish(self.root, x["id"], "failed", note="tests red")
+        self.assertEqual(dw.continue_next(self.root)[1], f"{x['id']} failed")
+        dw.set_mode(self.root, continuous=True)  # "Go on" on the board
+        y, _ = dw.continue_next(self.root)
+        self.assertEqual(y["args"], {"command": "/dev-kit:implement"})
+        dw.cancel(self.root, y["id"])
+        self.assertEqual(dw.continue_next(self.root)[1], f"{y['id']} was cancelled")
+
+    def test_continuous_takes_one_milestone_per_go_and_leaves_some_steps_to_the_user(self):
+        ds = self.plan()
+        dw.set_mode(self.root, continuous=True)
+        ds("start", "T-001")
+        ds("done", "T-001")
+        x, _ = dw.continue_next(self.root)  # /dev-kit:qa M1, queued while the gate of M1 is pending
+        dw.claim(self.root, "s1")
+        ds("gate", "M1", "passed", "--score", "95")
+        dw.finish(self.root, x["id"], "done")
+        self.assertEqual(dw.continue_next(self.root)[1], "M1 is closed; turn it on again for the next milestone")
+        dw.set_mode(self.root, continuous=True)
+        self.assertEqual(dw.continue_next(self.root)[0]["args"], {"command": "/dev-kit:implement"})
+        dw.cancel(self.root, "R-002")
+        dw.set_mode(self.root, continuous=True)
+        ds("set", "phase", "done")
+        self.assertEqual(dw.continue_next(self.root)[1], "the next step is /dev-kit:backlog, which is yours to start")
+
+    def test_listener_starts_continuous_steps_when_idle(self):
+        self.plan()
+        dw.arm(self.root, os.getppid())
+        self.assertEqual(self.heard(), [])
+        dw.set_mode(self.root, continuous=True)
+        self.assertEqual(self.heard(), ["dev-kit board: request R-001 is waiting; /dev-kit:worker runs the board's requests"])
+        self.assertEqual(dw.item(self.root, "R-001")["by"], "continuous")
+
 
 if __name__ == "__main__":
     unittest.main()

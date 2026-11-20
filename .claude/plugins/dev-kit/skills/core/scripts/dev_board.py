@@ -8,8 +8,9 @@ Subcommands
           --port N (preferred port, default 8765; falls back to a free one) · --no-open · --open (force a tab
           even when the board was already running) · --idle-min N (auto-stop after N idle minutes, default 120)
           · --host IP (listen address, default 127.0.0.1; 0.0.0.0 or :: shares it with the network, see below;
-          a running board on another address is restarted) · --actions auto|on|off (requests to Claude Code from
-          the page; auto = on when listening on loopback only, off when shared with the network)
+          a running board on another address is restarted) · --actions on|off (requests to Claude Code from the
+          page; on by default) · --trusted-host NAME (a host name the board also answers to, for a reverse proxy;
+          repeatable, remembered for the project in .dev/run/board-config.json; "none" forgets them)
   stop    stop the board of this project (token-authenticated shutdown, then SIGTERM, then SIGKILL)
   status  print whether the board is running, its URL and PID (--json)
   serve   internal: the server process itself (spawned by start)
@@ -28,6 +29,9 @@ By default it binds 127.0.0.1 and answers Host headers that are localhost or an 
 refusing host names (DNS rebinding). With --host on a non-loopback address the board is "exposed": every
 request except /api/ping needs the access key (the per-run token) from ?key= - traded for an HttpOnly,
 SameSite=Strict cookie - so host names are accepted there. It is plain HTTP: for trusted networks only.
+The board is a single-user tool: whoever can open it can queue requests for Claude Code. Behind a reverse proxy
+(which brings its own TLS and login), name the proxy's host with --trusted-host: that name alone is accepted in
+Host and Origin, so the DNS-rebinding protection stays for every other name.
 
 Exit codes: 0 ok · 1 error · 2 no dev-kit state in the project
 """
@@ -62,7 +66,8 @@ import dev_worker as dw  # noqa: E402
 
 ASSETS = SCRIPTS.parent / "shared" / "board"
 STATIC = {"/": "index.html", "/index.html": "index.html", "/assets/board.css": "board.css",
-          "/assets/board.js": "board.js", "/assets/favicon.svg": "favicon.svg"}
+          "/assets/board.js": "board.js", "/assets/favicon.svg": "favicon.svg",
+          "/assets/favicon-alert.svg": "favicon-alert.svg"}
 DEFAULT_PORT = 8765
 # Identity of this code: a running server whose record carries another value was started by an older copy
 # of the kit (e.g. before a plugin update) and is restarted by `start` instead of reused.
@@ -768,6 +773,43 @@ def signature(root: Path) -> tuple:
 
 # --------------------------------------------------------------------------- server
 
+HOST_NAME = re.compile(r"^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$")
+
+
+def config_path(root: Path) -> Path:
+    return run_dir(root) / "board-config.json"
+
+
+def trusted_hosts(root: Path, given: list[str] | None = None) -> list[str]:
+    """Host names the board answers to besides localhost and IP addresses (a reverse proxy in front of it).
+    `given` (from --trusted-host) is added to the remembered list and saved; "none" forgets them all."""
+    try:
+        saved = [h for h in json.loads(config_path(root).read_text(encoding="utf-8")).get("trusted_hosts", []) if isinstance(h, str)]
+    except (OSError, json.JSONDecodeError, AttributeError):
+        saved = []
+    if not given:
+        return saved
+    names = [g.strip().lower() for g in given]
+    new = [] if "none" in names else sorted(set(saved) | {n for n in names if n})
+    if new != saved:
+        ensure_run_dir(root)
+        config_path(root).write_text(json.dumps({"trusted_hosts": new}) + "\n", encoding="utf-8")
+    return new
+
+
+def parse_host_name(v: str) -> str:
+    name = v.strip().lower()
+    if name != "none" and not HOST_NAME.match(name):
+        raise argparse.ArgumentTypeError("--trusted-host takes a host name without scheme or port, e.g. board.example.com")
+    return name
+
+
+def host_name(host: str) -> str:
+    """The name part of a Host header or URL authority, lowercased, without the port."""
+    host = host.strip().lower()
+    return host.partition("]")[0] + "]" if host.startswith("[") else host.partition(":")[0]
+
+
 def allowed_host(host: str) -> bool:
     """Host headers the board answers: 'localhost' or any IP literal (127.0.0.1, [::1], 192.168.x.y...),
     with or without a numeric port. Any other name is refused.
@@ -801,12 +843,14 @@ class Board(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, addr, root: Path, token: str, idle_s: int, actions: str = "auto"):
+    def __init__(self, addr, root: Path, token: str, idle_s: int, actions: str = "auto", trusted: list[str] | None = None):
         super().__init__(addr, Handler)
         self.root, self.token, self.idle_s = root, token, idle_s
         self.exposed = is_exposed(addr[0])  # listening beyond loopback: every request needs the access key
-        # requests to Claude Code: on by default only when nobody else on the network can reach the page
-        self.actions = actions == "on" or (actions == "auto" and not self.exposed)
+        # requests to Claude Code: on unless turned off. The board is a single-user tool, and beyond loopback
+        # nobody reaches it without the access key
+        self.actions = actions != "off"
+        self.trusted = set(trusted or [])  # host names of a reverse proxy in front of the board
         self.record: dict = {}
         self.stopping = threading.Event()
         self.last_activity = time.monotonic()
@@ -839,7 +883,10 @@ class Handler(BaseHTTPRequestHandler):
         host = self.headers.get("Host", "")
         if allowed_host(host) or self.server.exposed:  # exposed: the access key protects instead (a rebinding page never has it)
             return True
-        print(f"refused Host header {host[:80]!r} (only localhost or an IP address are accepted)", file=sys.stderr, flush=True)
+        if host_name(host) in self.server.trusted:
+            return True
+        print(f"refused Host header {host[:80]!r} (only localhost, an IP address or a --trusted-host name are accepted)",
+              file=sys.stderr, flush=True)
         return False
 
     def _cookie_name(self) -> str:
@@ -875,9 +922,13 @@ class Handler(BaseHTTPRequestHandler):
         self._send(401, body, "text/html; charset=utf-8")
 
     def _origin_ok(self) -> bool:
-        """POSTs must come from the page itself: Origin, when sent, is the same origin the browser used."""
+        """POSTs must come from the page itself: Origin, when sent, is the same origin the browser used, or a
+        trusted host's (a reverse proxy may serve the page over https and rewrite the Host header)."""
         origin = self.headers.get("Origin")
-        return origin is None or origin.lower() == f"http://{self.headers.get('Host', '')}".lower()
+        if origin is None or origin.lower() == f"http://{self.headers.get('Host', '')}".lower():
+            return True
+        scheme, sep, rest = origin.lower().partition("://")
+        return bool(sep) and scheme in ("http", "https") and "/" not in rest and host_name(rest) in self.server.trusted
 
     def _send(self, code: int, body: bytes, ctype: str = "application/json; charset=utf-8", extra: dict | None = None):
         self.send_response(code)
@@ -1043,23 +1094,25 @@ class Handler(BaseHTTPRequestHandler):
                 srv.clients -= 1
 
 
-def bind(host: str, port: int, root: Path, token: str, idle_s: int, actions: str = "auto") -> Board:
+def bind(host: str, port: int, root: Path, token: str, idle_s: int, actions: str = "auto",
+         trusted: list[str] | None = None) -> Board:
     cls = Board6 if ":" in host else Board
     try:
-        return cls((host, port), root, token, idle_s, actions)
+        return cls((host, port), root, token, idle_s, actions, trusted)
     except OSError:
-        return cls((host, 0), root, token, idle_s, actions)
+        return cls((host, 0), root, token, idle_s, actions, trusted)
 
 
 def cmd_serve(root: Path, a: argparse.Namespace) -> int:
     token = os.environ.pop("DEV_BOARD_TOKEN", "") or secrets.token_urlsafe(24)
     host = a.host or "127.0.0.1"
-    srv = bind(host, a.port, root, token, a.idle_min * 60, a.actions or "auto")
+    srv = bind(host, a.port, root, token, a.idle_min * 60, a.actions or "auto", sorted(set(a.trusted_host or [])))
     port = srv.server_address[1]
     conn = connect_addr(host)
     url = f"http://{hostport(conn, port)}/"
     srv.record = {"pid": os.getpid(), "port": port, "token": token, "url": url, "root": str(root),
                   "host": host, "connect": conn, "exposed": srv.exposed, "actions": srv.actions,
+                  "trusted_hosts": sorted(srv.trusted),
                   "code": CODE_ID, "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     if srv.exposed:
         srv.record["open_url"] = f"{url}?key={token}"
@@ -1075,6 +1128,8 @@ def cmd_serve(root: Path, a: argparse.Namespace) -> int:
     def watchdog():
         while not srv.stopping.wait(30):
             if srv.idle_s > 0 and srv.clients == 0 and time.monotonic() - srv.last_activity > srv.idle_s:
+                if dw.executor(root)["online"]:
+                    continue  # a Claude Code session is waiting for requests from this board: stay up for it
                 print(f"idle for {srv.idle_s // 60} min: stopping", flush=True)
                 srv.stop()
             if read_record(root) is None or (read_record(root) or {}).get("pid") != os.getpid():
@@ -1103,6 +1158,7 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
     if not (root / ".dev" / "state.json").exists():
         print(f"no dev-kit state at {root / '.dev' / 'state.json'}; run /dev-kit:start first", file=sys.stderr)
         return 2
+    trusted = trusted_hosts(root, a.trusted_host)
     with Lock(root):
         rec = live_record(root)
         restarted = False
@@ -1113,6 +1169,8 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
             why = f"the running board listens on {rec.get('host', '127.0.0.1')}, not {a.host}"
         elif rec and a.actions and a.actions != "auto" and bool(rec.get("actions")) != (a.actions == "on"):
             why = f"the running board has actions {'on' if rec.get('actions') else 'off'}"
+        elif rec and sorted(rec.get("trusted_hosts") or []) != trusted:
+            why = "the trusted host names changed"
         if why:
             code, msg = stop_locked(root)  # replace it rather than reuse it
             print(f"{why}; {msg}")
@@ -1129,6 +1187,8 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
         cmd = [sys.executable, "-I", str(Path(__file__).resolve()), "--root", str(root), "serve",
                "--port", str(a.port), "--idle-min", str(a.idle_min), "--host", a.host or "127.0.0.1",
                "--actions", a.actions or "auto"]
+        for name in trusted:
+            cmd += ["--trusted-host", name]
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=str(root),
                                 start_new_session=True, close_fds=True)
         log.close()
@@ -1159,6 +1219,9 @@ def print_exposure(rec: dict) -> None:
     warning that goes with them."""
     print("requests: on · buttons on the page queue them; /dev-kit:worker runs them in Claude Code" if rec.get("actions")
           else "requests: off · the page only shows the project (start with --actions on to queue requests)")
+    if rec.get("trusted_hosts"):
+        print(f"trusted host names: {', '.join(rec['trusted_hosts'])} · the proxy in front of them is the board's only "
+              "protection there: keep its own login on (--trusted-host none forgets them)")
     if not rec.get("exposed"):
         return
     print(f"exposed on {rec.get('host')} port {rec['port']}: plain HTTP, anyone with an access link can see the board and stop it")
@@ -1228,7 +1291,8 @@ def cmd_status(root: Path, a: argparse.Namespace) -> int:
     else:
         with Lock(root):
             rec = live_record(root)
-    out = {"running": bool(rec), **({k: rec.get(k) for k in ("url", "pid", "port", "started_at", "host", "exposed", "access_urls")}
+    out = {"running": bool(rec), **({k: rec.get(k) for k in ("url", "pid", "port", "started_at", "host", "exposed", "access_urls",
+                                                              "actions", "trusted_hosts")}
                                     if rec else {})}
     if a.json:
         print(json.dumps(out))
@@ -1252,7 +1316,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="IP address to listen on (default 127.0.0.1). 0.0.0.0 or :: shares the board with the "
                             "network: every request then needs the access key printed at start")
         s.add_argument("--actions", choices=["auto", "on", "off"], default=None,
-                       help="let the page send requests to Claude Code (auto: on for loopback, off when shared)")
+                       help="let the page send requests to Claude Code (on by default; auto means on)")
+        s.add_argument("--trusted-host", action="append", type=parse_host_name, metavar="NAME",
+                       help="host name of a reverse proxy in front of the board (repeatable; remembered; 'none' forgets)")
         if name == "start":
             g = s.add_mutually_exclusive_group()
             g.add_argument("--no-open", action="store_true", help="do not open a browser tab")
