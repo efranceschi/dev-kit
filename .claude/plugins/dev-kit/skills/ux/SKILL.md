@@ -25,7 +25,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 5. Microcopy guide in the **application language(s)** from brief block 2 with examples; conversation and headings stay in the user's language.
 6. Usability checkpoints: for each heuristic that matters here, how the flows satisfy it; list accessibility implications for `ui` (focus order, announcements, target sizes).
 7. Gaps → autonomy rule (`ui_details` and most UX choices are `decide_alone`); log ADRs for notable choices (navigation model, onboarding strategy). Ask only for `always_ask` matters (rare here: e.g. collecting extra personal data).
-8. Write `.dev/design/ux-flows.md`; `dev_state.py set phase ui`; summarise journeys and screen count; next: `ui`.
+8. Write `.dev/design/ux-flows.md`. Run the self-check (`${CLAUDE_SKILL_DIR}/../core/shared/prompts/self-check.md`, which includes `dev_state.py xref`) and fix what it finds, then `dev_state.py artifact mark ux`. Then `dev_state.py set phase ui`; summarise journeys and screen count; next: `ui`.
 
 ## Rules
 - Every AC that involves the interface must be reachable in at least one journey step; check this before finishing.

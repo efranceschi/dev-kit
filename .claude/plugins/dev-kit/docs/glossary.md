@@ -12,6 +12,7 @@
 | **Brownfield** | An existing project not built with dev-kit. start runs the onboarding (baseline tag, discovery, test baseline, entry mode); audits score only the changes since the baseline and legacy problems become issues (conventions §16). |
 | **buffer** | Share of each milestone (default 20%) reserved for queued issues. |
 | **class of service** | How an issue is scheduled: expedite (hotfix), current, standard (buffer), intangible (cool-down) or change (replan). |
+| **convergence** | Round 2+ of a review: blocking findings and the medium trend versus the previous round; a review converged twice can stop. |
 | **cool-down** | Optional short slot after a gate where small issues are fixed before the next milestone. |
 | **cut-off** | Minimum score for a gate or review, set in the interview (standard 85, premium 92, prototype 70). |
 | **delta mode** | From round 2, auditors verify whether previous findings were closed; new low findings are recorded but not scored. |
@@ -31,7 +32,9 @@
 | **milestone** | A cadence step M1, M2…; the next one starts only after the previous gate passes. Issues never renumber milestones. |
 | **model ladder** | Agents start on their base model and effort; failed dimensions are re-run one step higher, with consent. |
 | **n/a review** | A review that does not apply (e.g. design with no new UI); recorded with a note, it satisfies prerequisites and is not graded. |
+| **output file** | Where an auditor writes its JSON result (given in its prompt); dev_score.py check validates it, the agent answers in a few lines. |
 | **park** | Pause-point action: never wait; record the question with the recommended answer, block only what depends on it and continue (the default of most points under the unattended level, available at any level). |
 | **pause policy** | What the kit does at each pause point: ask, preauthorize within a limit, apply the recommendation, or park. |
 | **session log** | .dev/telemetry.jsonl: structured, high-level events of the run, without project data. |
 | **slot** | Per-agent isolation number that gives each agent its own port, database and scratch folder. |
+| **stale artifact** | A PRD, architecture, design or plan whose sources changed after it was marked; dev_state.py stale lists them, review refreshes them first. |

@@ -11,7 +11,7 @@ from pathlib import Path
 SCORE = Path(__file__).resolve().parents[1] / "scripts" / "dev_score.py"
 
 
-class TestCheck(unittest.TestCase):
+class Helpers(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
@@ -29,6 +29,9 @@ class TestCheck(unittest.TestCase):
         p = self.root / name
         p.write_text(data if isinstance(data, str) else json.dumps(data), encoding="utf-8")
         return p
+
+
+class TestCheck(Helpers):
 
     def test_normalises_drift_and_writes_back(self) -> None:
         p = self.write("code-reviewer.json", {
@@ -83,6 +86,43 @@ class TestCheck(unittest.TestCase):
                                                 "previous": [{"id": "F-001", "status": "resolved"}]})
         self.sc("score", "--scope", "M1", "--root", str(self.root), "--previous", str(prev), str(cur), expect=0)
         self.assertEqual(json.loads((self.root / "scores.json").read_text(encoding="utf-8"))["delta"]["closed"], 1)
+
+
+class TestDeltaRevision(Helpers):
+    def prev(self, findings: list[dict]) -> Path:
+        return self.write("prev.json", {"findings": findings})
+
+    def score(self, prev: Path, cur: Path, expect: int | None = None) -> dict:
+        self.sc("score", "--scope", "prd", "--kind", "review", "--root", str(self.root), "--previous", str(prev), str(cur), expect=expect)
+        return json.loads((self.root / "scores.json").read_text(encoding="utf-8"))
+
+    def test_findings_outside_the_change_are_deferred(self) -> None:
+        prev = self.prev([{"id": "F-001", "severity": "medium", "title": "a", "file": "prd.md", "line": 3, "auditor": "requirements-reviewer"},
+                          {"id": "F-002", "severity": "medium", "title": "b", "file": "prd.md", "line": 9, "auditor": "requirements-reviewer"}])
+        cur = self.write("requirements-reviewer.json", {"auditor": "requirements-reviewer", "findings": [
+            {"id": "F-010", "severity": "high", "title": "old section gap", "file": "prd.md", "line": 50, "in_change": False},
+            {"id": "F-011", "severity": "critical", "title": "data loss", "file": "prd.md", "line": 60, "in_change": False},
+            {"id": "F-012", "severity": "medium", "title": "new text vague", "file": "prd.md", "line": 4, "in_change": True}],
+            "previous": [{"id": "F-001", "state": "closed"}, {"id": "F-002", "state": "closed"}]})
+        res = self.score(prev, cur, expect=1)
+        self.assertEqual(res["delta"]["new_outside_change"], 1)              # the high outside the change
+        self.assertEqual(res["dimensions"]["requirements"]["counts"]["critical"], 1)   # critical always scores
+        self.assertEqual(res["convergence"]["mediums_prev"], 2)
+        self.assertEqual(res["convergence"]["mediums"], 1)
+        self.assertEqual(res["convergence"]["trend"], "falling")
+        self.assertFalse(res["convergence"]["converged"])                    # the critical blocks
+
+    def test_converged_and_contradictions_capped(self) -> None:
+        prev = self.prev([{"id": "F-001", "severity": "medium", "title": "a", "file": "prd.md", "line": 3, "auditor": "requirements-reviewer"}])
+        cur = self.write("requirements-reviewer.json", {"auditor": "requirements-reviewer", "findings": [
+            {"id": "F-020", "severity": "high", "title": "first_seen rule regresses", "file": "prd.md", "line": 8,
+             "contradicts": "F-001"}],
+            "previous": [{"id": "F-001", "state": "closed"}]})
+        res = self.score(prev, cur)
+        self.assertEqual(res["blockers"], [])
+        self.assertEqual(res["conflicts"][0]["contradicts"], "F-001")
+        self.assertEqual(res["convergence"]["trend"], "flat")
+        self.assertTrue(res["convergence"]["converged"])
 
 
 if __name__ == "__main__":

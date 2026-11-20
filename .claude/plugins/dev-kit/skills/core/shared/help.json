@@ -1078,6 +1078,18 @@
       "definition": "From round 2, auditors verify whether previous findings were closed; new low findings are recorded but not scored."
     },
     {
+      "term": "convergence",
+      "definition": "Round 2+ of a review: blocking findings and the medium trend versus the previous round; a review converged twice can stop."
+    },
+    {
+      "term": "stale artifact",
+      "definition": "A PRD, architecture, design or plan whose sources changed after it was marked; dev_state.py stale lists them, review refreshes them first."
+    },
+    {
+      "term": "output file",
+      "definition": "Where an auditor writes its JSON result (given in its prompt); dev_score.py check validates it, the agent answers in a few lines."
+    },
+    {
       "term": "low cap",
       "definition": "Low findings cost at most 10 points per dimension."
     },

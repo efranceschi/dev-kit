@@ -41,6 +41,8 @@ Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` and the autonomy policy
 - If the same dimension fails twice with the same root cause, stop looping: write an ADR describing the structural problem and ask the user (replan, change the spec, or accept with `--force`).
 - Report the score of every checkpoint in the progress line.
 
+Before every review in the table, run `DS stale`: an artifact that is stale is refreshed with its producing skill before its review runs (`review` step 1 does it; never advance past a review that passed on an older version of its artifact, `stale` → `reviews`).
+
 The "current milestone" is the first milestone (by number) with tasks not done or gate pending. Each sub-skill updates `phase` itself (`DS done` of a milestone's last task moves it to `qa`; `qa` moves it to `usability` or `docs` after the last gate); after each returns, re-read `DS status --short` and decide the next row. If a sub-skill stops early (blocked task, question), handle it here before continuing.
 
 ## Question handling (governed by `autonomy.pause_policy`, `conventions.md` §10)
