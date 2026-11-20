@@ -64,6 +64,21 @@ def request(port: int, method: str, path: str, headers: dict | None = None) -> t
     return r.status, body
 
 
+def post(port: int, path: str, body: object, token: str | None, headers: dict | None = None) -> tuple[int, dict]:
+    data = body if isinstance(body, bytes) else json.dumps(body).encode()
+    h = {"Content-Type": "application/json", "Content-Length": str(len(data)), "Origin": f"http://127.0.0.1:{port}",
+         **({"X-Board-Token": token} if token else {}), **(headers or {})}
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    c.request("POST", path, body=data, headers={"Host": f"127.0.0.1:{port}", **h})
+    r = c.getresponse()
+    raw = r.read()
+    c.close()
+    try:
+        return r.status, json.loads(raw)
+    except json.JSONDecodeError:
+        return r.status, {}
+
+
 def alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -317,6 +332,97 @@ class BoardTest(unittest.TestCase):
         self.assertNotIn(b"__BOARD_TOKEN__", body)
 
     # ------------------------------------------------------------------ data
+
+    # ------------------------------------------------------------------ requests to Claude Code
+
+    def test_requests_need_token_origin_and_json(self):
+        self.board("start", check=True)
+        rec = self.record()
+        port, tok = rec["port"], rec["token"]
+        self.assertTrue(rec["actions"])
+        body = {"action": "run", "args": {"command": "/dev-kit:implement"}}
+        self.assertEqual(post(port, "/api/inbox", body, None)[0], 403)
+        self.assertEqual(post(port, "/api/inbox", body, "wrong")[0], 403)
+        self.assertEqual(post(port, "/api/inbox", body, tok, {"Origin": "http://evil.example"})[0], 403)
+        self.assertEqual(post(port, "/api/inbox", body, tok, {"Content-Type": "text/plain"})[0], 415)
+        self.assertEqual(post(port, "/api/inbox", b"not json", tok)[0], 400)
+        self.assertEqual(post(port, "/api/inbox", {"action": "run", "args": {"command": "x" * 20000}}, tok)[0], 413)
+        code, d = post(port, "/api/inbox", {"action": "run", "args": {"command": "/dev-kit:board stop"}}, tok)
+        self.assertEqual(code, 422)
+        self.assertIn("command is not one of", d["errors"][0])
+        self.assertEqual(post(port, "/api/elsewhere", body, tok)[0], 404)
+        self.assertFalse((self.root / ".dev" / "run" / "inbox" / "R-001.json").exists())
+        code, d = post(port, "/api/inbox", body, tok)
+        self.assertEqual((code, d["item"]["id"], d["item"]["status"]), (201, "R-001", "pending"))
+        code, st = request(port, "GET", "/api/state")
+        st = json.loads(st)
+        self.assertEqual([x["id"] for x in st["inbox"]["open"]], ["R-001"])
+        self.assertTrue(st["inbox"]["actions"])
+        self.assertEqual(st["inbox"]["executor"]["state"], "offline")
+        self.assertEqual(st["next"]["command"], "/dev-kit:interview")  # the demo project is still in phase init
+
+    def test_request_writes_only_the_queue(self):
+        dev = self.root / ".dev"
+        before = {p: p.read_bytes() for p in dev.rglob("*") if p.is_file() and "run" not in p.relative_to(dev).parts}
+        self.board("start", check=True)
+        port, tok = self.record()["port"], self.record()["token"]
+        self.assertEqual(post(port, "/api/inbox", {"action": "issue_new", "args": {"title": "Crash"}}, tok)[0], 201)
+        self.assertEqual(post(port, "/api/inbox/R-001/cancel", {}, tok)[0], 200)
+        self.assertEqual(post(port, "/api/inbox/R-001/cancel", {}, tok)[0], 409)
+        self.assertEqual(post(port, "/api/inbox/R-404/cancel", {}, tok)[0], 404)
+        code, d = post(port, "/api/worker/mode", {"paused": True}, tok)
+        self.assertEqual((code, d["modes"]["paused"]), (200, True))
+        self.assertEqual(post(port, "/api/worker/mode", {"paused": "yes"}, tok)[0], 422)
+        after = {p: p.read_bytes() for p in dev.rglob("*") if p.is_file() and "run" not in p.relative_to(dev).parts}
+        self.assertEqual(after, before)
+
+    def test_plan_draft_is_checked_before_it_is_queued(self):
+        self.board("start", check=True)
+        port, tok = self.record()["port"], self.record()["token"]
+        bad = {"action": "plan_draft", "args": {"ops": [{"op": "move_task", "task": "T-001", "milestone": "M1"}]}}
+        code, d = post(port, "/api/inbox", bad, tok)  # T-001 is in progress
+        self.assertEqual(code, 422)
+        self.assertIn("only tasks not started can move", d["errors"][0])
+        good = {"action": "plan_draft", "args": {"ops": [{"op": "new_milestone", "milestone": "M2", "title": "Next"},
+                                                         {"op": "move_task", "task": "T-002", "milestone": "M2"}]}}
+        state = (self.root / ".dev" / "state.json").read_bytes()
+        self.assertEqual(post(port, "/api/inbox", good, tok)[0], 201)
+        self.assertEqual((self.root / ".dev" / "state.json").read_bytes(), state)  # applied by Claude Code, not here
+
+    def test_approval_decisions(self):
+        d = self.root / ".dev" / "run" / "approvals"
+        d.mkdir(parents=True)
+        (d / "A-00ff00ff.json").write_text(json.dumps({"id": "A-00ff00ff", "tool": "Bash", "target": "npm test"}))
+        self.board("start", check=True)
+        port, tok = self.record()["port"], self.record()["token"]
+        st = json.loads(request(port, "GET", "/api/state")[1])
+        self.assertEqual([a["id"] for a in st["inbox"]["approvals"]], ["A-00ff00ff"])
+        self.assertEqual(post(port, "/api/approvals/A-00ff00ff", {"decision": "always"}, tok)[0], 422)
+        self.assertEqual(post(port, "/api/approvals/A-00ff00ff", {"decision": "allow"}, tok)[0], 200)
+        self.assertEqual((d / "A-00ff00ff.decision").read_text(), "allow")
+        self.assertEqual(post(port, "/api/approvals/A-00ff00ff", {"decision": "deny"}, tok)[0], 409)
+        self.assertEqual(post(port, "/api/approvals/A-11111111", {"decision": "deny"}, tok)[0], 404)
+
+    def test_question_options_reach_the_page(self):
+        self.ds("add-question", "Which DB?", "--options", "Postgres|SQLite", "--recommended", "SQLite")
+        self.board("start", check=True)
+        q = json.loads(request(self.record()["port"], "GET", "/api/state")[1])["questions"][0]
+        self.assertEqual((q["options"], q["recommended"]), (["Postgres", "SQLite"], "SQLite"))
+
+    def test_actions_off_and_shared_board(self):
+        self.board("start", "--actions", "off", check=True)
+        rec = self.record()
+        self.assertFalse(rec["actions"])
+        code, d = post(rec["port"], "/api/inbox", {"action": "run", "args": {"command": "/dev-kit:docs"}}, rec["token"])
+        self.assertEqual((code, d["error"]), (403, "actions off"))
+        # asking for actions restarts a board started without them
+        out = self.board("start", "--actions", "on", check=True).stdout
+        self.assertIn("actions off", out)
+        self.assertTrue(self.record()["actions"])
+        self.board("stop")
+        # shared with the network: off unless asked for
+        self.board("start", "--host", "0.0.0.0", check=True)
+        self.assertFalse(self.record()["actions"])
 
     def test_state_endpoint_is_read_only_and_complete(self):
         state_file = self.root / ".dev" / "state.json"
