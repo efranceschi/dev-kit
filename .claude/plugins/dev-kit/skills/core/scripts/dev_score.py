@@ -20,7 +20,11 @@ Scoring rule (reproducible, no judgement involved)
           normalised title and file, count once (highest severity kept)
   delta (--previous, rounds >= 2): previous findings stay scored unless an auditor of their dimension
           marks them "closed" in its "previous" list (omitted = still open); new critical/high/medium
-          findings score; new low findings are recorded as deferred and do not score
+          findings score; new low findings, and (document reviews only, --kind review) new findings below
+          critical marked "in_change": false (text the revision did not touch), are recorded as deferred; "convergence" reports blockers and
+          the medium trend against the previous round
+  contradicts: a finding with "contradicts": "F-nnn" (it reverses an earlier recommendation) is capped at medium
+          and listed in "conflicts" for an ADR
   legacy: findings with "legacy": true (existing projects: a problem already present at the brownfield
           baseline and not made worse by the scope) never score or block; they are listed in "legacy"
           so the orchestrator registers them as issues
@@ -331,8 +335,19 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
                 marks[dim][pv["id"]] = "open" if "open" in (state, cur) else "closed"
     low_cap = quality.get("low_cap")
     delta = None
+    conv_prev: dict[str, int] = {}
+    # a finding that contradicts a recommendation of an earlier round (ping-pong) is capped at medium and listed:
+    # the orchestrator settles it with an ADR instead of applying one more reversal
+    conflicts = []
+    for d, entry in dims.items():
+        for f in entry["findings"]:
+            if f.get("contradicts"):
+                if severity(f) in ("critical", "high"):
+                    f["severity_reported"] = severity(f)
+                    f["severity"] = "medium"
+                conflicts.append({"dimension": d, "id": f.get("id"), "contradicts": f.get("contradicts"), "title": f.get("title")})
     if previous is not None:
-        delta = {"closed": 0, "still_open": 0, "new_scored": 0, "new_deferred": 0}
+        delta = {"closed": 0, "still_open": 0, "new_scored": 0, "new_deferred": 0, "new_outside_change": 0}
         prev_by_dim: dict[str, list[dict]] = {}
         for f in previous:
             d = finding_dimension(f)
@@ -352,14 +367,20 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
             for f in merge_findings(entry["findings"]):
                 if dedupe_key(f) in prev_keys:
                     continue  # same as a previous finding: already counted (or closed)
-                if severity(f) == "low":
+                # round >= 2 judges the revision: lows, and anything short of critical in text the revision did not
+                # touch ("in_change": false), are recorded but do not score
+                outside = kind == "review" and f.get("in_change") is False and severity(f) != "critical"
+                if severity(f) == "low" or outside:
                     deferred.append(f)
                     delta["new_deferred"] += 1
+                    delta["new_outside_change"] += int(outside)
                 else:
                     kept.append(f)
                     delta["new_scored"] += 1
             entry["findings"] = kept
             entry["deferred"] = len(deferred)
+            prev_med = sum(1 for f in prev if severity(f) == "medium")
+            conv_prev[d] = prev_med
     for entry in dims.values():
         entry["findings"] = merge_findings(entry["findings"]) if previous is None else entry["findings"]
         entry["score"], entry["counts"] = dimension_score(entry["findings"], low_cap)
@@ -387,6 +408,13 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
     reasons += problems
     if not dims:
         reasons.append("no valid auditor results")
+    convergence = None
+    if previous is not None:
+        mediums = sum(v["counts"]["medium"] for v in dims.values())
+        mediums_prev = sum(conv_prev.values())
+        trend = "falling" if mediums < mediums_prev else ("flat" if mediums == mediums_prev else "rising")
+        convergence = {"blockers": len(blockers), "mediums": mediums, "mediums_prev": mediums_prev, "trend": trend,
+                       "converged": not blockers and trend in ("falling", "flat")}
     for v in dims.values():
         v.pop("findings", None)
     return {
@@ -394,6 +422,8 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
         "dimensions": dims, "blockers": blockers, "problems": problems,
         "verdict": "pass" if not reasons else "fail", "reasons": reasons,
         **({"delta": delta} if delta is not None else {}),
+        **({"convergence": convergence} if convergence is not None else {}),
+        **({"conflicts": conflicts} if conflicts else {}),
         **({"legacy": legacy} if legacy else {}),
     }
 
@@ -408,7 +438,14 @@ def render(res: dict) -> str:
     lines += ["", f"overall {res['overall']} (cut-off {res['cutoff']}) -> {res['verdict'].upper()}"]
     if res.get("delta"):
         dl = res["delta"]
-        lines.append(f"delta: {dl['closed']} closed · {dl['still_open']} still open · {dl['new_scored']} new scored · {dl['new_deferred']} new low deferred")
+        lines.append(f"delta: {dl['closed']} closed · {dl['still_open']} still open · {dl['new_scored']} new scored · {dl['new_deferred']} new deferred"
+                     + (f" ({dl['new_outside_change']} outside the change)" if dl.get("new_outside_change") else ""))
+    if res.get("convergence"):
+        cv = res["convergence"]
+        lines.append(f"convergence: {cv['blockers']} blocking · mediums {cv['mediums_prev']} -> {cv['mediums']} ({cv['trend']})"
+                     + (" · converged" if cv["converged"] else ""))
+    for c in res.get("conflicts", []):
+        lines.append(f"conflict: {c['dimension']} {c['id']} contradicts {c['contradicts']} (capped at medium; settle with an ADR)")
     if res.get("legacy"):
         lines.append(f"legacy: {len(res['legacy'])} pre-existing finding(s) not scored (register them as issues)")
     for r in res["reasons"]:
@@ -502,7 +539,9 @@ def main(argv: list[str] | None = None) -> int:
             "cutoff": res["cutoff"], "verdict": res["verdict"], "blockers": len(res["blockers"]),
             "auditors": sum(len(v["auditors"]) for v in res["dimensions"].values()),
             "dimensions": {d: v["score"] for d, v in res["dimensions"].items()},
-            "delta": res.get("delta")})
+            "delta": res.get("delta"),
+            "converged": (res.get("convergence") or {}).get("converged"),
+            "conflicts": len(res.get("conflicts") or []) or None})
     return 0 if res["verdict"] == "pass" else 1
 
 

@@ -34,6 +34,9 @@ Reviewers return findings in one JSON contract; `dev_score.py` turns them into a
 - **Low cap:** low findings cost at most 10 points per dimension.
 - **Dedupe:** the same finding reported by two audits of one dimension counts once.
 - **Delta mode:** from round 2, auditors check whether the previous findings were closed; new low findings are recorded but not scored. Rounds converge instead of discovering a new layer of nits.
+- **Document reviews (round 2+):** the reviewer gets the diff since the previous round and judges the changed text; new findings below critical in untouched text wait, and a finding that reverses an earlier recommendation is capped at medium and settled by an ADR. The score shows the **convergence** (blocking findings, mediums now vs before); a review converged twice can stop. Rounds are capped by `max_review_rounds` (default 3).
+- **Stale artifacts:** each planning document records what it was built from (`dev_state.py artifact mark`). When the PRD changes, `dev_state.py stale` lists architecture, design and plan as stale, and `review` updates them before any reviewer runs. Writers run a self-check first (`xref` plus the reviewer's checklist), so the review confirms quality instead of discovering it.
+- **Output files:** each auditor writes its JSON to a file and answers in a few lines; `dev_score.py check` validates it against the contract.
 - A gate or review passes only with no critical/high finding, every dimension at its minimum (security 90, spec 85, tests 80, a11y 80, others 70) and the overall score at the cut-off (85 for milestones, 80 for documents). Presets: `standard` 85, `premium` 92, `prototype` 70.
 - Failing gates create `fix` tasks. `dev_state.py` refuses a pass below the cut-off; `--force` needs your decision and an ADR.
 
@@ -45,7 +48,7 @@ The **pause policy** decides what happens at each pause point: `ask`, `preauthor
 
 ## Models and effort [§9]
 
-Agents have a base model and effort by what they need: `speed` (haiku), `balanced` (sonnet), `quality` (opus). When a dimension fails, only it is re-run one step higher on the ladder (effort before model), and only with your consent (`model_policy`: `ask`, `preapproved`, `off`). The agents and their tiers: [agents](agents.md).
+Agents have a base model and effort by what they need: `speed` (haiku), `balanced` (sonnet), `quality` (opus). Skills pass the model and effort in every agent call, so the tiers hold even where the host ignores the agent's own settings. When a dimension fails, only it is re-run one step higher on the ladder (effort before model), and only with your consent (`model_policy`: `ask`, `preapproved`, `off`). The agents and their tiers: [agents](agents.md).
 
 ## Parallel work and isolation
 

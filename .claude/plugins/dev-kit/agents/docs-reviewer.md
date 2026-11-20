@@ -10,6 +10,8 @@ effort: medium
 
 > Isolation: whenever you run commands (servers, tests, builds, browsers, migrations), follow `<KIT>/shared/prompts/resource-isolation.md` with the `Slot:` given in your prompt: your own port, database and scratch folder, PIDs recorded and stopped before you report, formatters only on your own files, no git writes.
 
+> Re-runs: when your prompt has `Changes since round <n>:`, follow the document-review delta rules of `<KIT>/shared/prompts/auditor-output-contract.md`: verify the previous findings, review the changed text and what it affects, mark new findings `in_change` and `contradicts`.
+
 You are a technical editor who trusts nothing you have not run. Read-only: you may run documented commands in a temp clone and start the app, never edit files.
 
 ## Inputs

@@ -2,6 +2,22 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.16.0 — 2026-11-19
+
+Second release from the field report: document reviews that converge. Long runs had the PRD in 8 rounds, the plan in 9 and the design in 6, because each round re-read everything, documents drifted apart, and a fix a reviewer suggested became the next round's regression.
+
+### Added
+- `dev_state.py artifact mark <brief|prd|architecture|ux|ui|plan|all> [--note]` and `dev_state.py stale [--json] [--strict]`: each planning artifact records the version of its sources; `stale` lists artifacts whose sources changed since (directly or through a stale source) and passed reviews whose artifact changed. Header-only edits (date, status) do not count. `status --short` shows a `stale:` line and `status --json` a `stale` object.
+- `review` step 1 runs `stale` and refreshes the target and its upstream (or marks them `no impact`) before spawning a reviewer; `autopilot` never advances past a review that passed on an older version.
+- `dev_state.py xref [--json] [--strict]`: deterministic cross-document checks (ACs with no task, tasks citing unknown ACs, screens without a spec, ADRs cited but not recorded, unknown deps).
+- `shared/prompts/self-check.md`: prd, architecture, ux, ui and plan run `xref` and the reviewer's own checklist, including the metric ↔ data and route ↔ artifact links, before `artifact mark`; `review` runs it after every revision.
+- Real delta for document reviews: `review` keeps a snapshot per round and gives the reviewer `Changes since round <n-1>:` (a diff). New findings carry `in_change`; below critical and outside the change they are deferred (`--kind review` only; gates still score them). A finding with `contradicts: F-nnn` is capped at medium and listed in `conflicts` for an ADR.
+- `dev_score.py` reports `convergence` (blocking findings, mediums now versus the previous round, trend, `converged`).
+- `autonomy.max_review_rounds` (default 3), separate from `max_fix_rounds_per_gate`; conventions §9 recommends accepting a review that converged two rounds in a row (never for security; policy force still refuses open critical/high).
+
+### Changed
+- Stage grades count review rounds against `max_review_rounds`.
+
 ## 1.15.0 — 2026-11-19
 
 First of three releases from a field report: most of a long run's cost was rework and orchestration context, not writing code. This one makes the cost measurable and the agents' output reliable and small.

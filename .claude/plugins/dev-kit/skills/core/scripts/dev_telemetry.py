@@ -42,7 +42,8 @@ SCHEMA: dict[str, dict[str, str]] = {
                   "findings": "counts", "parsable": "bool"},
     "cost": {"usd": "num", "tokens": "num", "requests": "num", "period": "tok", "stages": "numdict"},
     "score": {"scope": "tok", "kind": "tok", "overall": "num", "cutoff": "num", "verdict": "tok",
-              "dimensions": "dims", "delta": "delta", "blockers": "num", "auditors": "num"},
+              "dimensions": "dims", "delta": "delta", "blockers": "num", "auditors": "num",
+              "converged": "bool", "conflicts": "num"},
     "gate": {"scope": "tok", "value": "tok", "score": "num", "forced": "bool", "force_source": "tok", "qa_runs": "num"},
     "review": {"scope": "tok", "value": "tok", "score": "num", "forced": "bool", "force_source": "tok"},
     "task": {"task": "tok", "transition": "tok", "type": "tok", "milestone": "tok", "parallel": "bool"},
@@ -158,9 +159,9 @@ def check_field(key: str, kind: str, v: object, deny: set[str]) -> object:
             raise ValueError(f"{key} must map known dimensions to scores")
         return v
     if kind == "delta":
-        allowed = {"closed", "still_open", "new_scored", "new_deferred"}
+        allowed = {"closed", "still_open", "new_scored", "new_deferred", "new_outside_change"}
         if not isinstance(v, dict) or set(v) - allowed or not all(isinstance(x, int) for x in v.values()):
-            raise ValueError(f"{key} must be {{closed, still_open, new_scored, new_deferred: int}}")
+            raise ValueError(f"{key} must be {{closed, still_open, new_scored, new_deferred, new_outside_change: int}}")
         return v
     if kind == "mtok":
         if not isinstance(v, dict) or set(v) - {"model", "effort"}:
@@ -393,6 +394,8 @@ def stage_of(e: dict) -> str | None:
 def stage_report(events: list[dict], state: dict) -> dict:
     """Deterministic grade per stage (conventions.md §13), with the reasons that produced it."""
     max_rounds = int((state.get("autonomy") or {}).get("max_fix_rounds_per_gate", 3))
+    max_review = int((state.get("autonomy") or {}).get("max_review_rounds", max_rounds))
+    review_scopes: set[str] = set()
     st = {s: {"events": 0, "agents": 0, "duration_s": 0, "tokens": 0, "rounds": {}, "scores": {}, "forced": [],
               "errors": {}, "unparsable": 0, "ends": {}, "final": {}, "na": 0, "feedback": {k: [] for k in FEEDBACK_LISTS}}
           for s in STAGES}
@@ -428,6 +431,8 @@ def stage_report(events: list[dict], state: dict) -> dict:
                 x["na"] += 1
             elif val in ("passed", "pending", "pass", "fail"):
                 x["rounds"][sc] = x["rounds"].get(sc, 0) + 1
+                if ev == "review":
+                    review_scopes.add(sc)
                 x["final"][sc] = "pass" if val in ("passed", "pass") else "fail"
             if e.get("forced"):
                 x["forced"].append(e.get("force_source", "user"))
@@ -442,7 +447,7 @@ def stage_report(events: list[dict], state: dict) -> dict:
         if ran:
             for sc, n in sorted(x["rounds"].items()):
                 if n > 1:
-                    pen = 10 * (n - 1) + 10 * max(0, n - max_rounds)
+                    pen = 10 * (n - 1) + 10 * max(0, n - (max_review if sc in review_scopes else max_rounds))
                     score -= pen
                     reasons.append(f"{sc} rounds {n} (-{pen})")
             for src in x["forced"]:

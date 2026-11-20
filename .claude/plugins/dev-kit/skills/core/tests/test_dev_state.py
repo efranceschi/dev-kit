@@ -718,7 +718,7 @@ class TestScoreConvergence(Base):
         a = self.write_full("ua", "usability-auditor", new, previous=[{"id": "F-001", "state": "closed"}])
         self.run_delta(prev, a)
         s = self.scores()
-        self.assertEqual(s["delta"], {"closed": 1, "still_open": 1, "new_scored": 1, "new_deferred": 1})
+        self.assertEqual(s["delta"], {"closed": 1, "still_open": 1, "new_scored": 1, "new_deferred": 1, "new_outside_change": 0})
         self.assertEqual(s["dimensions"]["ux"]["score"], 84)  # F-002 (omitted = open) + N-2
         self.assertEqual(s["dimensions"]["ux"]["deferred"], 1)
         b = self.write_full("ub", "usability-auditor", [finding("high", id="N-3", line=70)],

@@ -27,7 +27,8 @@ Detected stack: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_detect_sta
 3. Write `.dev/architecture.md` from `${CLAUDE_SKILL_DIR}/../core/shared/templates/architecture.md`: stack table with versions, context diagram, repository layout, data model (every entity from the PRD, with retention/privacy rules from the brief), contracts (every operation needed by the ACs, mapped to AC ids), cross-cutting concerns, environments (when `autonomy.local_deploy.mode` is not `off`, a "local preview" command that builds and starts the production build on `127.0.0.1:<port>`, or installs the CLI/desktop build locally; see `conventions.md` §11), CI steps (when `autonomy.production.when` is not `none`: the production install, migrate and rollback commands, backup location, smoke checks and the list of operational prerequisites with how each is provided; see `conventions.md` §12), the type-check command that covers every project reference, test strategy summary, open points delegated to implementation.
 4. Append ADRs to `.dev/decisions.md` for every non-obvious choice (`source: auto` or `user`). Add `Q-nnn` questions for choices the user may want to revisit.
 5. Persist stack: `dev_state.py init --stack-json '{"lang":..., "framework":..., "pkg":..., "test":..., "lint":..., "db":..., "detected_from":[...]}'` and `dev_state.py set phase ux` (if the brief says the product has no UI — API/CLI only — set phase `plan` and note that `ux`/`ui` are skipped).
-6. Summarise the decisions in ≤ 10 lines and name the next step.
+6. Run the self-check (`${CLAUDE_SKILL_DIR}/../core/shared/prompts/self-check.md`, which includes `dev_state.py xref`) and fix what it finds, then `dev_state.py artifact mark architecture`.
+7. Summarise the decisions in ≤ 10 lines and name the next step.
 
 ## `review` mode
 Spawn `architect` with "challenge" instructions on the current `architecture.md`; apply accepted changes as superseding ADRs; do not rewrite from scratch.

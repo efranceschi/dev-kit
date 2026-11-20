@@ -8,6 +8,7 @@ Stored in `.dev/state.json` under `autonomy`. Set by `interview` (block 9); chan
   "decide_alone": ["library_choice", "file_structure", "naming", "test_strategy", "ui_details", "minor_scope_tradeoffs", "dev_tooling", "data_model_details"],
   "always_ask": ["paid_services", "delete_data", "public_exposure", "scope_change_major", "security_model_change", "credentials", "model_escalation"],
   "max_fix_rounds_per_gate": 3,
+  "max_review_rounds": 3,
   "task_time_budget_min": 30,
   "commit_per_task": true,
   "may_install_deps": true,

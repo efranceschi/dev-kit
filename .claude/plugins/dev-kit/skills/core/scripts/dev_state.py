@@ -16,6 +16,9 @@ Subcommands
   fix-tasks     one fix task per blocking finding of a findings file (--from --milestone; idempotent)
   add-question  append a non-blocking question to open-questions.md
   gate M        set milestone gate: passed | pending | skipped (passed needs --score >= cut-off)
+  artifact mark NAME  record that an artifact (brief|prd|architecture|ux|ui|plan|all) is up to date with its upstream
+  stale         artifacts whose upstream changed since they were marked, and passed reviews now out of date
+  xref          cross-document checks: ACs without tasks, unknown ACs, unspecified screens, unknown ADRs and deps
   review NAME   record a review (prd|design|plan|docs...): pass | fail | pending (pass needs --score >= cut-off)
   event TYPE    append an allowlisted event to .dev/telemetry.jsonl (--set k=v, --json)
   feedback      brief feedback about the dev-kit (--worked/--failed/--improve area:note)
@@ -39,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -80,6 +84,8 @@ DEFAULT_AUTONOMY = {
         "security_model_change", "credentials", "model_escalation",
     ],
     "max_fix_rounds_per_gate": 3,
+    # Rounds of a document review (prd, design, plan, docs) before rounds_exhausted applies (conventions.md §9).
+    "max_review_rounds": 3,
     # Model/effort ladder for agents (conventions.md §9). mode: ask (confirm before each escalation) |
     # preapproved (escalate within the approved ladder without asking) | off (never escalate).
     # tiers: optional per-agent tier overrides, e.g. {"copy-reviewer": "balanced"}.
@@ -136,7 +142,7 @@ LEVEL_PRESETS = {
 }
 LEVELS = tuple(LEVEL_PRESETS)
 BOOL_FIELDS = ("commit_per_task", "may_install_deps", "may_run_servers", "may_push", "notify_on_park")
-INT_FIELDS = {"max_fix_rounds_per_gate": (1, 10), "task_time_budget_min": (5, 480)}
+INT_FIELDS = {"max_fix_rounds_per_gate": (1, 10), "max_review_rounds": (1, 10), "task_time_budget_min": (5, 480)}
 
 MODEL_POLICY_MODES = ("ask", "preapproved", "off")
 MODEL_TIERS = ("speed", "balanced", "quality")
@@ -1771,6 +1777,207 @@ def cmd_tips(store: Store, a: argparse.Namespace) -> None:
 REVIEW_VALUES = {"pass", "fail", "pending", "n/a"}
 
 
+# ------------------------------------------------------------------ artifact dependencies (conventions.md §7)
+# Each planning artifact is derived from the ones listed; when an upstream changes after an artifact was produced
+# (`artifact mark`), the artifact is stale and must be refreshed before any review that reads it runs.
+ARTIFACT_FILES = {
+    "brief": ["brief.md"],
+    "prd": ["prd.md", "prd/*.md"],
+    "architecture": ["architecture.md"],
+    "ux": ["design/ux-flows.md"],
+    "ui": ["design/ui-spec.md"],
+    "plan": ["plan.md"],
+}
+ARTIFACT_DEPS = {
+    "brief": [],
+    "prd": ["brief"],
+    "architecture": ["prd"],
+    "ux": ["prd", "architecture"],
+    "ui": ["ux"],
+    "plan": ["prd", "architecture", "ux", "ui"],
+}
+REVIEW_ARTIFACTS = {"prd": ["prd"], "design": ["ux", "ui"], "plan": ["plan"]}
+ARTIFACT_PRODUCER = {"brief": "interview", "prd": "prd", "architecture": "architecture", "ux": "ux", "ui": "ui", "plan": "plan replan"}
+# Header lines that change without changing the content (conventions.md §8 header: date, status).
+_VOLATILE = re.compile(r"^\W*(date|status|updated|last updated|revision|rev)\W*\s*[:=]", re.I)
+
+
+def artifact_paths(store: Store, name: str) -> list[Path]:
+    out: list[Path] = []
+    for pat in ARTIFACT_FILES[name]:
+        out += sorted(store.dev.glob(pat)) if "*" in pat else ([store.dev / pat] if (store.dev / pat).exists() else [])
+    return out
+
+
+def artifact_hash(store: Store, name: str) -> str | None:
+    paths = artifact_paths(store, name)
+    if not paths:
+        return None
+    h = hashlib.sha256()
+    for path in paths:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        body = [ln.rstrip() for i, ln in enumerate(lines) if not (i < 12 and _VOLATILE.match(ln))]
+        h.update(path.relative_to(store.dev).as_posix().encode() + b"\0" + "\n".join(body).strip().encode() + b"\0")
+    return h.hexdigest()[:16]
+
+
+def stale_report(store: Store) -> dict:
+    """Which artifacts are stale (an upstream changed after they were marked, directly or through a stale
+    upstream), which passed reviews no longer match their artifact, and which artifacts are not tracked yet."""
+    recs = store.state.get("artifacts") or {}
+    cur = {n: artifact_hash(store, n) for n in ARTIFACT_FILES}
+    direct: dict[str, list[str]] = {}
+    untracked = []
+    for n in ARTIFACT_FILES:
+        if cur[n] is None:
+            continue
+        r = recs.get(n)
+        if not r:
+            untracked.append(n)
+            continue
+        ups = r.get("upstream") or {}
+        why = [d for d in ARTIFACT_DEPS[n] if cur.get(d) is not None and ups.get(d) != cur[d]]
+        if why:
+            direct[n] = why
+    stale: dict[str, list[str]] = {}
+    for n in ARTIFACT_FILES:  # declaration order is topological
+        if cur[n] is None or n in untracked:
+            continue
+        why = [f"{d} changed" for d in direct.get(n, [])]
+        why += [f"{d} is stale" for d in ARTIFACT_DEPS[n] if d in stale and f"{d} changed" not in why]
+        if why:
+            stale[n] = why
+    reviews = []
+    phase = store.state.get("phase")
+    # Once implementation starts, dev_state.py itself appends fix and issue tasks to plan.md: a passed planning
+    # review is no longer re-checked against the files (stale upstream artifacts still are, above).
+    pre_build = phase not in PHASES or PHASES.index(phase) < PHASES.index("implement")
+    for rname, arts in (REVIEW_ARTIFACTS.items() if pre_build else []):
+        r = (store.state.get("reviews") or {}).get(rname) or {}
+        if r.get("verdict") != "pass" or not r.get("hashes"):
+            continue
+        changed = [x for x in arts if cur.get(x) is not None and r["hashes"].get(x) != cur[x]]
+        upstream = sorted({x for x in arts if x in stale})
+        if changed or upstream:
+            reviews.append({"review": rname, "changed": changed, "stale_artifacts": upstream})
+    order = [n for n in ARTIFACT_FILES if n in stale]
+    return {"stale": [{"artifact": n, "because": stale[n], "refresh_with": ARTIFACT_PRODUCER[n]} for n in order],
+            "reviews": reviews, "untracked": untracked}
+
+
+def cmd_artifact(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    names = list(ARTIFACT_FILES) if a.name == "all" else [a.name]
+    if a.name != "all" and a.name not in ARTIFACT_FILES:
+        fail(f"unknown artifact {a.name}; one of {', '.join(ARTIFACT_FILES)}, all")
+    recs = store.state.setdefault("artifacts", {})
+    marked = []
+    for n in names:
+        h = artifact_hash(store, n)
+        if h is None:
+            if a.name != "all":
+                fail(f"artifact {n} does not exist yet (.dev/{ARTIFACT_FILES[n][0]})")
+            continue
+        recs[n] = {"hash": h, "at": now(),
+                   "upstream": {d: artifact_hash(store, d) for d in ARTIFACT_DEPS[n] if artifact_hash(store, d)}}
+        if a.note:
+            recs[n]["note"] = a.note[:200]
+        marked.append(n)
+    store.save()
+    store.log(f"artifact mark {', '.join(marked) or '-'}" + (f" ({a.note})" if a.note else ""))
+    print(f"marked: {', '.join(marked) or 'nothing'}")
+
+
+def cmd_stale(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    rep = stale_report(store)
+    if a.json:
+        print(json.dumps(rep, indent=2))
+    else:
+        if not rep["stale"] and not rep["reviews"]:
+            print("stale: nothing" + (f" (not tracked yet: {', '.join(rep['untracked'])}; run `artifact mark all` once)" if rep["untracked"] else ""))
+        for it in rep["stale"]:
+            print(f"stale: {it['artifact']} ({'; '.join(it['because'])}) -> refresh with {it['refresh_with']}, or `artifact mark {it['artifact']} --note \"no impact: ...\"`")
+        for it in rep["reviews"]:
+            print(f"review {it['review']}: passed on an older version ({', '.join(it['changed'] + it['stale_artifacts'])}) -> re-run review {it['review']}")
+    if a.strict and (rep["stale"] or rep["reviews"]):
+        sys.exit(1)
+
+
+def xref_report(store: Store) -> dict:
+    """Deterministic cross-document checks the producing skills run before a review (shared/prompts/self-check.md)."""
+    def read(paths: list[Path]) -> str:
+        return "\n".join(x.read_text(encoding="utf-8", errors="replace") for x in paths)
+    problems: list[dict] = []
+    prd = read(artifact_paths(store, "prd"))
+    defined, inactive = set(), set()
+    for ln in prd.splitlines():
+        m = re.match(r"^\s*(?:[-*]|\d+\.)\s*\**(AC-\d+)\b", ln)
+        if not m:
+            continue
+        defined.add(m.group(1))
+        low = ln.lower()
+        if "superseded" in low or "~~" in ln or re.search(r"\[\s*existing\s*\]|\(existing\)|`existing`", low):
+            inactive.add(m.group(1))
+    tasks = {k: v for k, v in store.tasks().items() if v.get("status") != "dropped"}
+    planned: dict[str, list[str]] = {}
+    for tid, t in tasks.items():
+        for item in t.get("acceptance") or []:
+            for ac in re.findall(r"\bAC-\d+\b", str(item)):
+                planned.setdefault(ac, []).append(tid)
+        for d in t.get("deps") or []:
+            if d not in store.tasks():
+                problems.append({"check": "dep_unknown", "id": tid, "detail": f"depends on {d}, which does not exist"})
+    acn = lambda x: int(x.split("-")[1])  # noqa: E731
+    if defined and tasks:
+        for ac in sorted(defined - inactive - set(planned), key=acn):
+            problems.append({"check": "ac_unplanned", "id": ac, "detail": "AC in the PRD with no task"})
+    if prd:
+        for ac in sorted(set(planned) - defined, key=acn):
+            problems.append({"check": "ac_unknown", "id": ac, "detail": f"cited by {', '.join(planned[ac])} but not defined in the PRD"})
+    ux = read(artifact_paths(store, "ux"))
+    ui = read(artifact_paths(store, "ui"))
+    if ux and ui:
+        screens = {}
+        for ln in ux.splitlines():
+            m = re.match(r"^\s*\|\s*(S-\d+)\s*\|", ln)
+            if m:
+                screens[m.group(1)] = "existing" in ln.lower().split("|")[-2] if ln.count("|") > 2 else False
+        specced = set(re.findall(r"^#{2,4}\s*(S-\d+)\b", ui, flags=re.M))
+        for sid in sorted(screens):
+            if not screens[sid] and sid not in specced:
+                problems.append({"check": "screen_unspecified", "id": sid, "detail": "screen in ux-flows.md with no section in ui-spec.md"})
+        for sid in sorted(specced - set(screens)):
+            problems.append({"check": "screen_unknown", "id": sid, "detail": "section in ui-spec.md for a screen not in the ux-flows.md inventory"})
+    dec = store.dev / "decisions.md"
+    adrs = set(re.findall(r"^#{2,4}\s*(ADR-\d+)\b", dec.read_text(encoding="utf-8", errors="replace"), flags=re.M)) if dec.exists() else set()
+    cited: dict[str, set[str]] = {}
+    for n in ("prd", "architecture", "ux", "ui", "plan"):
+        for adr in re.findall(r"\bADR-\d+\b", read(artifact_paths(store, n))):
+            cited.setdefault(adr, set()).add(n)
+    for adr in sorted(set(cited) - adrs, key=acn):
+        problems.append({"check": "adr_unknown", "id": adr, "detail": f"cited in {', '.join(sorted(cited[adr]))} but not in decisions.md"})
+    counts: dict[str, int] = {}
+    for x in problems:
+        counts[x["check"]] = counts.get(x["check"], 0) + 1
+    return {"problems": problems, "counts": counts,
+            "acs": {"defined": len(defined), "inactive": len(inactive), "planned": len(set(planned) & defined)}}
+
+
+def cmd_xref(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    rep = xref_report(store)
+    if a.json:
+        print(json.dumps(rep, indent=2))
+    else:
+        acs = rep["acs"]
+        print(f"xref: {len(rep['problems'])} problem(s) · ACs {acs['planned']}/{acs['defined'] - acs['inactive']} planned")
+        for x in rep["problems"]:
+            print(f"  {x['check']}: {x['id']} - {x['detail']}")
+    if a.strict and rep["problems"]:
+        sys.exit(1)
+
+
 def cmd_review(store: Store, a: argparse.Namespace) -> None:
     """Record the outcome of a pre-implementation or documentation review (prd, design, plan, docs, ...)."""
     store.load()
@@ -1797,6 +2004,8 @@ def cmd_review(store: Store, a: argparse.Namespace) -> None:
         r["note"] = a.note
     if a.force and a.value == "pass":
         r["forced"] = True
+    if a.value == "pass" and a.name in REVIEW_ARTIFACTS:
+        r["hashes"] = {x: artifact_hash(store, x) for x in REVIEW_ARTIFACTS[a.name] if artifact_hash(store, x)}
     if a.count_run:
         r["rounds"] = int(r.get("rounds", 0)) + 1
     r["at"] = now()
@@ -1929,6 +2138,10 @@ def render_short(store: Store) -> str:
     revs = s.get("reviews") or {}
     rv = ", ".join(f"{k}:{v.get('verdict')}" + (f"({v['score']})" if v.get("score") is not None else "") for k, v in revs.items()) or "none"
     l3 = f"[dev-kit] reviews: {rv} · blocked: {p['blocked']} · open questions: {open_q} · resume with /dev-kit:start"
+    st = stale_report(store) if s.get("artifacts") else {"stale": [], "reviews": []}
+    if st["stale"] or st["reviews"]:
+        items = [x["artifact"] for x in st["stale"]] + [f"review {x['review']}" for x in st["reviews"]]
+        return "\n".join([l1, l2, l3, f"[dev-kit] stale: {', '.join(items)} (dev_state.py stale)"])
     return "\n".join([l1, l2, l3])
 
 
@@ -1959,6 +2172,7 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
         tid, why = pick_next(store, None)
         out["next"] = {"task": tid, "reason": why}
         out["open_questions"] = count_open_questions(store)
+        out["stale"] = stale_report(store)
         print(json.dumps(out, indent=2, ensure_ascii=False))
         return
     if a.short:
@@ -2094,6 +2308,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("name"); s.add_argument("value"); s.add_argument("--score", type=int); s.add_argument("--note")
     s.add_argument("--count-run", action="store_true"); s.add_argument("--force", action="store_true"); s.add_argument("--scores")
 
+    s = sub.add_parser("artifact"); s.set_defaults(fn=cmd_artifact)
+    s.add_argument("action", choices=["mark"]); s.add_argument("name"); s.add_argument("--note")
+    s = sub.add_parser("xref"); s.set_defaults(fn=cmd_xref)
+    s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
+    s = sub.add_parser("stale"); s.set_defaults(fn=cmd_stale)
+    s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
     s = sub.add_parser("set"); s.set_defaults(fn=cmd_set); s.add_argument("key"); s.add_argument("value")
 
     s = sub.add_parser("event"); s.set_defaults(fn=cmd_event)

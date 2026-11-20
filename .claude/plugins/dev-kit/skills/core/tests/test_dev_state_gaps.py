@@ -236,5 +236,62 @@ class TestFixTasks(Base):
         self.assertEqual((again["created"], sorted(again["skipped"])), ([], ["F-001", "F-003"]))
 
 
+class TestArtifactsAndXref(Base):
+    def setup_docs(self) -> Path:
+        self.init_with_plan()
+        dev = self.root / ".dev"
+        (dev / "brief.md").write_text("# Brief\n- date: 2026-11-01\nlogin and dashboard\n", encoding="utf-8")
+        (dev / "prd.md").write_text("# PRD\n- status: draft\n- AC-0: lint green\n- AC-1: inline error\n- AC-2: redirect\n"
+                                    "- AC-3: dashboard (ADR-002)\n- AC-4: chart\n- AC-5: export\n"
+                                    "- AC-6: old flow (superseded by ADR-001)\n", encoding="utf-8")
+        (dev / "architecture.md").write_text("# Architecture\npostgres\n", encoding="utf-8")
+        (dev / "decisions.md").write_text("# Decisions\n\n### ADR-001 — Drop old flow\n", encoding="utf-8")
+        return dev
+
+    def test_prd_change_makes_downstream_stale_until_marked(self) -> None:
+        dev = self.setup_docs()
+        self.assertIn("not tracked yet", self.run_state("stale").stdout)
+        self.run_state("artifact", "mark", "all")
+        self.run_state("review", "plan", "pass", "--score", "90")
+        self.assertEqual(json.loads(self.run_state("stale", "--json").stdout)["stale"], [])
+        # header-only change (status/date) is not a change
+        (dev / "prd.md").write_text((dev / "prd.md").read_text().replace("status: draft", "status: approved"), encoding="utf-8")
+        self.assertEqual(json.loads(self.run_state("stale", "--json").stdout)["stale"], [])
+        (dev / "prd.md").write_text((dev / "prd.md").read_text() + "- AC-7: new rule\n", encoding="utf-8")
+        rep = json.loads(self.run_state("stale", "--json").stdout)
+        self.assertEqual([x["artifact"] for x in rep["stale"]], ["architecture", "plan"])
+        self.assertIn("architecture is stale", rep["stale"][1]["because"])
+        self.run_state("stale", "--strict", expect=1)
+        self.assertIn("[dev-kit] stale: architecture, plan", self.run_state("status", "--short").stdout)
+        self.run_state("artifact", "mark", "architecture", "--note", "no impact: new AC is UI only")
+        rep = json.loads(self.run_state("stale", "--json").stdout)
+        self.assertEqual([x["artifact"] for x in rep["stale"]], ["plan"])
+        self.assertEqual(self.state()["artifacts"]["architecture"]["note"], "no impact: new AC is UI only")
+        (dev / "plan.md").write_text((dev / "plan.md").read_text() + "\n<!-- replanned -->\n", encoding="utf-8")
+        self.run_state("artifact", "mark", "plan")
+        rep = json.loads(self.run_state("stale", "--json").stdout)
+        self.assertEqual(rep["stale"], [])
+        self.assertEqual([r["review"] for r in rep["reviews"]], ["plan"])   # passed on the old plan
+
+    def test_xref_finds_cross_document_gaps(self) -> None:
+        self.setup_docs()
+        rep = json.loads(self.run_state("xref", "--json").stdout)
+        got = {(x["check"], x["id"]) for x in rep["problems"]}
+        self.assertIn(("ac_unplanned", "AC-5"), got)
+        self.assertNotIn(("ac_unplanned", "AC-6"), got)      # superseded
+        self.assertIn(("adr_unknown", "ADR-002"), got)
+        self.assertNotIn(("adr_unknown", "ADR-001"), got)
+        self.run_state("xref", "--strict", expect=1)
+        dev = self.root / ".dev"
+        (dev / "design").mkdir()
+        (dev / "design" / "ux-flows.md").write_text("| id | name | tag |\n|---|---|---|\n| S-01 | Login | new |\n"
+                                                    "| S-02 | Home | new |\n| S-03 | Legacy | existing |\n", encoding="utf-8")
+        (dev / "design" / "ui-spec.md").write_text("## 5. Screen specs\n### S-01 — Login\n### S-09 — Ghost\n", encoding="utf-8")
+        got = {(x["check"], x["id"]) for x in json.loads(self.run_state("xref", "--json").stdout)["problems"]}
+        self.assertIn(("screen_unspecified", "S-02"), got)
+        self.assertNotIn(("screen_unspecified", "S-03"), got)
+        self.assertIn(("screen_unknown", "S-09"), got)
+
+
 if __name__ == "__main__":
     unittest.main()

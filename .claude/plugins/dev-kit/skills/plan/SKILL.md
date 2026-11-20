@@ -23,11 +23,11 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 3. Tasks: vertical slices (schema + API + UI + tests for one capability) sized for one sitting; each lists the ACs it fulfils, `test_notes` naming the layers to test, and the files it will likely touch. Infrastructure tasks only when a feature needs them. Every AC in the PRD appears in at least one task; every mandatory e2e flow has a task that writes it.
 4. Dependencies: minimal and explicit; avoid long chains so `implement --parallel` can work.
 5. Write `.dev/plan.md` **exactly** in the parser format (`## M1 — Title`, `### T-001 Title`, fields `status/deps/type/acceptance/test_notes/files`). Task ids continue from `next_task_id` in state when replanning; never renumber.
-6. Run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" sync-plan` and fix any warnings it prints (unknown deps, undeclared milestones). Then `dev_state.py set phase implement`.
+6. Run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" sync-plan` and fix any warnings it prints (unknown deps, undeclared milestones). Run the self-check (`${CLAUDE_SKILL_DIR}/../core/shared/prompts/self-check.md`, which includes `dev_state.py xref`) and fix what it finds, then `dev_state.py artifact mark plan`. Then `dev_state.py set phase implement`.
 7. Report: milestones with task counts, estimated sessions, ACs without tasks (must be none), and the first task. Next: `review plan` (independent score against the cut-off), then `implement` or `autopilot`.
 
 ## `replan`
-Keep done/in_progress tasks untouched; rewrite only `todo` tasks of remaining milestones; new tasks get new ids; mark dropped tasks by deleting their section and running `dev_state.py drop T-xxx --reason "dropped in replan ADR-nnn"` (state keeps them for history; they no longer count for the milestone, `next` or `release`).
+Start with `dev_state.py stale`: replan against the current PRD, architecture and design, and update any of them that is itself stale first. Keep done/in_progress tasks untouched; rewrite only `todo` tasks of remaining milestones; new tasks get new ids; mark dropped tasks by deleting their section and running `dev_state.py drop T-xxx --reason "dropped in replan ADR-nnn"` (state keeps them for history; they no longer count for the milestone, `next` or `release`).
 
 ## Existing projects (brownfield)
 
