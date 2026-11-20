@@ -806,7 +806,7 @@
     const revRows = revs.filter(([, v]) => started(v)).map(([k, v]) => dodRow(rname(k), v.score ?? null, k === "ux" ? q.min_overall : q.review_min_overall, v.verdict));
     const revPending = revs.filter(([, v]) => !started(v)).map(([k]) => rname(k));
     const gStarted = (m) => m.score != null || m.gate !== "pending";
-    const gateRows = data.milestones.filter(gStarted).map((m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? "fail" : m.gate));
+    const gateRows = data.milestones.filter(gStarted).map((m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? "fail" : m.gate)).reverse();
     const gatePending = data.milestones.filter((m) => !gStarted(m)).map((m) => m.id);
     const block = (title, rows, pending, emptyText) => h("div", {}, h("div", { class: "list-title", text: title }),
       rows.length ? h("div", { class: "list" }, rows) : !pending.length ? h("div", { class: "empty", text: emptyText }) : null,

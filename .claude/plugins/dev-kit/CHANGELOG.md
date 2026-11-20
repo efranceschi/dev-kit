@@ -2,6 +2,12 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.27.0 — 2026-11-20
+
+### Changed
+- Board: Milestone gates list newest milestone first.
+- Board: active chevrons, in-progress items and running states (QA round, requests, Claude Code working) pulse; disabled by reduced-motion.
+
 ## 1.26.0 — 2026-11-20
 
 Claude Code's permission prompts are answered on the board while it runs a board request.

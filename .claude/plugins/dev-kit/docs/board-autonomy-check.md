@@ -6,7 +6,7 @@ Nothing here touches a real project: it works in a scratch folder.
 
 ## Before you start
 
-- Claude Code with this plugin at version 1.26.0 or later (`/plugin`, Installed tab). Run `/reload-plugins` or start a new session after updating.
+- Claude Code with this plugin at version 1.27.0 or later (`/plugin`, Installed tab). Run `/reload-plugins` or start a new session after updating.
 - A terminal you can leave open (tmux works well), and a browser on the same machine or through an SSH tunnel.
 
 ## 1. Prepare the scratch project (in a shell)

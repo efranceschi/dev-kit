@@ -692,3 +692,10 @@ dialog p { color: var(--text-secondary); }
 .hint-line { display: block; }
 .hint-line + .hint-line { margin-top: 4px; }
 .hint-line.bad { color: var(--critical-text); }
+
+/* ---------- running states keep pulsing: active chevrons, in-progress items, anything being executed */
+@keyframes chev-pulse { 50% { opacity: .72; } }
+.chev.here, .chev.st-current, .schev.here, .schev.st-current,
+.tcard.s-in_progress, .pcard.s-in_progress, .chip.st-chip.s-in_progress, .chip.req-st.s-running,
+.badge.warn, .qa-pill.run, .exec.on { animation: chev-pulse 1.8s ease-in-out infinite; }
+.tab-dot.active, .st-in_progress, .exec.on::before { animation: agent-pulse 1.6s ease-in-out infinite; }
