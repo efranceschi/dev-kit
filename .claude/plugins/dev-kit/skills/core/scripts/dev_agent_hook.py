@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """Hook handler: the board's live agents panel and the Claude Code interface of a dev-kit project.
 
-Wired to the SessionStart, SubagentStart, SubagentStop and Stop hooks (hooks/hooks.json). Reads the hook payload
-from stdin.
+Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit and Stop hooks (hooks/hooks.json). Reads
+the hook payload from stdin.
 - SessionStart, SubagentStart, SubagentStop: append one JSON line to <project>/.dev/run/agents.jsonl:
   {"ts": "...Z", "event": "session_start|agent_start|agent_stop", "session": "<id>", "agent_id": "<id>", "agent": "<type>"}
 - SessionStart of a new session (source startup), with autonomy.ui.title on (default): set the session title
   ("dev-kit · <project> · <milestone or phase>") and show one line with the next command (systemMessage).
 - Stop, with autonomy.ui.notify on: show the notices queued by dev_state.py (gates, blocks, autopilot) as a
   desktop notification (OSC 9 terminal sequence) and a line in the chat, then clear the queue.
+- SessionStart, UserPromptSubmit and Stop: when the board queued requests for Claude Code (dev_worker.py), one line
+  with how many and the command that runs them (/dev-kit:worker); at a prompt or the end of a turn only when the
+  set of waiting requests changed since the last notice. Only ids and counts: the text of a request never enters
+  the session from here.
 
 Privacy: only ids and the agent type are kept; prompts, messages and tool data in the payload are ignored.
 It never fails a hook (always exits 0) and does nothing outside a dev-kit project (no .dev/state.json).
@@ -92,6 +96,38 @@ def take_notices(dev: Path) -> dict | None:
     return {"systemMessage": "\n".join(texts), "terminalSequence": f"\x1b]9;{texts[-1][:180]}\x07"}
 
 
+def board_requests(root: Path, dev: Path, only_new: bool) -> dict | None:
+    """One line about the requests the board queued, or None (nothing waiting, or nothing new since the last one)."""
+    import dev_worker as dw
+    waiting = [x for x in dw.items(root) if x["status"] == "pending"]
+    nxt = dw.claimable(root)
+    ids = [x["id"] for x in waiting]
+    seen_path = dev / "run" / "worker-notice.json"
+    try:
+        seen = json.loads(seen_path.read_text(encoding="utf-8")).get("ids")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        seen = None
+    if seen != ids:
+        dw._write(seen_path, {"ids": ids})
+    if not nxt or dw.modes(root)["paused"] or (only_new and seen == ids):
+        return None
+    n = len(waiting) or 1
+    text = f"dev-kit board: {n} request{'s' if n != 1 else ''} waiting ({', '.join(ids[:5]) or nxt['id']}) · run /dev-kit:worker"
+    return {"systemMessage": text, "context": f"{text}. The requests come from the project's web board; /dev-kit:worker runs them."}
+
+
+def merge(out: dict | None, extra: dict | None, event: str) -> dict | None:
+    if not extra:
+        return out
+    out = dict(out or {})
+    out["systemMessage"] = "\n".join(x for x in (out.get("systemMessage"), extra["systemMessage"]) if x)
+    if event in ("SessionStart", "UserPromptSubmit"):
+        hso = dict(out.get("hookSpecificOutput") or {"hookEventName": event})
+        hso["additionalContext"] = extra["context"]
+        out["hookSpecificOutput"] = hso
+    return out
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -107,6 +143,11 @@ def main() -> int:
             out = session_banner(root)
         elif name == "Stop":
             out = take_notices(dev)
+        if name in ("SessionStart", "UserPromptSubmit", "Stop") and not str(payload.get("prompt") or "").startswith("/dev-kit:worker"):
+            try:
+                out = merge(out, board_requests(root, dev, only_new=name != "SessionStart"), name)
+            except Exception:  # noqa: BLE001 - the board's queue must never break a hook
+                pass
         if out:
             print(json.dumps(out, ensure_ascii=False))
     except Exception:  # noqa: BLE001 - a hook must never break the session

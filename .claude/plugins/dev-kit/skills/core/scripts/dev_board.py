@@ -287,7 +287,8 @@ def open_questions(text: str) -> list[dict]:
             continue
         if cells and cells[0].startswith("Q-"):
             row = dict(zip(cols, cells))
-            out.append({"id": cells[0], "question": row.get("question", ""), "assumption": row.get("assumption used", ""),
+            assumed = row.get("assumption used", "")
+            out.append({"id": cells[0], "question": row.get("question", ""), "assumption": "" if assumed in ("-", "—") else assumed,
                         "by": row.get("raised by", ""), "date": row.get("date", "")})
     return out
 
@@ -675,7 +676,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         if t.get("status") == "dropped":
             continue  # removed by a replan: history only, not on the board
         tasks[tid] = {k: t.get(k) for k in ("title", "milestone", "type", "status", "lane", "deps", "commit",
-                                            "blocked_reason", "started_at", "done_at", "source")}
+                                            "blocked_reason", "started_at", "done_at", "source", "seq")}
         tasks[tid]["acceptance"] = len(t.get("acceptance") or [])
     events = _task_events(root)
     order = store.milestone_order()
@@ -1154,7 +1155,10 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
 
 
 def print_exposure(rec: dict) -> None:
-    """For a board listening beyond loopback: the access links and the warning that goes with them."""
+    """Whether the page can queue requests, and for a board listening beyond loopback the access links and the
+    warning that goes with them."""
+    print("requests: on · buttons on the page queue them; /dev-kit:worker runs them in Claude Code" if rec.get("actions")
+          else "requests: off · the page only shows the project (start with --actions on to queue requests)")
     if not rec.get("exposed"):
         return
     print(f"exposed on {rec.get('host')} port {rec['port']}: plain HTTP, anyone with an access link can see the board and stop it")
@@ -1162,7 +1166,8 @@ def print_exposure(rec: dict) -> None:
         print(f"access link: {u}")
     if not rec.get("access_urls"):
         print(f"access link: http://<this machine's IP>:{rec['port']}/?key={rec['token']}")
-    print("keep the links private; restart without --host (or --host 127.0.0.1) to stop sharing")
+    print("keep the links private; restart without --host (or --host 127.0.0.1) to stop sharing" +
+          ("; with requests on, anyone with a link can also queue work for Claude Code" if rec.get("actions") else ""))
 
 
 def cmd_stop(root: Path, a: argparse.Namespace) -> int:

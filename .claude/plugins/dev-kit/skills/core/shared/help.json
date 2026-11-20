@@ -173,7 +173,7 @@
     {
       "name": "board",
       "category": "start",
-      "one_line": "Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link.",
+      "one_line": "Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; with buttons that queue requests to Claude Code (run the next step, new issue, answer a question, a plan draft made by dragging cards); light or dark; local, or shared on your network with an access link.",
       "when": "When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.",
       "args": [
         {
@@ -199,6 +199,10 @@
         {
           "arg": "--idle-min N",
           "meaning": "stop after N minutes with no open tab (default 120; 0 = never)"
+        },
+        {
+          "arg": "--actions auto|on|off",
+          "meaning": "let the page queue requests to Claude Code (auto: on when local, off when shared with --host)"
         }
       ],
       "examples": [
@@ -215,11 +219,36 @@
           "what": "stop the board server"
         }
       ],
-      "produces": "nothing in the project (read-only); its own files in .dev/run/",
+      "produces": "nothing in the project by itself (requests are run by /dev-kit:worker); its own files in .dev/run/",
       "related": [
+        "worker",
         "status",
         "backlog",
         "costs"
+      ]
+    },
+    {
+      "name": "worker",
+      "category": "start",
+      "one_line": "Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick.",
+      "when": "When the board, the session banner or the status line (▣) says requests are waiting; the board queues them, this session runs them.",
+      "args": [
+        {
+          "arg": "(empty)",
+          "meaning": "run every request waiting on the board, in order, until none is left or the queue is paused"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:worker",
+          "what": "run what you asked for on the board"
+        }
+      ],
+      "produces": "whatever each request does (commits, issues, plan changes); the request's result on the board",
+      "related": [
+        "board",
+        "issue",
+        "plan"
       ]
     },
     {
@@ -1089,6 +1118,24 @@
         "/dev-kit:board opens the live board in the browser (one server per project)",
         "/dev-kit:board --host 0.0.0.0 shares it on your network: open the access link it prints on the other device",
         "/dev-kit:board stop (or the Stop server button) when done"
+      ]
+    },
+    {
+      "id": "board-requests",
+      "title": "Drive the work from the board",
+      "topics": [
+        "board",
+        "request",
+        "button",
+        "drag",
+        "plan milestone",
+        "answer question",
+        "remote"
+      ],
+      "steps": [
+        "/dev-kit:board opens the board; local boards accept requests (shared ones only with --actions on)",
+        "on the board: Run next to a command, New issue, answer a question in Needs you, or Plan to drag tasks and issues between milestones and Send",
+        "/dev-kit:worker in the Claude Code session runs the requests; questions come back to the board with answers to pick"
       ]
     },
     {

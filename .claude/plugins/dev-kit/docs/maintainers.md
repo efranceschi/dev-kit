@@ -13,7 +13,7 @@ How the plugin is built, tested and documented. Users do not need this page.
   agents/*.md                    17 agents (model + effort in the frontmatter, conventions §9)
   hooks/hooks.json               optional SessionStart / SubagentStart / SubagentStop / Stop hooks: board's live agents,
                                  session title and banner, desktop notifications
-  skills/*/SKILL.md              24 skills, invoked as /dev-kit:<name>
+  skills/*/SKILL.md              25 skills, invoked as /dev-kit:<name>
   skills/core/                   support skill, not invocable
     SKILL.md                     marker (disable-model-invocation: true, user-invocable: false)
     scripts/dev_state.py         state: init, sync-plan, next, start, done, block, unblock, drop, add-task, add-question,

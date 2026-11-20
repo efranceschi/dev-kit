@@ -48,7 +48,7 @@
             <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
             Stop server
           </button>
-          <p class="pop-note">Read-only board. It stops by itself when no tab is open.</p>
+          <p class="pop-note">The board changes nothing by itself: requests are run by Claude Code (/dev-kit:worker). It stops by itself when no tab is open.</p>
         </div>
       </div>
     </div>
@@ -90,6 +90,7 @@
           <div class="segbar" id="segbar" role="img" aria-label="Task status split"></div>
           <ul class="seg-legend" id="seg-legend"></ul>
           <p class="ms-caption" id="ms-caption" aria-live="polite"></p>
+          <p class="ms-next" id="ms-next"></p>
         </div>
       </div>
     </section>
@@ -110,9 +111,13 @@
 
     <div class="workspace">
       <div class="main-col">
-        <section class="card board-card" aria-labelledby="board-h">
+        <section class="card board-card" id="board-card" aria-labelledby="board-h">
           <div class="card-head">
             <h2 id="board-h">Task board</h2>
+            <div class="seg-switch view-switch" id="view-switch" role="group" aria-label="View" hidden>
+              <button type="button" class="seg-btn" data-view="tasks" aria-pressed="true">Tasks</button>
+              <button type="button" class="seg-btn" data-view="plan" aria-pressed="false">Plan</button>
+            </div>
             <div class="board-tools">
               <label class="search">
                 <span class="visually-hidden">Filter tasks by id or title</span>
@@ -128,6 +133,7 @@
           <p class="filter-note" id="filter-note" role="status" hidden></p>
           <div class="col-tabs seg-switch" id="col-tabs" role="group" aria-label="Column shown"></div>
           <div class="kanban" id="kanban"></div>
+          <div class="planner" id="planner" hidden></div>
         </section>
         <section class="card insights" aria-labelledby="ins-h">
           <div class="card-head">
@@ -163,7 +169,16 @@
         </section>
       </div>
 
-      <aside class="side" aria-label="Activity">
+      <aside class="side" aria-label="Requests and activity">
+        <section class="card req-card" id="req-card" aria-labelledby="req-h" hidden>
+          <div class="card-head"><h2 id="req-h">Requests</h2><span class="exec off" id="exec" role="status">Claude Code: not running</span></div>
+          <div class="req-tools">
+            <button type="button" class="btn btn-sm" id="new-issue-btn" aria-haspopup="dialog">＋ New issue</button>
+            <button type="button" class="btn btn-sm" id="pause-btn" aria-pressed="false">Pause queue</button>
+          </div>
+          <p class="card-sub req-hint" id="req-hint"></p>
+          <ol class="list req-list" id="req-list" aria-live="polite"></ol>
+        </section>
         <section class="card feed-card" aria-labelledby="act-h">
           <div class="card-head"><h2 id="act-h">Activity</h2><p class="card-sub" title="From .dev/log.md and the session log (skills and agents)">Latest first</p></div>
           <ol class="feed" id="feed"></ol>
@@ -176,6 +191,23 @@
 
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
   <div class="visually-hidden" id="copy-status" role="status" aria-live="polite"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <dialog id="issue-dialog" aria-labelledby="issue-h">
+    <form method="dialog" id="issue-form">
+      <h2 id="issue-h">New issue</h2>
+      <p>Claude Code classifies it and asks you here if it needs to.</p>
+      <label class="field">Title <input id="issue-title" maxlength="120" required autocomplete="off"></label>
+      <label class="field">Type
+        <select id="issue-type"><option value="bug">Bug</option><option value="improvement">Improvement</option><option value="change">Change of scope</option></select>
+      </label>
+      <label class="field">Details <span class="card-sub">(optional)</span><textarea id="issue-note" maxlength="2000" rows="4"></textarea></label>
+      <div class="dialog-actions">
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn btn-primary" value="send">Queue the issue</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="task-dialog" class="drawer" aria-labelledby="task-title">
     <div class="td-head"><h2 id="task-title"></h2><button type="button" class="btn" id="task-close" aria-label="Close details">Close</button></div>
