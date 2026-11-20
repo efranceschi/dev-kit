@@ -1090,6 +1090,18 @@
       "definition": "Where an auditor writes its JSON result (given in its prompt); dev_score.py check validates it, the agent answers in a few lines."
     },
     {
+      "term": "task checks",
+      "definition": "Self-check plus cheap copy and static a11y agents at the end of each UI task (autonomy.task_checks), so the gate confirms instead of discovers."
+    },
+    {
+      "term": "recorded test run",
+      "definition": "A green suite stored per commit (dev_state.py tests record); the test auditor and the gate reuse it until the code it covers changes."
+    },
+    {
+      "term": "QA harness",
+      "definition": "Playwright with mocks that captures every screen and state (qa:shots) and runs axe (qa:a11y); added by plan to the first UI milestone."
+    },
+    {
       "term": "low cap",
       "definition": "Low findings cost at most 10 points per dimension."
     },

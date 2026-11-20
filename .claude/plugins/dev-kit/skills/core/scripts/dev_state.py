@@ -18,6 +18,8 @@ Subcommands
   gate M        set milestone gate: passed | pending | skipped (passed needs --score >= cut-off)
   artifact mark NAME  record that an artifact (brief|prd|architecture|ux|ui|plan|all) is up to date with its upstream
   stale         artifacts whose upstream changed since they were marked, and passed reviews now out of date
+  tests         record | lookup: test results per commit (.dev/run/test-runs.jsonl) so a green suite is not re-run
+                on unchanged code (--kind unit|integration|e2e|all, --paths); lookup exits 3 when nothing is reusable
   xref          cross-document checks: ACs without tasks, unknown ACs, unspecified screens, unknown ADRs and deps
   review NAME   record a review (prd|design|plan|docs...): pass | fail | pending (pass needs --score >= cut-off)
   event TYPE    append an allowlisted event to .dev/telemetry.jsonl (--set k=v, --json)
@@ -101,6 +103,9 @@ DEFAULT_AUTONOMY = {
     "cooldown": {"enabled": False, "max_tasks": 5},
     # Contextual tips (shared/tips.json): on (each tip at most twice) | off | always.
     "tips": "on",
+    # Cheap checks at the end of each task (conventions.md §7): ui = copy and static a11y agents on tasks that touch
+    # UI files (haiku) | all = also on other tasks with user-facing strings | off = implementer self-check only.
+    "task_checks": "ui",
     # Production deploy (conventions.md §12). when: per_milestone | on_release | manual | none.
     "production": {"when": "none", "method": None, "host": None, "targets": [], "smoke": [], "prerequisites": []},
     "task_time_budget_min": 30,
@@ -176,6 +181,7 @@ LIMIT_KEYS = {"paid_services": "max_monthly", "delete_data": "environments", "pu
               "production_deploy": "targets"}
 PROD_NAMES = {"prod", "production", "prd", "live"}
 ON_PARK = ("stop_when_idle", "stop_first")
+TASK_CHECKS = ("ui", "all", "off")
 UNATTENDED_PAUSE_POLICY = {
     "paid_services": {"action": "park"},
     "delete_data": {"action": "preauthorize", "limit": {"environments": ["dev", "test"]}},
@@ -312,6 +318,9 @@ def check_autonomy_field(field: str, val: object) -> object:
     elif field == "on_park":
         if val not in ON_PARK:
             fail(f"autonomy.on_park must be one of {', '.join(ON_PARK)}")
+    elif field == "task_checks":
+        if val not in TASK_CHECKS:
+            fail(f"autonomy.task_checks must be one of {', '.join(TASK_CHECKS)}")
     elif field == "commit_style":
         check_commit_style(val)
     elif field == "model_policy":
@@ -1340,6 +1349,78 @@ def _git(store: Store, *args: str) -> str | None:
         return None
 
 
+TEST_KINDS = ("unit", "integration", "e2e", "all")
+
+
+def _tree_dirty(store: Store) -> bool | None:
+    out = _git(store, "status", "--porcelain", "--", ".", ":(exclude).dev")
+    return None if out is None else bool(out)
+
+
+def test_runs_path(store: Store) -> Path:
+    return store.dev / "run" / "test-runs.jsonl"
+
+
+def cmd_tests(store: Store, a: argparse.Namespace) -> None:
+    """Test results per commit (machine-local), so the same suite is not run again on the same code by the
+    implementer, the test auditor and the gate (qa §2)."""
+    store.load()
+    if a.kind not in TEST_KINDS:
+        fail(f"--kind must be one of {', '.join(TEST_KINDS)}")
+    path = test_runs_path(store)
+    if a.action == "record":
+        sha = _git(store, "rev-parse", a.sha or "HEAD")
+        if not sha:
+            fail(f"unknown commit {a.sha or 'HEAD'}")
+        if a.passed is None or a.failed is None:
+            fail("tests record needs --passed and --failed")
+        rec = {"sha": sha, "kind": a.kind, "command": (a.command or "")[:200], "passed": a.passed, "failed": a.failed,
+               "coverage": a.coverage, "duration_s": a.duration, "dirty": bool(_tree_dirty(store)) if not a.sha else False,
+               "at": now()}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+        print(f"tests {a.kind}: {a.passed} passed, {a.failed} failed at {sha[:7]}" + (" (dirty tree: not reusable)" if rec["dirty"] else ""))
+        return
+    # lookup
+    head = _git(store, "rev-parse", a.sha or "HEAD")
+    if not head:
+        fail(f"unknown commit {a.sha or 'HEAD'}")
+    if not a.sha and _tree_dirty(store):
+        print("no reusable run: the working tree has uncommitted changes outside .dev/; run the suite")
+        sys.exit(3)
+    recs = []
+    if path.exists():
+        for ln in path.read_text(encoding="utf-8").splitlines():
+            try:
+                recs.append(json.loads(ln))
+            except json.JSONDecodeError:
+                continue
+    scope = [x.strip() for x in (a.paths or "").split(",") if x.strip()] or [".", ":(exclude).dev", ":(exclude)*.md", ":(exclude)docs"]
+    for r in reversed(recs):
+        # a run of the full suite ("all") covers any kind; a partial run covers only its own kind
+        if r.get("failed") != 0 or r.get("dirty") or r.get("kind") not in (a.kind, "all"):
+            continue
+        if r.get("sha") == head:
+            hit = {**r, "reused": True, "same_commit": True}
+        elif _git(store, "merge-base", "--is-ancestor", r["sha"], head) is not None:
+            changed = _git(store, "diff", "--name-only", r["sha"], head, "--", *scope)
+            if changed is None or changed:
+                continue
+            hit = {**r, "reused": True, "same_commit": False}
+        else:
+            continue
+        if a.json:
+            print(json.dumps(hit))
+        else:
+            print(f"reuse: {r['kind']} run at {r['sha'][:7]} ({r['passed']} passed, 0 failed"
+                  + (f", coverage {r['coverage']}%" if r.get("coverage") is not None else "") + ")"
+                  + ("" if hit["same_commit"] else f"; nothing it covers changed up to {head[:7]}"))
+        return
+    print(f"no reusable {a.kind} run for {head[:7]}; run the suite and record it")
+    sys.exit(3)
+
+
 def _int_tail(rev: str | None) -> int | None:
     m = re.search(r"(\d+)\D*$", str(rev or ""))
     return int(m.group(1)) if m else None
@@ -1352,6 +1433,12 @@ def cmd_deploy(store: Store, a: argparse.Namespace) -> None:
         fail(f"--status must be one of {', '.join(DEPLOY_STATUS)}")
     if a.milestone and a.milestone not in store.milestones():
         fail(f"unknown milestone {a.milestone}")
+    if a.milestone and a.env == "production" and a.status == "ok":
+        gate = store.milestones()[a.milestone].get("gate", "pending")
+        if gate not in ("passed", "skipped") and not any(t.get("lane") == "hotfix" for t in store.tasks().values()
+                                                          if t.get("milestone") == a.milestone):
+            print(f"warning: gate of {a.milestone} is {gate}; production gets one deploy per approved gate, "
+                  "after the whole fix round (conventions §12)", file=sys.stderr)
     d = store.state.setdefault("deploys", {}).setdefault(a.env, {"history": []})
     rec = {"sha": a.sha, "milestone": a.milestone, "migration": a.migration, "status": a.status, "at": now()}
     d["history"] = (d.get("history") or [])[-19:] + [rec]
@@ -2086,7 +2173,7 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
             base = _copy(auto.get(top) or DEFAULT_AUTONOMY.get(top) or {})
             store_autonomy_object(auto, top, merge_quality(base, parsed) if top == "quality" else {**base, **parsed})
         else:
-            auto[field] = check_autonomy_field(field, val if field in ("commit_style", "tips", "on_park") else parsed)
+            auto[field] = check_autonomy_field(field, val if field in ("commit_style", "tips", "on_park", "task_checks") else parsed)
     elif key.startswith("stack."):
         store.state.setdefault("stack", {})[key.split(".", 1)[1]] = val
     else:
@@ -2310,6 +2397,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("artifact"); s.set_defaults(fn=cmd_artifact)
     s.add_argument("action", choices=["mark"]); s.add_argument("name"); s.add_argument("--note")
+    s = sub.add_parser("tests"); s.set_defaults(fn=cmd_tests)
+    s.add_argument("action", choices=["record", "lookup"]); s.add_argument("--kind", default="all")
+    s.add_argument("--sha"); s.add_argument("--command"); s.add_argument("--passed", type=int); s.add_argument("--failed", type=int)
+    s.add_argument("--coverage", type=float); s.add_argument("--duration", type=float); s.add_argument("--paths")
+    s.add_argument("--json", action="store_true")
     s = sub.add_parser("xref"); s.set_defaults(fn=cmd_xref)
     s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
     s = sub.add_parser("stale"); s.set_defaults(fn=cmd_stale)

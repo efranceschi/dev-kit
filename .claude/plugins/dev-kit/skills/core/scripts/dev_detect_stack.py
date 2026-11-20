@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
 """dev_detect_stack.py - detect the technology stack of a project from its manifests.
 
-Standard library only. Usage: python3 -I dev_detect_stack.py [ROOT] [--pretty]
+Standard library only. Usage: python3 -I dev_detect_stack.py [ROOT] [--pretty] [--tools]
 Prints JSON: {"lang", "framework", "pkg", "test", "lint", "db", "detected_from": [...], "greenfield": bool, "notes": [...]}
 Values are null when unknown. Exit 0 always (detection is best effort).
+
+--tools prints instead what the QA agents can use without installing anything: browser automation (Playwright,
+a Chromium), accessibility and performance scanners (axe, Lighthouse), installed dependencies (node_modules, a
+virtualenv) and the QA harness scripts (shared/templates/qa-harness.md):
+{"playwright": {"available": bool, "via": ...}, "chromium": ..., "axe": ..., "lighthouse": ..., "node_modules": bool,
+ "venv": bool, "harness": {"qa:shots": bool, "qa:a11y": bool}, "visual_ready": bool}
 """
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -189,11 +198,59 @@ def other_markers(root: Path, out: dict) -> list[str]:
     return hits
 
 
+def _first(*cands: tuple[bool, str]) -> dict:
+    for ok, via in cands:
+        if ok:
+            return {"available": True, "via": via}
+    return {"available": False, "via": None}
+
+
+def _py_has(mod: str) -> bool:
+    try:
+        return importlib.util.find_spec(mod) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def detect_tools(root: Path) -> dict:
+    nm = root / "node_modules"
+    caches = [Path(x) for x in [os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or ""] if x and x != "0"]
+    caches += [Path.home() / ".cache" / "ms-playwright", Path.home() / "Library" / "Caches" / "ms-playwright"]
+    scripts: dict = {}
+    try:
+        scripts = (json.loads(read(root / "package.json") or "{}").get("scripts") or {})
+    except json.JSONDecodeError:
+        pass
+    harness = {k: k in scripts for k in ("qa:shots", "qa:a11y")}
+    if not any(harness.values()):
+        mk = read(root / "Makefile")
+        harness = {k: bool(re.search(rf"^{re.escape(k.replace(':', '-'))}:", mk, re.M)) for k in harness}
+    out = {
+        "playwright": _first(((nm / "@playwright" / "test").exists(), "node_modules/@playwright/test"),
+                             ((nm / "playwright").exists(), "node_modules/playwright"),
+                             (_py_has("playwright"), "python playwright"),
+                             (bool(shutil.which("playwright")), "playwright on PATH")),
+        "chromium": _first((any(c.is_dir() and any(c.glob("chromium*")) for c in caches), "playwright browser cache"),
+                           *[(bool(shutil.which(b)), b) for b in ("chromium", "chromium-browser", "google-chrome", "chrome")]),
+        "axe": _first(((nm / "@axe-core" / "playwright").exists(), "node_modules/@axe-core/playwright"),
+                      ((nm / "axe-core").exists(), "node_modules/axe-core"),
+                      (_py_has("axe_playwright_python"), "python axe-playwright"),
+                      (bool(shutil.which("axe")), "axe on PATH")),
+        "lighthouse": _first(((nm / "lighthouse").exists(), "node_modules/lighthouse"),
+                             (bool(shutil.which("lighthouse")), "lighthouse on PATH")),
+        "node_modules": nm.exists(),
+        "venv": any((root / d / "bin").exists() or (root / d / "Scripts").exists() for d in (".venv", "venv")),
+        "harness": harness,
+    }
+    out["visual_ready"] = out["playwright"]["available"] and out["chromium"]["available"]
+    return out
+
+
 def main(argv: list[str]) -> None:
     pretty = "--pretty" in argv
     args = [a for a in argv if not a.startswith("--")]
     root = Path(args[0]).resolve() if args else Path.cwd()
-    result = detect(root)
+    result = detect_tools(root) if "--tools" in argv else detect(root)
     print(json.dumps(result, indent=2 if pretty else None, ensure_ascii=False))
 
 

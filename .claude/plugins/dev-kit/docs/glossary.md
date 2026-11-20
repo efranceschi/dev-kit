@@ -35,6 +35,9 @@
 | **output file** | Where an auditor writes its JSON result (given in its prompt); dev_score.py check validates it, the agent answers in a few lines. |
 | **park** | Pause-point action: never wait; record the question with the recommended answer, block only what depends on it and continue (the default of most points under the unattended level, available at any level). |
 | **pause policy** | What the kit does at each pause point: ask, preauthorize within a limit, apply the recommendation, or park. |
+| **QA harness** | Playwright with mocks that captures every screen and state (qa:shots) and runs axe (qa:a11y); added by plan to the first UI milestone. |
+| **recorded test run** | A green suite stored per commit (dev_state.py tests record); the test auditor and the gate reuse it until the code it covers changes. |
 | **session log** | .dev/telemetry.jsonl: structured, high-level events of the run, without project data. |
 | **slot** | Per-agent isolation number that gives each agent its own port, database and scratch folder. |
 | **stale artifact** | A PRD, architecture, design or plan whose sources changed after it was marked; dev_state.py stale lists them, review refreshes them first. |
+| **task checks** | Self-check plus cheap copy and static a11y agents at the end of each UI task (autonomy.task_checks), so the gate confirms instead of discovers. |

@@ -74,3 +74,15 @@ Tick each item; note the Claude Code version used.
 - [ ] Hotfix: `/dev-kit:issue` with a critical bug → `implement` → `qa --scope T-xxx` records review `hotfix-T-xxx` and leaves the milestone gate as it was → `release --hotfix` tags a patch and deploys once.
 - [ ] Buffer and cool-down: queued standard issues enter the next milestone through `pull-issues`; with cool-down on, small ones enter right after a gate.
 - [ ] `plan replan` dropping a task uses `dev_state.py drop`; the milestone can still complete and `release` does not wait for it.
+
+## 8. Rework and cost (1.15–1.17)
+- [ ] An auditor writes its result to the `Output file:` and answers in ≤ 5 lines; a result with `status`, `Major` or a repeated id is fixed by `dev_score.py check --fix`; an unknown severity makes `check` exit 1.
+- [ ] `agent_spawn` events show the tier's model for every agent (copy-reviewer on haiku even when the session runs on opus).
+- [ ] `/dev-kit:costs` after a session counts every request (no single `unknown` record) and prices gateway model names.
+- [ ] Changing the PRD after the plan review: `dev_state.py stale` lists architecture and plan, `status --short` shows them, and `review plan` refreshes them before spawning the reviewer.
+- [ ] Round 2 of a document review: the reviewer gets `Changes since round 1:`; findings outside the change are deferred; `convergence` is printed; a `contradicts` finding is capped at medium.
+- [ ] `implement` records the green suite per commit; the gate's test auditor reports `tests_reused: true` when nothing changed.
+- [ ] A UI task runs the self-check and the haiku copy and static a11y checks into `.dev/qa/T-xxx/precheck/`.
+- [ ] A gate with fixes: all fix tasks run, then one `qa` round, one local preview, and production only after the gate passes.
+- [ ] `--parallel` implementers link `node_modules` instead of installing; `plan` adds the QA harness task when `dev_detect_stack.py --tools` finds none.
+

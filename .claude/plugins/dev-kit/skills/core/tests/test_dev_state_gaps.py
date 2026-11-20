@@ -205,6 +205,24 @@ class TestDetection(Base):
         self.assertFalse(d["greenfield"])
         self.assertTrue(any("monorepo" in n for n in d["notes"]))
 
+    def test_tools_report_what_qa_can_use(self) -> None:
+        nm = self.root / "node_modules"
+        (nm / "@playwright" / "test").mkdir(parents=True)
+        (nm / "@axe-core" / "playwright").mkdir(parents=True)
+        (self.root / "package.json").write_text(json.dumps({"scripts": {"qa:shots": "playwright test qa/shots"}}))
+        cache = self.root / "browsers" / "chromium-1"
+        cache.mkdir(parents=True)
+        env = {"PLAYWRIGHT_BROWSERS_PATH": str(self.root / "browsers"), "PATH": "/nonexistent", "HOME": str(self.root)}
+        out = json.loads(subprocess.run([sys.executable, "-I", str(DETECT), str(self.root), "--tools"],
+                                        capture_output=True, text=True, env=env).stdout)
+        self.assertEqual(out["playwright"]["via"], "node_modules/@playwright/test")
+        self.assertTrue(out["axe"]["available"])
+        self.assertFalse(out["lighthouse"]["available"])
+        self.assertTrue(out["chromium"]["available"])
+        self.assertTrue(out["visual_ready"])
+        self.assertEqual(out["harness"], {"qa:shots": True, "qa:a11y": False})
+        self.assertTrue(out["node_modules"])
+
     def test_empty_dir_is_greenfield(self) -> None:
         (self.root / "README.md").write_text("# idea\n")
         self.assertTrue(self.detect()["greenfield"])
@@ -291,6 +309,47 @@ class TestArtifactsAndXref(Base):
         self.assertIn(("screen_unspecified", "S-02"), got)
         self.assertNotIn(("screen_unspecified", "S-03"), got)
         self.assertIn(("screen_unknown", "S-09"), got)
+
+
+class TestTestRuns(Base):
+    def git(self, *args: str) -> str:
+        return subprocess.run(["git", "-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                              capture_output=True, text=True, check=True).stdout.strip()
+
+    def commit(self, name: str, text: str) -> str:
+        (self.root / name).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / name).write_text(text, encoding="utf-8")
+        self.git("add", name)
+        self.git("commit", "-qm", name)
+        return self.git("rev-parse", "HEAD")
+
+    def test_record_and_reuse_until_code_changes(self) -> None:
+        self.git("init", "-q")
+        self.init_with_plan()
+        self.commit(".gitignore", ".dev/\n")
+        self.commit("src/app.py", "x = 1\n")
+        self.run_state("tests", "lookup", "--kind", "integration", expect=3)
+        self.run_state("tests", "record", "--kind", "integration", "--passed", "40", "--failed", "0", "--command", "pytest -m it")
+        hit = json.loads(self.run_state("tests", "lookup", "--kind", "integration", "--json").stdout)
+        self.assertTrue(hit["same_commit"])
+        self.commit("README.md", "# docs only\n")                     # docs change: still reusable
+        self.assertFalse(json.loads(self.run_state("tests", "lookup", "--kind", "integration", "--json").stdout)["same_commit"])
+        self.run_state("tests", "lookup", "--kind", "e2e", expect=3)  # other kind
+        (self.root / "src" / "app.py").write_text("x = 2\n")          # dirty tree
+        self.run_state("tests", "lookup", "--kind", "integration", expect=3)
+        self.git("checkout", "-q", "--", "src/app.py")
+        self.commit("src/app.py", "x = 3\n")                          # code change: run again
+        self.run_state("tests", "lookup", "--kind", "integration", expect=3)
+        self.run_state("tests", "lookup", "--kind", "integration", "--paths", "tests/it", expect=0)  # outside the paths
+        self.run_state("tests", "record", "--kind", "integration", "--passed", "40", "--failed", "0")
+        self.run_state("tests", "lookup", "--kind", "all", expect=3)  # a partial run is not the full suite
+        self.run_state("tests", "record", "--kind", "unit", "--passed", "3", "--failed", "1")
+        self.run_state("tests", "lookup", "--kind", "unit", expect=3)  # failing runs are never reused
+
+    def test_deploy_before_gate_warns(self) -> None:
+        self.init_with_plan()
+        proc = self.run_state("deploy", "production", "--sha", "abc1234", "--milestone", "M1", "--status", "ok")
+        self.assertIn("one deploy per approved gate", proc.stderr)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,10 @@
 | Board: a host name is refused | DNS rebinding protection | Open it by IP or `localhost` (SSH tunnel: `ssh -N -L 8765:127.0.0.1:<port> <host>`) |
 | Board stopped by itself | No open tab for 2 hours | Start it again; `--idle-min N` changes the limit (0 = never) |
 | Board: "started by another version" | The kit was updated while it ran | `/dev-kit:board stop`, then start it again |
+| Agents in worktrees fail on `npm`/`node` with missing modules | Worktrees have no `node_modules` | Since 1.17.0 implementers link the main checkout's `node_modules` (never install there); check that `.gitignore` has `node_modules` without a trailing slash |
+| Visual and a11y audits are "static reading, confidence low" | No browser or harness available | Let `plan` add the QA harness task (`qa:shots`, `qa:a11y`), or install Playwright and a Chromium; `dev_detect_stack.py --tools` shows what is found |
+| The same long test suite runs several times per gate | Runs were not recorded | `implement` and `qa` record green runs with `dev_state.py tests record`; `tests lookup` shows whether one is reusable (a dirty tree never is) |
+| Read-only commands keep asking for permission, or a guard refuses heredocs and `cd … &&` | The host's permission rules | Run `/fewer-permission-prompts`, or allow at least `Bash(python3 -I *dev_state.py*)`, `Bash(python3 -I *dev_score.py*)`, `Bash(python3 -I *dev_cost.py*)`, `Bash(python3 -I *dev_detect_stack.py*)`, `Bash(git status*)`, `Bash(git diff*)`, `Bash(git log*)`, `Bash(git rev-parse*)` and the project's test, lint and type-check commands |
 | You do not know which skill to use | — | `/dev-kit:help <your question>` |
 
 `dev_state.py` lives at `.claude/plugins/dev-kit/skills/core/scripts/dev_state.py` (or the installed plugin copy); run it with `python3 -I <path> --root . <command>`.
