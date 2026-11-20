@@ -68,7 +68,7 @@ AGENT_STALE_S = 3600
 LINK_WINDOW_S = 30  # a hook start and a skill spawn of the same agent type this close may be the same agent
 AGENTS_DONE = 8  # a start with no stop after this long is treated as lost, not running
 AGENT_RECENT = 10
-LOG_TAIL = 25
+LOG_TAIL = 60
 
 
 # --------------------------------------------------------------------------- record and identity
@@ -465,6 +465,16 @@ def live_agents(root: Path) -> dict:
     return {"hooks": True, "active": active}
 
 
+def lifecycle(auto: dict) -> dict:
+    """Settings that decide which milestone stages apply: local preview (smoke) and production deploy per milestone."""
+    d = ds.DEFAULT_AUTONOMY
+    ld = auto.get("local_deploy") if isinstance(auto.get("local_deploy"), dict) else {}
+    pr = auto.get("production") if isinstance(auto.get("production"), dict) else {}
+    return {"local_deploy": ld.get("mode") or d["local_deploy"]["mode"],
+            "deploy_when": pr.get("when") or d["production"]["when"],
+            "max_fix_rounds": auto.get("max_fix_rounds_per_gate") or d["max_fix_rounds_per_gate"]}
+
+
 def build_state(root: Path, board: dict | None = None) -> dict:
     store = ds.Store(root)
     if not store.exists():
@@ -483,11 +493,14 @@ def build_state(root: Path, board: dict | None = None) -> dict:
                                             "blocked_reason", "started_at", "done_at", "source")}
         tasks[tid]["acceptance"] = len(t.get("acceptance") or [])
     milestones = []
+    prod = [d for d in ((s.get("deploys") or {}).get("production") or {}).get("history") or [] if isinstance(d, dict)]
     for m in store.milestone_order():
         info = store.milestones()[m]
+        dep = next((d for d in reversed(prod) if d.get("milestone") == m), None)
         milestones.append({"id": m, "title": info.get("title"), "goal": goals.get(m, ""), "gate": info.get("gate", "pending"),
                            "score": info.get("score"), "qa_runs": info.get("qa_runs", 0), "passed_at": info.get("passed_at"),
                            "preview": info.get("preview"),
+                           "deploy": {k: dep.get(k) for k in ("status", "sha", "at")} if dep else None,
                            "tasks": [tid for tid, t in tasks.items() if t["milestone"] == m]})
     nxt, why = ds.pick_next(store, None)
     try:
@@ -516,6 +529,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "milestones": milestones, "tasks": tasks,
         "reviews": s.get("reviews") or {},
         "quality": ds.quality_cfg(store),
+        "lifecycle": lifecycle(s.get("autonomy") or {}),
         "backlog": backlog,
         "questions": open_questions(_read(store.dev / "open-questions.md")),
         "log": log_tail(_read(store.dev / "log.md")),

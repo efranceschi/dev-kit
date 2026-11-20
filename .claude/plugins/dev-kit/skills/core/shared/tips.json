@@ -1,5 +1,5 @@
 {
-  "about": "Short contextual tips (conventions.md §15). Each tip: id, context, en (≤140 chars), optional command. English only: skills translate a tip into the user's language when they show it. dev_state.py tip <context> returns the least-shown one, each at most twice (autonomy.tips: on | off | always).",
+  "about": "Short contextual tips (conventions.md §15). Each tip: id, context, en (≤140 chars), optional command, optional spinner (shown under the Claude Code spinner, written by dev_ui.py). English only: skills translate a tip into the user's language when they show it. dev_state.py tip <context> returns the least-shown one, each at most twice (autonomy.tips: on | off | always).",
   "tips": [
     {"id": "issue-standard", "context": "issue_created:standard", "command": "/dev-kit:backlog", "en": "Standard issues wait in the queue and enter the next milestone's buffer (20%). See the queue with /dev-kit:backlog."},
     {"id": "issue-intangible", "context": "issue_created:intangible", "en": "Small, low-risk items are handled in the cool-down between a gate and the next milestone (turn it on in the interview)."},
@@ -11,20 +11,26 @@
     {"id": "gate-cooldown", "context": "gate_passed", "en": "Gate passed. With cool-down on, small issues are fixed now, before the next milestone: autonomy.cooldown on."},
     {"id": "gate-preview", "context": "gate_passed", "en": "Want to try the milestone yourself? A local preview can start after each approved gate (local_deploy in the interview)."},
     {"id": "qa-deferred", "context": "qa_deferred", "command": "/dev-kit:issue --from F-012 M3", "en": "Some findings were deferred. Promote the ones that matter to issues with /dev-kit:issue --from <F-id> <scope>."},
-    {"id": "backlog-new-issue", "context": "backlog", "command": "/dev-kit:issue", "en": "Found a bug or want an improvement? Just describe it: /dev-kit:issue \"what happens\". The kit classifies it for you."},
+    {"id": "backlog-new-issue", "context": "backlog", "spinner": true, "command": "/dev-kit:issue", "en": "Found a bug or want an improvement? Just describe it: /dev-kit:issue \"what happens\". The kit classifies it for you."},
     {"id": "backlog-classes", "context": "backlog", "en": "Classes: expedite = hotfix now · current = this milestone · standard = next buffer · intangible = cool-down · change = replan."},
-    {"id": "status-board", "context": "status", "command": "/dev-kit:board", "en": "Prefer a picture? /dev-kit:board opens a live Scrum board (kanban, burndown, impediments) in your browser."},
-    {"id": "status-costs", "context": "status", "command": "/dev-kit:costs", "en": "Curious how much each stage cost? /dev-kit:costs shows tokens and estimated US$ per stage."},
-    {"id": "status-feedback", "context": "status", "command": "/dev-kit:feedback", "en": "/dev-kit:feedback grades each stage of the session and suggests improvements to the kit."},
-    {"id": "status-backlog", "context": "status", "command": "/dev-kit:backlog", "en": "/dev-kit:backlog lists everything pending: issues, tasks, parked questions, deferred findings and deploys."},
-    {"id": "status-unattended", "context": "status", "en": "To let autopilot run overnight: autonomy level unattended plus a permission allowlist (/fewer-permission-prompts)."},
+    {"id": "status-board", "context": "status", "spinner": true, "command": "/dev-kit:board", "en": "Prefer a picture? /dev-kit:board opens a live Scrum board (kanban, burndown, impediments) in your browser."},
+    {"id": "status-costs", "context": "status", "spinner": true, "command": "/dev-kit:costs", "en": "Curious how much each stage cost? /dev-kit:costs shows tokens and estimated US$ per stage."},
+    {"id": "status-feedback", "context": "status", "spinner": true, "command": "/dev-kit:feedback", "en": "/dev-kit:feedback grades each stage of the session and suggests improvements to the kit."},
+    {"id": "status-backlog", "context": "status", "spinner": true, "command": "/dev-kit:backlog", "en": "/dev-kit:backlog lists everything pending: issues, tasks, parked questions, deferred findings and deploys."},
+    {"id": "status-unattended", "context": "status", "spinner": true, "en": "To let autopilot run overnight: autonomy level unattended plus a permission allowlist (/fewer-permission-prompts)."},
     {"id": "implement-hotfix", "context": "implement", "en": "Hotfix tasks run before everything else, even with a pending gate. Only one hotfix is open at a time."},
-    {"id": "settings-words", "context": "settings", "en": "Ask for settings in plain words, e.g. /dev-kit:settings stricter gates, or /dev-kit:settings show to see them all."},
-    {"id": "autopilot-fresh-session", "context": "autopilot", "command": "/dev-kit:autopilot --milestones 2", "en": "Long runs cost more per turn as the session grows. --milestones N stops after N gates; resume in a new session."},
+    {"id": "settings-words", "context": "settings", "spinner": true, "en": "Ask for settings in plain words, e.g. /dev-kit:settings stricter gates, or /dev-kit:settings show to see them all."},
+    {"id": "autopilot-fresh-session", "context": "autopilot", "spinner": true, "command": "/dev-kit:autopilot --milestones 2", "en": "Long runs cost more per turn as the session grows. --milestones N stops after N gates; resume in a new session."},
     {"id": "autopilot-issues", "context": "autopilot", "en": "Between milestones autopilot pulls queued issues into the buffer and, with cool-down on, fixes small ones first."},
     {"id": "costs-csv", "context": "costs", "en": "Need your own prices? /dev-kit:costs --csv exports every token count; prices live in .dev/costs/prices.json."},
     {"id": "feedback-export", "context": "feedback", "en": "The feedback report and export carry no project data; review them and send them to the dev-kit author if you like."},
-    {"id": "help-lost", "context": "help", "command": "/dev-kit:help", "en": "Lost? /dev-kit:help shows what to do next, how each skill works and short recipes for common tasks."},
-    {"id": "status-help", "context": "status", "command": "/dev-kit:help", "en": "Not sure which skill to use? /dev-kit:help <question> answers with the right command."}
+    {"id": "help-lost", "context": "help", "spinner": true, "command": "/dev-kit:help", "en": "Lost? /dev-kit:help shows what to do next, how each skill works and short recipes for common tasks."},
+    {"id": "status-help", "context": "status", "spinner": true, "command": "/dev-kit:help", "en": "Not sure which skill to use? /dev-kit:help <question> answers with the right command."},
+    {"id": "spinner-accept", "context": "spinner", "spinner": true, "en": "When the grey suggestion in the prompt is a /dev-kit command, press Tab or Right arrow to take it, then Enter."},
+    {"id": "spinner-issue", "context": "spinner", "spinner": true, "command": "/dev-kit:issue", "en": "Spotted a bug while this runs? Describe it afterwards with /dev-kit:issue \"what happens\"; the kit classifies and queues it."},
+    {"id": "spinner-gaps", "context": "spinner", "spinner": true, "command": "/dev-kit:interview --gaps", "en": "Questions parked during autonomous work wait in .dev/open-questions.md; answer them with /dev-kit:interview --gaps."},
+    {"id": "spinner-ui", "context": "spinner", "spinner": true, "command": "/dev-kit:settings", "en": "Turn these tips, the status line or the desktop notifications on or off with /dev-kit:settings."},
+    {"id": "spinner-status", "context": "spinner", "spinner": true, "command": "/dev-kit:status", "en": "Where is the project? /dev-kit:status shows milestones, gates, blocked tasks and the next task in one screen."},
+    {"id": "start-ui", "context": "start", "command": "/dev-kit:settings", "en": "The status line shows phase, milestone progress, the running task and the next command. Turn it on in /dev-kit:settings."}
   ]
 }

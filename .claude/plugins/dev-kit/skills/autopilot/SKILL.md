@@ -61,7 +61,7 @@ Every pause point below first looks up its action; only `ask` opens a question. 
 After each phase transition, review and milestone, print one line: phase, tasks done/total, gates and review scores (from `DS status --short`), open questions, issues pulled into the milestone, the local preview URL when a milestone was just deployed (`conventions.md` §11), and the estimated cost so far (run `dev_cost.py ingest` then `dev_cost.py report --json --no-ingest` after each milestone; show `total.usd` and tokens, §14). Keep the user's context light: do not dump artifacts; name the files, and follow `conventions.md` §17 (agents write their results to files; read `status --short`, scores and consolidated findings, never raw results).
 
 ## End of run
-Run `DS cleanup`. Write the run's feedback on the kit (`DS feedback --trigger autopilot --worked area:note --failed area:note --improve area:note`, at most 3 each, about the dev-kit only, consolidating the agents' `kit_feedback`) and `skill_end`. End the run report with one tip from `DS tip autopilot`. Include the run's estimated cost by stage (`dev_cost.py report`) and suggest `/dev-kit:costs` for the breakdown. Suggest `/dev-kit:feedback` for the session's evaluation by stage (a timestamped report and data export to review and, if the user wants, send to the dev-kit author).
+Run `DS cleanup`. Queue the end-of-run notification in the user's language, one short line with no project text beyond ids and scores (`DS notify "dev-kit: autopilot stopped at M2, 3 questions parked"`; it shows only when `autonomy.ui.notify` is on, `conventions.md` §15). Write the run's feedback on the kit (`DS feedback --trigger autopilot --worked area:note --failed area:note --improve area:note`, at most 3 each, about the dev-kit only, consolidating the agents' `kit_feedback`) and `skill_end`. End the run report with one tip from `DS tip autopilot`. Include the run's estimated cost by stage (`dev_cost.py report`) and suggest `/dev-kit:costs` for the breakdown. Suggest `/dev-kit:feedback` for the session's evaluation by stage (a timestamped report and data export to review and, if the user wants, send to the dev-kit author).
 
 Report in the user's language: what was built (milestones, tasks, commits), gates and review scores with the cut-offs used, decisions taken autonomously that deserve review (ADR ids, highlighting `source: policy` ones and any gate passed with `policy:` force), parked items with their recommendation, the local preview still running (URL, milestone, how to stop it), the production deploy state (`DS status` → `Production:` line: what is deployed and how far behind), open questions (suggest `interview --gaps`), and the single next command if the run stopped early. If the run completed `release`, give the version and how to run it.
 
@@ -69,6 +69,8 @@ Report in the user's language: what was built (milestones, tasks, commits), gate
 - Never run `release` for real with `public_exposure` implications without an explicit yes recorded in the brief, asked now, or `pause_policy.public_exposure` preauthorized for that target.
 - Never bypass a gate silently; `--skip-gate` always leaves an ADR.
 - Never rewrite git history.
+
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:autopilot` to resume, or `/dev-kit:interview --gaps` when it parked questions. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

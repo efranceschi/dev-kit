@@ -1,4 +1,4 @@
-/* dev-kit board - read-only view of .dev/state.json: what needs the user, what is running, the sprint kanban, insights. No dependencies. All untrusted text goes through textContent. */
+/* dev-kit board - read-only view of .dev/state.json: sprint window, what needs the user, the stages of the milestone with what runs in each, the sprint kanban, insights. No dependencies. All untrusted text goes through textContent. */
 (() => {
   "use strict";
 
@@ -86,13 +86,15 @@
 
   const store = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
   const TASK_RE = /^T-\d{1,5}$/;
-  const INS = ["burndown", "velocity", "quality", "backlog"];
+  const INS = ["quality", "burndown", "velocity", "backlog"];
+  const COL_LIMIT = 3;       // cards shown per kanban column before "Show all"
   let query = "";            // text filter of the kanban
   let typeFilter = "";       // task type filter of the kanban
-  let showAllDone = false;   // Done column: latest 5 or all
+  let expanded = new Set();  // kanban columns showing every card
   let mobileCol = null;      // column shown on narrow screens (null = pick the most useful one)
   let goalOpen = false;      // sprint goal expanded
-  let insTab = INS.includes(store.get("board-insight", "")) ? store.get("board-insight", "") : "burndown";
+  const INS_KEY = "board-insight-v2";  // v2: Quality became the default tab
+  let insTab = INS.includes(store.get(INS_KEY, "")) ? store.get(INS_KEY, "") : "quality";
   let firstRender = true;
 
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + "s"}`;
@@ -114,6 +116,48 @@
     return String(text || "").split(/\b(T-\d{1,5})\b/).map((part) => (TASK_RE.test(part) && data.tasks[part]
       ? h("button", { type: "button", class: "tid-btn", text: part, title: data.tasks[part].title, onclick: () => openTask(part) }) : part));
   }
+  // ------------------------------------------------------------------ commands the user pastes into Claude Code: always with a copy button
+  const COPY_ICON = "M9 9h10v12H9zM5 15V3h10";
+  const copySvg = () => s("svg", { viewBox: "0 0 24 24", width: "14", height: "14", "aria-hidden": "true" },
+    s("path", { d: COPY_ICON, fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linejoin": "round" }));
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+    } catch (e) { /* fall back below */ }
+    // plain HTTP on the network (shared board) has no Clipboard API: use a temporary selection
+    const ta = h("textarea", { class: "copy-buffer", readonly: true, "aria-hidden": "true", tabindex: "-1" });
+    ta.value = text;
+    document.body.append(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+  function copyBtn(text) {
+    const label = `Copy ${text}`;
+    const btn = h("button", { type: "button", class: "copy-btn", title: label, "aria-label": label }, copySvg());
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const ok = await copyText(text);
+      btn.classList.toggle("copied", ok);
+      btn.classList.toggle("copy-failed", !ok);
+      fill(btn, ok ? "✓" : "✕");
+      $("copy-status").textContent = ok ? `Copied ${text}. Paste it in Claude Code.` : `Could not copy. Select ${text} and copy it by hand.`;
+      clearTimeout(btn._t);
+      btn._t = setTimeout(() => { btn.classList.remove("copied", "copy-failed"); fill(btn, copySvg()); }, 1600);
+    });
+    return btn;
+  }
+  /** A command shown as code with its copy button. */
+  const cmd = (text) => h("span", { class: "cmd" }, h("code", { text }), copyBtn(text));
+  // static commands in index.html: <code data-copy>
+  document.querySelectorAll("code[data-copy]").forEach((c) => {
+    const wrap = h("span", { class: "cmd" });
+    c.replaceWith(wrap);
+    wrap.append(c, copyBtn(c.textContent));
+  });
+
   function keepFocus(fn) {
     const a = document.activeElement;
     const tid = a && a.getAttribute && a.getAttribute("data-tid");
@@ -124,7 +168,7 @@
     if (el) el.focus({ preventScroll: true });
   }
 
-  // ------------------------------------------------------------------ popovers (phases, options) and theme
+  // ------------------------------------------------------------------ popovers (options, sprint lists) and theme
   const pops = [];
   function popover(btn, pop) {
     const close = () => { pop.hidden = true; btn.setAttribute("aria-expanded", "false"); };
@@ -135,8 +179,9 @@
     });
     pops.push({ btn, pop, close });
   }
-  popover($("phase-btn"), $("phase-pop"));
   popover($("menu-btn"), $("menu-pop"));
+  popover($("tabs-earlier"), $("tabs-earlier-pop"));
+  popover($("tabs-later"), $("tabs-later-pop"));
   document.addEventListener("click", (e) => pops.forEach((p) => { if (!p.pop.hidden && !p.pop.contains(e.target) && !p.btn.contains(e.target)) p.close(); }));
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
@@ -177,13 +222,17 @@
     $("bf-mode").textContent = data.brownfield ? `existing project · ${data.brownfield.mode || "feature"} · since ${data.brownfield.baseline_ref || "baseline"}` : "";
     const phases = data.phases.filter((p) => p !== "init");
     const idx = phases.indexOf(data.phase);
-    const name = PHASE_LABEL[data.phase] || data.phase || "—";
-    const cls = (i) => (i < idx || data.phase === "done" ? "past" : i === idx ? "current" : "");
-    $("phase-name").textContent = name;
-    $("phase-step").textContent = idx >= 0 ? `step ${idx + 1} of ${phases.length}` : "";
-    $("phase-btn").setAttribute("aria-label", `Project phase: ${name}${idx >= 0 ? `, step ${idx + 1} of ${phases.length}` : ""}. Show all phases`);
-    fill($("phase-track"), phases.map((p, i) => h("span", { class: cls(i) })));
-    fill($("phases"), phases.map((p, i) => h("li", { class: cls(i), "aria-current": i === idx ? "step" : null, text: PHASE_LABEL[p] || p })));
+    const done = data.phase === "done";
+    const state = (i) => (i < idx || done ? "done" : i === idx ? "current" : "upcoming");
+    $("phase-step").textContent = idx >= 0 ? (done ? "All phases complete" : `Step ${idx + 1} of ${phases.length}`) : "";
+    // one chevron per phase: done ✓, the current one filled with the accent, the rest waiting
+    fill($("phases"), phases.map((p, i) => {
+      const st = state(i);
+      return h("li", { class: `chev st-${st}${i === idx && !done ? " here" : ""}${Math.abs(i - idx) === 1 || (done && i === phases.length - 1) ? " near" : ""}`, "aria-current": i === idx ? "step" : null, title: `${PHASE_LABEL[p] || p}: ${STAGE_WORD[st]}` },
+        h("span", { class: "chev-ico", "aria-hidden": "true", text: st === "done" ? "✓" : String(i + 1) }),
+        h("span", { class: "chev-name", text: PHASE_LABEL[p] || p }),
+        h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[st]}.` }));
+    }));
   }
 
   function currentId() {
@@ -193,70 +242,55 @@
   }
   const currentMilestone = () => (data && data.milestones.find((x) => x.id === currentId())) || null;
   function selectSprint(id, focusTab) {
-    selected = id; showAllDone = false; goalOpen = false; mobileCol = null;
+    selected = id; expanded = new Set(); goalOpen = false; mobileCol = null;
     render();
-    if (focusTab && $(`tab-${id}`)) $(`tab-${id}`).focus();
+    if (focusTab && $(`tab-${currentId()}`)) $(`tab-${currentId()}`).focus();
   }
-
-  // ------------------------------------------------------------------ "right now": what needs the user, what runs, what comes next
-  function renderNow() {
-    const blocked = Object.entries(data.tasks).filter(([, t]) => t.status === "blocked");
-    const hot = (data.backlog || {}).hotfix_open || [];
-    const parts = [];
-    if (hot.length) parts.push(plural(hot.length, "open hotfix", "open hotfixes"));
-    if (blocked.length) parts.push(plural(blocked.length, "blocked task"));
-    if (data.questions.length) parts.push(plural(data.questions.length, "open question"));
-    $("now-needs").className = `now-block ${parts.length ? "alert" : "clear"}`;
-    $("now-needs-value").textContent = parts.join(" · ") || "Nothing needs you";
-    $("now-needs-note").textContent = blocked.length ? `${blocked[0][0]} ${blocked[0][1].blocked_reason || blocked[0][1].title}`
-      : data.questions.length ? `${data.questions[0].id} ${data.questions[0].question}` : parts.length ? "" : "No blocked tasks, no open questions";
-
-    const running = Object.entries(data.tasks).filter(([, t]) => t.status === "in_progress");
-    const ids = new Set(running.map(([id]) => id));
-    const chips = running.map(([id, t]) => h("button", { type: "button", class: "run-chip", title: `${id} ${t.title}. Open details`, onclick: () => openTask(id) },
-      h("span", { class: "tid", text: id }), h("span", { class: "run-title", text: t.title }), agentsOn(id).slice(0, 2).flatMap(agentBits)));
-    activeAgents().filter((x) => !x.node || !ids.has(x.node)).forEach((x) => chips.push(h("span", { class: "run-chip" },
-      x.node ? h("span", { class: "tid", text: x.node.replace("GATE:", "QA ") }) : null, agentBits(x))));
-    $("now-running").className = `now-block ${chips.length ? "busy" : ""}`;
-    fill($("now-running-chips"), chips.length ? chips : h("span", { class: "now-idle", text: "Nothing is running" }));
-
-    const nx = data.next || {};
-    const nt = nx.task && data.tasks[nx.task];
-    $("now-next").disabled = !nt;
-    // dev_state explains why nothing is ready; turn its common case into plain words and keep the rest as a note
-    const busy = !nt && /\bis in_progress\b/.test(nx.reason || "");
-    $("now-next-value").textContent = nt ? `${nx.task} ${nt.title}` : busy ? "Nothing ready yet" : nx.reason ? "Nothing ready" : "Nothing queued";
-    $("now-next-value").title = nt ? nt.title : "";
-    $("now-next-note").textContent = nt ? `${nt.milestone} · ${nt.type} · open details`
-      : busy ? "The next task is picked when the running ones finish" : nx.reason || "";
-    $("now-next-note").title = nt ? "" : nx.reason || "";
-  }
-  $("now-needs").addEventListener("click", () => {
-    const el = $("attention");
-    el.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
-    el.focus({ preventScroll: true });
-  });
-  $("now-next").addEventListener("click", () => { if (data && data.next && data.next.task) openTask(data.next.task); });
 
   // ------------------------------------------------------------------ sprint: tabs, goal, progress
+  const TAB_WINDOW = 3;       // sprints shown as tabs: the selected one and its neighbours; the rest sit in the earlier/later lists
+  function tabWindow(ids, cur) {
+    const i = Math.max(0, ids.indexOf(cur));
+    const start = Math.max(0, Math.min(i - Math.floor(TAB_WINDOW / 2), ids.length - TAB_WINDOW));
+    return [start, Math.min(ids.length, start + TAB_WINDOW)];
+  }
+  function sprintInfo(m) {
+    const ts = tasksOf(m);
+    return { active: ts.some((t) => t.status === "in_progress"), done: ts.filter((t) => t.status === "done").length, total: ts.length };
+  }
   function renderTabs() {
     const cur = currentId();
-    const tabs = data.milestones.map((m) => {
-      const ts = tasksOf(m);
-      const active = ts.some((t) => t.status === "in_progress");
-      const done = ts.filter((t) => t.status === "done").length;
+    const ms = data.milestones;
+    const [a, b] = tabWindow(ms.map((m) => m.id), cur);
+    const tabs = ms.slice(a, b).map((m) => {
+      const x = sprintInfo(m);
       return h("button", {
         role: "tab", type: "button", id: `tab-${m.id}`, "aria-selected": String(m.id === cur), "aria-controls": "main",
         tabindex: m.id === cur ? "0" : "-1", title: `${m.title || m.id} · gate ${m.gate}`,
         onclick: () => selectSprint(m.id, true),
-      }, h("span", { class: `tab-dot ${active ? "active" : m.gate}`, "aria-hidden": "true" }), h("strong", { text: m.id }),
-      h("span", { text: `${done}/${ts.length}` }),
+      }, h("span", { class: `tab-dot ${x.active ? "active" : m.gate}`, "aria-hidden": "true" }), h("strong", { text: m.id }),
+      h("span", { text: `${x.done}/${x.total}` }),
       m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null);
     });
-    if (!tabs.length) tabs.push(h("span", { class: "card-sub", text: "No milestones yet. They appear after /dev-kit:plan." }));
+    if (!tabs.length) tabs.push(h("span", { class: "card-sub" }, "No milestones yet. They appear after ", cmd("/dev-kit:plan"), "."));
     fill($("tabs"), tabs);
-    if (firstRender && $(`tab-${cur}`)) $("tabs").scrollLeft = Math.max(0, $(`tab-${cur}`).offsetLeft - 60);
+    const side = (key, list, word) => {
+      $(`tabs-${key}-wrap`).hidden = !list.length;
+      $(`tabs-${key}`).textContent = `+${list.length} ${word}`;
+      $(`tabs-${key}`).setAttribute("aria-label", `${plural(list.length, `${word} sprint`)}: choose one`);
+      fill($(`tabs-${key}-list`), list.map((m) => {
+        const x = sprintInfo(m);
+        return h("li", {}, h("button", { type: "button", class: "sprint-item", onclick: () => { pops.forEach((p) => p.close()); selectSprint(m.id, true); } },
+          h("span", { class: `tab-dot ${x.active ? "active" : m.gate}`, "aria-hidden": "true" }), h("strong", { text: m.id }),
+          h("span", { class: "si-title", text: m.title || "" }), h("span", { class: "si-count", text: `${x.done}/${x.total}` }),
+          m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null));
+      }));
+    };
+    side("earlier", ms.slice(0, a), "earlier");
+    side("later", ms.slice(b), "later");
+    $("tabs-back").hidden = !data.current_milestone || cur === data.current_milestone;
   }
+  $("tabs-back").addEventListener("click", () => { selected = null; selectSprint(null, true); });
 
   function renderSprint(m) {
     const ts = tasksOf(m);
@@ -264,7 +298,8 @@
     const pct = ts.length ? Math.round((counts.done / ts.length) * 100) : 0;
     $("sprint-title").textContent = m ? `${m.id} · ${m.title || "Sprint"}` : "No sprint planned yet";
     const goal = $("sprint-goal");
-    goal.textContent = m ? m.goal || "No goal paragraph in plan.md for this milestone." : "Run /dev-kit:plan to create milestones and tasks.";
+    if (m) goal.textContent = m.goal || "No goal paragraph in plan.md for this milestone.";
+    else fill(goal, "Run ", cmd("/dev-kit:plan"), " to create milestones and tasks.");
     goal.classList.remove("open");
     const clipped = goal.scrollHeight > goal.clientHeight + 1;
     goal.classList.toggle("open", goalOpen);
@@ -288,8 +323,8 @@
     if (badge) badge.title = `Cut-off ${q.min_overall} overall · ${q.min_dimension} per dimension`;
     fill($("sprint-facts"),
       h("span", { title: "Tasks done in the whole project", text: `Project ${p.done}/${p.total}` }),
-      h("span", { title: c ? `${compact(c.tokens || 0)} tokens (API-equivalent estimate)` : "Run /dev-kit:costs to compute the estimated cost",
-        text: c ? `Cost US$ ${Number(c.usd || 0).toFixed(2)}` : "Cost not computed" }),
+      c ? h("span", { title: `${compact(c.tokens || 0)} tokens (API-equivalent estimate)`, text: `Cost US$ ${Number(c.usd || 0).toFixed(2)}` })
+        : h("span", { class: "fact-cmd", title: "Run /dev-kit:costs to compute the estimated cost" }, "Cost not computed", copyBtn("/dev-kit:costs")),
       badge);
   }
   $("goal-more").addEventListener("click", () => { goalOpen = !goalOpen; renderSprint(currentMilestone()); });
@@ -342,11 +377,15 @@
     const box = $("kanban");
     if (!m) {
       fill($("col-tabs"));
-      fill(box, h("div", { class: "board-empty" }, "No sprint planned yet. Run ", h("code", { text: "/dev-kit:plan" }), " to create milestones and tasks."));
+      fill(box, h("div", { class: "board-empty" }, "No sprint planned yet. Run ", cmd("/dev-kit:plan"), " to create milestones and tasks."));
       return;
     }
     const by = Object.fromEntries(STATUS.map((st) => [st.key, shown.filter((t) => t.status === st.key)]));
     by.done.sort((a, b) => (parseT(b.done_at) || 0) - (parseT(a.done_at) || 0));
+    // To do: next up first, then ready, then waiting, so the few visible cards are the useful ones
+    const nextId = data.next && data.next.task;
+    const todoRank = (t) => (t.id === nextId ? 0 : waitingOn(t).length ? 2 : 1);
+    by.todo.sort((a, b) => todoRank(a) - todoRank(b) || Number(a.id.slice(2)) - Number(b.id.slice(2)));
     const col = mobileCol || ["in_progress", "blocked", "todo", "done"].find((k) => by[k].length) || "todo";
     box.dataset.col = col;
     fill($("col-tabs"), STATUS.map((st) => h("button", { type: "button", class: "seg-btn", "aria-pressed": String(col === st.key),
@@ -354,10 +393,12 @@
     fill(box, STATUS.map((st) => {
       let list = by[st.key];
       let more = null;
-      if (st.key === "done" && list.length > 5 && !filtering) {
-        more = h("button", { type: "button", class: "col-more", id: "done-more", text: showAllDone ? "Show only the latest 5" : `Show all ${list.length} done`,
-          onclick: () => { showAllDone = !showAllDone; keepFocus(() => renderKanban(currentMilestone())); } });
-        if (!showAllDone) list = list.slice(0, 5);
+      if (list.length > COL_LIMIT && !filtering) {
+        const open = expanded.has(st.key);
+        more = h("button", { type: "button", class: "col-more", id: `more-${st.key}`, "aria-expanded": String(open),
+          text: open ? "Show less" : `Show all ${list.length}`,
+          onclick: () => { if (open) expanded.delete(st.key); else expanded.add(st.key); keepFocus(() => renderKanban(currentMilestone())); } });
+        if (!open) list = list.slice(0, COL_LIMIT);
       }
       const slim = st.key === "blocked" && !ts.some((t) => t.status === "blocked");
       return h("section", { class: `col${slim ? " slim" : ""}`, "data-st": st.key, "aria-label": `${st.label}, ${plural(by[st.key].length, "task")}` },
@@ -507,11 +548,11 @@
     const hot = b.hotfix_open || [];
     const warns = b.warnings || [];
     const n = blocked.length + data.questions.length + hot.length;
-    $("att-sub").textContent = n ? plural(n, "item") : "";
-    if (!n && !warns.length) {
-      fill($("impediments"), h("div", { class: "empty good", text: "Nothing is blocked and no questions are open." }));
-      return;
-    }
+    // the strip exists only while something needs the user; warnings alone ride along but do not open it
+    const strip = $("needs");
+    strip.hidden = !n;
+    $("needs-count").textContent = n ? plural(n, "item") : "";
+    if (!n) { fill($("impediments")); return; }
     fill($("impediments"),
       hot.length ? listBlock("Open hotfixes", hot.map((id) => h("li", {}, h("span", { class: "id", text: String(id) }),
         h("span", { text: (data.tasks[id] || (b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))), "") : null,
@@ -522,7 +563,109 @@
       data.questions.length ? listBlock("Open questions", data.questions.map((q) => h("li", {}, h("span", { class: "id", text: q.id }), h("span", {}, linkify(q.question)),
         h("span", { class: "chip", text: q.by || "?" }), q.assumption ? h("span", { class: "sub", text: `Assumed meanwhile: ${q.assumption}` }) : null)), "") : null,
       warns.length ? listBlock("Warnings", warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
-      data.questions.length || blocked.length ? h("p", { class: "card-sub" }, "Answer in Claude Code with ", h("code", { text: "/dev-kit:interview --gaps" })) : null);
+      data.questions.length || blocked.length ? h("p", { class: "needs-hint" }, "Answer in Claude Code with ", cmd("/dev-kit:interview --gaps")) : null);
+  }
+  function goNeeds() {
+    const el = $("needs");
+    if (el.hidden) return;
+    el.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    el.focus({ preventScroll: true });
+  }
+
+  // ------------------------------------------------------------------ stages of the milestone, in the order the kit runs them
+  // Plan → Build → QA gate ⇄ Fixes → Smoke (local preview, inside qa) → Deploy (per-milestone production) → Closed
+  const isFix = (t) => t.type === "fix" && Boolean(t.source);
+  function stagesOf(m) {
+    const ts = tasksOf(m);
+    const lc = data.lifecycle || {};
+    const q = data.quality || {};
+    const build = ts.filter((t) => !isFix(t)), fixes = ts.filter(isFix);
+    const open = (list) => list.filter((t) => t.status !== "done");
+    const buildOpen = open(build), fixOpen = open(fixes);
+    const passed = m.gate === "passed" || m.gate === "skipped";
+    const qaAgents = agentsOn(`GATE:${m.id}`);
+    const smokeOn = lc.local_deploy && lc.local_deploy !== "off";
+    const deployOn = lc.deploy_when === "per_milestone";
+    const dep = m.deploy;
+    const st = [];
+    st.push({ key: "plan", name: "Plan", state: ts.length ? "done" : "current",
+      note: ts.length ? plural(ts.length, "task") : "Run", cmd: ts.length ? null : "/dev-kit:plan", tasks: [] });
+    st.push({ key: "build", name: "Build", tasks: build,
+      state: !ts.length ? "upcoming" : buildOpen.length ? "current" : "done",
+      note: build.length ? `${build.length - buildOpen.length}/${build.length} done` : "No tasks" });
+    const failed = !passed && m.score != null && m.score < (q.min_overall ?? 0);
+    st.push({ key: "qa", name: "QA gate", tasks: [], agents: qaAgents,
+      state: passed ? "done" : qaAgents.length ? "current" : failed && fixOpen.length ? "failed"
+        : ts.length && !buildOpen.length && !fixOpen.length ? "current" : "upcoming",
+      note: passed ? (m.gate === "skipped" ? "Skipped" : `Passed${m.score != null ? ` · ${m.score}` : ""}`)
+        : failed ? `Failed · ${m.score} / ${q.min_overall}` : m.qa_runs ? plural(m.qa_runs, "run") : "Not run yet" });
+    const rounds = `round ${Math.max(1, m.qa_runs || 0)} of ${lc.max_fix_rounds || 3}`;
+    st.push({ key: "fixes", name: "Fixes", tasks: fixes,
+      state: fixOpen.length ? "current" : fixes.length ? "done" : passed ? "na" : "upcoming",
+      note: fixOpen.length ? `${fixes.length - fixOpen.length}/${fixes.length} done · ${rounds}` : fixes.length ? `${plural(fixes.length, "fix", "fixes")} done` : passed ? "None needed" : "Only if QA fails" });
+    st.push({ key: "smoke", name: "Smoke test", tasks: [],
+      state: !smokeOn ? "na" : m.preview ? "done" : "upcoming",
+      note: !smokeOn ? "Local preview off" : m.preview ? (m.preview.pid != null ? "Preview running" : "Passed") : passed ? "Not recorded" : "Runs inside QA" });
+    st.push({ key: "deploy", name: "Deploy", tasks: [],
+      state: !deployOn ? "na" : dep && dep.status === "ok" ? "done" : dep ? "failed" : passed ? "current" : "upcoming",
+      note: !deployOn ? (lc.deploy_when === "on_release" ? "At release" : "Not per milestone")
+        : dep && dep.status === "ok" ? `${(dep.sha || "").slice(0, 7)}${dep.at && Number.isFinite(parseT(dep.at)) ? ` · ${fmtDate(parseT(dep.at))}` : ""}`
+        : dep ? stLabel(dep.status) : passed ? "Waiting for" : "After the gate",
+      cmd: deployOn && passed && !(dep && dep.status === "ok") ? "/dev-kit:deploy" : null });
+    const closed = passed && (!deployOn || (dep && dep.status === "ok"));
+    st.push({ key: "close", name: "Closed", tasks: [], state: closed ? "done" : "upcoming",
+      note: closed ? (m.passed_at && Number.isFinite(parseT(m.passed_at)) ? fmtDate(parseT(m.passed_at)) : "Milestone closed") : "" });
+    // one stage is "where we are": the first current or failed one
+    const here = st.find((x) => x.state === "current" || x.state === "failed");
+    if (here) here.here = true;
+    return st;
+  }
+  const STAGE_ICON = { done: "✓", current: "●", upcoming: "○", failed: "✕", na: "–" };
+  const STAGE_WORD = { done: "done", current: "in progress", upcoming: "not started", failed: "failed", na: "does not apply" };
+  function runChip(t) {
+    return h("button", { type: "button", class: "run-chip", "data-tid": t.id, title: `${t.id} ${t.title}. Open details`, onclick: () => openTask(t.id) },
+      h("span", { class: "tid", text: t.id }), h("span", { class: "run-title", text: t.title }), agentsOn(t.id).slice(0, 2).flatMap(agentBits));
+  }
+  function renderStages(m) {
+    const box = $("stages");
+    if (!m) {
+      fill(box, h("li", { class: "stage-empty card-sub", text: "Stages appear once the plan has milestones." }));
+      $("stages-sub").textContent = ""; $("also-running").hidden = true;
+      return;
+    }
+    const st = stagesOf(m);
+    const here = st.find((x) => x.here);
+    const closed = st.at(-1).state === "done";
+    $("stages-sub").textContent = closed ? `${m.id} is closed` : here ? `${m.id} is in ${here.name}` : "";
+    const shown = new Set();
+    fill(box, st.map((x) => {
+      const running = x.tasks.filter((t) => t.status === "in_progress");
+      const blocked = x.tasks.filter((t) => t.status === "blocked");
+      running.forEach((t) => shown.add(t.id));
+      const chips = [...running.map(runChip), ...(x.agents || []).map((a) => h("span", { class: "run-chip" }, h("span", { class: "tid", text: "QA" }), agentBits(a)))];
+      let nextBtn = null;
+      if (x.here && !chips.length) {
+        const nt = data.next && data.next.task && data.tasks[data.next.task];
+        if (nt && nt.milestone === m.id && x.tasks.some((t) => t.id === data.next.task)) {
+          nextBtn = h("button", { type: "button", class: "next-btn", "data-tid": data.next.task, onclick: () => openTask(data.next.task) },
+            h("span", { class: "chip next-chip", text: "next up" }), h("span", { class: "tid", text: data.next.task }), h("span", { class: "run-title", text: nt.title }));
+        }
+      }
+      return h("li", { class: `chev stage st-${x.state}${x.here ? " here" : ""}`, "aria-current": x.here ? "step" : null },
+        h("div", { class: "stage-top" }, h("span", { class: "stage-ico", "aria-hidden": "true", text: STAGE_ICON[x.state] }),
+          h("span", { class: "stage-name", text: x.name }), h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[x.state]}.` })),
+        x.note ? h("span", { class: "stage-note" }, x.note, x.cmd ? [" ", cmd(x.cmd)] : null) : null,
+        blocked.length ? h("button", { type: "button", class: "stage-blocked", text: `⛔ ${blocked.length} blocked`, onclick: goNeeds }) : null,
+        chips.length ? h("div", { class: "stage-run" }, chips) : null, nextBtn);
+    }));
+    // anything running outside this milestone's stages stays visible
+    const elsewhere = Object.entries(data.tasks).filter(([id, t]) => t.status === "in_progress" && !shown.has(id)).map(([id, t]) => runChip({ id, ...t }));
+    const taskIds = new Set(Object.keys(data.tasks));
+    activeAgents().filter((a) => !(a.node && (taskIds.has(a.node) || a.node === `GATE:${m.id}`))).forEach((a) =>
+      elsewhere.push(h("span", { class: "run-chip" }, a.node ? h("span", { class: "tid", text: a.node.replace("GATE:", "QA ") }) : null, agentBits(a))));
+    const also = $("also-running");
+    also.hidden = !elsewhere.length;
+    fill(also, elsewhere.length ? [h("span", { class: "also-label", text: "Also running" }), ...elsewhere] : []);
   }
 
   function renderFeed() {
@@ -533,7 +676,7 @@
     }) : h("li", {}, h("span", { class: "txt", text: "No activity logged yet." })));
     const b = data.board;
     fill($("foot"), `Read-only view of ${data.project}/.dev · autonomy ${data.autonomy || "?"}`,
-      b ? ` · server pid ${b.pid} on port ${b.port}` : "", " · stop it from the ⋯ menu or with ", h("code", { text: "/dev-kit:board stop" }));
+      b ? ` · server pid ${b.pid} on port ${b.port}` : "", " · stop it from the ⋯ menu or with ", cmd("/dev-kit:board stop"));
   }
 
   // ------------------------------------------------------------------ insights: quality (definition of done) and backlog
@@ -612,7 +755,7 @@
     else renderBacklog(curId);
   }
   function pickInsight(k, focus) {
-    insTab = k; store.set("board-insight", k);
+    insTab = k; store.set(INS_KEY, k);
     if (data && data.ok) renderInsights(currentMilestone(), currentId());
     if (focus) $(`ins-tab-${k}`).focus();
   }
@@ -641,8 +784,8 @@
     const curId = currentId();
     const m = data.milestones.find((x) => x.id === curId) || null;
     keepFocus(() => {
-      renderHeader(); renderTabs(); renderNow(); renderSprint(m); renderKanban(m);
-      renderImpediments(); renderFeed(); renderInsights(m, curId);
+      renderHeader(); renderTabs(); renderSprint(m); renderImpediments(); renderStages(m); renderKanban(m);
+      renderFeed(); renderInsights(m, curId);
     });
     $("main").setAttribute("aria-busy", "false");
     if (firstRender) {
@@ -690,7 +833,7 @@
     es.onerror = () => {
       if (stopped) return;
       setLive("off", "Reconnecting…");
-      const b = $("banner"); b.hidden = false; b.textContent = "The board server is not answering. Reconnecting… (start it again with /dev-kit:board)";
+      const b = $("banner"); b.hidden = false; fill(b, "The board server is not answering. Reconnecting… Start it again with ", cmd("/dev-kit:board"));
     };
   }
 
@@ -788,7 +931,7 @@
       showStopped();
     } catch (e) {
       btn.disabled = false;
-      const b = $("banner"); b.hidden = false; b.textContent = `Could not stop the server (${e.message}). Use /dev-kit:board stop.`;
+      const b = $("banner"); b.hidden = false; fill(b, `Could not stop the server (${e.message}). Use `, cmd("/dev-kit:board stop"));
     }
   }
 

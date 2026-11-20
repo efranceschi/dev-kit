@@ -52,6 +52,8 @@ Read `.dev/open-questions.md` (Open table). Group questions by theme, ask them i
 - Keep questions concrete with examples; avoid jargon for non-technical users (block 1 tells you their level).
 - Never record secret values; record variable names only.
 
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the command the close step announces. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+
 ## Existing projects (brownfield)
 
 When state has `brownfield` (`conventions.md` §16) the mode in `brownfield.mode` limits the interview: `feature` → express round on the change, blocks 5–8 and 10 confirmed from `discovery.md`; `import` → read the documents listed in `discovery.md` §12 first and ask only the blocks they leave open (cite the source of each pre-filled answer in `brief.md`); `maintenance` → only blocks 8–10 (quality, autonomy, deploy consent). In every mode, confirm `autonomy.commit_style`, the version and tag scheme and `production` proposed by discovery (`discovery.md` §10–11) instead of asking them from scratch; `pause_policy.dirty_tree` stays at `ask` (the script enforces it). Block 9's `dev_tooling` is `always_ask` in existing projects (`conventions.md` §16); the script moves it when the level is set.

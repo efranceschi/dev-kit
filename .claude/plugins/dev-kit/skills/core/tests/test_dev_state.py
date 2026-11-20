@@ -1061,7 +1061,8 @@ class TestTips(Base):
         ids = [t["id"] for t in cat]
         self.assertEqual(len(ids), len(set(ids)))
         for t in cat:
-            self.assertEqual(set(t) - {"id", "context", "en", "command"}, set(), f"{t['id']}: English only")
+            self.assertEqual(set(t) - {"id", "context", "en", "command", "spinner"}, set(), f"{t['id']}: English only")
+            self.assertIn(t.get("spinner", True), (True,), t["id"])
             self.assertTrue(t.get("en"), t["id"])
             self.assertLessEqual(len(t["en"]), 140, t["id"])
 

@@ -333,7 +333,22 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(d["milestones"][0]["goal"], "Ship a deployable skeleton.")
         self.assertEqual(d["tasks"]["T-001"]["status"], "in_progress")
         self.assertNotIn("token", d["board"])
+        self.assertEqual(d["lifecycle"], {"local_deploy": "off", "deploy_when": "none", "max_fix_rounds": 3})
+        self.assertIsNone(d["milestones"][0]["deploy"])
         self.assertEqual(state_file.read_bytes(), before)
+
+    def test_milestone_deploy_is_the_latest_production_record_of_that_milestone(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("dev_board", BOARD)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        m1 = mod.build_state(self.root)["milestones"][0]["id"]
+        self.ds("deploy", "production", "--sha", "a" * 40, "--status", "failed", "--milestone", m1)
+        self.ds("deploy", "production", "--sha", "b" * 40, "--status", "ok", "--milestone", m1)
+        self.ds("deploy", "production", "--sha", "c" * 40, "--status", "ok")
+        d = mod.build_state(self.root)
+        self.assertEqual(d["milestones"][0]["deploy"]["status"], "ok")
+        self.assertEqual(d["milestones"][0]["deploy"]["sha"], "b" * 40)
 
     def test_agents_disabled_until_a_hook_fires_then_live(self):
         import importlib.util

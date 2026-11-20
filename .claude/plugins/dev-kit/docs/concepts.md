@@ -96,7 +96,7 @@ Optionally, each approved milestone can run locally on `127.0.0.1` (`keep_runnin
 
 ## The board
 
-`/dev-kit:board` opens a live, read-only dashboard of the project in the browser: a "right now" strip (what needs you, what is running, what comes next), the sprint goal and kanban (filterable, with running agents on the cards and a details panel per task, linkable as `#T-nnn`), and insights tabs for burndown, velocity, quality and backlog; light, dark or following the system. One server per project, stopped from the page's ⋯ menu or with `stop`, and by itself after 2 idle hours. `--host 0.0.0.0` shares it on your network through a private access link (plain HTTP: trusted networks only); on a remote machine an SSH tunnel to `127.0.0.1` works too.
+`/dev-kit:board` opens a live, read-only dashboard of the project in the browser: the project phase as a row of chevrons, sprint tabs for the previous, current and next milestone (the others in "earlier"/"later" lists), a "Needs you" strip only when something waits on you, the stages of the milestone as chevrons too (plan → build → QA gate ⇄ fixes → smoke test → deploy → closed; smoke and deploy only when enabled) with what is running and what comes next on the stage it belongs to, the sprint goal and kanban (filterable, 3 cards per column with "Show all", running agents on the cards and a details panel per task, linkable as `#T-nnn`), insights tabs for quality, burndown, velocity and backlog, and the activity feed beside them; light, dark or following the system. One server per project, stopped from the page's ⋯ menu or with `stop`, and by itself after 2 idle hours. `--host 0.0.0.0` shares it on your network through a private access link (plain HTTP: trusted networks only); on a remote machine an SSH tunnel to `127.0.0.1` works too.
 
 ## Session log, feedback, costs and tips [§13, §14, §15]
 
@@ -104,6 +104,17 @@ Optionally, each approved milestone can run locally on `127.0.0.1` (`keep_runnin
 - `/dev-kit:feedback` grades each stage with its reasons and writes a timestamped report you can send to the kit's author.
 - `/dev-kit:costs` shows tokens and estimated US$ per stage from Claude Code's local transcripts (API-equivalent, not a charge).
 - Short tips (`💡`) explain each mechanism the first times it matters (each at most twice; `autonomy.tips off` silences them).
+
+## Claude Code interface [§15]
+
+The kit also uses Claude Code's own interface, all of it display only:
+
+- **Next command, one key away.** Every skill ends with the next command alone on the last line, so Claude Code's greyed-out prompt suggestion usually offers it: Tab or Right arrow, then Enter. Claude Code predicts that suggestion itself; no plugin can set it, and it does not appear in plan mode, right after an error or with prompt suggestions turned off.
+- **Tips while you wait.** Short dev-kit tips, in your language, rotate under the spinner while Claude works.
+- **Status line.** Below the prompt: phase · milestone progress · running task · blocked tasks · open questions · next command.
+- **Session title and notifications.** A new session is named after the project and milestone and opens with one line naming the next command; gates, blocked tasks and the end of autopilot can raise a desktop notification.
+
+`/dev-kit:start` offers the tips, the status line and the notifications once; `/dev-kit:settings` turns each of them on or off. Tips and the status line are written to `.claude/settings.local.json`, your personal settings for the project, which stay out of git. Spinner, suggestions and status line are terminal features: hosts that embed Claude Code (web apps, the SDK) may not show them.
 
 ## Language
 

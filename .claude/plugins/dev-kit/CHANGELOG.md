@@ -2,6 +2,23 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.21.0 — 2026-11-20
+
+### Added
+- Board: **milestone stages** below the sprint card, in the order the kit runs them: Plan → Build → QA gate ⇄ Fixes (round n of max) → Smoke test (only with a local preview) → Deploy (only with production per milestone) → Closed. The stage where the milestone is now is wider and holds its running tasks with their agents (QA agents under QA gate) or the next task; a stage with blocked tasks links to "Needs you"; work running outside the shown milestone sits on an "Also running" line. `/api/state` gains `lifecycle` (local preview mode, production `when`, max fix rounds) and `milestones[].deploy` (latest production deploy of that milestone).
+
+- **Claude Code interface** (conventions §15). Every skill ends its report with the next command alone on the last line, so Claude Code's greyed-out prompt suggestion offers it (Tab or Right arrow); `dev_state.py status --next` (and `next_command` in `status --json`) computes it. `dev_ui.py` writes dev-kit spinner tips (the `tips.json` entries marked `spinner`, translated) and a status line (`dev_statusline.py`: phase · milestone progress · running task · blocked · open questions · next command) to the project's `.claude/settings.local.json`, touching only what is the kit's and never replacing the user's own status line. Hooks: session title and one-line banner with the next command on a new session, and a desktop notification (OSC 9) at the end of the turn for gates, blocked tasks and the end of autopilot (`dev_state.py notify`). `start` offers tips, status line and notifications once; `/dev-kit:settings` turns each on or off (`autonomy.ui`).
+
+- Board: every command the user is told to run in Claude Code (`/dev-kit:plan`, `/dev-kit:interview --gaps`, `/dev-kit:deploy`, `/dev-kit:costs`, `/dev-kit:board`, `/dev-kit:board stop`) has a copy button next to it, with a "Copied" confirmation announced to screen readers; on a board shared over plain HTTP, where the browser has no Clipboard API, it copies through a temporary selection.
+
+### Changed
+- Board: the project phase is no longer a small button in the top bar but a full-width row of chevrons at the top of the page (done ✓, the current one large and highlighted, the rest numbered); on a phone it shows the previous, current and next phase with "Step n of N". The milestone stages use the same chevrons (pointing down when stacked on narrow screens).
+- Board sprint tabs show only the selected milestone and its neighbours (M-1 · M · M+1, the current one by default); the others are in "+N earlier" / "+N later" lists, arrow keys walk all of them, and "Back to current" returns. No more horizontal scrolling.
+- Board: the "right now" strip is gone; "Needs you" is a full-width, highlighted strip above the stages that appears only when something waits on the user.
+- Board layout: two columns, with sprint board and Insights on the left and Activity on the right, filling their height (60 log lines instead of 25).
+- Board Insights: Quality is the first tab and the default (remembered choice reset once).
+- Board kanban: at most 3 cards per column, each with "Show all N" / "Show less"; To do lists the next task first, then ready, then waiting ones.
+
 ## 1.20.0 — 2026-11-20
 
 Nothing to run by hand: every action a user may need goes through a skill; the scripts are the skills' tools.

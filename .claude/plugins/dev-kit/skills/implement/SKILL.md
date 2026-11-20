@@ -48,6 +48,8 @@ Stop when: requested tasks done; milestone complete (announce the gate); an `alw
 ## Never
 - Never skip or weaken tests to pass; never commit with failing tests; never edit `state.json` manually; never push unless `may_push` is true and the brief asked for it.
 
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:qa M1` when the milestone is complete, otherwise `/dev-kit:implement`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+
 ## Existing projects (brownfield)
 
 When state has `brownfield` (`conventions.md` §16): follow the folder layout, test framework, test location and naming, and the build/test/lint commands in `.dev/discovery.md` §3–4 (they override `test-pyramid.md` defaults and `architecture.md` §8 where they differ); never add a runner, linter, formatter or build tool without an `always_ask` decision. Uncommitted changes that belong to no task are the user's work: always ask (never stash them on your own). In `maintenance` mode the tasks come from `issue` in the open maintenance milestone (`M<n> — Maintenance`, numbered from `brownfield.first_milestone`); when its tasks are done, the milestone goes to `qa M<n>` like any other, and new issues then open `M<n+1> — Maintenance`. With no task at all, suggest `/dev-kit:issue`.

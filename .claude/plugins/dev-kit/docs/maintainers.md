@@ -11,13 +11,14 @@ How the plugin is built, tested and documented. Users do not need this page.
   docs/                          user docs (four of them generated, see below), e2e checklist, flow diagram
   CHANGELOG.md                   kit versions (bump .claude-plugin/plugin.json and add an entry for every change)
   agents/*.md                    17 agents (model + effort in the frontmatter, conventions §9)
-  hooks/hooks.json               optional SessionStart / SubagentStart / SubagentStop hooks for the board's live agents
+  hooks/hooks.json               optional SessionStart / SubagentStart / SubagentStop / Stop hooks: board's live agents,
+                                 session title and banner, desktop notifications
   skills/*/SKILL.md              24 skills, invoked as /dev-kit:<name>
   skills/core/                   support skill, not invocable
     SKILL.md                     marker (disable-model-invocation: true, user-invocable: false)
     scripts/dev_state.py         state: init, sync-plan, next, start, done, block, unblock, drop, add-task, add-question,
                                  fix-tasks, gate, review, artifact, stale, xref, tests, ledger, brief, lock, strings, contrast, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
-                                 preview, deploy, cleanup, event, feedback, telemetry, tip, tips
+                                 preview, deploy, cleanup, event, feedback, telemetry, tip, tips, notify
     scripts/dev_score.py         0–100 score per dimension (low cap, dedupe, delta mode, legacy findings ignored)
     scripts/dev_ledger.py        work ledger: fingerprints of verified work, incremental plans, spot checks (conventions §18)
     scripts/dev_telemetry.py     allowlisted session log, stage grades (imported by the other scripts)
@@ -25,7 +26,9 @@ How the plugin is built, tested and documented. Users do not need this page.
     scripts/dev_docs.py          generated docs and /dev-kit:help answers
     scripts/dev_detect_stack.py  stack detection (manifests, manifests in subfolders, source files); --tools: QA tooling
     scripts/dev_board.py         local board server for /dev-kit:board (page in shared/board/)
-    scripts/dev_agent_hook.py    hook handler that feeds the board's live agents (.dev/run/agents.jsonl)
+    scripts/dev_agent_hook.py    hook handler: board's live agents (.dev/run/agents.jsonl), session title, notifications
+    scripts/dev_ui.py            Claude Code interface: spinner tips and status line in .claude/settings.local.json
+    scripts/dev_statusline.py    the status line itself (read-only, one line, silent outside a dev-kit project)
     shared/conventions.md        the rules every skill and agent follows (§0–§18)
     shared/onboarding.md         adoption of an existing codebase (run by start)
     shared/help.json             catalog for help and the generated docs (English only)
@@ -33,7 +36,8 @@ How the plugin is built, tested and documented. Users do not need this page.
     shared/board/                index.html, board.js, board.css, favicon of the board
     shared/interview/ templates/ checklists/ prompts/   interview script, artifact templates, review checklists, output and isolation contracts
     tests/                       lint_suite.py, test_dev_state.py, test_dev_state_gaps.py, test_dev_board.py,
-                                 test_dev_cost.py, test_dev_docs.py, test_dev_score.py, test_dev_ledger.py, test_dev_spec.py
+                                 test_dev_cost.py, test_dev_docs.py, test_dev_score.py, test_dev_ledger.py, test_dev_spec.py,
+                                 test_dev_ui.py
 ```
 
 Requirements: Python 3.10+ (standard library only) on Linux or macOS. Process checks (`cleanup`, board liveness) read `/proc` and are best effort on macOS; the board server uses `fcntl` and does not run on native Windows (use WSL).
@@ -44,7 +48,9 @@ Requirements: Python 3.10+ (standard library only) on Linux or macOS. Process ch
 - Agents and shared files get no variable substitution: they use `<KIT>`, and the skill that spawns an agent passes `Kit root: <absolute path>` in the prompt.
 - State commands use `${CLAUDE_PROJECT_DIR}` so they keep pointing at the project.
 - Scripts run with `python3 -I`; modules next to them are imported by inserting the script folder into `sys.path` explicitly.
-- One optional hook set (`hooks/hooks.json`: SessionStart, SubagentStart, SubagentStop) feeds the board's live Agents panel through `dev_agent_hook.py`, which stores only ids and the agent type in `.dev/run/agents.jsonl`. It writes only inside a dev-kit project (`.dev/state.json` exists). Nothing depends on it: where the environment does not run plugin hooks, the board still shows agents logged by the skills (`agent_spawn`/`agent_end`), and the live badges simply do not appear for agents outside dev-kit skills.
+- One optional hook set (`hooks/hooks.json`: SessionStart, SubagentStart, SubagentStop, Stop) feeds the board's live Agents panel through `dev_agent_hook.py`, which stores only ids and the agent type in `.dev/run/agents.jsonl`. It writes only inside a dev-kit project (`.dev/state.json` exists). Nothing depends on it: where the environment does not run plugin hooks, the board still shows agents logged by the skills (`agent_spawn`/`agent_end`), and the live badges simply do not appear for agents outside dev-kit skills. The same handler sets the session title and a one-line banner with the next command on a new session (`autonomy.ui.title`), and at the end of each turn shows the notices `dev_state.py` queued in `.dev/run/notify.jsonl` (`autonomy.ui.notify`) as a chat line and an OSC 9 desktop notification.
+- A plugin cannot ship `settings.json`, so the spinner tips and the status line are written by `dev_ui.py` to the project's `.claude/settings.local.json` (added to `.git/info/exclude` when git does not ignore it yet). Ownership is by marker: tips starting with `dev-kit: ` and a `statusLine` whose command runs `dev_statusline.py`; nothing else in the file is touched, and a status line of the user's own is never replaced. The command holds the absolute script path (settings do not expand `${CLAUDE_PLUGIN_ROOT}`); `start` runs `dev_ui.py repair` so a plugin update does not leave it pointing at an old version. Project and local settings accept only plain-string spinner tips (no id, cooldown or label), which is why the prefix marks them.
+- Claude Code's prompt suggestion (greyed-out, Tab or Right arrow) cannot be set by a plugin; it is predicted from the conversation. Every skill ends its report with the next command on the last line (conventions §15), and `dev_state.py status --next` computes it the same way for the status line and the banner.
 
 ## Frontmatter
 

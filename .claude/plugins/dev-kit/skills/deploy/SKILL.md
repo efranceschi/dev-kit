@@ -33,6 +33,8 @@ Before `skill_end`, run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cos
 - Never skip the backup when the method supports one.
 - Production data is never deleted by this skill (`conventions.md` §10 floors).
 
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+
 ## Existing projects (brownfield)
 
 When state has `brownfield` (`conventions.md` §16): if `autonomy.production` is empty, propose it from `.dev/discovery.md` §10 and confirm with the user before the first deploy. With `production.method` `external` (the project's CI/CD deploys), steps 6–8 are replaced by: tell the user which commit or tag the pipeline must deploy (or read the pipeline status with `gh run list` when available), wait for their confirmation of success, then record it in step 9. Never run install or migration commands that the project's pipeline owns.

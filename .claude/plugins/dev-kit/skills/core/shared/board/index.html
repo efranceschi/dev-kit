@@ -22,19 +22,6 @@
       </div>
     </div>
 
-    <div class="pop-wrap phase-wrap">
-      <button type="button" class="phase-btn" id="phase-btn" aria-haspopup="true" aria-expanded="false" aria-controls="phase-pop">
-        <span class="phase-label">Phase</span>
-        <strong id="phase-name">—</strong>
-        <span class="phase-step" id="phase-step"></span>
-        <span class="phase-track" id="phase-track" aria-hidden="true"></span>
-      </button>
-      <div class="popover" id="phase-pop" hidden>
-        <p class="pop-title">Project phases</p>
-        <ol class="phases" id="phases"></ol>
-      </div>
-    </div>
-
     <div class="top-actions">
       <span class="live" id="live" role="status" aria-live="polite">
         <span class="dot" aria-hidden="true"></span><span id="live-text">Connecting…</span>
@@ -70,27 +57,26 @@
   <div class="banner" id="banner" role="alert" hidden></div>
 
   <main id="main" tabindex="-1" aria-busy="true">
-    <section class="now" aria-label="Right now">
-      <button type="button" class="now-block" id="now-needs">
-        <span class="now-label">Needs you</span>
-        <span class="now-value" id="now-needs-value">—</span>
-        <span class="now-note" id="now-needs-note"></span>
-      </button>
-      <div class="now-block" id="now-running">
-        <span class="now-label">Running now</span>
-        <div class="now-chips" id="now-running-chips"></div>
-      </div>
-      <button type="button" class="now-block" id="now-next">
-        <span class="now-label">Next up</span>
-        <span class="now-value" id="now-next-value">—</span>
-        <span class="now-note" id="now-next-note"></span>
-      </button>
-    </section>
+    <nav class="phasebar" aria-labelledby="phase-h">
+      <div class="phasebar-head"><h2 id="phase-h">Project phase</h2><span class="phase-step" id="phase-step"></span></div>
+      <ol class="chevrons phase-chevrons" id="phases"></ol>
+    </nav>
 
     <section class="card sprint" aria-labelledby="sprint-title">
       <div class="sprint-top">
         <span class="sprints-label" id="tabs-label">Sprints</span>
-        <div role="tablist" id="tabs" aria-labelledby="tabs-label"></div>
+        <div class="tabs-row">
+          <div class="pop-wrap" id="tabs-earlier-wrap" hidden>
+            <button type="button" class="more-tab" id="tabs-earlier" aria-haspopup="true" aria-expanded="false" aria-controls="tabs-earlier-pop"></button>
+            <div class="popover sprint-pop" id="tabs-earlier-pop" hidden><p class="pop-title">Earlier sprints</p><ul class="sprint-list" id="tabs-earlier-list"></ul></div>
+          </div>
+          <div role="tablist" id="tabs" aria-labelledby="tabs-label"></div>
+          <div class="pop-wrap" id="tabs-later-wrap" hidden>
+            <button type="button" class="more-tab" id="tabs-later" aria-haspopup="true" aria-expanded="false" aria-controls="tabs-later-pop"></button>
+            <div class="popover sprint-pop" id="tabs-later-pop" hidden><p class="pop-title">Later sprints</p><ul class="sprint-list" id="tabs-later-list"></ul></div>
+          </div>
+          <button type="button" class="link-btn" id="tabs-back" hidden>Back to current</button>
+        </div>
         <div class="sprint-facts" id="sprint-facts"></div>
       </div>
       <div class="sprint-body">
@@ -107,76 +93,88 @@
       </div>
     </section>
 
-    <div class="workspace">
-      <section class="card board-card" aria-labelledby="board-h">
-        <div class="card-head">
-          <h2 id="board-h">Sprint board</h2>
-          <div class="board-tools">
-            <label class="search">
-              <span class="visually-hidden">Filter tasks by id or title</span>
-              <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              <input type="search" id="task-search" placeholder="Filter tasks" autocomplete="off" spellcheck="false">
-            </label>
-            <label>
-              <span class="visually-hidden">Filter by task type</span>
-              <select id="type-filter"><option value="">All types</option></select>
-            </label>
-          </div>
-        </div>
-        <p class="filter-note" id="filter-note" role="status" hidden></p>
-        <div class="col-tabs seg-switch" id="col-tabs" role="group" aria-label="Column shown"></div>
-        <div class="kanban" id="kanban"></div>
-      </section>
+    <section class="needs" id="needs" aria-labelledby="needs-h" tabindex="-1" hidden>
+      <div class="needs-head">
+        <h2 id="needs-h"><span class="needs-icon" aria-hidden="true">!</span>Needs you</h2>
+        <span class="needs-count" id="needs-count" aria-live="polite"></span>
+      </div>
+      <div id="impediments" class="needs-lists"></div>
+    </section>
 
-      <aside class="side" aria-label="Attention and activity">
-        <section class="card" aria-labelledby="att-h" id="attention" tabindex="-1">
-          <div class="card-head"><h2 id="att-h">Needs you</h2><p class="card-sub" id="att-sub"></p></div>
-          <div id="impediments" class="list-wrap"></div>
+    <section class="card stages-card" aria-labelledby="stages-h">
+      <div class="card-head"><h2 id="stages-h">Milestone stages</h2><p class="card-sub" id="stages-sub"></p></div>
+      <ol class="chevrons stages" id="stages"></ol>
+      <p class="also-running" id="also-running" hidden></p>
+    </section>
+
+    <div class="workspace">
+      <div class="main-col">
+        <section class="card board-card" aria-labelledby="board-h">
+          <div class="card-head">
+            <h2 id="board-h">Sprint board</h2>
+            <div class="board-tools">
+              <label class="search">
+                <span class="visually-hidden">Filter tasks by id or title</span>
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <input type="search" id="task-search" placeholder="Filter tasks" autocomplete="off" spellcheck="false">
+              </label>
+              <label>
+                <span class="visually-hidden">Filter by task type</span>
+                <select id="type-filter"><option value="">All types</option></select>
+              </label>
+            </div>
+          </div>
+          <p class="filter-note" id="filter-note" role="status" hidden></p>
+          <div class="col-tabs seg-switch" id="col-tabs" role="group" aria-label="Column shown"></div>
+          <div class="kanban" id="kanban"></div>
         </section>
-        <section class="card" aria-labelledby="act-h">
+        <section class="card insights" aria-labelledby="ins-h">
+          <div class="card-head">
+            <h2 id="ins-h">Insights</h2>
+            <div role="tablist" class="ins-tabs" id="ins-tabs" aria-labelledby="ins-h">
+              <button type="button" role="tab" id="ins-tab-quality" aria-controls="ins-quality" data-ins="quality">Quality</button>
+              <button type="button" role="tab" id="ins-tab-burndown" aria-controls="ins-burndown" data-ins="burndown">Burndown</button>
+              <button type="button" role="tab" id="ins-tab-velocity" aria-controls="ins-velocity" data-ins="velocity">Velocity</button>
+              <button type="button" role="tab" id="ins-tab-backlog" aria-controls="ins-backlog" data-ins="backlog">Backlog</button>
+            </div>
+          </div>
+          <div role="tabpanel" id="ins-quality" aria-labelledby="ins-tab-quality" tabindex="0" hidden>
+            <p class="card-sub" id="dod-sub"></p>
+            <div id="dod" class="cols-2"></div>
+          </div>
+          <div role="tabpanel" id="ins-burndown" aria-labelledby="ins-tab-burndown" tabindex="0" hidden>
+            <ul class="legend" aria-label="Legend">
+              <li><span class="key key-line s1" aria-hidden="true"></span>Remaining tasks</li>
+              <li><span class="key key-line ideal" aria-hidden="true"></span>Ideal</li>
+            </ul>
+            <div class="chart" id="burndown"></div>
+            <details class="table-view"><summary>Show as table</summary><div id="burndown-table"></div></details>
+          </div>
+          <div role="tabpanel" id="ins-velocity" aria-labelledby="ins-tab-velocity" tabindex="0" hidden>
+            <p class="card-sub">Tasks done per sprint</p>
+            <div class="chart" id="velocity"></div>
+            <details class="table-view"><summary>Show as table</summary><div id="velocity-table"></div></details>
+          </div>
+          <div role="tabpanel" id="ins-backlog" aria-labelledby="ins-tab-backlog" tabindex="0" hidden>
+            <p class="card-sub" id="pb-sub"></p>
+            <div id="product-backlog" class="cols-3"></div>
+          </div>
+        </section>
+      </div>
+
+      <aside class="side" aria-label="Activity">
+        <section class="card feed-card" aria-labelledby="act-h">
           <div class="card-head"><h2 id="act-h">Activity</h2><p class="card-sub">Latest in .dev/log.md</p></div>
           <ol class="feed" id="feed"></ol>
         </section>
       </aside>
     </div>
 
-    <section class="card insights" aria-labelledby="ins-h">
-      <div class="card-head">
-        <h2 id="ins-h">Insights</h2>
-        <div role="tablist" class="ins-tabs" id="ins-tabs" aria-labelledby="ins-h">
-          <button type="button" role="tab" id="ins-tab-burndown" aria-controls="ins-burndown" data-ins="burndown">Burndown</button>
-          <button type="button" role="tab" id="ins-tab-velocity" aria-controls="ins-velocity" data-ins="velocity">Velocity</button>
-          <button type="button" role="tab" id="ins-tab-quality" aria-controls="ins-quality" data-ins="quality">Quality</button>
-          <button type="button" role="tab" id="ins-tab-backlog" aria-controls="ins-backlog" data-ins="backlog">Backlog</button>
-        </div>
-      </div>
-      <div role="tabpanel" id="ins-burndown" aria-labelledby="ins-tab-burndown" tabindex="0" hidden>
-        <ul class="legend" aria-label="Legend">
-          <li><span class="key key-line s1" aria-hidden="true"></span>Remaining tasks</li>
-          <li><span class="key key-line ideal" aria-hidden="true"></span>Ideal</li>
-        </ul>
-        <div class="chart" id="burndown"></div>
-        <details class="table-view"><summary>Show as table</summary><div id="burndown-table"></div></details>
-      </div>
-      <div role="tabpanel" id="ins-velocity" aria-labelledby="ins-tab-velocity" tabindex="0" hidden>
-        <p class="card-sub">Tasks done per sprint</p>
-        <div class="chart" id="velocity"></div>
-        <details class="table-view"><summary>Show as table</summary><div id="velocity-table"></div></details>
-      </div>
-      <div role="tabpanel" id="ins-quality" aria-labelledby="ins-tab-quality" tabindex="0" hidden>
-        <p class="card-sub" id="dod-sub"></p>
-        <div id="dod" class="cols-2"></div>
-      </div>
-      <div role="tabpanel" id="ins-backlog" aria-labelledby="ins-tab-backlog" tabindex="0" hidden>
-        <p class="card-sub" id="pb-sub"></p>
-        <div id="product-backlog" class="cols-3"></div>
-      </div>
-    </section>
-
     <footer class="foot" id="foot"></footer>
   </main>
 
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <div class="visually-hidden" id="copy-status" role="status" aria-live="polite"></div>
 
   <dialog id="task-dialog" class="drawer" aria-labelledby="task-title">
     <div class="td-head"><h2 id="task-title"></h2><button type="button" class="btn" id="task-close" aria-label="Close details">Close</button></div>
@@ -186,7 +184,7 @@
   <dialog id="stop-dialog" aria-labelledby="stop-h">
     <form method="dialog">
       <h2 id="stop-h">Stop the board server?</h2>
-      <p>The page stops updating. Start it again any time with <code>/dev-kit:board</code>. Your project is not touched.</p>
+      <p>The page stops updating. Start it again any time with <code data-copy>/dev-kit:board</code>. Your project is not touched.</p>
       <div class="dialog-actions">
         <button class="btn" value="cancel" autofocus>Keep running</button>
         <button class="btn btn-danger" value="stop" id="stop-confirm">Stop server</button>
@@ -198,7 +196,7 @@
     <div class="stopped-card">
       <img class="logo big" src="/assets/favicon.svg" alt="">
       <h2>Board stopped</h2>
-      <p>The server is off. You can close this tab.<br>Run <code>/dev-kit:board</code> to start it again.</p>
+      <p>The server is off. You can close this tab.<br>Run <code data-copy>/dev-kit:board</code> to start it again.</p>
     </div>
   </div>
 </body>

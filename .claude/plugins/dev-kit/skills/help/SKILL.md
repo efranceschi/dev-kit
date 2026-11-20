@@ -29,3 +29,5 @@ Read-only. The sources are in English (`${CLAUDE_SKILL_DIR}/../core/shared/help.
    - `suggest` (no match): the closest skills and the docs pages to read (`docs/recipes.md`, `docs/skills.md`, `docs/concepts.md`, `docs/glossary.md`, `docs/troubleshooting.md`); offer to rephrase.
 3. Keep it short: the user wants to know what to type. Never invent a skill, argument or behaviour that is not in the catalog or the docs; if unsure, point to the doc page.
 4. End with one tip from `DS tip help` on its own line (only if `.dev/` exists and the tip is not empty), translated into the user's language. If `.dev/` exists, log `skill_end`.
+
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the command that answers the question, or the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).

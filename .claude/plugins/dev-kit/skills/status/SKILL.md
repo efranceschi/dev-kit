@@ -19,6 +19,8 @@ Arguments: $ARGUMENTS
 3. If `--json` was passed, print the raw JSON from `dev_state.py status --json` instead.
 4. End with the single recommended next command. Do not run it. To change how the kit behaves, point to `/dev-kit:settings`.
 
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+
 ## Existing projects (brownfield)
 
 When state has `brownfield`: include the `Brownfield:` line (mode, baseline tag and sha, first milestone, commit style) from `dev_state.py status`, the number of pre-existing failures in `.dev/qa/baseline.md`, reviews recorded `n/a` with their note, and any missing stage artifact (`conventions.md` §16 "Missing stages") as the recommended next command.

@@ -30,3 +30,5 @@ Read-only: this skill changes nothing.
    - **Warnings:** e.g. expedite overused.
 3. **Suggested next step:** one or two lines, recommended option first with the reason, chosen in this order: open hotfix → `/dev-kit:implement <task>`; blocked tasks or parked questions → `/dev-kit:interview --gaps`; milestone in progress → `/dev-kit:implement` (or `/dev-kit:autopilot`); a relevant deferred finding → `/dev-kit:issue --from <F-id> <scope>`; maintenance mode with queued issues → `/dev-kit:issue --schedule <I-id> <open maintenance milestone>`; production behind → `/dev-kit:deploy`.
 4. Log `skill_end`. End with one tip from `DS tip backlog` (or `DS tip expedite_overuse` when that warning is present), on its own line; skip if empty. (`DS backlog --json` prints no tip, so this is the only one.)
+
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the suggested next step. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
