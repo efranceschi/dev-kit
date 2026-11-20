@@ -1,4 +1,4 @@
-/* dev-kit board - read-only view of .dev/state.json: milestone window, what needs the user, the stages of the milestone with what runs in each, the milestone kanban, insights. No dependencies. All untrusted text goes through textContent. */
+/* dev-kit board - live view of .dev/state.json: milestone window, what needs the user, the stages of the milestone with what runs in each, the milestone kanban, insights; with actions on, requests to Claude Code (run a command, answer a question, new issue, a plan draft made by dragging cards) queued through the server and run by /dev-kit:worker. No dependencies. All untrusted text goes through textContent. */
 (() => {
   "use strict";
 
@@ -162,8 +162,8 @@
     });
     return btn;
   }
-  /** A command shown as code with its copy button. */
-  const cmd = (text) => h("span", { class: "cmd" }, h("code", { text }), copyBtn(text));
+  /** A command shown as code with its copy button and, when the board takes requests, a button that queues it. */
+  const cmd = (text) => h("span", { class: "cmd" }, h("code", { text }), runnable(text) ? runBtn(text) : null, copyBtn(text));
   // static commands in index.html: <code data-copy>
   document.querySelectorAll("code[data-copy]").forEach((c) => {
     const wrap = h("span", { class: "cmd" });
@@ -385,6 +385,7 @@
   }
 
   function renderKanban(m) {
+    if (view === "plan") return;
     const ts = tasksOf(m);
     const types = [...new Set(ts.map((t) => t.type).filter(Boolean))].sort();
     const sel = $("type-filter");
@@ -578,13 +579,15 @@
     const warns = b.warnings || [];
     // milestones past the QA limit with no blocked card to show it (the round failed on scores alone)
     const stuck = data.milestones.filter((m) => qaState(m).exhausted && !qaState(m).fixBlocked.length);
-    const n = blocked.length + data.questions.length + hot.length + stuck.length;
+    const approvals = actionsOn() ? inbox().approvals : [];
+    const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length;
     // the strip exists only while something needs the user; warnings alone ride along but do not open it
     const strip = $("needs");
     strip.hidden = !n;
     $("needs-count").textContent = n ? plural(n, "item") : "";
     if (!n) { fill($("impediments")); return; }
     fill($("impediments"),
+      approvals.length ? listBlock("Claude Code asks permission", approvals.map(approvalRow), "") : null,
       stuck.length ? listBlock("QA rounds used up", stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }),
         h("span", { text: `${qaState(m).qa.runs - 1} fix rounds used of ${qaState(m).max} (${qaReason(qaState(m).qa, m) || "see the QA report"}). Keep fixing, accept with an ADR, or replan.` }),
         h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))), "") : null,
@@ -595,9 +598,11 @@
           h("span", { class: "id", text: id }), h("span", { text: t.title }), h("span", { class: "chip", text: t.milestone }),
           h("span", { class: "sub bad", text: t.blocked_reason || "No reason recorded" })))), "") : null,
       data.questions.length ? listBlock("Open questions", data.questions.map((q) => h("li", {}, h("span", { class: "id", text: q.id }), h("span", {}, linkify(q.question)),
-        h("span", { class: "chip", text: q.by || "?" }), q.assumption ? h("span", { class: "sub", text: `Assumed meanwhile: ${q.assumption}` }) : null)), "") : null,
+        h("span", { class: "chip", text: q.by || "?" }), q.assumption ? h("span", { class: "sub", text: `Assumed meanwhile: ${q.assumption}` }) : null,
+        actionsOn() ? answerBox(q) : null)), "") : null,
       warns.length ? listBlock("Warnings", warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
-      data.questions.length || blocked.length ? h("p", { class: "needs-hint" }, "Answer in Claude Code with ", cmd("/dev-kit:interview --gaps")) : null);
+      actionsOn() && data.questions.length ? h("p", { class: "needs-hint" }, "Answer here: Claude Code records the answer and continues what was waiting on it.") : null,
+      data.questions.length || blocked.length ? h("p", { class: "needs-hint" }, actionsOn() ? "Or go through all of them with " : "Answer in Claude Code with ", cmd("/dev-kit:interview --gaps")) : null);
   }
   function goNeeds() {
     const el = $("needs");
@@ -774,7 +779,7 @@
         h("span", { class: "txt" }, linkify(r.text)));
     }) : h("li", {}, h("span", { class: "txt", text: "No activity logged yet." })));
     const b = data.board;
-    fill($("foot"), `Read-only view of ${data.project}/.dev · autonomy ${data.autonomy || "?"}`,
+    fill($("foot"), `${actionsOn() ? "View" : "Read-only view"} of ${data.project}/.dev${actionsOn() ? " · requests run by Claude Code" : ""} · autonomy ${data.autonomy || "?"}`,
       b ? ` · server pid ${b.pid} on port ${b.port}` : "", " · stop it from the ⋯ menu or with ", cmd("/dev-kit:board stop"));
   }
 
@@ -871,6 +876,368 @@
   }
   setInterval(tickAgents, 1000);
 
+  // ------------------------------------------------------------------ requests to Claude Code (dev_worker.py on the server, /dev-kit:worker runs them)
+  // the commands the server accepts (dev_worker.RUN_COMMANDS); anything else keeps only its copy button
+  const RUN_RES = [/^\/dev-kit:implement(?: (?:T-\d{3,5}|--milestone M\d{1,3}))?$/, /^\/dev-kit:qa M\d{1,3}$/, /^\/dev-kit:review (?:prd|design|plan|docs)$/,
+    /^\/dev-kit:(?:interview|prd|architecture|ux|ui|plan|docs|usability|costs|backlog|status|release)$/, /^\/dev-kit:interview --gaps$/, /^\/dev-kit:deploy(?: M\d{1,3})?$/];
+  const EMPTY_INBOX = { open: [], recent: [], executor: { state: "offline", online: false, paused: false }, approvals: [], actions: false };
+  const inbox = () => (data && data.inbox) || EMPTY_INBOX;
+  const actionsOn = () => Boolean(inbox().actions);
+  function runnable(c) { return actionsOn() && RUN_RES.some((r) => r.test(c)); }
+  const openRun = (c) => inbox().open.find((x) => x.action === "run" && x.args && x.args.command === c);
+  let toastT = null;
+  function toast(text, bad) {
+    const el = $("toast");
+    el.textContent = text;
+    el.classList.toggle("bad", Boolean(bad));
+    el.hidden = false;
+    clearTimeout(toastT);
+    toastT = setTimeout(() => { el.hidden = true; }, bad ? 9000 : 5000);
+  }
+  async function api(path, body) {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Board-Token": TOKEN }, body: JSON.stringify(body || {}) });
+    let d = {};
+    try { d = await r.json(); } catch (e) { /* no body */ }
+    if (!r.ok) {
+      const err = new Error((d.errors && d.errors.join("; ")) || d.hint || d.error || `HTTP ${r.status}`);
+      err.errors = d.errors || [err.message];
+      throw err;
+    }
+    return d;
+  }
+  const workerHint = () => (inbox().executor.online ? "Claude Code takes it next." : "Run /dev-kit:worker in Claude Code to start it.");
+  async function queue(action, args, quietErrors) {
+    try {
+      const d = await api("/api/inbox", { action, args });
+      toast(`Queued ${d.item.id}. ${workerHint()}`);
+      load();
+      return d.item;
+    } catch (e) {
+      if (!quietErrors) toast(`Not queued: ${e.message}`, true);
+      throw e;
+    }
+  }
+  function runBtn(text) {
+    const q = openRun(text);
+    const label = q ? `${text} is queued (${q.id}, ${stLabel(q.status)})` : `Run ${text} in Claude Code`;
+    const btn = h("button", { type: "button", class: `run-btn${q ? " queued" : ""}`, title: label, "aria-label": label, disabled: q ? true : null }, q ? "◷" : "▶");
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      btn.disabled = true;
+      try { await queue("run", { command: text }); } catch (err) { btn.disabled = false; }
+    });
+    return btn;
+  }
+  function describeReq(x) {
+    const a = x.args || {};
+    if (x.action === "run") return h("code", { text: a.command || "" });
+    if (x.action === "issue_new") return `New ${a.type === "improvement" ? "improvement" : a.type === "change" ? "change" : "bug"}: ${a.title || ""}`;
+    if (x.action === "answer_question") return `Answer to ${a.question}: ${a.option || a.answer || ""}`;
+    if (x.action === "plan_draft") return `Plan draft · ${plural((a.ops || []).length, "change")}`;
+    return x.action;
+  }
+  const REQ_WORD = { pending: "waiting", running: "running", needs_input: "needs your answer", done: "done", failed: "failed", cancelled: "cancelled", stale: "stopped" };
+  function execLabel(ex) {
+    if (!ex.online) return ["off", "Claude Code: not running"];
+    if (ex.paused) return ["paused", "Claude Code: paused"];
+    if (ex.state === "running") return ["on", `Claude Code: working${ex.item ? ` on ${ex.item}` : ""}`];
+    return ["on", "Claude Code: ready"];
+  }
+  function renderRequests() {
+    const ib = inbox();
+    const card = $("req-card");
+    card.hidden = !ib.actions && !ib.open.length && !ib.recent.length;
+    if (card.hidden) return;
+    const [cls, word] = execLabel(ib.executor);
+    const ex = $("exec");
+    ex.className = `exec ${cls}`;
+    ex.textContent = word;
+    $("new-issue-btn").hidden = !ib.actions;
+    const pb = $("pause-btn");
+    pb.hidden = !ib.actions;
+    pb.setAttribute("aria-pressed", String(Boolean(ib.executor.paused)));
+    pb.textContent = ib.executor.paused ? "Resume queue" : "Pause queue";
+    const waiting = ib.open.filter((x) => x.status === "pending").length;
+    fill($("req-hint"),
+      !ib.actions ? "This board only shows the project: requests are off (start it with --actions on)." : null,
+      ib.actions && !ib.executor.online && waiting ? h("span", {}, `${plural(waiting, "request")} waiting. In Claude Code, run `, h("span", { class: "cmd" }, h("code", { text: "/dev-kit:worker" }), copyBtn("/dev-kit:worker"))) : null,
+      ib.actions && ib.executor.paused ? "Paused: Claude Code finishes what it is doing and takes nothing new." : null,
+      ib.actions && !ib.open.length && !ib.recent.length ? "Nothing queued. Use ▶ next to a command, answer a question, add an issue, or plan by dragging cards." : null);
+    const row = (x, open) => h("li", { class: `req s-${x.status}` },
+      h("span", { class: "id", text: x.id }),
+      h("span", { class: "req-what" }, describeReq(x)),
+      h("span", { class: `chip req-st s-${x.status}`, text: x.cancel_requested ? "cancelling" : REQ_WORD[x.status] || x.status }),
+      x.note ? h("span", { class: "sub", text: x.note }) : null,
+      x.status === "needs_input" ? h("button", { type: "button", class: "link-btn sub", text: `Answer ${x.question || "the question"} in Needs you`, onclick: goNeeds }) : null,
+      open && ib.actions && !x.cancel_requested ? h("button", { type: "button", class: "link-btn req-cancel", "aria-label": `Cancel ${x.id}`, text: "Cancel",
+        onclick: async (e) => { e.currentTarget.disabled = true; try { await api(`/api/inbox/${x.id}/cancel`, {}); toast(`${x.id}: ${x.status === "running" ? "Claude Code stops at the next safe point" : "cancelled"}.`); load(); } catch (err) { toast(err.message, true); } } }) : null);
+    fill($("req-list"), ib.open.map((x) => row(x, true)), ib.recent.slice(0, 6).map((x) => row(x, false)));
+    const nx = data.next && data.next.command;
+    fill($("ms-next"), nx ? ["Next step: ", cmd(nx)] : null);
+  }
+  $("pause-btn").addEventListener("click", async () => {
+    const paused = !inbox().executor.paused;
+    try { await api("/api/worker/mode", { paused }); toast(paused ? "Queue paused." : "Queue resumed."); load(); } catch (e) { toast(e.message, true); }
+  });
+
+  // new issue: a short form; Claude Code classifies it and asks here when it needs to
+  const idlg = $("issue-dialog");
+  $("new-issue-btn").addEventListener("click", () => { $("issue-form").reset(); idlg.showModal(); });
+  idlg.addEventListener("close", async () => {
+    if (idlg.returnValue !== "send") { $("new-issue-btn").focus(); return; }
+    const title = $("issue-title").value.trim();
+    if (!title) return;
+    try { await queue("issue_new", { title, type: $("issue-type").value, note: $("issue-note").value.trim() }); } catch (e) { /* toast shown */ }
+    $("new-issue-btn").focus();
+  });
+
+  // answers to the open questions, right where they are listed
+  const answerDrafts = {};
+  function answerBox(q) {
+    const sent = inbox().open.find((x) => x.action === "answer_question" && x.args && x.args.question === q.id);
+    if (sent) return h("div", { class: "sub answer-sent", text: `Answer sent (${sent.id}): ${sent.args.option || sent.args.answer}. Claude Code applies it.` });
+    const opts = (q.options || []).slice().sort((a, b) => (b === q.recommended) - (a === q.recommended));
+    const box = h("div", { class: "sub answer", role: "group", "aria-label": `Answer ${q.id}` });
+    const send = async (args, el) => { el.disabled = true; try { await queue("answer_question", { question: q.id, ...args }); delete answerDrafts[q.id]; } catch (e) { el.disabled = false; } };
+    opts.forEach((o) => box.append(h("button", { type: "button", class: `btn btn-sm${o === q.recommended ? " btn-primary" : ""}`, onclick: (e) => send({ option: o }, e.currentTarget) },
+      o, o === q.recommended ? h("span", { class: "rec", text: "recommended" }) : null)));
+    if (!opts.length && q.assumption) box.append(h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: (e) => send({ answer: q.assumption }, e.currentTarget) }, "Keep the assumption"));
+    const inp = h("input", { type: "text", id: `ans-${q.id}`, maxlength: "2000", class: "answer-input", "aria-label": `Your answer to ${q.id}`,
+      placeholder: opts.length || q.assumption ? "Or write another answer" : "Your answer" });
+    inp.value = answerDrafts[q.id] || "";
+    inp.addEventListener("input", () => { answerDrafts[q.id] = inp.value; });
+    const go = h("button", { type: "button", class: "btn btn-sm", id: `ans-send-${q.id}`, text: "Send",
+      onclick: (e) => { const v = inp.value.trim(); if (v) send({ answer: v }, e.currentTarget); else inp.focus(); } });
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go.click(); } });
+    box.append(h("span", { class: "answer-free" }, inp, go));
+    return box;
+  }
+  function approvalRow(a) {
+    const decide = async (decision, el) => {
+      el.disabled = true;
+      try { await api(`/api/approvals/${a.id}`, { decision }); toast(`${decision === "allow" ? "Allowed" : "Denied"}: ${a.tool}.`); load(); } catch (e) { el.disabled = false; toast(e.message, true); }
+    };
+    return h("li", {}, h("span", { class: "id", text: a.tool || "tool" }), h("span", { class: "mono-wrap", text: a.target || "" }),
+      h("span", { class: "chip", text: a.request || "" }),
+      h("div", { class: "sub answer" },
+        h("button", { type: "button", class: "btn btn-sm btn-primary", text: "Allow", onclick: (e) => decide("allow", e.currentTarget) }),
+        h("button", { type: "button", class: "btn btn-sm btn-danger", text: "Deny", onclick: (e) => decide("deny", e.currentTarget) })));
+  }
+
+  // ------------------------------------------------------------------ plan: drag tasks and issues between open milestones, add the next milestone, send the draft
+  let view = "tasks";
+  let draft = { ops: [], base: null, serverErrors: [], buffer: false };
+  const MS_NUM = (id) => Number(String(id).slice(1));
+  const cmpSeq = (a, b) => ((data.tasks[a].seq ?? 1e6) - (data.tasks[b].seq ?? 1e6)) || (Number(a.slice(2)) - Number(b.slice(2)));
+  const movableTask = (t) => t && t.status === "todo" && t.lane !== "hotfix";
+  const issueOf = (id) => ((data.backlog || {}).issues || {})[id];
+  const movableIssue = (i) => i && i.status === "open" && !["expedite", "change"].includes(i.class) && i.type !== "change";
+  /** The plan as the draft leaves it: open milestones (and the new one) with their cards, the issue queue, and the problems found. */
+  function planModel() {
+    const ms = data.milestones.filter((m) => m.gate === "pending").map((m) => ({ id: m.id, title: m.title, isNew: false }));
+    const cols = Object.fromEntries(ms.map((m) => [m.id, []]));
+    Object.keys(data.tasks).filter((id) => cols[data.tasks[id].milestone] && data.tasks[id].status !== "dropped").sort(cmpSeq)
+      .forEach((id) => cols[data.tasks[id].milestone].push({ kind: "task", id }));
+    const queued = Object.entries((data.backlog || {}).issues || {}).filter(([, i]) => i.status === "open")
+      .sort((a, b) => String(a[1].created_at || "").localeCompare(String(b[1].created_at || ""))).map(([id]) => ({ kind: "issue", id }));
+    const where = {};
+    Object.entries(cols).forEach(([m, l]) => l.forEach((c) => { where[c.id] = m; }));
+    const problems = [];
+    const take = (id) => {
+      if (where[id] === "queue") { const i = queued.findIndex((c) => c.id === id); return queued.splice(i, 1)[0]; }
+      const l = cols[where[id]] || [];
+      const i = l.findIndex((c) => c.id === id);
+      return i >= 0 ? l.splice(i, 1)[0] : null;
+    };
+    const put = (card, m, before) => {
+      const l = cols[m];
+      const i = before ? l.findIndex((c) => c.id === before) : -1;
+      if (i >= 0) l.splice(i, 0, card); else l.push(card);
+      where[card.id] = m;
+    };
+    queued.forEach((c) => { where[c.id] = "queue"; });
+    draft.ops.forEach((op, n) => {
+      const at = `Change ${n + 1}`;
+      if (op.op === "new_milestone") { ms.push({ id: op.milestone, title: op.title, isNew: true }); cols[op.milestone] = []; return; }
+      if (!cols[op.milestone]) { problems.push(`${at}: ${op.milestone} is no longer open`); return; }
+      const id = op.op === "move_task" ? op.task : op.issue;
+      if (op.op === "move_task" && !movableTask(data.tasks[id])) { problems.push(`${at}: ${id} is ${stLabel((data.tasks[id] || {}).status || "gone")} now; undo this change`); return; }
+      if (op.op === "schedule_issue" && !movableIssue(issueOf(id))) { problems.push(`${at}: ${id} is not open any more; undo this change`); return; }
+      const card = take(id);
+      if (card) put(card, op.milestone, op.before);
+    });
+    // a task never sits in an earlier milestone than a task it depends on (done ones do not count)
+    Object.entries(cols).forEach(([m, l]) => l.forEach((c) => {
+      if (c.kind !== "task") return;
+      (data.tasks[c.id].deps || []).forEach((d) => {
+        const dt = data.tasks[d];
+        if (dt && dt.status !== "done" && where[d] && where[d] !== "queue" && MS_NUM(where[d]) > MS_NUM(m)) problems.push(`${c.id} depends on ${d}, which would be in a later milestone (${where[d]})`);
+      });
+    }));
+    return { ms, cols, queued, where, problems };
+  }
+  function addOp(op) {
+    if (!draft.ops.length) draft.base = data.updated_at;
+    draft.ops.push(op);
+    draft.serverErrors = [];
+    draft.buffer = false;
+    renderPlan();
+  }
+  function moveCard(card, m, beforeId, model) {
+    const l = model.cols[m] || [];
+    // a draft anchors on tasks only: an issue scheduled in the draft has no task id yet
+    let before = null;
+    if (beforeId) {
+      const i = l.findIndex((c) => c.id === beforeId);
+      before = (l.slice(i).find((c) => c.kind === "task" && c.id !== card.id) || {}).id || null;
+    }
+    if (card.kind === "task") {
+      if (model.where[card.id] === m && !beforeId && l[l.length - 1] && l[l.length - 1].id === card.id) return;
+      addOp({ op: "move_task", task: card.id, milestone: m, ...(before ? { before } : {}) });
+    } else {
+      addOp({ op: "schedule_issue", issue: card.id, milestone: m, ...(before ? { before } : {}) });
+    }
+    toast(`${card.id} → ${m}${before ? ` (before ${before})` : ""}. Send the draft when it is ready.`);
+  }
+  function describeOp(op) {
+    if (op.op === "new_milestone") return `New milestone ${op.milestone} · ${op.title}`;
+    if (op.op === "move_task") return `${op.task} → ${op.milestone}${op.before ? ` (before ${op.before})` : ""}`;
+    if (op.op === "schedule_issue") return `${op.issue} → ${op.milestone}${op.before ? ` (before ${op.before})` : ""}${op.force ? " · over the buffer" : ""}`;
+    return op.op;
+  }
+  let dragging = null;
+  function planCard(c, model, m) {
+    const isTask = c.kind === "task";
+    const x = isTask ? data.tasks[c.id] : issueOf(c.id);
+    if (!x) return null;
+    const movable = isTask ? movableTask(x) : movableIssue(x);
+    const targets = model.ms.map((t) => t.id);
+    const sel = movable ? h("select", { class: "move-sel", "aria-label": `Move ${c.id}`, id: `mv-${c.id}` },
+      h("option", { value: "", text: "Move…" }),
+      isTask && m ? [h("option", { value: "up", text: "↑ Up" }), h("option", { value: "down", text: "↓ Down" })] : null,
+      targets.filter((t) => t !== m).map((t) => h("option", { value: `to:${t}`, text: `To ${t}` }))) : null;
+    if (sel) sel.addEventListener("change", () => {
+      const v = sel.value;
+      sel.value = "";
+      if (!v) return;
+      const l = model.cols[m] || [];
+      const i = l.findIndex((k) => k.id === c.id);
+      if (v === "up" && i > 0) moveCard(c, m, l[i - 1].id, model);
+      else if (v === "down" && i >= 0 && i < l.length - 1) moveCard(c, m, l[i + 2] ? l[i + 2].id : null, model);
+      else if (v.startsWith("to:")) moveCard(c, v.slice(3), null, model);
+      requestAnimationFrame(() => { const el = $(`mv-${c.id}`); if (el) el.focus(); });
+    });
+    const el = h("li", { class: `pcard ${isTask ? `s-${x.status}` : "issue"}${movable ? " movable" : " locked"}`, "data-id": c.id, draggable: movable ? "true" : null,
+      title: movable ? "Drag to another place, or use Move…" : isTask ? `${stLabel(x.status)}: only tasks not started move` : `${x.class}: goes through /dev-kit:issue` },
+      h("div", { class: "tcard-top" }, h("span", { class: "tid", text: c.id }),
+        isTask ? h("span", { class: "chip", text: x.type }) : h("span", { class: `chip${x.class === "expedite" ? " lane-hotfix" : ""}`, text: x.class || "issue" }),
+        isTask && x.status !== "todo" ? h("span", { class: `chip st-chip s-${x.status}`, text: stLabel(x.status) }) : null,
+        isTask && x.lane ? h("span", { class: `chip lane-${x.lane}`, text: x.lane }) : null,
+        !isTask && x.severity ? h("span", { class: "chip", text: x.severity }) : null),
+      h("div", { class: "tcard-title", text: x.title || "" }),
+      sel);
+    if (movable) {
+      el.addEventListener("dragstart", (e) => { dragging = c; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.id); el.classList.add("dragging"); });
+      el.addEventListener("dragend", () => { dragging = null; el.classList.remove("dragging"); document.querySelectorAll(".drop-before").forEach((n) => n.classList.remove("drop-before")); });
+    }
+    return el;
+  }
+  function dropZone(list, m, model) {
+    const target = (e) => [...list.querySelectorAll(".pcard:not(.dragging)")].find((n) => { const r = n.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+    list.addEventListener("dragover", (e) => {
+      if (!dragging || (m === "queue" && dragging.kind === "task")) return;
+      e.preventDefault();
+      list.querySelectorAll(".drop-before").forEach((n) => n.classList.remove("drop-before"));
+      const t = target(e);
+      if (t) t.classList.add("drop-before");
+      list.classList.add("drop-on");
+    });
+    list.addEventListener("dragleave", (e) => { if (!list.contains(e.relatedTarget)) { list.classList.remove("drop-on"); list.querySelectorAll(".drop-before").forEach((n) => n.classList.remove("drop-before")); } });
+    list.addEventListener("drop", (e) => {
+      e.preventDefault();
+      list.classList.remove("drop-on");
+      const card = dragging;
+      if (!card) return;
+      dragging = null;  // the drop re-renders the plan; renderPlan waits while a drag is in progress
+      const t = target(e);
+      if (m === "queue") {
+        // back to the queue: undo the scheduling of this issue (the latest one)
+        const i = draft.ops.map((o) => o.issue).lastIndexOf(card.id);
+        if (i >= 0) { draft.ops.splice(i, 1); renderPlan(); toast(`${card.id} back in the queue.`); }
+        return;
+      }
+      moveCard(card, m, t ? t.dataset.id : null, model);
+    });
+  }
+  let newMsTitle = "";
+  function renderPlan() {
+    const box = $("planner");
+    if (view !== "plan" || !data || !data.ok) { box.hidden = true; return; }
+    if (dragging) return;  // a live update in the middle of a drag would pull the card from under the pointer
+    box.hidden = false;
+    const model = planModel();
+    const column = (key, title, sub, cards, extra, isNew) => {
+      const list = h("ol", { class: "pcol-list", "aria-label": `${title}, ${plural(cards.length, "card")}` }, cards.map((c) => planCard(c, model, key === "queue" ? null : key)).filter(Boolean));
+      if (!cards.length) list.append(h("li", { class: "col-empty", text: key === "queue" ? "No open issue" : "Drop tasks or issues here" }));
+      dropZone(list, key, model);
+      return h("section", { class: `pcol${key === "queue" ? " queue" : ""}${isNew ? " new" : ""}` },
+        h("div", { class: "col-head" }, h("strong", { text: key === "queue" ? "Issue queue" : key }), key === "queue" || title === key ? null : h("span", { class: "pcol-title", text: title, title }),
+          h("span", { class: "count", text: String(cards.length) })),
+        sub ? h("p", { class: "card-sub", text: sub }) : null, list, extra);
+    };
+    const newNum = `M${Math.max(0, ...data.milestones.map((m) => MS_NUM(m.id)), ...draft.ops.filter((o) => o.op === "new_milestone").map((o) => MS_NUM(o.milestone))) + 1}`;
+    const hasNew = draft.ops.some((o) => o.op === "new_milestone");
+    const b = (data.backlog || {}).buffer;
+    const cols = [column("queue", "Issue queue", "Expedite and change issues go through /dev-kit:issue.", model.queued)]
+      .concat(model.ms.map((m) => column(m.id, m.title || m.id, m.isNew ? "New in this draft" : b && b.milestone === m.id ? `Issue buffer ${b.used}/${b.capacity}` : null, model.cols[m.id] || [], null, m.isNew)));
+    if (!hasNew) {
+      const inp = h("input", { type: "text", id: "new-ms-title", maxlength: "80", placeholder: `Title of ${newNum}`, "aria-label": `Title of the new milestone ${newNum}` });
+      inp.value = newMsTitle;
+      inp.addEventListener("input", () => { newMsTitle = inp.value; });
+      const add = () => { const v = inp.value.trim(); if (!v) { inp.focus(); return; } newMsTitle = ""; addOp({ op: "new_milestone", milestone: newNum, title: v }); toast(`${newNum} added to the draft.`); };
+      inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } });
+      cols.push(h("section", { class: "pcol add" }, h("div", { class: "col-head" }, h("strong", { text: `＋ ${newNum}` })),
+        h("p", { class: "card-sub", text: "The next milestone, after the others. Name it, then drag cards into it." }),
+        h("div", { class: "answer-free" }, inp, h("button", { type: "button", class: "btn btn-sm", text: "Add", onclick: add }))));
+    }
+    const errors = model.problems.concat(draft.serverErrors);
+    const sendBtn = h("button", { type: "button", class: "btn btn-primary", id: "plan-send", disabled: !draft.ops.length || model.problems.length ? true : null, text: "Send to Claude Code",
+      onclick: async (e) => {
+        e.currentTarget.disabled = true;
+        const ops = draft.ops.map((o) => (o.op === "schedule_issue" && draft.buffer ? { ...o, force: true } : o));
+        try {
+          await queue("plan_draft", { ops, base: draft.base || data.updated_at }, true);
+          draft = { ops: [], base: null, serverErrors: [], buffer: false };
+          renderPlan();
+        } catch (err) {
+          draft.serverErrors = err.errors || [err.message];
+          renderPlan();
+        }
+      } });
+    const overBuffer = draft.serverErrors.some((x) => /issue buffer/.test(x));
+    fill(box,
+      h("div", { class: "plan-cols" }, cols),
+      h("aside", { class: "plan-draft", "aria-label": "Draft of the plan" },
+        h("div", { class: "list-title" }, "Draft", draft.ops.length ? h("span", { class: "chip", text: String(draft.ops.length) }) : null),
+        draft.ops.length ? h("ol", { class: "td-list" }, draft.ops.map((o) => h("li", { text: describeOp(o) })))
+          : h("p", { class: "card-sub", text: "Drag tasks not started and open issues between open milestones, or use Move… on a card. Nothing changes until you send the draft; Claude Code applies it with /dev-kit:worker." }),
+        errors.length ? h("ul", { class: "td-list plan-errors", role: "alert" }, errors.map((x) => h("li", { text: x }))) : null,
+        overBuffer ? h("button", { type: "button", class: "link-btn", text: "Go over the issue buffer and send again", onclick: () => { draft.buffer = true; draft.serverErrors = []; renderPlan(); $("plan-send").click(); } }) : null,
+        h("div", { class: "plan-actions" },
+          h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: "Undo", onclick: () => { draft.ops.pop(); draft.serverErrors = []; renderPlan(); } }),
+          h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: "Discard", onclick: () => { draft = { ops: [], base: null, serverErrors: [], buffer: false }; renderPlan(); } }),
+          sendBtn)));
+  }
+  function setView(v) {
+    view = v;
+    document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === v)));
+    $("board-card").classList.toggle("planning", v === "plan");
+    $("board-h").textContent = v === "plan" ? "Plan the milestones" : "Task board";
+    renderKanban(currentMilestone());
+    renderPlan();
+  }
+  $("view-switch").addEventListener("click", (e) => { const b = e.target.closest("[data-view]"); if (b) setView(b.dataset.view); });
+
   // ------------------------------------------------------------------ main render + data flow
   function render() {
     if (!data) return;
@@ -883,8 +1250,10 @@
     const curId = currentId();
     const m = data.milestones.find((x) => x.id === curId) || null;
     keepFocus(() => {
-      renderHeader(); renderTabs(); renderMilestone(m); renderImpediments(); renderStages(m); renderKanban(m);
-      renderFeed(); renderInsights(m, curId);
+      $("view-switch").hidden = !actionsOn();
+      if (!actionsOn() && view === "plan") { view = "tasks"; $("board-card").classList.remove("planning"); $("board-h").textContent = "Task board"; }
+      renderHeader(); renderTabs(); renderMilestone(m); renderImpediments(); renderStages(m); renderKanban(m); renderPlan();
+      renderRequests(); renderFeed(); renderInsights(m, curId);
     });
     $("main").setAttribute("aria-busy", "false");
     if (firstRender) {

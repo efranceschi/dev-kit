@@ -12,7 +12,8 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 | [`help`](#help) | Help inside Claude Code: what to do next, how each skill works, recipes and concepts. |
 | [`interview`](#interview) | Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md with the autonomy policy. |
 | [`status`](#status) | Read-only dashboard: phase, milestones, gates, scores, issues, preview, production drift, cost so far. |
-| [`board`](#board) | Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link. |
+| [`board`](#board) | Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; with buttons that queue requests to Claude Code (run the next step, new issue, answer a question, a plan draft made by dragging cards); light or dark; local, or shared on your network with an access link. |
+| [`worker`](#worker) | Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick. |
 | [`settings`](#settings) | Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips, status line and notifications. |
 
 ## Specify
@@ -156,11 +157,11 @@ Read-only dashboard: phase, milestones, gates, scores, issues, preview, producti
 
 ### board
 
-Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link.
+Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; with buttons that queue requests to Claude Code (run the next step, new issue, answer a question, a plan draft made by dragging cards); light or dark; local, or shared on your network with an access link.
 
 **When:** When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.
 
-**Usage:** `/dev-kit:board [stop | status | --open | --no-open | --port N | --host IP | --idle-min N]`
+**Usage:** `/dev-kit:board [stop | status | --open | --no-open | --port N | --host IP | --idle-min N | --actions auto|on|off]`
 
 | Argument | Meaning |
 |---|---|
@@ -170,6 +171,7 @@ Live board in the browser: the milestones as chevrons (previous, current, next),
 | `--open | --no-open | --port N` | force a new tab, do not open a tab, preferred port (default 8765) |
 | `--host IP` | listen address (default 127.0.0.1); 0.0.0.0 shares the board on the network, opened only with the access link it prints |
 | `--idle-min N` | stop after N minutes with no open tab (default 120; 0 = never) |
+| `--actions auto|on|off` | let the page queue requests to Claude Code (auto: on when local, off when shared with --host) |
 
 **Examples:**
 
@@ -177,9 +179,29 @@ Live board in the browser: the milestones as chevrons (previous, current, next),
 - `/dev-kit:board --host 0.0.0.0`: share it on your network (phone, another computer) with a private access link
 - `/dev-kit:board stop`: stop the board server
 
-**Produces:** nothing in the project (read-only); its own files in .dev/run/
+**Produces:** nothing in the project by itself (requests are run by /dev-kit:worker); its own files in .dev/run/
 
-**Related:** [`status`](#status), [`backlog`](#backlog), [`costs`](#costs)
+**Related:** [`worker`](#worker), [`status`](#status), [`backlog`](#backlog), [`costs`](#costs)
+
+### worker
+
+Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick.
+
+**When:** When the board, the session banner or the status line (▣) says requests are waiting; the board queues them, this session runs them.
+
+**Usage:** `/dev-kit:worker `
+
+| Argument | Meaning |
+|---|---|
+| `(empty)` | run every request waiting on the board, in order, until none is left or the queue is paused |
+
+**Examples:**
+
+- `/dev-kit:worker`: run what you asked for on the board
+
+**Produces:** whatever each request does (commits, issues, plan changes); the request's result on the board
+
+**Related:** [`board`](#board), [`issue`](#issue), [`plan`](#plan)
 
 ### prd
 

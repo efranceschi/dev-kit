@@ -90,6 +90,12 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 2. /dev-kit:board --host 0.0.0.0 shares it on your network: open the access link it prints on the other device
 3. /dev-kit:board stop (or the Stop server button) when done
 
+## Drive the work from the board
+
+1. /dev-kit:board opens the board; local boards accept requests (shared ones only with --actions on)
+2. on the board: Run next to a command, New issue, answer a question in Needs you, or Plan to drag tasks and issues between milestones and Send
+3. /dev-kit:worker in the Claude Code session runs the requests; questions come back to the board with answers to pick
+
 ## Ship a version
 
 1. /dev-kit:docs all, then /dev-kit:review docs

@@ -3,6 +3,9 @@
     "SessionStart": [
       { "hooks": [ { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"" } ] }
     ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"" } ] }
+    ],
     "SubagentStart": [
       { "hooks": [ { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"" } ] }
     ],

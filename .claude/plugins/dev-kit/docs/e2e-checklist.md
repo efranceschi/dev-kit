@@ -89,3 +89,11 @@ Tick each item; note the Claude Code version used.
 - [ ] (1.18) `/dev-kit:costs --time` shows time per agent and skill and the ledger reuse table.
 - [ ] (1.19) A consumer task's `dev_state.py brief` shows the producer's contract; `xref` flags `consumes` without `contract`; two parallel tasks cannot hold the same `lock`; `docs` merges `changelog.d/`.
 
+## 9. Requests from the board (1.23–1.24)
+These need a real Claude Code with the plugin's hooks; they also decide how the executor runs unattended (planned next).
+- [ ] `/dev-kit:board` prints `requests: on`; ▶ next to "Next step" queues `/dev-kit:implement` and the session banner (at the next prompt or at the end of the turn) says `1 request waiting · run /dev-kit:worker`; the status line shows `▣ 1`.
+- [ ] `/dev-kit:worker` takes the request, runs the skill and closes it; the board shows `done` with the note. A second Claude Code session in the same project running `/dev-kit:worker` is refused while the first is alive.
+- [ ] A question raised while a request runs appears in Needs you with its options; the request shows "needs your answer"; answering on the board queues the answer, the worker records it and resumes the request.
+- [ ] Plan tab: drag a task and an open issue into a new milestone, Send; the worker runs `plan-apply` and `plan.md`, state and `issues.md` agree; a draft that breaks a dependency cannot be sent.
+- [ ] Cancel a running request: the worker stops at the next safe point and the task is blocked with the reason; Pause queue: nothing new is taken.
+- [ ] Check on this Claude Code version: (a) does a background Bash command that exits wake an idle session, and how long may it run; (b) does a `PermissionRequest` hook exist, which decision format and timeout it takes; (c) does a `Stop` hook with `decision: block` keep the session working; (d) does a `PreToolUse` deny reach subagents; (e) is `additionalContext` from `SessionStart` and `UserPromptSubmit` seen by the model.

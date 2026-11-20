@@ -3,7 +3,7 @@
 
 Written to the project's .claude/settings.local.json by dev_ui.py apply --statusline. Claude Code runs it with the
 session as JSON on stdin; it prints one line, for example:
-  dev-kit · implement · M2 3/7 · ▶ T-014 · ⛔ 1 · ? 2 · next /dev-kit:implement
+  dev-kit · implement · M2 3/7 · ▶ T-014 · ⛔ 1 · ? 2 · ▣ 1 · next /dev-kit:implement
 Read-only: it never writes, and prints nothing outside a dev-kit project or on any error (a status line must never
 break the session). Symbols instead of words, so the line needs no translation.
 """
@@ -49,6 +49,13 @@ def render(root: Path) -> str:
     oq = ds.count_open_questions(store)
     if oq:
         parts.append(f"? {oq}")
+    try:
+        import dev_worker as dw
+        waiting = sum(1 for x in dw.items(root) if x["status"] == "pending")
+        if waiting:
+            parts.append(f"▣ {waiting}")  # requests from the board, run with /dev-kit:worker
+    except Exception:  # noqa: BLE001
+        pass
     parts.append(f"next {ds.next_command(store)}")
     return " · ".join(parts)
 

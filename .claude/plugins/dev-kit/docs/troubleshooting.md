@@ -32,6 +32,9 @@
 | Board: "Access link required" | It was shared with `--host` and opened without the key | Open the `access link:` URL; `/dev-kit:board status` prints it again |
 | Board: a host name is refused | DNS rebinding protection | Open it by IP or `localhost` (SSH tunnel: `ssh -N -L 8765:127.0.0.1:<port> <host>`) |
 | Board stopped by itself | No open tab for 2 hours | Start it again; `--idle-min N` changes the limit (0 = never) |
+| Board: requests stay "waiting" | No Claude Code session is running them | In the project's Claude Code session run `/dev-kit:worker`; the Requests card says "Claude Code: not running" until one does |
+| Board: "actions off" or no ▶ buttons | The board is shared with `--host`, or was started with `--actions off` | `/dev-kit:board --actions on` (on a shared board anyone with the link can then queue work) |
+| Board: "another session is the executor" | Two Claude Code sessions ran `/dev-kit:worker` | Keep one; the other is refused while the first is alive |
 | Board: "started by another version" | The kit was updated while it ran | `/dev-kit:board stop`, then start it again |
 | Agents in worktrees fail on `npm`/`node` with missing modules | Worktrees have no `node_modules` | Since 1.17.0 implementers link the main checkout's `node_modules` (never install there); check that `.gitignore` has `node_modules` without a trailing slash |
 | Visual and a11y audits are "static reading, confidence low" | No browser or harness available | The QA report says which tools were missing; `/dev-kit:plan replan` adds the QA harness task (Playwright with mocks, axe), or install Playwright and a Chromium |

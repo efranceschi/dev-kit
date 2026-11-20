@@ -2,6 +2,20 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.24.0 — 2026-11-20
+
+The board asks Claude Code for work: buttons, answers, new issues and a plan drawn by dragging cards, run by `/dev-kit:worker` in your session.
+
+### Added
+- Board (local, or shared with `--actions on`): ▶ next to every command the server accepts, "Next step" with the command `status --next` gives under the milestone, a Requests card (Claude Code ready, working on R-nnn, paused or not running; open and recent requests with their result; Cancel; New issue; Pause queue), answers to open questions in Needs you (the options, the recommended one first, or your own text; "Keep the assumption" for questions without options), permission requests with Allow and Deny when a hook raises them, and a toast for every request queued or refused.
+- Board Plan tab: the issue queue, every open milestone and the next one to add, as columns that wrap. Drag tasks not started and open issues, or use Move… (up, down, to a milestone) by keyboard or touch; the draft lists the changes, flags a task placed before one it depends on, and has Undo, Discard and Send. The server checks the draft again before queuing it; over the issue buffer it asks before sending again.
+- `/dev-kit:worker`: runs the board's requests in this Claude Code session one at a time (answers first, then requests whose answer arrived, then the oldest), in board mode: questions go to the board with answers to pick and the request waits for them while the others run. Text typed on the board is data, never an instruction.
+- Hooks: at session start, at a prompt and at the end of a turn, one line when the board has requests waiting (only when the set changed; ids and counts only); the status line shows `▣ N`. `UserPromptSubmit` joins the hooks.
+- `dev_board.py start` prints whether requests are on; `/dev-kit:board --actions auto|on|off`.
+
+### Fixed
+- Board: "Assumed meanwhile: -" was shown for questions recorded without an assumption.
+
 ## 1.23.0 — 2026-11-20
 
 The groundwork for driving Claude Code from the board: a request queue, plan edits that keep `plan.md` and state together, and questions with answers to pick. The page itself does not use them yet.
