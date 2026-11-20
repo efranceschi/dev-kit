@@ -16,7 +16,7 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 1. Commit or stash pending work, then /dev-kit:start <the change you want> in the repository root
 2. Onboarding: baseline tag dev-kit-baseline, .dev/discovery.md (stack, conventions, existing docs), test baseline, ADRs discovered/imported
 3. Pick the entry mode: feature (new capability), maintenance (bugs only: straight to /dev-kit:issue) or import (use the project's PRD/specs/ADRs)
-4. A stage was skipped? /dev-kit:start routes to the first missing artifact; a stage that does not apply is recorded as review n/a
+4. A stage was skipped? The lifecycle step is the first missing artifact and /dev-kit:start routes there; a stage that does not apply is recorded as review n/a
 5. QA scores only what changed since the baseline; pre-existing problems become intangible issues
 
 ## Let it run overnight
@@ -42,7 +42,7 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 ## Change the scope (new feature, different behaviour)
 
 1. /dev-kit:issue "the new behaviour" (class change)
-2. Accept the chain prd → review prd → (ux/ui → review design) → plan replan
+2. Accept the chain prd → review prd → (ux/ui → review design) → plan replan: conception and planning are reopened, while the milestone in construction keeps going
 3. The new tasks land in future milestones; the cadence does not change
 
 ## What is left to do?
@@ -65,7 +65,7 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 ## Resume after a crash or a reboot
 
 1. /dev-kit:start to reconcile state with git
-2. /dev-kit:autopilot continues from the current phase
+2. /dev-kit:autopilot continues from the current lifecycle step (status shows it)
 3. /dev-kit:start also stops processes and frees locks left by the crash
 
 ## Review the session or send feedback to the author
@@ -98,9 +98,10 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 
 ## Ship a version
 
-1. /dev-kit:docs all, then /dev-kit:review docs
-2. /dev-kit:release --dry-run to see the checklist and the version it would use
-3. /dev-kit:release (tags; pushes and deploys only as the brief allows)
+1. Release between milestones: /dev-kit:status (or the board) shows the release train, the closed milestones not released yet
+2. /dev-kit:usability for apps with a UI, then /dev-kit:docs all and /dev-kit:review docs
+3. /dev-kit:release --dry-run to see the checklist and the version it would use
+4. /dev-kit:release (tags and records the release; pushes and deploys only as the brief allows)
 
 ## Check that the app is usable and accessible
 

@@ -11,8 +11,8 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 | [`start`](#start) | Entry point: starts a new project, adopts an existing codebase (feature, maintenance or import mode) or resumes, and routes to the next skill. |
 | [`help`](#help) | Help inside Claude Code: what to do next, how each skill works, recipes and concepts. |
 | [`interview`](#interview) | Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md with the autonomy policy. |
-| [`status`](#status) | Read-only dashboard: phase, milestones, gates, scores, issues, preview, production drift, cost so far. |
-| [`board`](#board) | Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy. |
+| [`status`](#status) | Read-only dashboard: lifecycle phase and step, release train, milestones, gates, scores, issues, preview, production drift, cost so far. |
+| [`board`](#board) | Live board in the browser: the project lifecycle (conception, planning, construction, stable) with the steps of each phase and the release train, the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy. |
 | [`worker`](#worker) | Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick. |
 | [`settings`](#settings) | Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips, status line and notifications. |
 
@@ -31,7 +31,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 
 | Skill | What it does |
 |---|---|
-| [`autopilot`](#autopilot) | Drives the whole build on its own, from PRD to release; pauses follow your autonomy settings. |
+| [`autopilot`](#autopilot) | Drives the build on its own: conception and planning, then milestone after milestone and the release train, until the project is stable; pauses follow your autonomy settings. |
 | [`implement`](#implement) | Implements ready tasks test-first, full suite, one commit per task; hotfix lane first. |
 | [`test`](#test) | Test strategy and test writing: plan, missing tests for a task or path, flaky tests. |
 
@@ -55,7 +55,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 |---|---|
 | [`deploy`](#deploy) | Production deploy of an approved milestone or release: preflight, backup, dry-run, install, migrations, smoke checks. |
 | [`docs`](#docs) | Project documentation from the artifacts and code: README, user guide, API reference, CHANGELOG. |
-| [`release`](#release) | Release checklist and execution: audits, version, CHANGELOG, tag; patch releases for hotfixes. |
+| [`release`](#release) | Ships the release train (the milestones closed since the last release): audits, version, CHANGELOG, tag and the release record; patch releases for hotfixes. |
 
 ## Observe
 
@@ -137,7 +137,7 @@ Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md
 
 ### status
 
-Read-only dashboard: phase, milestones, gates, scores, issues, preview, production drift, cost so far.
+Read-only dashboard: lifecycle phase and step, release train, milestones, gates, scores, issues, preview, production drift, cost so far.
 
 **When:** Any time you want a quick picture of the project.
 
@@ -157,7 +157,7 @@ Read-only dashboard: phase, milestones, gates, scores, issues, preview, producti
 
 ### board
 
-Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy.
+Live board in the browser: the project lifecycle (conception, planning, construction, stable) with the steps of each phase and the release train, the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy.
 
 **When:** When you want to watch the project visually or drive it from the browser, e.g. away from the console; it updates by itself.
 
@@ -332,7 +332,7 @@ Scored independent review (0-100, with cut-off) of the PRD, design, plan or docs
 
 ### autopilot
 
-Drives the whole build on its own, from PRD to release; pauses follow your autonomy settings.
+Drives the build on its own: conception and planning, then milestone after milestone and the release train, until the project is stable; pauses follow your autonomy settings.
 
 **When:** After the interview, when you want the app built with minimal interaction (also overnight).
 
@@ -340,7 +340,7 @@ Drives the whole build on its own, from PRD to release; pauses follow your auton
 
 | Argument | Meaning |
 |---|---|
-| `--until phase` | stop after a phase (e.g. plan to review documents first) |
+| `--until step` | stop at a step: prd, architecture, design, plan, qa, usability, docs or release (e.g. plan, to review the documents first) |
 | `--milestone M1` | build only one milestone |
 | `--milestones N` | stop after N approved gates, to resume in a fresh session (cheaper long runs) |
 
@@ -562,9 +562,9 @@ Project documentation from the artifacts and code: README, user guide, API refer
 
 ### release
 
-Release checklist and execution: audits, version, CHANGELOG, tag; patch releases for hotfixes.
+Ships the release train (the milestones closed since the last release): audits, version, CHANGELOG, tag and the release record; patch releases for hotfixes.
 
-**When:** When the build is done and you want to ship, or after a hotfix.
+**When:** Between milestones, when closed milestones wait in the release train (the board and status show it), or after a hotfix.
 
 **Usage:** `/dev-kit:release [version e.g. 1.0.0 | --dry-run | --hotfix]`
 
@@ -579,7 +579,7 @@ Release checklist and execution: audits, version, CHANGELOG, tag; patch releases
 - `/dev-kit:release --dry-run`: see what would happen
 - `/dev-kit:release --hotfix`: ship a hotfix as a patch version
 
-**Produces:** version bump, release notes, tag
+**Produces:** version bump, release notes, tag, release record (the train empties; with nothing open the project is stable)
 
 **Related:** [`deploy`](#deploy), [`docs`](#docs)
 

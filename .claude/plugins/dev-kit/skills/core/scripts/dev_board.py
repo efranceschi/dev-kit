@@ -746,6 +746,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
     except SystemExit:
         return {"ok": False, "error": "corrupt_state", "message": "state.json could not be read (it may be mid-write)."}
     s = store.state
+    lc = ds.lifecycle(store)
     goals = milestone_goals(_read(store.dev / "plan.md"))
     tasks = {}
     for tid, t in sorted(store.tasks().items(), key=lambda kv: int(kv[0][2:])):
@@ -789,7 +790,8 @@ def build_state(root: Path, board: dict | None = None) -> dict:
     return {
         "ok": True,
         "project": s.get("project") or root.name,
-        "phase": s.get("phase"), "phases": ds.PHASES, "language": s.get("language"),
+        **{k: lc[k] for k in ("phase", "step", "reopened")}, "cycle": {k: lc[k] for k in ("phases", "release", "queue")},
+        "language": s.get("language"),
         "created_at": s.get("created_at"), "updated_at": s.get("updated_at"),
         "autonomy": (s.get("autonomy") or {}).get("level"),
         "brownfield": ({k: (s.get("brownfield") or {}).get(k) for k in ("mode", "baseline_ref", "first_milestone")}

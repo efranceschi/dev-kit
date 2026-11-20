@@ -34,7 +34,7 @@ class Base(unittest.TestCase):
         self.root.mkdir()
         self.tdir = Path(self.tmp.name) / "transcripts"
         (self.tdir / "s1" / "subagents").mkdir(parents=True)
-        self.sh(STATE, "init", "--project", "demo", "--phase", "prd")
+        self.sh(STATE, "init", "--project", "demo")
 
     def tearDown(self) -> None:
         self.tmp.cleanup()

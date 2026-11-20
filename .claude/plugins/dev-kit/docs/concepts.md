@@ -8,7 +8,7 @@ Everything the kit knows about your project lives in `.dev/` inside the project,
 
 ```
 .dev/
-  state.json          phases, milestones, tasks, gates, issues, settings (only via dev_state.py)
+  state.json          milestones, tasks, gates, reviews, issues, releases, settings (only via dev_state.py)
   brief.md  prd.md  architecture.md  plan.md  decisions.md (ADRs)  open-questions.md  issues.md  log.md
   design/             ux-flows.md, ui-spec.md
   qa/  reviews/       reports, scores and findings per milestone and per review
@@ -20,11 +20,28 @@ Everything the kit knows about your project lives in `.dev/` inside the project,
 
 The Markdown files can be edited by hand. After a scope change run `/dev-kit:prd` or `/dev-kit:plan replan` so the change propagates. Each task becomes one commit, `[T-003] feat: ...` by default or in your project's own style (`autonomy.commit_style`, with a `Refs: T-003` trailer); history is never rewritten.
 
-## Flow and milestones
+## Lifecycle: conception, planning, construction [§19]
 
-`start → interview → prd → review → architecture → ux → ui → review → plan → review`, then per milestone `implement ⇄ test → qa` (with the optional local preview and production `deploy`), then `usability → docs → review → release`. An existing codebase goes through an onboarding first (below). See the [flow diagram](dev-kit-flow.png).
+A product built by agents is never "finished" in a straight line: after the first round of requirements it keeps receiving bugs, improvements and scope changes until it is stable. The kit models that as a cycle of four phases:
 
-Milestones (M1, M2, …) are the project's cadence: `M2` starts only after the `M1` gate passes, a milestone whose gate passed takes no new task, and nothing ever inserts or renumbers a milestone. A task removed by a replan is `dropped` (kept for history, never counted).
+```
+  conception ──────► planning ──────► construction ──────► stable
+  interview, PRD,    plan + review    M1 → M2 → M3 …       nothing open,
+  architecture,      (replan on       each: build → QA      everything
+  UX, UI + reviews   every change)    → deploy → closed     released
+       ▲                  ▲           + release train          │
+       │                  └──── bug or improvement (issue) ────┤
+       └──────────────────────── scope change (issue change) ──┘
+```
+
+- **Conception** runs once at the start and again for every scope change: `interview` → `prd` → review → `architecture` → `ux` → `ui` → review. For a product without a UI, `ux` and `ui` are skipped (review `design` recorded `n/a`).
+- **Planning** turns the specs into milestones and tasks (`plan`, then `review plan`), and replans after a change.
+- **Construction** is where the product is built, one milestone after the other. Building and QA are not project phases: they repeat inside every milestone (plan → build → QA & fixes → smoke → deploy → closed). Closed milestones wait in the **release train** until a release ships them: `usability` (apps with a UI), `docs`, `review docs`, then `release`, cut between milestones so no work is half built.
+- **Stable** means nothing is open: no milestone in progress, no queued issue, every closed milestone released. The next issue starts the cycle again.
+
+The phase is **derived** from what `.dev/` already holds (artifacts, reviews, gates, issues, releases), never set by hand, so it cannot go backwards by mistake. When a scope change edits the PRD, conception shows as *reopened* (from the PRD on) and planning after it, while the milestone already in construction keeps going; once the changes are reviewed and replanned, the project is back in construction. `/dev-kit:status` shows the phase and step (`conception · prd`, `construction · M3`, `stable`) and the release train; the board draws the four phases with the steps inside each; `status --next` names the command that moves the cycle forward. An existing codebase goes through an onboarding first (below). See the [flow diagram](dev-kit-flow.png).
+
+Milestones (M1, M2, …) are the cadence of construction: `M2` starts only after the `M1` gate passes, a milestone whose gate passed takes no new task, and nothing ever inserts or renumbers a milestone. A task removed by a replan is `dropped` (kept for history, never counted).
 
 ## Quality scores and gates [§7]
 
@@ -96,7 +113,7 @@ Optionally, each approved milestone can run locally on `127.0.0.1` (`keep_runnin
 
 ## The board
 
-`/dev-kit:board` opens a live dashboard of the project in the browser: the project phase as a row of chevrons, the milestones as chevrons (previous, current and next; the others in "earlier"/"later" lists), a "Needs you" strip only when something waits on you, the stages of the milestone as chevrons too (plan → build → QA & fixes → smoke test → deploy → closed; smoke and deploy only when enabled), where QA & fixes shows its rounds (R1 ✕ 89 → 1 fix ✓ → R2 running) and the auditors of the running round, with what is running and what comes next on the stage it belongs to; the milestone goal, its stage instead of a task percentage, and the task kanban (filterable, 3 cards per column with "Show all", running agents on the cards and a details panel per task, linkable as `#T-nnn`), insights tabs for quality, burndown, velocity and backlog, and the activity feed beside them; light, dark or following the system. One server per project, stopped from the page's ⋯ menu or with `stop`, and by itself after 2 idle hours.
+`/dev-kit:board` opens a live dashboard of the project in the browser: the project lifecycle as four chevrons (conception, planning, construction, stable) with the steps inside each (✓ done, ◐ in progress or waiting for its review, ↻ out of date after a change, "reopened" when a scope change sent the project back), the current milestone and the release train inside construction; the milestones as chevrons (previous, current and next; the others in "earlier"/"later" lists), a "Needs you" strip only when something waits on you, the stages of the milestone as chevrons too (plan → build → QA & fixes → smoke test → deploy → closed; smoke and deploy only when enabled), where QA & fixes shows its rounds (R1 ✕ 89 → 1 fix ✓ → R2 running) and the auditors of the running round, with what is running and what comes next on the stage it belongs to; the milestone goal, its stage instead of a task percentage, and the task kanban (filterable, 3 cards per column with "Show all", running agents on the cards and a details panel per task, linkable as `#T-nnn`), insights tabs for quality, burndown, velocity and backlog, and the activity feed beside them; light, dark or following the system. One server per project, stopped from the page's ⋯ menu or with `stop`, and by itself after 2 idle hours.
 
 **Requests to Claude Code.** The page can also ask for work: ▶ next to a command ("Next step" included) queues it, Needs you takes the answer to an open question (its options, the recommended one first), Requests has New issue, Pause queue and Go on by itself, and the Plan tab lets you drag tasks not started and open issues between open milestones, add the next milestone and send the draft. The board never changes the project itself: `dev_worker.py` keeps the queue and `/dev-kit:worker`, run in a Claude Code session, executes the requests one at a time; questions that would stop it come back to the board (board mode, conventions §10).
 
@@ -119,7 +136,7 @@ The kit also uses Claude Code's own interface, all of it display only:
 
 - **Next command, one key away.** Every skill ends with the next command alone on the last line, so Claude Code's greyed-out prompt suggestion usually offers it: Tab or Right arrow, then Enter. Claude Code predicts that suggestion itself; no plugin can set it, and it does not appear in plan mode, right after an error or with prompt suggestions turned off.
 - **Tips while you wait.** Short dev-kit tips, in your language, rotate under the spinner while Claude works.
-- **Status line.** Below the prompt: phase · milestone progress · running task · blocked tasks · open questions · next command.
+- **Status line.** Below the prompt: lifecycle phase (with the step in conception and planning) · milestone progress · running task · blocked tasks · open questions · next command.
 - **Session title and notifications.** A new session is named after the project and milestone and opens with one line naming the next command; gates, blocked tasks and the end of autopilot can raise a desktop notification.
 
 `/dev-kit:start` offers the tips, the status line and the notifications once; `/dev-kit:settings` turns each of them on or off. Tips and the status line are written to `.claude/settings.local.json`, your personal settings for the project, which stay out of git. Spinner, suggestions and status line are terminal features: hosts that embed Claude Code (web apps, the SDK) may not show them.

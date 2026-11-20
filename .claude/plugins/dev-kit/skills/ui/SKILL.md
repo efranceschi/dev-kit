@@ -15,7 +15,7 @@ Input: $ARGUMENTS
 State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" status --short --quiet-if-missing`
 
 ## Preconditions
-`.dev/design/ux-flows.md` exists (run `ux` otherwise). Skip entirely for products without a UI (set phase `plan`).
+`.dev/design/ux-flows.md` exists (run `ux` otherwise). Skip entirely for products without a UI (review `design` recorded `n/a`, `conventions.md` §19).
 
 ## Procedure
 1. Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md`, `${CLAUDE_SKILL_DIR}/../core/shared/checklists/wcag-2.2-aa.md`, the brief block 7 (references, brand assets, component library, dark mode, a11y level), `.dev/architecture.md` (frontend stack), `.dev/design/ux-flows.md`, and the template `${CLAUDE_SKILL_DIR}/../core/shared/templates/ui-spec.md`.
@@ -26,7 +26,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 6. One spec per screen id from `ux-flows.md`: purpose, ASCII/Mermaid wireframe, components used, copy in the application language, all states, responsive notes, accessibility (heading order, focus order, announcements).
 6a. Screen map: for every screen, its route, the states reachable by URL or mock, and its route files (the QA harness and the work ledger use it). Run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" contrast` on the tokens and fix the pairs it marks LOW before writing the spec.
 7. Accessibility baseline section and implementation notes (where tokens live, naming of components, visual regression if planned).
-8. Gaps → autonomy rule (`ui_details` is normally `decide_alone`); ADR for the library and identity choices. Write `.dev/design/ui-spec.md`. Run the self-check (`${CLAUDE_SKILL_DIR}/../core/shared/prompts/self-check.md`, which includes `dev_state.py xref`) and fix what it finds, then `dev_state.py artifact mark ui`. Then `dev_state.py set phase plan`; summarise; next: `review design` (independent score against the cut-off), then `plan`.
+8. Gaps → autonomy rule (`ui_details` is normally `decide_alone`); ADR for the library and identity choices. Write `.dev/design/ui-spec.md`. Run the self-check (`${CLAUDE_SKILL_DIR}/../core/shared/prompts/self-check.md`, which includes `dev_state.py xref`) and fix what it finds, then `dev_state.py artifact mark ui`. Summarise; next: `review design` (independent score against the cut-off), then `plan`.
 
 ## Rules
 - Every screen in `ux-flows.md` §4 has a spec; every component referenced by a spec is in the inventory.

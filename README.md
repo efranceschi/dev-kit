@@ -1,16 +1,30 @@
 # dev-kit
 
-A [Claude Code](https://claude.com/claude-code) plugin that builds a complete application, from requirements interview to release.
+A [Claude Code](https://claude.com/claude-code) plugin where a team of specialised agents builds a complete application and keeps it evolving: from the requirements interview to releases, and on through every bug, improvement and scope change until the product is stable.
 
-You answer one thorough interview. The kit then writes the PRD, architecture and design, plans the work, implements it task by task with tests, audits every milestone and prepares the release. It stops only when it needs a decision from you, and everything it produces is kept in a `.dev/` folder inside your project, so you can stop and resume at any time.
+You answer one thorough interview. The kit then writes the PRD, architecture and design, plans the work, implements it milestone by milestone with tests, audits every milestone and ships releases. It stops only when it needs a decision from you, and everything it produces is kept in a `.dev/` folder inside your project, so you can stop and resume at any time.
+
+## How a project moves
+
+```
+  conception ──────► planning ──────► construction ──────► stable
+  interview, PRD,    milestones and   M1 → M2 → M3 …       nothing open,
+  architecture,      tasks, reviewed  build → QA → deploy  everything
+  UX, UI, reviewed                    + release train      released
+       ▲                  ▲                                    │
+       │                  └──── bug or improvement ────────────┤
+       └──────────────────────── scope change ─────────────────┘
+```
+
+**Conception** and **planning** happen once at the start, and again, only for what changed, whenever the scope changes. **Construction** builds the product one milestone at a time: each milestone has its own cycle (build, QA and fixes, deploy), so building and QA are never "the project's phase", they happen in every milestone. Closed milestones ride the **release train** until a release ships them. When nothing is open and everything is released, the project is **stable**; the next issue starts the cycle again. The kit works out the phase from what is in `.dev/`, so it never gets out of step with the work ([concepts](.claude/plugins/dev-kit/docs/concepts.md#lifecycle-conception-planning-construction-19)).
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/dev-kit-board-dark.png">
-    <img src=".github/assets/dev-kit-board.png" alt="dev-kit board of a sample project: the project phase as a row of chevrons (step 7 of 11, implement), the milestones as chevrons too, with the current one between its neighbours, its goal and stage, a highlighted Needs you strip with one blocked task and one open question, and the milestone stages as chevrons with three implementer agents and a test auditor running in the Build stage" width="900">
+    <img src=".github/assets/dev-kit-board.png" alt="dev-kit board of a sample project: the project lifecycle as four chevrons (conception and planning done with their steps ticked, construction current at M3 with 2 of 6 milestones closed, M2 waiting in the release train and one issue queued, stable next), the milestones as chevrons with the current one between its neighbours, its goal and stage, a highlighted Needs you strip with one blocked task and one open question, and the milestone stages as chevrons with three implementer agents and a test auditor running in the Build stage" width="900">
   </picture>
   <br>
-  <sub><code>/dev-kit:board</code> shows the build in <b>real time</b> in your browser: the project phase, what needs you, the stage of the milestone with what is running in it (QA rounds included), then the task kanban, quality gates, burndown and activity.</sub>
+  <sub><code>/dev-kit:board</code> shows the build in <b>real time</b> in your browser: where the project is in its lifecycle, what needs you, the stage of the milestone with what is running in it (QA rounds included), then the task kanban, quality gates, burndown and activity.</sub>
 </p>
 
 ## What it does
@@ -18,8 +32,9 @@ You answer one thorough interview. The kit then writes the PRD, architecture and
 - **Skills for the whole lifecycle**, invoked as `/dev-kit:<name>`, such as `interview`, `prd`, `architecture`, `ux`, `ui`, `plan`, `implement`, `test`, `qa`, `review`, `usability`, `docs`, `release`, `deploy`, plus `autopilot`, `status`, `board`, `backlog`, `issue`, `costs`, `feedback`, `help` and `start`.
 - **Specialised agents** that the skills call: an implementer, an architecture consultant and a team of read-only reviewers (code, security, tests, accessibility, data, performance, copy and more).
 - **Quality gates**: each milestone ends with a scored review (0-100 per dimension) that must clear a cut-off before the next one starts.
+- **Releases as a train**: closed milestones wait for the next release; `/dev-kit:release` ships them between milestones, after the usability audit and docs.
 - **Adjustable autonomy**: from supervised (asks at each decision, always with a recommendation) to unattended (parks what needs you and keeps going).
-- **Bugs and ideas** found at any time are classified and routed with `/dev-kit:issue`, without renumbering the plan.
+- **Bugs and ideas** found at any time are classified and routed with `/dev-kit:issue`, without renumbering the plan: bugs and improvements go straight to construction; a scope change reopens conception and planning while the current milestone keeps going.
 - **Existing projects too**: in a codebase not built with dev-kit, `/dev-kit:start` first tags a baseline and learns the project (stack, commands, your commit and version conventions, existing docs). You pick a mode (new feature, maintenance only, or import your own PRD/specs); audits then judge only what changed, and old problems become issues instead of blocking.
 - **Live board**: `/dev-kit:board` shows the build in the browser, on this machine or shared on your network with a private link.
 - **Deploy, costs and feedback**: production deploys with backup and smoke checks (`/dev-kit:deploy`), token cost per stage (`/dev-kit:costs`) and a graded evaluation of each session (`/dev-kit:feedback`).
@@ -81,7 +96,7 @@ Full documentation lives in [`.claude/plugins/dev-kit/docs/`](.claude/plugins/de
 | [recipes](.claude/plugins/dev-kit/docs/recipes.md) | "how do I...?" (report a bug, overnight run, costs, deploy, resume) |
 | [skills](.claude/plugins/dev-kit/docs/skills.md) | every skill: when to use it, arguments, examples, outputs |
 | [agents](.claude/plugins/dev-kit/docs/agents.md) | every agent and who calls it |
-| [concepts](.claude/plugins/dev-kit/docs/concepts.md) | state, gates, autonomy, issues, deploy, costs |
+| [concepts](.claude/plugins/dev-kit/docs/concepts.md) | lifecycle, state, gates, autonomy, issues, deploy, costs |
 | [troubleshooting](.claude/plugins/dev-kit/docs/troubleshooting.md) | when something goes wrong |
 | [glossary](.claude/plugins/dev-kit/docs/glossary.md) | short definitions of the terms the kit uses |
 | [maintainers](.claude/plugins/dev-kit/docs/maintainers.md) | how the kit itself is built and tested |

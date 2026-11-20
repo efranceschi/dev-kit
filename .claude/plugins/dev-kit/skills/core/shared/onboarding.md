@@ -10,7 +10,7 @@ Never modify existing source, docs, CI or git history during onboarding; only `.
 3. Tag the baseline: `git tag dev-kit-baseline` (skip if the tag exists; never move it). Record the sha **of the tag** (`git rev-list -n 1 dev-kit-baseline`), not of HEAD. Everything after this tag is "new work".
 
 ## 2. State first
-Create the state now, so every later step can log and register issues: `DS init --language <tag> --phase interview --project "<name>" --stack-json '<detected json>' --brownfield-json '{"baseline_ref":"dev-kit-baseline","baseline_sha":"<sha>"}'`. Existing projects keep `pause_policy.dirty_tree` at `ask` automatically (the tree may hold the user's own work). Then start the session: `DS event session_start --set trigger=start --set brownfield=true` and `DS event skill_start --set skill=start --set args_kind=onboarding`.
+Create the state now, so every later step can log and register issues: `DS init --language <tag> --project "<name>" --stack-json '<detected json>' --brownfield-json '{"baseline_ref":"dev-kit-baseline","baseline_sha":"<sha>"}'`. Existing projects keep `pause_policy.dirty_tree` at `ask` automatically (the tree may hold the user's own work). Then start the session: `DS event session_start --set trigger=start --set brownfield=true` and `DS event skill_start --set skill=start --set args_kind=onboarding`.
 
 ## 3. Discovery → `.dev/discovery.md`
 Steps 3, 4 and 5 are independent: run them at the same time (the test baseline in the background, one `Explore` agent for the code and one for the existing documents and decisions when the repository is large), then write the files.
@@ -51,5 +51,5 @@ One AskUserQuestion with two questions, recommended option first (derived from t
 - **maintenance** →
   1. `interview --express` limited to quality, autonomy and deploy consent (blocks 8–10); everything else `inferred` from discovery. The interview returns here instead of recommending `autopilot`.
   2. `prd`: as-built only, every AC `existing`; `architecture`: summary of discovery with links to the ADRs.
-  3. Write `.dev/plan.md` with only `# Plan` and `## M<n> — Maintenance` (`n` = `first_milestone`, no tasks), run `DS sync-plan`, then `DS review prd n/a --note "maintenance mode: as-built PRD"`, the same for `design` and `plan`, and `DS set phase implement`.
+  3. Write `.dev/plan.md` with only `# Plan` and `## M<n> — Maintenance` (`n` = `first_milestone`, no tasks), run `DS sync-plan`, then `DS review prd n/a --note "maintenance mode: as-built PRD"`, the same for `design` and `plan`. With those `n/a` reviews the lifecycle is already past conception and planning: `stable` until the first issue brings a task into the maintenance milestone (`conventions.md` §19).
   4. Tell the user that bugs and improvements now go through `/dev-kit:issue` (they become tasks in `M<n>`); when those tasks are done, `qa M<n>` gates them like any milestone and the next issues open `M<n+1> — Maintenance`. `/dev-kit:start` with a feature switches to the feature path (`DS init --brownfield-json '{"mode":"feature"}'`, which reopens the `n/a` reviews, then `prd` revision and `plan replan`).

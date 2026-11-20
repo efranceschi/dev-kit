@@ -27,7 +27,7 @@ class TestOnboardingOrder(Base):
 
     def test_onboarding_sequence_with_first_milestone(self) -> None:
         # onboarding.md order: init first, then baseline issues, then the maintenance milestone
-        self.run_state("init", "--language", "en", "--phase", "interview", "--brownfield-json", BF,
+        self.run_state("init", "--language", "en", "--brownfield-json", BF,
                        "--autonomy-json", '{"commit_style":"{type}: {summary}"}')
         self.assertTrue((self.root / ".dev" / ".gitignore").exists())
         self.run_state("event", "session_start", "--set", "trigger=start", "--set", "brownfield=true", "--set", "mode=maintenance")
@@ -43,10 +43,9 @@ class TestOnboardingOrder(Base):
         self.assertEqual(bl["issues"][iid]["origin"], "baseline")
         self.assertIn("| baseline |", (self.root / ".dev" / "issues.md").read_text(encoding="utf-8"))
         tid = self.run_state("add-task", "--milestone", "M7", "--type", "fix", "--issue", iid, "--title", "Fix export").stdout.split()[0]
-        self.run_state("set", "phase", "implement")
         self.run_state("start", tid)
         self.run_state("done", tid, "--commit", "1111111")
-        self.assertEqual(self.state()["phase"], "qa")
+        self.assertEqual(self.run_state("status", "--next").stdout.strip(), "/dev-kit:interview")  # no brief yet
         self.run_state("gate", "M7", "passed", "--score", "90")
         # a passed gate is closed: new work goes to the next maintenance milestone
         out = self.run_state("add-task", "--milestone", "M7", "--title", "Another bug", "--type", "fix", expect=1)

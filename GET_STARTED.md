@@ -37,6 +37,12 @@ This writes and reviews the PRD, architecture, UX/UI design and implementation p
 
 The kit implements the plan milestone by milestone, with tests, and runs a quality gate at the end of each one. It pauses only for decisions that need you.
 
+## 5. Release, then keep evolving
+
+Closed milestones wait in the **release train** (`/dev-kit:status` and the board show it). Between milestones, `/dev-kit:release` ships them, after the usability audit (apps with a UI) and the docs; `autopilot` does it for you when your brief asks for releases. With nothing open and everything released, the project is **stable**.
+
+From there the product keeps living: `/dev-kit:issue "what happens"` sends a bug or improvement straight to construction (a new task in a milestone), while a scope change reopens conception and planning, only for what changed, and the milestone being built keeps going. The phase you see (`conception · prd`, `construction · M3`, `stable`) is worked out from `.dev/`, so it always matches the work.
+
 ## Day-to-day commands
 
 | I want to... | Run |
@@ -48,14 +54,14 @@ The kit implements the plan milestone by milestone, with tests, and runs a quali
 | report a bug or ask for a change | `/dev-kit:issue "what happens"` |
 | see everything still pending | `/dev-kit:backlog` |
 | put an approved milestone in production | `/dev-kit:deploy` |
-| ship a version | `/dev-kit:release` |
+| ship the closed milestones as a version | `/dev-kit:release` |
 | see how much it cost | `/dev-kit:costs` |
 | get an evaluation of the session | `/dev-kit:feedback` |
 
 ## Good to know
 
 - **Everything is a file.** Specs, plan, state and logs live in `.dev/`; never edit `.dev/state.json` by hand.
-- **You can go step by step** instead of autopilot: `prd`, `review prd`, `architecture`, `ux`, `ui`, `review design`, `plan`, `review plan`, `implement`, `qa`, in that order (each review scores the document; `release` requires them).
+- **You can go step by step** instead of autopilot: `prd`, `review prd`, `architecture`, `ux`, `ui`, `review design`, `plan`, `review plan`, `implement`, `qa`, in that order (each review scores the document; `release` requires them). `/dev-kit:status --next` (or `/dev-kit:help`) names the step the project is at.
 - **Stuck or lost?** Run `/dev-kit:help`, or see [troubleshooting](.claude/plugins/dev-kit/docs/troubleshooting.md).
 
 Next: the longer [getting-started guide](.claude/plugins/dev-kit/docs/getting-started.md) and the [recipes](.claude/plugins/dev-kit/docs/recipes.md).

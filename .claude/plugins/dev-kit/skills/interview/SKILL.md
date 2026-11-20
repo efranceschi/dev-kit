@@ -19,7 +19,7 @@ Stack: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_detect_stack.py" "$
 ## Setup
 1. Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md`, `${CLAUDE_SKILL_DIR}/../core/shared/interview/questionnaire.md` and `${CLAUDE_SKILL_DIR}/../core/shared/interview/autonomy-policy.md`.
 2. Language: infer from the user's messages; if `.dev/state.json` has `language`, use it. If undeterminable, the very first question asks it.
-3. If `.dev/state.json` does not exist: `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" init --language <tag> --phase interview --project "<name or folder>"`.
+3. If `.dev/state.json` does not exist: `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" init --language <tag> --project "<name or folder>"`.
 4. Existing codebase (detection says `"greenfield": false`) but no `brownfield` in state: stop and invoke `start` instead, which runs the onboarding (baseline tag, discovery, test baseline) first; without it none of the existing-project rules apply. With `brownfield` in state, see the last section.
 
 ## Mode: full interview (default)
@@ -39,7 +39,7 @@ Read `.dev/open-questions.md` (Open table). Group questions by theme, ask them i
 ## Close (full and express)
 1. Show a compact summary: one line per block. Ask for one confirmation (AskUserQuestion: "Confirm and start building" / "Change something").
 2. Write `.dev/decisions.md` from `${CLAUDE_SKILL_DIR}/../core/shared/templates/adr.md` with the initial ADRs (stack if chosen, auth model, hosting, autonomy level, git policy) — `source: interview`.
-3. Persist: `dev_state.py init --language <tag> --stack-json '<json>' --autonomy-json '<json>' --phase prd` (init is idempotent and only updates the given fields). Record unknowns the user chose to leave open with `dev_state.py add-question "<q>" --skill interview --assumption "<a>" --impact "<i>"`.
+3. Persist: `dev_state.py init --language <tag> --stack-json '<json>' --autonomy-json '<json>'` (init is idempotent and only updates the given fields), then `dev_state.py artifact mark brief`: the confirmed brief closes the interview step and the lifecycle moves to `prd` (`conventions.md` §19). Record unknowns the user chose to leave open with `dev_state.py add-question "<q>" --skill interview --assumption "<a>" --impact "<i>"`.
 4. **Announce the next step on screen.** This is the last thing the user reads, so make it unmissable and in the user's language. State that all requirements were collected and the project is ready to be built, then show:
    - What was saved: `.dev/brief.md`, `.dev/decisions.md`, the autonomy level chosen, the quality cut-offs that gates will enforce (overall and security minimums), and how many open questions remain (if any).
    - The recommended next command in a fenced code block: `/dev-kit:autopilot` (builds everything autonomously from PRD to release, pausing only on always-ask decisions). Mention the useful variants in one line each: `--until plan` (generate only the documents so you can review them first) and `--milestone M1` (build only the first milestone).

@@ -31,7 +31,7 @@ Answers that matter most later:
 /dev-kit:autopilot --until plan
 ```
 
-This writes and reviews the PRD, architecture, UX/UI specs and the plan, then stops. Read `.dev/prd.md` and `.dev/plan.md`; mistakes are cheapest here. To change something: `/dev-kit:prd <change>` or `/dev-kit:plan replan`.
+This finishes **conception** (PRD, architecture, UX/UI specs, each reviewed) and **planning** (the plan, reviewed), then stops. Read `.dev/prd.md` and `.dev/plan.md`; mistakes are cheapest here. To change something: `/dev-kit:prd <change>` or `/dev-kit:plan replan`.
 
 ## 4. Build
 
@@ -39,7 +39,7 @@ This writes and reviews the PRD, architecture, UX/UI specs and the plan, then st
 /dev-kit:autopilot
 ```
 
-It implements each milestone test-first (one commit per task), runs the quality gate (`qa`), fixes what failed and moves to the next milestone. Prefer to drive it yourself? After each document, its review: `/dev-kit:prd` → `/dev-kit:review prd` → `/dev-kit:architecture` → `/dev-kit:ux` → `/dev-kit:ui` → `/dev-kit:review design` → `/dev-kit:plan` → `/dev-kit:review plan`; then `/dev-kit:implement --milestone M1` and `/dev-kit:qa M1`. `release` checks that every review passed.
+Now the project is in **construction**. It implements each milestone test-first (one commit per task), runs the quality gate (`qa`), fixes what failed and moves to the next milestone. Building and QA belong to each milestone, so the project phase stays `construction` the whole time; `/dev-kit:status` says which milestone (`construction · M2`). Prefer to drive it yourself? After each document, its review: `/dev-kit:prd` → `/dev-kit:review prd` → `/dev-kit:architecture` → `/dev-kit:ux` → `/dev-kit:ui` → `/dev-kit:review design` → `/dev-kit:plan` → `/dev-kit:review plan`; then `/dev-kit:implement --milestone M1` and `/dev-kit:qa M1`. `release` checks that every review passed.
 
 ## Already have a project?
 
@@ -57,7 +57,7 @@ Nothing in your code, docs or history is changed by the onboarding. From then on
 
 | You want | Run |
 |---|---|
-| where the project stands | `/dev-kit:status` |
+| where the project stands (lifecycle phase and step, release train) | `/dev-kit:status` |
 | a live board in the browser (or on your phone) | `/dev-kit:board` (`--host 0.0.0.0` to share it) |
 | what is pending and what to do next | `/dev-kit:backlog` |
 | report a bug or an idea | `/dev-kit:issue "what happens"` |
@@ -65,8 +65,16 @@ Nothing in your code, docs or history is changed by the onboarding. From then on
 | an evaluation of the session | `/dev-kit:feedback` |
 | help with anything | `/dev-kit:help <question>` |
 
-## 6. Finish
+## 6. Release, and keep the product evolving
 
-`autopilot` continues with the usability audit, project docs and the release (`--dry-run` first). If production deploys are configured, `/dev-kit:deploy` installs each approved milestone or the release.
+Each closed milestone joins the **release train**. A release ships the train between milestones: the usability audit (apps with a UI), the project docs and their review, then `/dev-kit:release` (`--dry-run` first), which tags the version and records it. `autopilot` runs this for you at the end of the planned milestones when your brief asks for releases. If production deploys are configured, `/dev-kit:deploy` installs each approved milestone or the release.
+
+With no milestone open, no issue queued and everything released, the project is **stable**. That is a resting point, not an end:
+
+- a bug or improvement (`/dev-kit:issue`) goes straight to construction, as a task in the current or next milestone;
+- a scope change reopens **conception** (the PRD and the specs it affects) and **planning** (replan into future milestones), while the milestone being built keeps going;
+- either way the project goes back to construction, and to stable after the next release.
+
+The phase is worked out from `.dev/` (artifacts, reviews, gates, issues, releases), never typed in, so it always matches the work: see [concepts](concepts.md#lifecycle-conception-planning-construction-19).
 
 Next: [recipes](recipes.md) for common tasks, [concepts](concepts.md) for how it works, [skills](skills.md) for every command.

@@ -149,7 +149,7 @@
     {
       "name": "status",
       "category": "start",
-      "one_line": "Read-only dashboard: phase, milestones, gates, scores, issues, preview, production drift, cost so far.",
+      "one_line": "Read-only dashboard: lifecycle phase and step, release train, milestones, gates, scores, issues, preview, production drift, cost so far.",
       "when": "Any time you want a quick picture of the project.",
       "args": [
         {
@@ -173,7 +173,7 @@
     {
       "name": "board",
       "category": "start",
-      "one_line": "Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy.",
+      "one_line": "Live board in the browser: the project lifecycle (conception, planning, construction, stable) with the steps of each phase and the release train, the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy.",
       "when": "When you want to watch the project visually or drive it from the browser, e.g. away from the console; it updates by itself.",
       "args": [
         {
@@ -424,12 +424,12 @@
     {
       "name": "autopilot",
       "category": "build",
-      "one_line": "Drives the whole build on its own, from PRD to release; pauses follow your autonomy settings.",
+      "one_line": "Drives the build on its own: conception and planning, then milestone after milestone and the release train, until the project is stable; pauses follow your autonomy settings.",
       "when": "After the interview, when you want the app built with minimal interaction (also overnight).",
       "args": [
         {
-          "arg": "--until phase",
-          "meaning": "stop after a phase (e.g. plan to review documents first)"
+          "arg": "--until step",
+          "meaning": "stop at a step: prd, architecture, design, plan, qa, usability, docs or release (e.g. plan, to review the documents first)"
         },
         {
           "arg": "--milestone M1",
@@ -780,8 +780,8 @@
     {
       "name": "release",
       "category": "ship",
-      "one_line": "Release checklist and execution: audits, version, CHANGELOG, tag; patch releases for hotfixes.",
-      "when": "When the build is done and you want to ship, or after a hotfix.",
+      "one_line": "Ships the release train (the milestones closed since the last release): audits, version, CHANGELOG, tag and the release record; patch releases for hotfixes.",
+      "when": "Between milestones, when closed milestones wait in the release train (the board and status show it), or after a hotfix.",
       "args": [
         {
           "arg": "version",
@@ -806,7 +806,7 @@
           "what": "ship a hotfix as a patch version"
         }
       ],
-      "produces": "version bump, release notes, tag",
+      "produces": "version bump, release notes, tag, release record (the train empties; with nothing open the project is stable)",
       "related": [
         "deploy",
         "docs"
@@ -913,7 +913,7 @@
         "Commit or stash pending work, then /dev-kit:start <the change you want> in the repository root",
         "Onboarding: baseline tag dev-kit-baseline, .dev/discovery.md (stack, conventions, existing docs), test baseline, ADRs discovered/imported",
         "Pick the entry mode: feature (new capability), maintenance (bugs only: straight to /dev-kit:issue) or import (use the project's PRD/specs/ADRs)",
-        "A stage was skipped? /dev-kit:start routes to the first missing artifact; a stage that does not apply is recorded as review n/a",
+        "A stage was skipped? The lifecycle step is the first missing artifact and /dev-kit:start routes there; a stage that does not apply is recorded as review n/a",
         "QA scores only what changed since the baseline; pre-existing problems become intangible issues"
       ]
     },
@@ -983,7 +983,7 @@
       ],
       "steps": [
         "/dev-kit:issue \"the new behaviour\" (class change)",
-        "Accept the chain prd → review prd → (ux/ui → review design) → plan replan",
+        "Accept the chain prd → review prd → (ux/ui → review design) → plan replan: conception and planning are reopened, while the milestone in construction keeps going",
         "The new tasks land in future milestones; the cadence does not change"
       ]
     },
@@ -1050,7 +1050,7 @@
       ],
       "steps": [
         "/dev-kit:start to reconcile state with git",
-        "/dev-kit:autopilot continues from the current phase",
+        "/dev-kit:autopilot continues from the current lifecycle step (status shows it)",
         "/dev-kit:start also stops processes and frees locks left by the crash"
       ]
     },
@@ -1153,9 +1153,10 @@
         "publish"
       ],
       "steps": [
-        "/dev-kit:docs all, then /dev-kit:review docs",
+        "Release between milestones: /dev-kit:status (or the board) shows the release train, the closed milestones not released yet",
+        "/dev-kit:usability for apps with a UI, then /dev-kit:docs all and /dev-kit:review docs",
         "/dev-kit:release --dry-run to see the checklist and the version it would use",
-        "/dev-kit:release (tags; pushes and deploys only as the brief allows)"
+        "/dev-kit:release (tags and records the release; pushes and deploys only as the brief allows)"
       ]
     },
     {
@@ -1186,8 +1187,20 @@
       "definition": "Architecture decision record in .dev/decisions.md; source auto, user, interview, policy, discovered or imported."
     },
     {
+      "term": "lifecycle",
+      "definition": "Where the project is: conception (interview, PRD, architecture, UX, UI) → planning (plan) → construction (milestones and the release train) → stable. A cycle, not a line: a scope change reopens conception and planning while construction goes on; a bug or improvement goes straight to construction. Derived from .dev/, never set by hand."
+    },
+    {
+      "term": "release train",
+      "definition": "The milestones closed since the last release. A release ships them between milestones, after usability (UI apps) and docs; release records it and the train empties."
+    },
+    {
+      "term": "stable",
+      "definition": "Lifecycle phase with nothing open: no milestone in progress, no queued issue, everything built is released. The next issue or change starts the cycle again."
+    },
+    {
       "term": "milestone",
-      "definition": "A cadence step M1, M2…; the next one starts only after the previous gate passes. Issues never renumber milestones."
+      "definition": "A cadence step M1, M2… inside construction; the next one starts only after the previous gate passes. Building and QA belong to the milestone, not to the project phase. Issues never renumber milestones."
     },
     {
       "term": "gate",
@@ -1363,7 +1376,7 @@
     },
     {
       "term": "status line",
-      "definition": "Line under the Claude Code prompt; the dev-kit one shows phase, milestone progress, the running task and the next command."
+      "definition": "Line under the Claude Code prompt; the dev-kit one shows the lifecycle phase (with the step in conception and planning), milestone progress, the running task and the next command."
     }
   ],
   "agents_called_by": {

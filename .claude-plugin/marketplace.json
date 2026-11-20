@@ -7,7 +7,7 @@
     {
       "name": "dev-kit",
       "source": "./.claude/plugins/dev-kit",
-      "description": "Kit for building complete applications, from requirements interview to release."
+      "description": "Kit for building complete applications and keeping them evolving: conception, planning, construction by milestones and releases, until the product is stable."
     }
   ]
 }

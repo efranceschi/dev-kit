@@ -359,7 +359,7 @@ class BoardTest(unittest.TestCase):
         self.assertEqual([x["id"] for x in st["inbox"]["open"]], ["R-001"])
         self.assertTrue(st["inbox"]["actions"])
         self.assertEqual(st["inbox"]["executor"]["state"], "offline")
-        self.assertEqual(st["next"]["command"], "/dev-kit:interview")  # the demo project is still in phase init
+        self.assertEqual(st["next"]["command"], "/dev-kit:interview")  # the demo project has no brief yet: conception · interview
 
     def test_request_writes_only_the_queue(self):
         dev = self.root / ".dev"
@@ -619,7 +619,7 @@ class BoardTest(unittest.TestCase):
         code, body = request(port, "GET", "/api/state")
         self.assertEqual(code, 200)
         d = json.loads(body)
-        for key in ("project", "phase", "phases", "progress", "milestones", "tasks", "next", "reviews", "quality",
+        for key in ("project", "phase", "step", "cycle", "progress", "milestones", "tasks", "next", "reviews", "quality",
                     "backlog", "questions", "log", "current_milestone", "board", "kit"):
             self.assertIn(key, d)
         self.assertRegex(d["kit"], r"^\d+\.\d+\.\d+")
@@ -627,6 +627,8 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(d["tasks"]["T-001"]["status"], "in_progress")
         self.assertNotIn("token", d["board"])
         self.assertEqual(d["lifecycle"], {"local_deploy": "off", "deploy_when": "none", "max_fix_rounds": 3})
+        self.assertEqual([p["key"] for p in d["cycle"]["phases"]], ["conception", "planning", "construction", "stable"])
+        self.assertEqual((d["phase"], d["step"]), ("conception", "interview"))  # no brief yet
         self.assertIsNone(d["milestones"][0]["deploy"])
         self.assertEqual(state_file.read_bytes(), before)
 

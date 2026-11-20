@@ -1,6 +1,6 @@
 # dev-kit
 
-A Claude Code plugin that builds a complete application, from requirements interview to release. You answer one interview; the kit then specifies, plans, implements, tests and audits almost on its own, and stops only when it needs a decision from you.
+A Claude Code plugin where specialised agents build a complete application and keep it evolving, from the requirements interview through milestones and releases until the product is stable. You answer one interview; the kit then specifies, plans, implements, tests, audits and releases almost on its own, and stops only when it needs a decision from you.
 
 - **25 skills**, invoked as `/dev-kit:<name>`.
 - **17 agents** the skills call: one implementer, one architecture consultant and 15 read-only reviewers.
@@ -41,7 +41,7 @@ Step by step: [getting started](docs/getting-started.md).
 | report a bug or ask for an improvement | `/dev-kit:issue "what happens"` |
 | see everything pending | `/dev-kit:backlog` |
 | put it in production | `/dev-kit:deploy` |
-| ship a version | `/dev-kit:release` |
+| ship the closed milestones (the release train) | `/dev-kit:release` |
 | know how much it cost | `/dev-kit:costs` |
 | review the session or send feedback to the author | `/dev-kit:feedback` |
 | run it overnight | [recipe](docs/recipes.md#let-it-run-overnight) |
@@ -51,12 +51,16 @@ All 25 skills by category, with arguments and examples: [skills](docs/skills.md)
 ## How it works, in short
 
 ```
-start → interview → prd → review → architecture → ux → ui → review → plan → review
-   → per milestone: implement ⇄ test → qa gate → (fixes → qa)*   [+ issues: buffer, cool-down, hotfix]
-   → usability → docs → review → release → deploy
+conception    interview → prd → review → architecture → ux → ui → review
+planning      plan → review                                  (and every replan)
+construction  per milestone: pull issues → implement ⇄ test → qa gate → (fixes → qa)* → deploy
+              release train: usability → docs → review → release   (closed milestones, between milestones)
+stable        nothing open, everything released
+                 ↺ bug or improvement → construction · scope change → conception and planning
 ```
 
-- **Milestones** M1, M2… are the cadence; each ends with a scored quality gate (0–100 per dimension, cut-off set in the interview).
+- **The lifecycle is a cycle**, derived from `.dev/` and never set by hand: a scope change reopens conception and planning while the milestone in construction keeps going; `/dev-kit:status` shows the phase and step (`construction · M3`).
+- **Milestones** M1, M2… are the cadence of construction; each ends with a scored quality gate (0–100 per dimension, cut-off set in the interview). Building and QA belong to the milestone, not to the project phase.
 - **Autonomy** is yours to set: supervised (asks at each decision point, always with a recommendation) or unattended (parks what needs you and keeps going).
 - **Bugs and ideas** found at any time enter by class of service without renumbering milestones.
 - Every question comes with a recommended option; short tips (`💡`) explain each mechanism the first times it matters.
@@ -71,8 +75,8 @@ Full picture: [concepts](docs/concepts.md) and the [flow diagram](docs/dev-kit-f
 | [recipes](docs/recipes.md) | "how do I…?" (bug, overnight run, costs, deploy, resume…) |
 | [skills](docs/skills.md) | every skill: when, arguments, examples, outputs |
 | [agents](docs/agents.md) | every agent: role, model tier, who calls it |
-| [concepts](docs/concepts.md) | state, gates and scores, autonomy, isolation, issues, deploy, costs, logs |
-| [glossary](docs/glossary.md) | AC, ADR, gate, delta, buffer, cool-down, hotfix, slot, park… |
+| [concepts](docs/concepts.md) | lifecycle, state, gates and scores, autonomy, isolation, issues, deploy, costs, logs |
+| [glossary](docs/glossary.md) | lifecycle, release train, AC, ADR, gate, delta, buffer, cool-down, hotfix, slot, park… |
 | [troubleshooting](docs/troubleshooting.md) | when something goes wrong |
 | [maintainers](docs/maintainers.md) | layout, scripts, tests, how docs are generated |
 
