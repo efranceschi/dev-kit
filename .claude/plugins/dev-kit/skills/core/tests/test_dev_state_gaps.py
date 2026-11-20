@@ -253,6 +253,71 @@ class TestFixTasks(Base):
                                           "--include", "F-003", "--json").stdout)
         self.assertEqual((again["created"], sorted(again["skipped"])), ([], ["F-001", "F-003"]))
 
+    def _findings(self, round_n: int, items: list) -> None:
+        f = self.root / ".dev" / "qa" / "M1" / "findings.json"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({"round": round_n, "findings": items}), encoding="utf-8")
+
+    def _fix(self) -> dict:
+        return json.loads(self.run_state("fix-tasks", "--from", ".dev/qa/M1/findings.json", "--milestone", "M1", "--json").stdout)
+
+    def test_a_fix_that_does_not_hold_is_reopened_then_blocked(self) -> None:
+        self.init_with_plan()
+        self._findings(1, [{"id": "F-001", "severity": "high", "title": "Empty password accepted", "auditor": "code-reviewer"}])
+        tid = self._fix()["created"][0].split("=")[0]
+        self.run_state("start", tid); self.run_state("done", tid)
+        # round 2: the same finding is still open (auditors kept its id): the card leaves Done
+        self._findings(2, [{"id": "F-001", "severity": "high", "title": "Empty password accepted", "previous": True}])
+        out = self._fix()
+        self.assertEqual((out["created"], out["reopened"]), ([], [f"{tid}=F-001"]))
+        t = self.state()["tasks"][tid]
+        self.assertEqual((t["status"], t["returns"]), ("todo", 1))
+        self.assertNotIn("done_at", t)
+        # it comes back a second time: the limit is reached, the card goes to Blocked with the reason
+        self.run_state("start", tid); self.run_state("done", tid)
+        self._findings(3, [{"id": "F-001", "severity": "high", "title": "Empty password accepted", "previous": True}])
+        self.assertEqual(self._fix()["blocked"], [f"{tid}=F-001"])
+        t = self.state()["tasks"][tid]
+        self.assertEqual(t["status"], "blocked")
+        self.assertIn("rounds_exhausted", t["blocked_reason"])
+
+    def test_reopen_survives_a_new_task_created_in_the_same_run(self) -> None:
+        self.init_with_plan()
+        self._findings(1, [{"id": "F-001", "severity": "high", "title": "Empty password accepted", "auditor": "code-reviewer"}])
+        tid = self._fix()["created"][0].split("=")[0]
+        self.run_state("start", tid); self.run_state("done", tid)
+        self._findings(2, [{"id": "F-001", "severity": "high", "title": "Empty password accepted", "previous": True},
+                           {"id": "F-002", "severity": "high", "title": "Token never expires", "auditor": "security-auditor"}])
+        out = self._fix()
+        self.assertEqual((len(out["created"]), out["reopened"]), (1, [f"{tid}=F-001"]))
+        self.assertEqual(self.state()["tasks"][tid]["status"], "todo")
+
+    def test_a_new_finding_reusing_a_closed_id_gets_its_own_task(self) -> None:
+        self.init_with_plan()
+        self._findings(1, [{"id": "F-001", "severity": "high", "title": "Empty password accepted", "auditor": "code-reviewer"}])
+        old = self._fix()["created"][0].split("=")[0]
+        self.run_state("start", old); self.run_state("done", old)
+        # round 2: F-001 was closed; the scorer gives the next new finding the same id
+        self._findings(2, [{"id": "F-001", "severity": "high", "title": "SQL injection in search", "auditor": "security-auditor"}])
+        out = self._fix()
+        self.assertEqual(len(out["created"]), 1)
+        tasks = {t["source"]: t for t in self.state()["tasks"].values() if t.get("type") == "fix"}
+        self.assertEqual(tasks["qa/M1/report.md#F-001-r2"]["title"], "SQL injection in search")
+        self.assertEqual(self.state()["tasks"][old]["status"], "done")
+
+    def test_a_round_past_the_limit_blocks_the_open_fix_tasks(self) -> None:
+        self.init_with_plan()
+        for n in range(1, 4):  # rounds 1-3 fail: still within the 3 agreed fix rounds
+            self.run_state("gate", "M1", "pending", "--score", "70", "--count-run")
+        self._findings(4, [{"id": "F-009", "severity": "high", "title": "Still broken", "auditor": "code-reviewer"}])
+        tid = self._fix()["created"][0].split("=")[0]
+        self.assertEqual(self.state()["tasks"][tid]["status"], "todo")
+        out = self.run_state("gate", "M1", "pending", "--score", "72", "--count-run").stdout
+        self.assertIn("rounds_exhausted", out)
+        t = self.state()["tasks"][tid]
+        self.assertEqual(t["status"], "blocked")
+        self.assertIn("QA round limit reached (3 fix rounds of 3", t["blocked_reason"])
+
 
 class TestArtifactsAndXref(Base):
     def setup_docs(self) -> Path:

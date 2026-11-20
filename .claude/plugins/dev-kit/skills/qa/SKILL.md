@@ -31,7 +31,7 @@ Let `DS` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root
 `--only` overrides the selection (aliases: deps, ops, perf). A skipped auditor does not count in the score; say which were skipped and why in the report.
 
 ## 2. Run the auditors (parallel, within the host's budget)
-Log `DS event skill_start --set skill=qa --set args_kind=milestone` at the start and `skill_end` (with `status`, `duration_s` and your `feedback` on the kit) at the end (`conventions.md` §13).
+Log `DS event skill_start --set skill=qa --set args_kind=milestone --set scope=<M>` at the start and `skill_end --set scope=<M>` (with `status`, `duration_s` and your `feedback` on the kit) at the end; the board uses the scope to place the auditors of this round on the milestone's QA stage (`conventions.md` §13).
 
 Give `copy-reviewer` the list from `DS strings --since <commit before the milestone> --json` (only the new user-facing strings) and `design-reviewer`/`ui` the result of `DS contrast --json`. Deferred dependency upgrades become issues (`DS add-issue --type improvement --class intangible`, or `standard` for a vulnerable one), not deferred findings.
 
@@ -56,6 +56,7 @@ Spawn the selected auditors with the Agent tool, `run_in_background: true`, then
 - Dimension below its minimum without blocking findings (many mediums): create fix tasks for the cheapest, highest-penalty mediums first until the projected score clears the cut-off (each medium costs 8 points, low 2); remaining mediums/lows are listed as deferred.
 - Gate: if the score verdict is pass → `DS gate <M> passed --score <overall> --count-run`; when it was the last milestone, `DS set phase usability` (or `docs` for products without a UI). Otherwise `DS gate <M> pending --score <overall> --count-run --note "<reasons> → fix tasks T-…"`. The next round is one batch: `implement` runs every fix task, then `qa <M>` runs once (one local deploy, at most); production gets the milestone only after the gate passes (`conventions.md` §12).
 - `--scope T-xxx`: no gate. Score with `--scope T-xxx --kind gate` into `.dev/qa/T-xxx/`, then record `DS review hotfix-T-xxx pass|fail --score <overall> --count-run` (a hotfix) or `DS review task-T-xxx …` (any other task); fix tasks go to the task's milestone. `release --hotfix` checks this review.
+- Limits and cards: `fix-tasks` reopens a fix task whose finding is still open after the task was done (the fix did not hold) and blocks it the second time; `DS gate <M> pending --count-run` blocks the open fix tasks when `qa_runs` exceeds `autonomy.max_fix_rounds_per_gate`. Either way the card goes to Blocked with the reason, `next` stops picking it, and it shows under Needs you on the board; relay the output lines `reopened`, `blocked` and `rounds_exhausted`. After the decision, `DS unblock T-xxx` (keep fixing) or the forced gate below.
 - Rounds: if `qa_runs` exceeds `autonomy.max_fix_rounds_per_gate`, apply `pause_policy.rounds_exhausted` (`conventions.md` §10; `auto_recommend` accepts with `--force --note "policy:rounds_exhausted"` only where §9 recommends it). With `ask`, stop and ask the user (recommended option first per `conventions.md` §9): keep fixing, accept with `DS gate <M> passed --score <n> --force` plus an ADR (`source: user`), or replan.
 
 ## 5. Report to the user

@@ -1,4 +1,4 @@
-/* dev-kit board - read-only view of .dev/state.json: sprint window, what needs the user, the stages of the milestone with what runs in each, the sprint kanban, insights. No dependencies. All untrusted text goes through textContent. */
+/* dev-kit board - read-only view of .dev/state.json: milestone window, what needs the user, the stages of the milestone with what runs in each, the milestone kanban, insights. No dependencies. All untrusted text goes through textContent. */
 (() => {
   "use strict";
 
@@ -60,12 +60,22 @@
     return `${Math.floor(s / 3600)} h ago`;
   }
   function tasksOf(m) { return (m ? m.tasks : []).map((id) => ({ id, ...data.tasks[id] })); }
-  function gateBadge(m, q) {
+  function gateBadge(m) {
     if (!m) return null;
-    if (m.gate === "passed") return h("span", { class: "badge good" }, "✓ Gate passed" + (m.score != null ? ` · ${m.score}` : ""));
-    if (m.gate === "skipped") return h("span", { class: "badge neutral" }, "Gate skipped");
-    if (m.score != null) return h("span", { class: "badge bad" }, `✕ Gate failed · ${m.score} / ${q.min_overall}`);
-    return h("span", { class: "badge warn" }, "◌ Gate pending" + (m.qa_runs ? ` · ${m.qa_runs} QA runs` : ""));
+    const x = qaState(m);
+    const why = qaReason(x.qa, m);
+    const last = x.qa.last;
+    const title = last ? `Last QA run: overall ${last.overall} (cut-off ${last.cutoff}); ${why || "no dimension below its minimum"}`
+      : `Cut-off ${data.quality.min_overall} overall · ${data.quality.min_dimension} per dimension`;
+    let b;
+    if (m.gate === "passed") b = h("span", { class: "badge good" }, "✓ Gate passed" + (m.score != null ? ` · ${m.score}` : "") + (x.qa.runs > 1 ? ` in round ${x.qa.runs}` : ""));
+    else if (m.gate === "skipped") b = h("span", { class: "badge neutral" }, "Gate skipped");
+    else if (x.running) b = h("span", { class: "badge warn" }, `◌ QA round ${x.round} running`);
+    else if (x.exhausted) b = h("span", { class: "badge bad" }, `✕ ${x.qa.runs} QA rounds failed · needs your decision`);
+    else if (x.qa.runs) b = h("span", { class: "badge bad" }, `✕ Round ${x.qa.runs} failed` + (why ? ` · ${why.length > 44 ? why.slice(0, 43) + "…" : why}` : ""));
+    else b = h("span", { class: "badge warn" }, "◌ Gate pending");
+    b.title = title;
+    return b;
   }
 
   // ------------------------------------------------------------------ tooltip
@@ -92,7 +102,7 @@
   let typeFilter = "";       // task type filter of the kanban
   let expanded = new Set();  // kanban columns showing every card
   let mobileCol = null;      // column shown on narrow screens (null = pick the most useful one)
-  let goalOpen = false;      // sprint goal expanded
+  let goalOpen = false;      // milestone goal expanded
   const INS_KEY = "board-insight-v2";  // v2: Quality became the default tab
   let insTab = INS.includes(store.get(INS_KEY, "")) ? store.get(INS_KEY, "") : "quality";
   let firstRender = true;
@@ -109,8 +119,11 @@
   }
   const activeAgents = () => ((data && data.agents && data.agents.active) || []);
   const agentsOn = (key) => activeAgents().filter((x) => x.node === key);
-  const agentBits = (x) => [h("span", { class: "agent-dot", "aria-hidden": "true" }), h("span", { class: "agent-name", text: x.agent }),
-    h("span", { class: "agent-time", "data-start": x.started_at, text: dur((Date.now() - parseT(x.started_at)) / 1000) })];
+  const roleOf = (name) => ((data && data.agent_roles) || {})[name] || {};
+  const agentBits = (x, withRole) => [h("span", { class: "agent-dot", "aria-hidden": "true" }),
+    h("span", { class: "agent-name", text: x.agent, title: roleOf(x.agent).about || null }),
+    withRole && roleOf(x.agent).role ? h("span", { class: "agent-role", text: roleOf(x.agent).role }) : null,
+    h("span", { class: "agent-time", "data-start": x.started_at, text: dur((Date.now() - parseT(x.started_at)) / 1000) })].filter(Boolean);
   /** Task ids inside free text become buttons that open the task; everything else stays text. */
   function linkify(text) {
     return String(text || "").split(/\b(T-\d{1,5})\b/).map((part) => (TASK_RE.test(part) && data.tasks[part]
@@ -168,7 +181,7 @@
     if (el) el.focus({ preventScroll: true });
   }
 
-  // ------------------------------------------------------------------ popovers (options, sprint lists) and theme
+  // ------------------------------------------------------------------ popovers (options, milestone lists) and theme
   const pops = [];
   function popover(btn, pop) {
     const close = () => { pop.hidden = true; btn.setAttribute("aria-expanded", "false"); };
@@ -241,20 +254,20 @@
     return data.current_milestone || ids[0] || null;
   }
   const currentMilestone = () => (data && data.milestones.find((x) => x.id === currentId())) || null;
-  function selectSprint(id, focusTab) {
+  function selectMilestone(id, focusTab) {
     selected = id; expanded = new Set(); goalOpen = false; mobileCol = null;
     render();
     if (focusTab && $(`tab-${currentId()}`)) $(`tab-${currentId()}`).focus();
   }
 
-  // ------------------------------------------------------------------ sprint: tabs, goal, progress
-  const TAB_WINDOW = 3;       // sprints shown as tabs: the selected one and its neighbours; the rest sit in the earlier/later lists
+  // ------------------------------------------------------------------ milestone: tabs, goal, progress
+  const TAB_WINDOW = 3;       // milestones shown as tabs: the selected one and its neighbours; the rest sit in the earlier/later lists
   function tabWindow(ids, cur) {
     const i = Math.max(0, ids.indexOf(cur));
     const start = Math.max(0, Math.min(i - Math.floor(TAB_WINDOW / 2), ids.length - TAB_WINDOW));
     return [start, Math.min(ids.length, start + TAB_WINDOW)];
   }
-  function sprintInfo(m) {
+  function milestoneInfo(m) {
     const ts = tasksOf(m);
     return { active: ts.some((t) => t.status === "in_progress"), done: ts.filter((t) => t.status === "done").length, total: ts.length };
   }
@@ -262,20 +275,22 @@
     const cur = currentId();
     const ms = data.milestones;
     const [a, b] = tabWindow(ms.map((m) => m.id), cur);
-    // sprints as one chevron strip: [+N earlier] M-1 › M › M+1 [+N later], coloured by the milestone's state
+    // milestones as one chevron strip: [+N earlier] M-1 › M › M+1 [+N later], coloured by the milestone's state
     const hasEarlier = a > 0, hasLater = b < ms.length;
     const shown = ms.slice(a, b);
     const tabs = shown.map((m, i) => {
-      const x = sprintInfo(m);
+      const x = milestoneInfo(m);
       const closed = m.gate === "passed" || m.gate === "skipped";
-      const state = m.id === cur ? "here" : closed ? "st-done" : x.active || m.id === data.current_milestone ? "st-current" : "st-upcoming";
+      const inQa = !closed && x.total > 0 && x.done === x.total;
+      const state = m.id === cur ? "here" : closed ? "st-done" : x.active || inQa || m.id === data.current_milestone ? "st-current" : "st-upcoming";
       const edge = `${i === 0 && !hasEarlier ? " chev-first" : ""}${i === shown.length - 1 && !hasLater ? " chev-last" : ""}`;
       return h("button", {
         role: "tab", type: "button", id: `tab-${m.id}`, class: `schev ${state}${edge}`, "aria-selected": String(m.id === cur), "aria-controls": "main",
         tabindex: m.id === cur ? "0" : "-1", title: `${m.title || m.id} · gate ${m.gate}`,
-        onclick: () => selectSprint(m.id, true),
+        onclick: () => selectMilestone(m.id, true),
       }, closed ? h("span", { class: "tab-ok", "aria-hidden": "true", text: "✓" }) : h("span", { class: `tab-dot ${x.active ? "active" : m.gate}`, "aria-hidden": "true" }),
       h("strong", { text: m.id }), h("span", { class: "tab-count", text: `${x.done}/${x.total}` }),
+      !closed && x.total > 0 && x.done === x.total ? h("span", { class: "tab-qa", title: "All tasks done; waiting for the QA gate", text: "QA" }) : null,
       m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null);
     });
     if (!tabs.length) tabs.push(h("span", { class: "card-sub" }, "No milestones yet. They appear after ", cmd("/dev-kit:plan"), "."));
@@ -283,10 +298,10 @@
     const side = (key, list, word) => {
       $(`tabs-${key}-wrap`).hidden = !list.length;
       fill($(`tabs-${key}`), `+${list.length}`, h("span", { class: "mt-word", text: ` ${word}` }));
-      $(`tabs-${key}`).setAttribute("aria-label", `${plural(list.length, `${word} sprint`)}: choose one`);
+      $(`tabs-${key}`).setAttribute("aria-label", `${plural(list.length, `${word} milestone`)}: choose one`);
       fill($(`tabs-${key}-list`), list.map((m) => {
-        const x = sprintInfo(m);
-        return h("li", {}, h("button", { type: "button", class: "sprint-item", onclick: () => { pops.forEach((p) => p.close()); selectSprint(m.id, true); } },
+        const x = milestoneInfo(m);
+        return h("li", {}, h("button", { type: "button", class: "ms-item", onclick: () => { pops.forEach((p) => p.close()); selectMilestone(m.id, true); } },
           h("span", { class: `tab-dot ${x.active ? "active" : m.gate}`, "aria-hidden": "true" }), h("strong", { text: m.id }),
           h("span", { class: "si-title", text: m.title || "" }), h("span", { class: "si-count", text: `${x.done}/${x.total}` }),
           m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null));
@@ -296,14 +311,14 @@
     side("later", ms.slice(b), "later");
     $("tabs-back").hidden = !data.current_milestone || cur === data.current_milestone;
   }
-  $("tabs-back").addEventListener("click", () => { selected = null; selectSprint(null, true); });
+  $("tabs-back").addEventListener("click", () => { selected = null; selectMilestone(null, true); });
 
-  function renderSprint(m) {
+  function renderMilestone(m) {
     const ts = tasksOf(m);
     const counts = Object.fromEntries(STATUS.map((st) => [st.key, ts.filter((t) => t.status === st.key).length]));
     const pct = ts.length ? Math.round((counts.done / ts.length) * 100) : 0;
-    $("sprint-title").textContent = m ? `${m.id} · ${m.title || "Sprint"}` : "No sprint planned yet";
-    const goal = $("sprint-goal");
+    $("ms-title").textContent = m ? `${m.id} · ${m.title || "Milestone"}` : "No milestone planned yet";
+    const goal = $("ms-goal");
     if (m) goal.textContent = m.goal || "No goal paragraph in plan.md for this milestone.";
     else fill(goal, "Run ", cmd("/dev-kit:plan"), " to create milestones and tasks.");
     goal.classList.remove("open");
@@ -312,9 +327,18 @@
     $("goal-more").hidden = !clipped;
     $("goal-more").textContent = goalOpen ? "Show less" : "Show more";
     $("goal-more").setAttribute("aria-expanded", String(goalOpen));
-    $("sprint-done").textContent = String(counts.done);
-    $("sprint-total").textContent = ` of ${plural(ts.length, "task")} done`;
-    $("sprint-pct").textContent = `${pct}%`;
+    $("ms-done").textContent = String(counts.done);
+    $("ms-total").textContent = ` of ${plural(ts.length, "task")} done`;
+    // the percentage counts tasks, not the milestone: show where the milestone is instead
+    const st = m ? stagesOf(m) : [];
+    const live = st.filter((x) => x.state !== "na");
+    const hereIdx = live.findIndex((x) => x.here);
+    const closedNow = st.length && st.at(-1).state === "done";
+    $("ms-pct").textContent = !m ? "" : closedNow ? "Closed" : hereIdx >= 0 ? `Stage ${hereIdx + 1} of ${live.length} · ${live[hereIdx].name}` : `${pct}%`;
+    $("ms-pct").title = m ? `${pct}% of the tasks are done` : "";
+    const next = st.slice(hereIdx + 1).find((x) => x.state !== "na");
+    $("ms-caption").textContent = m && ts.length && counts.done === ts.length && !closedNow
+      ? `All tasks done; the milestone closes after ${hereIdx >= 0 ? (live[hereIdx].key === "qa" ? "the QA gate" : live[hereIdx].name.toLowerCase()) : "its gate"}${next && next.key !== "close" ? ` and ${next.name.toLowerCase()}` : ""}.` : "";
     const order = ["done", "in_progress", "blocked", "todo"];
     const label = (k) => STATUS.find((x) => x.key === k).label;
     fill($("segbar"), order.filter((k) => counts[k]).map((k) => {
@@ -324,16 +348,15 @@
     }));
     $("segbar").setAttribute("aria-label", order.map((k) => `${label(k)} ${counts[k]}`).join(", "));
     fill($("seg-legend"), order.map((k) => h("li", {}, h("span", { class: `swatch st-${k}`, "aria-hidden": "true" }), `${label(k)} ${counts[k]}`)));
-    const p = data.progress, c = data.costs, q = data.quality;
-    const badge = gateBadge(m, q);
-    if (badge) badge.title = `Cut-off ${q.min_overall} overall · ${q.min_dimension} per dimension`;
-    fill($("sprint-facts"),
+    const p = data.progress, c = data.costs;
+    const badge = gateBadge(m);
+    fill($("ms-facts"),
       h("span", { title: "Tasks done in the whole project", text: `Project ${p.done}/${p.total}` }),
-      c ? h("span", { title: `${compact(c.tokens || 0)} tokens (API-equivalent estimate)`, text: `Cost US$ ${Number(c.usd || 0).toFixed(2)}` })
+      c && (Number(c.usd) > 0 || Number(c.tokens) > 0) ? h("span", { title: `${compact(c.tokens || 0)} tokens (API-equivalent estimate)`, text: `Cost US$ ${Number(c.usd || 0).toFixed(2)}` })
         : h("span", { class: "fact-cmd", title: "Run /dev-kit:costs to compute the estimated cost" }, "Cost not computed", copyBtn("/dev-kit:costs")),
       badge);
   }
-  $("goal-more").addEventListener("click", () => { goalOpen = !goalOpen; renderSprint(currentMilestone()); });
+  $("goal-more").addEventListener("click", () => { goalOpen = !goalOpen; renderMilestone(currentMilestone()); });
 
   // ------------------------------------------------------------------ kanban
   function waitingOn(t) {
@@ -383,7 +406,7 @@
     const box = $("kanban");
     if (!m) {
       fill($("col-tabs"));
-      fill(box, h("div", { class: "board-empty" }, "No sprint planned yet. Run ", cmd("/dev-kit:plan"), " to create milestones and tasks."));
+      fill(box, h("div", { class: "board-empty" }, "No milestone planned yet. Run ", cmd("/dev-kit:plan"), " to create milestones and tasks."));
       return;
     }
     const by = Object.fromEntries(STATUS.map((st) => [st.key, shown.filter((t) => t.status === st.key)]));
@@ -439,7 +462,7 @@
     const box = $("burndown");
     const ser = m && burndownSeries(m);
     if (!ser) {
-      fill(box, h("div", { class: "chart-empty", text: "The burndown starts when the first task of this sprint starts." }));
+      fill(box, h("div", { class: "chart-empty", text: "The burndown starts when the first task of this milestone starts." }));
       fill($("burndown-table"));
       return;
     }
@@ -491,7 +514,7 @@
     hit.addEventListener("pointerleave", out); hit.addEventListener("blur", out);
     svg.append(hit);
     fill(box, svg);
-    const rows = [[ser.t0, ser.total, "sprint start"]];
+    const rows = [[ser.t0, ser.total, "milestone start"]];
     let rem = ser.total;
     for (const d of ser.dones) { rem -= 1; rows.push([d, rem, "task done"]); }
     fill($("burndown-table"), h("table", {}, h("thead", {}, h("tr", {}, h("th", { text: "When" }), h("th", { text: "Remaining" }), h("th", { text: "Event" }))),
@@ -506,7 +529,7 @@
       return { id: m.id, title: m.title, done: ts.filter((t) => t.status === "done").length, total: ts.length };
     }).filter((r) => r.total);
     if (!rows.length) {
-      fill(box, h("div", { class: "chart-empty", text: "Velocity appears once sprints have tasks." }));
+      fill(box, h("div", { class: "chart-empty", text: "Velocity appears once milestones have tasks." }));
       fill($("velocity-table"));
       return;
     }
@@ -515,7 +538,7 @@
     const y = (v) => T + (1 - v / max) * (H - T - B);
     const band = (W - L - R) / rows.length;
     const bw = Math.min(24, band * 0.6);
-    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Tasks done per sprint: " + rows.map((r) => `${r.id} ${r.done}`).join(", ") });
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Tasks done per milestone: " + rows.map((r) => `${r.id} ${r.done}`).join(", ") });
     svg.append(s("defs", {}, s("linearGradient", { id: "accent-grad", x1: "0", y1: "1", x2: "0", y2: "0" },
       s("stop", { offset: "0", "stop-color": "#8b5cf6" }), s("stop", { offset: "1", "stop-color": "#22d3ee" }))));
     const step = max <= 6 ? 1 : Math.ceil(max / 5);
@@ -538,7 +561,7 @@
       svg.append(s("text", { x: cx, y: H - 8, "text-anchor": "middle", text: r.id }));
     });
     fill(box, svg);
-    fill($("velocity-table"), h("table", {}, h("thead", {}, h("tr", {}, h("th", { text: "Sprint" }), h("th", { text: "Done" }), h("th", { text: "Total" }))),
+    fill($("velocity-table"), h("table", {}, h("thead", {}, h("tr", {}, h("th", { text: "Milestone" }), h("th", { text: "Done" }), h("th", { text: "Total" }))),
       h("tbody", {}, rows.map((r) => h("tr", {}, h("td", { text: `${r.id} ${r.title || ""}` }), h("td", { text: String(r.done) }), h("td", { text: String(r.total) }))))));
   }
 
@@ -553,13 +576,18 @@
     const b = data.backlog || {};
     const hot = b.hotfix_open || [];
     const warns = b.warnings || [];
-    const n = blocked.length + data.questions.length + hot.length;
+    // milestones past the QA limit with no blocked card to show it (the round failed on scores alone)
+    const stuck = data.milestones.filter((m) => qaState(m).exhausted && !qaState(m).fixBlocked.length);
+    const n = blocked.length + data.questions.length + hot.length + stuck.length;
     // the strip exists only while something needs the user; warnings alone ride along but do not open it
     const strip = $("needs");
     strip.hidden = !n;
     $("needs-count").textContent = n ? plural(n, "item") : "";
     if (!n) { fill($("impediments")); return; }
     fill($("impediments"),
+      stuck.length ? listBlock("QA rounds used up", stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }),
+        h("span", { text: `${qaState(m).qa.runs - 1} fix rounds used of ${qaState(m).max} (${qaReason(qaState(m).qa, m) || "see the QA report"}). Keep fixing, accept with an ADR, or replan.` }),
+        h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))), "") : null,
       hot.length ? listBlock("Open hotfixes", hot.map((id) => h("li", {}, h("span", { class: "id", text: String(id) }),
         h("span", { text: (data.tasks[id] || (b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))), "") : null,
       blocked.length ? listBlock("Blocked tasks", blocked.map(([id, t]) => h("li", { class: "has-btn" },
@@ -581,15 +609,67 @@
   // ------------------------------------------------------------------ stages of the milestone, in the order the kit runs them
   // Plan → Build → QA gate ⇄ Fixes → Smoke (local preview, inside qa) → Deploy (per-milestone production) → Closed
   const isFix = (t) => t.type === "fix" && Boolean(t.source);
+  /** Where the QA loop of a milestone stands: rounds run, fixes, whether a round is running now. */
+  function qaState(m) {
+    const qa = m.qa || { runs: m.qa_runs || 0, history: [] };
+    const ts = tasksOf(m);
+    const fixes = ts.filter(isFix), fixOpen = fixes.filter((t) => t.status !== "done");
+    const buildOpen = ts.filter((t) => !isFix(t) && t.status !== "done");
+    const passed = m.gate === "passed" || m.gate === "skipped";
+    const agents = agentsOn(`GATE:${m.id}`);
+    const running = !passed && (Boolean(qa.round) || agents.length > 0);
+    const max = (data.lifecycle || {}).max_fix_rounds || 3;
+    const fixActive = fixes.filter((t) => t.status === "todo" || t.status === "in_progress");
+    const fixBlocked = fixes.filter((t) => t.status === "blocked");
+    // past the agreed fix rounds (or a fix that did not hold twice) the next step is a decision: dev_state blocks those cards
+    const exhausted = !passed && !running && !fixActive.length && (qa.runs > max || fixBlocked.length > 0);
+    return { qa, ts, fixes, fixOpen, fixActive, fixBlocked, buildOpen, passed, agents, running, max, exhausted, round: qa.runs + 1 };
+  }
+  /** Why the last QA round failed, in words: dimensions under their minimum first, then blockers, then the overall. */
+  function qaReason(qa, m) {
+    const last = qa && qa.last;
+    if (!last) return (m && m.gate_note) || (qa && qa.note) || "";
+    const below = last.below || [];
+    const parts = [];
+    if (below.length) {
+      const mins = new Set(below.map((d) => d.min));
+      parts.push(mins.size === 1 ? `${below.map((d) => `${d.dimension} ${d.score}`).join(", ")} below ${below[0].min}`
+        : below.map((d) => `${d.dimension} ${d.score} < ${d.min}`).join(", "));
+    }
+    if (last.blockers) parts.push(plural(last.blockers, "blocking finding"));
+    if (last.overall != null && last.cutoff != null && last.overall < last.cutoff) parts.push(`overall ${last.overall} below ${last.cutoff}`);
+    return parts.join("; ");
+  }
+  /** The QA loop as a trail: one pill per round, the fixes in between, and the round running or due now. */
+  function qaTrail(m, x) {
+    const hist = x.qa.history && x.qa.history.length ? x.qa.history
+      : Array.from({ length: x.qa.runs }, (_, i) => ({ n: i + 1, value: i === x.qa.runs - 1 ? m.gate : "pending", score: i === x.qa.runs - 1 ? m.score : null }));
+    const pills = [];
+    hist.forEach((r, i) => {
+      const ok = r.value === "passed" || r.value === "skipped";
+      pills.push({ cls: ok ? "ok" : "bad", text: `R${r.n} ${ok ? "✓" : "✕"}${r.score != null ? ` ${r.score}` : ""}`,
+        title: `Round ${r.n}: ${ok ? "passed" : "failed"}${r.score != null ? ` with ${r.score}` : ""}${i === hist.length - 1 && !ok ? ` · ${qaReason(x.qa, m)}` : ""}` });
+    });
+    if (x.fixes.length) {
+      const done = x.fixes.length - x.fixOpen.length;
+      pills.push({ cls: x.fixBlocked.length ? "bad" : x.fixOpen.length ? "run" : "ok",
+        text: `${done}/${plural(x.fixes.length, "fix", "fixes")}${x.fixBlocked.length ? ` · ${x.fixBlocked.length} blocked` : x.fixOpen.length ? "" : " ✓"}`,
+        title: x.fixBlocked.length ? `${x.fixBlocked.length} fix task(s) blocked: the agreed limit was reached` : x.fixOpen.length ? `${x.fixOpen.length} fix task(s) still open` : "All fix tasks done" });
+    }
+    if (!x.passed && x.ts.length && !x.buildOpen.length) {
+      if (x.running) pills.push({ cls: "run", text: `R${x.round} ●`, title: `Round ${x.round} is running now` });
+      else if (x.exhausted) pills.push({ cls: "bad", text: "decide", title: "The agreed limit was reached: keep fixing, accept with an ADR, or replan" });
+      else if (!x.fixOpen.length) pills.push({ cls: "next", text: `R${x.round} next`, title: `Round ${x.round} has not started yet` });
+    }
+    return pills;
+  }
   function stagesOf(m) {
     const ts = tasksOf(m);
     const lc = data.lifecycle || {};
-    const q = data.quality || {};
-    const build = ts.filter((t) => !isFix(t)), fixes = ts.filter(isFix);
-    const open = (list) => list.filter((t) => t.status !== "done");
-    const buildOpen = open(build), fixOpen = open(fixes);
-    const passed = m.gate === "passed" || m.gate === "skipped";
-    const qaAgents = agentsOn(`GATE:${m.id}`);
+    const build = ts.filter((t) => !isFix(t));
+    const buildOpen = build.filter((t) => t.status !== "done");
+    const x = qaState(m);
+    const passed = x.passed;
     const smokeOn = lc.local_deploy && lc.local_deploy !== "off";
     const deployOn = lc.deploy_when === "per_milestone";
     const dep = m.deploy;
@@ -599,16 +679,24 @@
     st.push({ key: "build", name: "Build", tasks: build,
       state: !ts.length ? "upcoming" : buildOpen.length ? "current" : "done",
       note: build.length ? `${build.length - buildOpen.length}/${build.length} done` : "No tasks" });
-    const failed = !passed && m.score != null && m.score < (q.min_overall ?? 0);
-    st.push({ key: "qa", name: "QA gate", tasks: [], agents: qaAgents,
-      state: passed ? "done" : qaAgents.length ? "current" : failed && fixOpen.length ? "failed"
-        : ts.length && !buildOpen.length && !fixOpen.length ? "current" : "upcoming",
-      note: passed ? (m.gate === "skipped" ? "Skipped" : `Passed${m.score != null ? ` · ${m.score}` : ""}`)
-        : failed ? `Failed · ${m.score} / ${q.min_overall}` : m.qa_runs ? plural(m.qa_runs, "run") : "Not run yet" });
-    const rounds = `round ${Math.max(1, m.qa_runs || 0)} of ${lc.max_fix_rounds || 3}`;
-    st.push({ key: "fixes", name: "Fixes", tasks: fixes,
-      state: fixOpen.length ? "current" : fixes.length ? "done" : passed ? "na" : "upcoming",
-      note: fixOpen.length ? `${fixes.length - fixOpen.length}/${fixes.length} done · ${rounds}` : fixes.length ? `${plural(fixes.length, "fix", "fixes")} done` : passed ? "None needed" : "Only if QA fails" });
+    // QA and its fixes are one loop: audit → fix → audit again, until the gate passes
+    const qaCmd = `/dev-kit:qa ${m.id}`;
+    let qaNote, qaCmdShown = null, qaStateName;
+    if (passed) { qaStateName = "done"; qaNote = m.gate === "skipped" ? "Skipped" : `Passed${m.score != null ? ` · ${m.score}` : ""}${x.qa.runs > 1 ? ` in round ${x.qa.runs}` : ""}`; }
+    else if (!ts.length || buildOpen.length) { qaStateName = "upcoming"; qaNote = "After the build"; }
+    else if (x.running) {
+      qaStateName = "current";
+      const r = x.qa.round;
+      qaNote = `Round ${x.round} running` + (r && r.spawned ? ` · ${r.done.length} of ${r.spawned} auditors done` : "");
+    } else if (x.exhausted) {
+      qaStateName = "failed";
+      qaNote = x.qa.runs > x.max ? `${x.qa.runs - 1} fix rounds used of ${x.max}: needs your decision`
+        : `${plural(x.fixBlocked.length, "fix", "fixes")} did not hold twice: needs your decision`;
+    } else if (x.fixActive.length) { qaStateName = "current"; qaNote = `Fixing round ${x.qa.runs}: ${x.fixes.length - x.fixOpen.length}/${x.fixes.length} done · ${qaReason(x.qa, m)}`; }
+    else if (x.qa.runs) { qaStateName = "current"; qaNote = `Fixes done; round ${x.round} not started. Run`; qaCmdShown = qaCmd; }
+    else { qaStateName = "current"; qaNote = "Tasks done; round 1 not started. Run"; qaCmdShown = qaCmd; }
+    st.push({ key: "qa", name: "QA & fixes", tasks: x.fixes, agents: x.agents, state: qaStateName, note: qaNote, cmd: qaCmdShown,
+      trail: qaTrail(m, x), decide: x.exhausted && !x.fixBlocked.length });
     st.push({ key: "smoke", name: "Smoke test", tasks: [],
       state: !smokeOn ? "na" : m.preview ? "done" : "upcoming",
       note: !smokeOn ? "Local preview off" : m.preview ? (m.preview.pid != null ? "Preview running" : "Passed") : passed ? "Not recorded" : "Runs inside QA" });
@@ -622,7 +710,7 @@
     st.push({ key: "close", name: "Closed", tasks: [], state: closed ? "done" : "upcoming",
       note: closed ? (m.passed_at && Number.isFinite(parseT(m.passed_at)) ? fmtDate(parseT(m.passed_at)) : "Milestone closed") : "" });
     // one stage is "where we are": the first current or failed one
-    const here = st.find((x) => x.state === "current" || x.state === "failed");
+    const here = st.find((y) => y.state === "current" || y.state === "failed");
     if (here) here.here = true;
     return st;
   }
@@ -630,7 +718,7 @@
   const STAGE_WORD = { done: "done", current: "in progress", upcoming: "not started", failed: "failed", na: "does not apply" };
   function runChip(t) {
     return h("button", { type: "button", class: "run-chip", "data-tid": t.id, title: `${t.id} ${t.title}. Open details`, onclick: () => openTask(t.id) },
-      h("span", { class: "tid", text: t.id }), h("span", { class: "run-title", text: t.title }), agentsOn(t.id).slice(0, 2).flatMap(agentBits));
+      h("span", { class: "tid", text: t.id }), h("span", { class: "run-title", text: t.title }), agentsOn(t.id).slice(0, 2).flatMap((a) => agentBits(a)));
   }
   function renderStages(m) {
     const box = $("stages");
@@ -642,13 +730,13 @@
     const st = stagesOf(m);
     const here = st.find((x) => x.here);
     const closed = st.at(-1).state === "done";
-    $("stages-sub").textContent = closed ? `${m.id} is closed` : here ? `${m.id} is in ${here.name}` : "";
+    $("stages-sub").textContent = closed ? `${m.id} is closed` : here ? `${m.id} is in ${here.name}${here.key === "qa" && qaState(m).running ? ` · round ${qaState(m).round} running` : ""}` : "";
     const shown = new Set();
     fill(box, st.map((x) => {
       const running = x.tasks.filter((t) => t.status === "in_progress");
       const blocked = x.tasks.filter((t) => t.status === "blocked");
       running.forEach((t) => shown.add(t.id));
-      const chips = [...running.map(runChip), ...(x.agents || []).map((a) => h("span", { class: "run-chip" }, h("span", { class: "tid", text: "QA" }), agentBits(a)))];
+      const chips = [...running.map(runChip), ...(x.agents || []).map((a) => h("span", { class: "run-chip auditor", title: roleOf(a.agent).about || a.agent }, agentBits(a, true)))];
       let nextBtn = null;
       if (x.here && !chips.length) {
         const nt = data.next && data.next.task && data.tasks[data.next.task];
@@ -661,6 +749,10 @@
         h("div", { class: "stage-top" }, h("span", { class: "stage-ico", "aria-hidden": "true", text: STAGE_ICON[x.state] }),
           h("span", { class: "stage-name", text: x.name }), h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[x.state]}.` })),
         x.note ? h("span", { class: "stage-note" }, x.note, x.cmd ? [" ", cmd(x.cmd)] : null) : null,
+        x.trail && x.trail.length ? h("ol", { class: "qa-trail", "aria-label": "QA rounds" },
+          x.trail.map((p, i) => h("li", { class: `qa-pill ${p.cls}`, title: p.title }, i ? h("span", { class: "qa-arrow", "aria-hidden": "true", text: "→" }) : null,
+            h("span", { class: "qa-tag", text: p.text }), h("span", { class: "visually-hidden", text: `: ${p.title}.` })))) : null,
+        x.decide ? h("button", { type: "button", class: "stage-blocked", text: "Needs your decision", onclick: goNeeds }) : null,
         blocked.length ? h("button", { type: "button", class: "stage-blocked", text: `⛔ ${blocked.length} blocked`, onclick: goNeeds }) : null,
         chips.length ? h("div", { class: "stage-run" }, chips) : null, nextBtn);
     }));
@@ -668,16 +760,17 @@
     const elsewhere = Object.entries(data.tasks).filter(([id, t]) => t.status === "in_progress" && !shown.has(id)).map(([id, t]) => runChip({ id, ...t }));
     const taskIds = new Set(Object.keys(data.tasks));
     activeAgents().filter((a) => !(a.node && (taskIds.has(a.node) || a.node === `GATE:${m.id}`))).forEach((a) =>
-      elsewhere.push(h("span", { class: "run-chip" }, a.node ? h("span", { class: "tid", text: a.node.replace("GATE:", "QA ") }) : null, agentBits(a))));
+      elsewhere.push(h("span", { class: "run-chip", title: `${roleOf(a.agent).about || a.agent}${a.node ? "" : ". Not linked to a task or a QA gate"}` },
+        a.node ? h("span", { class: "tid", text: a.node.replace("GATE:", "QA ") }) : h("span", { class: "unlinked", text: "not linked" }), agentBits(a, true))));
     const also = $("also-running");
     also.hidden = !elsewhere.length;
-    fill(also, elsewhere.length ? [h("span", { class: "also-label", text: "Also running" }), ...elsewhere] : []);
+    fill(also, elsewhere.length ? [h("span", { class: "also-label", text: "Running outside this milestone" }), ...elsewhere] : []);
   }
 
   function renderFeed() {
     fill($("feed"), data.log.length ? data.log.map((r) => {
       const t = parseT(r.at);
-      return h("li", {}, h("time", { datetime: r.at, title: Number.isFinite(t) ? fmtDT(t) : r.at, text: Number.isFinite(t) ? agoShort(t) : r.at }),
+      return h("li", { class: r.kind === "live" ? "feed-live" : null }, h("time", { datetime: r.at, title: Number.isFinite(t) ? fmtDT(t) : r.at, text: Number.isFinite(t) ? agoShort(t) : r.at }),
         h("span", { class: "txt" }, linkify(r.text)));
     }) : h("li", {}, h("span", { class: "txt", text: "No activity logged yet." })));
     const b = data.board;
@@ -725,7 +818,7 @@
     const curIdx = data.milestones.findIndex((m) => m.id === cur);
     const later = data.milestones.slice(curIdx + 1).map((m) => ({ m, left: tasksOf(m).filter((t) => t.status !== "done").length })).filter((x) => x.left);
     const laterTasks = later.reduce((n, x) => n + x.left, 0);
-    $("pb-sub").textContent = `${plural(queued.length, "queued issue")} · ${plural(laterTasks, "task")} in later sprints`;
+    $("pb-sub").textContent = `${plural(queued.length, "queued issue")} · ${plural(laterTasks, "task")} in later milestones`;
     const issueLi = (i) => h("li", {}, h("span", { class: "id", text: i.id }), h("span", { text: i.title || "" }),
       h("span", { class: `chip${i.c === "expedite" ? " lane-hotfix" : ""}`, text: i.c || i.status }),
       h("span", { class: "sub", text: [i.type, i.severity, i.origin === "baseline" ? "pre-existing" : null, i.scheduled_in ? `→ ${i.scheduled_in}` : null].filter(Boolean).join(" · ") }));
@@ -741,11 +834,11 @@
       scheduled.length || buf ? h("div", { class: "list-wrap" },
         scheduled.length ? listBlock("Scheduled issues", scheduled.map(([id, v]) => issueLi({ id, c: v.class, ...v })), "") : null,
         buf ? h("div", {}, h("div", { class: "list-title", text: `Issue buffer of ${buf.milestone}` }),
-          h("div", { class: "score", text: `${buf.used} of ${plural(buf.capacity, "slot")} used (${buf.pct}% of the sprint reserved for issues)` }), meter) : null) : null,
-      listBlock("Later sprints", later.map(({ m, left }) => h("li", { class: "has-btn" },
-        h("button", { type: "button", class: "row-btn", title: `Show ${m.id} on the board`, onclick: () => { selectSprint(m.id, false); $("main").scrollIntoView({ block: "start" }); } },
+          h("div", { class: "score", text: `${buf.used} of ${plural(buf.capacity, "slot")} used (${buf.pct}% of the milestone reserved for issues)` }), meter) : null) : null,
+      listBlock("Later milestones", later.map(({ m, left }) => h("li", { class: "has-btn" },
+        h("button", { type: "button", class: "row-btn", title: `Show ${m.id} on the board`, onclick: () => { selectMilestone(m.id, false); $("main").scrollIntoView({ block: "start" }); } },
           h("span", { class: "id", text: m.id }), h("span", { text: m.title || "" }), h("span", { class: "chip", text: plural(left, "task") })))),
-        "Nothing planned after this sprint."));
+        "Nothing planned after this milestone."));
   }
 
   function renderInsights(m, curId) {
@@ -790,7 +883,7 @@
     const curId = currentId();
     const m = data.milestones.find((x) => x.id === curId) || null;
     keepFocus(() => {
-      renderHeader(); renderTabs(); renderSprint(m); renderImpediments(); renderStages(m); renderKanban(m);
+      renderHeader(); renderTabs(); renderMilestone(m); renderImpediments(); renderStages(m); renderKanban(m);
       renderFeed(); renderInsights(m, curId);
     });
     $("main").setAttribute("aria-busy", "false");
@@ -941,13 +1034,13 @@
     }
   }
 
-  // sprint tabs: arrow keys move between sprints
+  // milestone tabs: arrow keys move between milestones
   $("tabs").addEventListener("keydown", (e) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !data || !data.milestones.length) return;
     const ids = data.milestones.map((m) => m.id);
     let i = ids.indexOf(currentId());
     i = e.key === "Home" ? 0 : e.key === "End" ? ids.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + ids.length) % ids.length;
-    selectSprint(ids[i], true); e.preventDefault();
+    selectMilestone(ids[i], true); e.preventDefault();
   });
 
   let resizeT = null;

@@ -12,7 +12,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 | [`help`](#help) | Help inside Claude Code: what to do next, how each skill works, recipes and concepts. |
 | [`interview`](#interview) | Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md with the autonomy policy. |
 | [`status`](#status) | Read-only dashboard: phase, milestones, gates, scores, issues, preview, production drift, cost so far. |
-| [`board`](#board) | Live Scrum board in the browser: the sprint window (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA gate, fixes, smoke, deploy, closed) with what runs in each, the sprint kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link. |
+| [`board`](#board) | Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link. |
 | [`settings`](#settings) | Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips, status line and notifications. |
 
 ## Specify
@@ -156,7 +156,7 @@ Read-only dashboard: phase, milestones, gates, scores, issues, preview, producti
 
 ### board
 
-Live Scrum board in the browser: the sprint window (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA gate, fixes, smoke, deploy, closed) with what runs in each, the sprint kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link.
+Live board in the browser: the milestones as chevrons (previous, current, next), what needs you when something does, the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, quality, burndown, velocity and backlog; light or dark; local, or shared on your network with an access link.
 
 **When:** When you want to watch the project visually, e.g. while implement or autopilot works; it updates by itself.
 

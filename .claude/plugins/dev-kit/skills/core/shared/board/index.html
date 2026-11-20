@@ -62,33 +62,34 @@
       <ol class="chevrons phase-chevrons" id="phases"></ol>
     </nav>
 
-    <section class="card sprint" aria-labelledby="sprint-title">
-      <div class="sprint-top">
-        <span class="sprints-label" id="tabs-label">Sprints</span>
+    <section class="card milestone" aria-labelledby="ms-title">
+      <div class="ms-top">
+        <span class="ms-label" id="tabs-label">Milestones</span>
         <div class="tabs-row">
           <div class="pop-wrap" id="tabs-earlier-wrap" hidden>
             <button type="button" class="more-tab chev-first" id="tabs-earlier" aria-haspopup="true" aria-expanded="false" aria-controls="tabs-earlier-pop"></button>
-            <div class="popover sprint-pop" id="tabs-earlier-pop" hidden><p class="pop-title">Earlier sprints</p><ul class="sprint-list" id="tabs-earlier-list"></ul></div>
+            <div class="popover ms-pop" id="tabs-earlier-pop" hidden><p class="pop-title">Earlier milestones</p><ul class="ms-list" id="tabs-earlier-list"></ul></div>
           </div>
           <div role="tablist" id="tabs" aria-labelledby="tabs-label"></div>
           <div class="pop-wrap" id="tabs-later-wrap" hidden>
             <button type="button" class="more-tab chev-last" id="tabs-later" aria-haspopup="true" aria-expanded="false" aria-controls="tabs-later-pop"></button>
-            <div class="popover sprint-pop" id="tabs-later-pop" hidden><p class="pop-title">Later sprints</p><ul class="sprint-list" id="tabs-later-list"></ul></div>
+            <div class="popover ms-pop" id="tabs-later-pop" hidden><p class="pop-title">Later milestones</p><ul class="ms-list" id="tabs-later-list"></ul></div>
           </div>
           <button type="button" class="link-btn" id="tabs-back" hidden>Back to current</button>
         </div>
-        <div class="sprint-facts" id="sprint-facts"></div>
+        <div class="ms-facts" id="ms-facts"></div>
       </div>
-      <div class="sprint-body">
-        <div class="sprint-text">
-          <h2 id="sprint-title">—</h2>
-          <p class="goal" id="sprint-goal">—</p>
+      <div class="ms-body">
+        <div class="ms-text">
+          <h2 id="ms-title">—</h2>
+          <p class="goal" id="ms-goal">—</p>
           <button type="button" class="link-btn" id="goal-more" aria-expanded="false" hidden>Show more</button>
         </div>
-        <div class="sprint-progress">
-          <p class="sprint-count"><strong id="sprint-done">0</strong><span id="sprint-total"> of 0 tasks done</span><span class="sprint-pct" id="sprint-pct">0%</span></p>
+        <div class="ms-progress">
+          <p class="ms-count"><strong id="ms-done">0</strong><span id="ms-total"> of 0 tasks done</span><span class="ms-pct" id="ms-pct">0%</span></p>
           <div class="segbar" id="segbar" role="img" aria-label="Task status split"></div>
           <ul class="seg-legend" id="seg-legend"></ul>
+          <p class="ms-caption" id="ms-caption" aria-live="polite"></p>
         </div>
       </div>
     </section>
@@ -111,7 +112,7 @@
       <div class="main-col">
         <section class="card board-card" aria-labelledby="board-h">
           <div class="card-head">
-            <h2 id="board-h">Sprint board</h2>
+            <h2 id="board-h">Task board</h2>
             <div class="board-tools">
               <label class="search">
                 <span class="visually-hidden">Filter tasks by id or title</span>
@@ -151,7 +152,7 @@
             <details class="table-view"><summary>Show as table</summary><div id="burndown-table"></div></details>
           </div>
           <div role="tabpanel" id="ins-velocity" aria-labelledby="ins-tab-velocity" tabindex="0" hidden>
-            <p class="card-sub">Tasks done per sprint</p>
+            <p class="card-sub">Tasks done per milestone</p>
             <div class="chart" id="velocity"></div>
             <details class="table-view"><summary>Show as table</summary><div id="velocity-table"></div></details>
           </div>
@@ -164,7 +165,7 @@
 
       <aside class="side" aria-label="Activity">
         <section class="card feed-card" aria-labelledby="act-h">
-          <div class="card-head"><h2 id="act-h">Activity</h2><p class="card-sub">Latest in .dev/log.md</p></div>
+          <div class="card-head"><h2 id="act-h">Activity</h2><p class="card-sub" title="From .dev/log.md and the session log (skills and agents)">Latest first</p></div>
           <ol class="feed" id="feed"></ol>
         </section>
       </aside>
