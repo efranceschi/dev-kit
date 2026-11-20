@@ -604,6 +604,11 @@ class BoardTest(unittest.TestCase):
         html = request(self.record()["port"], "GET", "/")[1].decode()
         for el in ('id="req-card"', 'id="view-switch"', 'id="planner"', 'id="issue-dialog"', 'id="toast"', 'id="cont-btn"'):
             self.assertIn(el, html)
+        # one work card: the board views and the insights are tabs of the same card
+        card = html[html.index('id="board-card"'):html.index('<aside class="side"')]
+        for el in ('id="tab-tasks"', 'id="tab-plan"', 'id="ins-quality"', 'id="ins-burndown"', 'id="ins-velocity"', 'id="ins-backlog"'):
+            self.assertIn(el, card)
+        self.assertNotIn('class="card insights"', html)
         self.assertEqual(request(self.record()["port"], "GET", "/assets/favicon-alert.svg")[0], 200)  # the tab's "needs you" icon
 
     def test_state_endpoint_is_read_only_and_complete(self):

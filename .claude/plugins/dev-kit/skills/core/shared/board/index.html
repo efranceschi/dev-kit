@@ -109,14 +109,22 @@
       <p class="also-running" id="also-running" hidden></p>
     </section>
 
-    <div class="workspace">
+    <div class="workspace" id="workspace">
       <div class="main-col">
-        <section class="card board-card" id="board-card" aria-labelledby="board-h">
+        <section class="card board-card" id="board-card" data-view="tasks" aria-labelledby="board-h">
           <div class="card-head">
             <h2 id="board-h">Task board</h2>
-            <div class="seg-switch view-switch" id="view-switch" role="group" aria-label="View" hidden>
-              <button type="button" class="seg-btn" data-view="tasks" aria-pressed="true">Tasks</button>
-              <button type="button" class="seg-btn" data-view="plan" aria-pressed="false">Plan</button>
+            <div role="tablist" class="work-tabs" id="view-switch" aria-label="Board views">
+              <span class="tab-group" role="presentation">
+                <button type="button" role="tab" id="tab-tasks" aria-controls="view-tasks" data-view="tasks">Tasks</button>
+                <button type="button" role="tab" id="tab-plan" aria-controls="planner" data-view="plan" hidden>Plan</button>
+              </span>
+              <span class="tab-group" role="presentation" title="Insights">
+                <button type="button" role="tab" id="ins-tab-quality" aria-controls="ins-quality" data-view="quality">Quality</button>
+                <button type="button" role="tab" id="ins-tab-burndown" aria-controls="ins-burndown" data-view="burndown">Burndown</button>
+                <button type="button" role="tab" id="ins-tab-velocity" aria-controls="ins-velocity" data-view="velocity">Velocity</button>
+                <button type="button" role="tab" id="ins-tab-backlog" aria-controls="ins-backlog" data-view="backlog">Backlog</button>
+              </span>
             </div>
             <div class="board-tools">
               <label class="search">
@@ -130,21 +138,12 @@
               </label>
             </div>
           </div>
-          <p class="filter-note" id="filter-note" role="status" hidden></p>
-          <div class="col-tabs seg-switch" id="col-tabs" role="group" aria-label="Column shown"></div>
-          <div class="kanban" id="kanban"></div>
-          <div class="planner" id="planner" hidden></div>
-        </section>
-        <section class="card insights" aria-labelledby="ins-h">
-          <div class="card-head">
-            <h2 id="ins-h">Insights</h2>
-            <div role="tablist" class="ins-tabs" id="ins-tabs" aria-labelledby="ins-h">
-              <button type="button" role="tab" id="ins-tab-quality" aria-controls="ins-quality" data-ins="quality">Quality</button>
-              <button type="button" role="tab" id="ins-tab-burndown" aria-controls="ins-burndown" data-ins="burndown">Burndown</button>
-              <button type="button" role="tab" id="ins-tab-velocity" aria-controls="ins-velocity" data-ins="velocity">Velocity</button>
-              <button type="button" role="tab" id="ins-tab-backlog" aria-controls="ins-backlog" data-ins="backlog">Backlog</button>
-            </div>
+          <div role="tabpanel" id="view-tasks" aria-labelledby="tab-tasks">
+            <p class="filter-note" id="filter-note" role="status" hidden></p>
+            <div class="col-tabs seg-switch" id="col-tabs" role="group" aria-label="Column shown"></div>
+            <div class="kanban" id="kanban"></div>
           </div>
+          <div role="tabpanel" class="planner" id="planner" aria-labelledby="tab-plan" hidden></div>
           <div role="tabpanel" id="ins-quality" aria-labelledby="ins-tab-quality" tabindex="0" hidden>
             <p class="card-sub" id="dod-sub"></p>
             <div id="dod" class="cols-2"></div>

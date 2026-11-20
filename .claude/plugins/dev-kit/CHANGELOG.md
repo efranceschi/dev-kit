@@ -2,6 +2,19 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.29.0 — 2026-11-20
+
+The board's Plan view becomes lanes that scroll sideways at full width, and the task board and the insights share one card.
+
+### Changed
+- Board: the task board and the insights are one card with a single row of tabs in two groups, Tasks · Plan and Quality · Burndown · Velocity · Backlog (arrow keys move between them). The last tab is remembered. The separate Insights card is gone, which shortens the page. The task filters show only on Tasks.
+- Board: the Plan view shows open milestones as fixed-width lanes side by side that scroll sideways. The issue queue stays pinned on the left, and each lane scrolls inside itself past a maximum height. Done tasks fold into "N tasks done" (the fold stays open across live updates), and card titles are clamped to two lines. While planning, the card takes the full width and Requests and Activity move below it, side by side. Sideways and inside-lane scrolling survive live updates.
+- Board: the page uses up to 2400 px of width (was 1560 px).
+
+### Fixed
+- Board: in the Plan view, a long milestone title widened its column's track, so cards spilled over the next column and columns over the card. Columns now have a `minmax(0, 1fr)` track and the title is cut with an ellipsis.
+- Board: on phones, the Plan columns lost their header, because the kanban rule that hid it also matched them.
+
 ## 1.28.0 — 2026-11-20
 
 Running agents land on their task card by an exact link, carry the task id in Claude Code, and keep one color per agent in Claude Code and on the board.

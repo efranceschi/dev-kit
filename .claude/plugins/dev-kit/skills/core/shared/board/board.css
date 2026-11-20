@@ -167,7 +167,7 @@ dialog .btn-danger:hover { background: color-mix(in srgb, var(--critical) 85%, #
 .banner::before { content: "⚠ "; }
 
 /* ---------- layout */
-main { max-width: 1560px; margin: 0 auto; padding: 16px 28px 40px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; outline: none; }
+main { max-width: 2400px; margin: 0 auto; padding: 16px 28px 40px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; outline: none; }
 main[aria-busy="true"] .card, main[aria-busy="true"] .needs { opacity: .55; }
 .card {
   background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
@@ -432,12 +432,14 @@ button.run-chip:hover { background: var(--surface-3); }
 .tooltip .tt-row strong { font-size: 14px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .tooltip .tt-row span { color: var(--text-secondary); }
 
-/* ---------- insights tabs */
-.ins-tabs { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 9px; overflow: hidden; }
-.ins-tabs [role="tab"] { font: inherit; font-size: 13px; padding: 5px 14px; min-height: 32px; background: transparent; color: var(--text-secondary); border: 0; cursor: pointer; }
-.ins-tabs [role="tab"] + [role="tab"] { border-left: 1px solid var(--border-strong); }
-.ins-tabs [role="tab"][aria-selected="true"] { background: var(--surface-3); color: var(--text-primary); font-weight: 700; }
-.ins-tabs [role="tab"]:focus-visible { outline-offset: -2px; }
+/* ---------- work card tabs: board views (Tasks, Plan) and insights, two groups in one tablist */
+.work-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-right: auto; }
+.tab-group { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 9px; overflow: hidden; }
+.tab-group [role="tab"] { font: inherit; font-size: 13px; padding: 5px 14px; min-height: 32px; background: transparent; color: var(--text-secondary); border: 0; cursor: pointer; }
+.tab-group [role="tab"]:not([hidden]) ~ [role="tab"] { border-left: 1px solid var(--border-strong); }
+.tab-group [role="tab"][aria-selected="true"] { background: var(--surface-3); color: var(--text-primary); font-weight: 700; }
+.tab-group [role="tab"]:focus-visible { outline-offset: -2px; }
+.board-card:not([data-view="tasks"]) .board-tools { display: none; }
 [role="tabpanel"]:focus-visible { outline-offset: 6px; }
 
 /* ---------- lists */
@@ -557,9 +559,10 @@ dialog p { color: var(--text-secondary); }
   .kanban .col { display: none; }
   .kanban[data-col="todo"] .col[data-st="todo"], .kanban[data-col="in_progress"] .col[data-st="in_progress"],
   .kanban[data-col="blocked"] .col[data-st="blocked"], .kanban[data-col="done"] .col[data-st="done"] { display: flex; flex: 1 1 auto; }
-  .col-head { display: none; }
-  .ins-tabs { width: 100%; }
-  .ins-tabs [role="tab"] { flex: 1; padding: 5px 4px; }
+  .kanban .col-head { display: none; }
+  .work-tabs { width: 100%; }
+  .tab-group { width: 100%; }
+  .tab-group [role="tab"] { flex: 1; padding: 5px 4px; }
   .drawer { border-radius: 0; border-width: 0; }
 }
 @media (max-width: 420px) {
@@ -672,21 +675,29 @@ dialog p { color: var(--text-secondary); }
   padding: 10px 16px; border-radius: 12px; font-size: 13px; background: var(--surface-3); color: var(--text-primary); border: 1px solid var(--border-strong); box-shadow: var(--shadow); }
 .toast.bad { background: color-mix(in srgb, var(--critical) 22%, var(--surface-2)); border-color: color-mix(in srgb, var(--critical) 55%, transparent); }
 
-/* ---------- plan: columns of open milestones, drag and drop, draft panel */
-.board-card.planning .board-tools, .board-card.planning .kanban, .board-card.planning .col-tabs, .board-card.planning .filter-note { display: none !important; }
-.view-switch { margin-right: auto; }
-.planner { display: grid; gap: 12px; }
-/* every open milestone visible at once: columns wrap instead of scrolling sideways */
-.plan-cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; align-items: start; }
-.pcol { min-width: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 8px; display: grid; gap: 6px; align-content: start; }
-.pcol.queue { background: color-mix(in srgb, var(--accent-a) 6%, var(--surface-2)); }
+/* ---------- plan: lanes of open milestones side by side, drag and drop, draft panel */
+/* while planning, the work card takes the whole width; requests and activity go below it, side by side */
+.workspace.planning { grid-template-columns: minmax(0, 1fr); }
+.workspace.planning .side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); align-items: start; }
+.workspace.planning .side .req-card[hidden] + .feed-card { grid-column: 1 / -1; }
+.workspace.planning .feed { flex: none; max-height: 360px; }
+.planner { display: grid; gap: 12px; min-width: 0; }
+/* lanes keep a fixed width and scroll sideways; the issue queue stays pinned on the left */
+.plan-cols { display: flex; gap: 10px; align-items: flex-start; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scroll-padding-left: 258px; padding: 2px 2px 10px; }
+.pcol { flex: 0 0 248px; min-width: 0; scroll-snap-align: start; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 8px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; }
+.pcol.queue { position: sticky; left: 0; z-index: 2; scroll-snap-align: none; background: color-mix(in srgb, var(--accent-a) 6%, var(--surface-2)); box-shadow: 10px 0 14px -10px rgba(0,0,0,.55); }
 .pcol.new { border-color: color-mix(in srgb, var(--accent-b) 60%, transparent); }
 .pcol.add { border-style: dashed; border-color: var(--border-strong); background: transparent; }
-.pcol .col-head { text-transform: none; letter-spacing: 0; font-size: 12.5px; }
-.pcol-title { font-weight: 500; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.pcol-list { list-style: none; margin: 0; padding: 2px; display: grid; gap: 6px; min-height: 48px; border-radius: 10px; }
-.pcol-list.drop-on { outline: 2px dashed var(--accent-b); outline-offset: 2px; }
-.pcard { background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--todo); border-radius: 10px; padding: 8px 10px; display: grid; gap: 4px; }
+.pcol .col-head { min-width: 0; text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+.pcol .col-head strong { flex: none; }
+.pcol-title { font-weight: 500; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.pcol .col-head .count { flex: none; white-space: nowrap; }
+.pcol-list { list-style: none; margin: 0; padding: 2px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-height: 48px; border-radius: 10px; max-height: min(62vh, 620px); overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: thin; }
+.pcol-list.drop-on { outline: 2px dashed var(--accent-b); outline-offset: -2px; }
+.pcol-done > summary { font-size: 12px; font-weight: 600; color: var(--text-secondary); cursor: pointer; padding: 4px 6px; border-radius: 8px; list-style-position: inside; }
+.pcol-done > summary:hover { color: var(--text-primary); background: var(--surface-3); }
+.pcol-done .done-list { min-height: 0; margin-top: 6px; max-height: 320px; }
+.pcard { min-width: 0; background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--todo); border-radius: 10px; padding: 7px 9px; display: grid; gap: 4px; }
 .pcard.issue { border-left-color: var(--accent-a); }
 .pcard.s-in_progress { border-left-color: var(--warning); }
 .pcard.s-blocked { border-left-color: var(--critical); }
@@ -695,17 +706,20 @@ dialog p { color: var(--text-secondary); }
 .pcard.locked { opacity: .62; }
 .pcard.dragging { opacity: .4; }
 .pcard.drop-before { box-shadow: 0 -3px 0 0 var(--accent-b); }
-.pcard .tcard-title { font-size: 12.5px; }
-.move-sel { font: inherit; font-size: 12px; color: var(--text-secondary); background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 6px; padding: 2px 4px; min-height: 26px; justify-self: start; }
+.pcard .tcard-title { font-size: 12.5px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.move-sel { font: inherit; font-size: 11.5px; color: var(--text-secondary); background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 6px; padding: 1px 4px; min-height: 24px; justify-self: start; }
 .plan-draft { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; display: grid; gap: 8px; }
 .plan-draft .td-list { font-size: 12.5px; }
 .plan-errors { color: var(--critical-text); }
 .plan-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .plan-actions .btn-primary { margin-left: auto; }
+@media (max-width: 860px) {
+  .workspace.planning .side { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 700px) {
-  .plan-cols { grid-template-columns: minmax(0, 1fr); }
-  .view-switch { order: 3; width: 100%; }
-  .view-switch .seg-btn { flex: 1; }
+  .pcol { flex-basis: 78%; }
+  .pcol.queue { position: static; box-shadow: none; scroll-snap-align: start; }
+  .plan-cols { scroll-padding-left: 0; }
 }
 
 /* ---------- listening and going on by itself */
