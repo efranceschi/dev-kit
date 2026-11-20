@@ -164,7 +164,7 @@ Live Scrum board in the browser: what needs you, what is running now, the sprint
 | Argument | Meaning |
 |---|---|
 | `(empty)` | start the local server (or reuse the running one) and open the default browser |
-| `stop` | stop the server (the page also has Stop server in its ⋯ menu) |
+| `stop` | stop the server (the page also has a Stop server button) |
 | `status` | whether it is running, its URL and PID |
 | `--open | --no-open | --port N` | force a new tab, do not open a tab, preferred port (default 8765) |
 | `--host IP` | listen address (default 127.0.0.1); 0.0.0.0 shares the board on the network, opened only with the access link it prints |
@@ -312,18 +312,20 @@ Drives the whole build on its own, from PRD to release; pauses follow your auton
 
 **When:** After the interview, when you want the app built with minimal interaction (also overnight).
 
-**Usage:** `/dev-kit:autopilot [--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1]`
+**Usage:** `/dev-kit:autopilot [--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N]`
 
 | Argument | Meaning |
 |---|---|
 | `--until phase` | stop after a phase (e.g. plan to review documents first) |
 | `--milestone M1` | build only one milestone |
+| `--milestones N` | stop after N approved gates, to resume in a fresh session (cheaper long runs) |
 
 **Examples:**
 
 - `/dev-kit:autopilot`: build everything
 - `/dev-kit:autopilot --until plan`: only the documents, so you can review them
 - `/dev-kit:autopilot --milestone M1`: one milestone, e.g. to gauge cost
+- `/dev-kit:autopilot --milestones 2`: two milestones, then resume in a new session
 
 **Produces:** everything below, one commit per task
 

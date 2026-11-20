@@ -1,7 +1,7 @@
 ---
 name: data-reviewer
 description: Read-only reviewer of the data layer - schema fit with the architecture, constraints, types, indexes, multi-tenant scoping, migration safety and reversibility, transactions, privacy, retention and LGPD/GDPR handling - running migrations against a scratch database when possible. Used by qa on milestones that touch schema or data access, and by release; returns findings in the shared JSON contract.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 effort: medium
 ---
@@ -28,7 +28,7 @@ Scope (milestone or `release`), language for prose. `.dev/architecture.md` ยง4โ€
 - Cite file, line and the schema element; say what to change in one sentence.
 - If the project has no database, return `findings: []` with a summary saying so.
 
-End with a prose summary and the single JSON block from the contract (`auditor: "data-reviewer"`).
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary (JSON: `auditor: "data-reviewer"`).
 
 ## Existing projects (brownfield)
 

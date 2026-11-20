@@ -3,6 +3,11 @@
 
 Standard library only. Usage:
   python3 -I dev_score.py score --scope M1 [--kind gate|review] [--out FILE] [--root DIR] [--previous FINDINGS_JSON] [--round N] AUDITOR_JSON [AUDITOR_JSON ...]
+  python3 -I dev_score.py check [--fix] [--json] AUDITOR_JSON [AUDITOR_JSON ...]
+
+check validates auditor files against the output contract and normalises the common drift (previous[].status ->
+state, severity and state synonyms, missing or repeated ids, missing auditor taken from the file name, a JSON
+block wrapped in prose). --fix writes the normalised file back. Exit 1 lists what the agent must correct.
 
 Each input file is one auditor result following shared/prompts/auditor-output-contract.md.
 
@@ -90,6 +95,115 @@ def load_quality(root: Path) -> dict:
                     q[k] = v
             break
     return q
+
+
+SEVERITY_ALIASES = {
+    "critical": "critical", "crit": "critical", "blocker": "critical", "blocking": "critical", "fatal": "critical",
+    "high": "high", "major": "high", "error": "high", "severe": "high", "serious": "high",
+    "medium": "medium", "med": "medium", "moderate": "medium", "warning": "medium", "warn": "medium", "minor": "medium",
+    "low": "low", "info": "low", "informational": "low", "nit": "low", "nitpick": "low", "trivial": "low",
+    "suggestion": "low", "style": "low", "cosmetic": "low",
+}
+STATE_ALIASES = {
+    "closed": "closed", "fixed": "closed", "resolved": "closed", "done": "closed", "verified": "closed",
+    "addressed": "closed", "not_reproducible": "closed",
+    "open": "open", "still_open": "open", "not_fixed": "open", "unresolved": "open", "partial": "open",
+    "partially_fixed": "open", "regressed": "open", "reopened": "open",
+}
+
+
+def _key(v: object) -> str:
+    return re.sub(r"[\s-]+", "_", str(v or "").strip().lower())
+
+
+def auditor_from_name(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    stem = re.sub(r"-\d+$", "", path.stem)
+    return stem if stem in AUDITOR_DIMENSION else None
+
+
+def normalize(data: object, path: Path | None = None) -> tuple[dict | None, list[str], list[str]]:
+    """Normalise one auditor result in place. Returns (data, changes, errors); errors are contract violations the
+    agent must fix (no findings list, unknown auditor or severity)."""
+    changes: list[str] = []
+    errors: list[str] = []
+    if not isinstance(data, dict):
+        return None, changes, ["top level must be a JSON object"]
+    aud = data.get("auditor")
+    if aud not in AUDITOR_DIMENSION:
+        guess = auditor_from_name(path)
+        if guess and not aud:
+            data["auditor"] = guess
+            changes.append(f"auditor set to '{guess}' from the file name")
+        else:
+            errors.append(f"unknown auditor '{aud}' (use your exact agent name: {', '.join(sorted(AUDITOR_DIMENSION))})")
+    findings = data.get("findings")
+    if not isinstance(findings, list):
+        errors.append("missing 'findings' list (use [] when there is nothing to report)")
+        findings = []
+    seen: set[str] = set()
+    used = {str(f.get("id")) for f in findings if isinstance(f, dict) and f.get("id")}
+    nxt = 1
+    for i, f in enumerate(findings):
+        if not isinstance(f, dict):
+            errors.append(f"findings[{i}] is not an object")
+            continue
+        raw = f.get("severity")
+        sev = SEVERITY_ALIASES.get(_key(raw))
+        if sev is None:
+            errors.append(f"findings[{i}] severity '{raw}' is not one of critical, high, medium, low")
+        elif sev != raw:
+            f["severity"] = sev
+            changes.append(f"findings[{i}] severity '{raw}' -> '{sev}'")
+        fid = str(f.get("id") or "")
+        if not fid or fid in seen:
+            while f"F-{nxt:03d}" in used or f"F-{nxt:03d}" in seen:
+                nxt += 1
+            new = f"F-{nxt:03d}"
+            changes.append(f"findings[{i}] id '{fid or '-'}' -> '{new}'")
+            f["id"] = fid = new
+        seen.add(fid)
+        if isinstance(f.get("confidence"), str) and f["confidence"].strip().lower() not in ("high", "low"):
+            f["confidence"] = "low" if f["confidence"].strip().lower() in ("medium", "med", "unverified", "inferred") else "high"
+            changes.append(f"findings[{i}] confidence normalised to '{f['confidence']}'")
+    prev = data.get("previous")
+    if prev is not None and not isinstance(prev, list):
+        errors.append("'previous' must be a list")
+    for i, pv in enumerate(prev if isinstance(prev, list) else []):
+        if not isinstance(pv, dict):
+            errors.append(f"previous[{i}] is not an object")
+            continue
+        if "state" not in pv and "status" in pv:
+            pv["state"] = pv.pop("status")
+            changes.append(f"previous[{i}] 'status' renamed to 'state'")
+        raw = pv.get("state")
+        st = STATE_ALIASES.get(_key(raw))
+        if st is None:
+            st = "open"
+            changes.append(f"previous[{i}] state '{raw}' is unclear -> 'open'")
+        elif st != raw:
+            changes.append(f"previous[{i}] state '{raw}' -> '{st}'")
+        pv["state"] = st
+        if not pv.get("id"):
+            errors.append(f"previous[{i}] has no id (copy the id of the previous finding)")
+    return data, changes, errors
+
+
+def read_result(path: Path) -> tuple[object, bool]:
+    """Parse an auditor file. Accepts a pure JSON file or, as a fallback, a message whose last fenced json block
+    is the result. Returns (data, wrapped)."""
+    text = path.read_text(encoding="utf-8")
+    try:
+        return json.loads(text), False
+    except json.JSONDecodeError:
+        blocks = re.findall(r"```(?:json)?\s*\n(.*?)\n```", text, flags=re.S)
+        for b in reversed(blocks):
+            try:
+                return json.loads(b), True
+            except json.JSONDecodeError:
+                continue
+        raise
 
 
 def severity(f: dict) -> str:
@@ -186,19 +300,17 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
     legacy: list[dict] = []
     for path in inputs:
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data, _ = read_result(path)
         except (OSError, json.JSONDecodeError) as e:
             problems.append(f"{path.name}: unreadable or invalid JSON ({e})")
             continue
+        data, _, errors = normalize(data, path)
+        if errors:
+            problems += [f"{path.name}: {e}" for e in errors]
+            continue
         auditor = data.get("auditor", "")
-        dim = AUDITOR_DIMENSION.get(auditor)
-        if dim is None:
-            problems.append(f"{path.name}: unknown auditor '{auditor}'")
-            continue
-        findings = data.get("findings")
-        if not isinstance(findings, list):
-            problems.append(f"{path.name}: missing 'findings' list")
-            continue
+        dim = AUDITOR_DIMENSION[auditor]
+        findings = data["findings"]
         entry = dims.setdefault(dim, {"auditors": [], "findings": [], "score": 100})
         if auditor not in entry["auditors"]:
             entry["auditors"].append(auditor)
@@ -306,6 +418,45 @@ def render(res: dict) -> str:
     return "\n".join(lines)
 
 
+def cmd_check(a: argparse.Namespace) -> int:
+    report = []
+    bad = 0
+    for x in a.inputs:
+        path = Path(x)
+        item = {"file": str(path), "changes": [], "errors": []}
+        try:
+            data, wrapped = read_result(path)
+        except OSError as e:
+            item["errors"].append(f"cannot read: {e}")
+            data, wrapped = None, False
+        except json.JSONDecodeError as e:
+            item["errors"].append(f"invalid JSON ({e}); write only the JSON object to the file")
+            data, wrapped = None, False
+        if data is not None:
+            if wrapped:
+                item["changes"].append("JSON block extracted from the surrounding prose")
+            data, ch, er = normalize(data, path)
+            item["changes"] += ch
+            item["errors"] += er
+            if a.fix and data is not None and item["changes"]:
+                data.setdefault("_normalized", []).extend(item["changes"])
+                path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                item["written"] = True
+        bad += bool(item["errors"])
+        report.append(item)
+    if a.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    else:
+        for it in report:
+            state = "INVALID" if it["errors"] else ("normalised" if it["changes"] else "ok")
+            print(f"{it['file']}: {state}" + (" (written)" if it.get("written") else ""))
+            for e in it["errors"]:
+                print(f"  ! {e}")
+            for ch in it["changes"]:
+                print(f"  ~ {ch}")
+    return 1 if bad else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -318,7 +469,13 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--previous", help="consolidated findings of the previous round (delta mode)")
     s.add_argument("--round", type=int, help="round number, for the session log")
     s.add_argument("inputs", nargs="+")
+    c = sub.add_parser("check")
+    c.add_argument("--fix", action="store_true", help="write the normalised result back to each file")
+    c.add_argument("--json", action="store_true")
+    c.add_argument("inputs", nargs="+")
     a = p.parse_args(argv)
+    if a.cmd == "check":
+        return cmd_check(a)
     paths = [Path(x) for x in a.inputs]
     missing = [str(x) for x in paths if not x.exists()]
     if missing:

@@ -1,7 +1,7 @@
 ---
 name: deps-auditor
 description: Read-only auditor of third-party dependencies - undeclared or undocumented packages, lockfile integrity, known vulnerabilities via installed audit tools, abandoned or outdated critical libraries, licence compatibility with the project, and supply-chain hygiene. Used by qa when manifests change and by release; returns findings in the shared JSON contract.
-tools: Read, Grep, Glob, Bash, WebFetch
+tools: Read, Grep, Glob, Bash, WebFetch, Write
 model: haiku
 effort: medium
 ---
@@ -29,7 +29,7 @@ Scope (milestone or `release`), language for prose. Manifests and lockfiles, `.d
 - Licence conflicts that block the stated distribution model → `high`.
 - Do not recommend replacing a dependency unless a concrete problem is shown.
 
-End with a prose summary and the single JSON block from the contract (`auditor: "deps-auditor"`) including `"counts"` and `"licenses"` as described in the checklist.
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary (JSON: `auditor: "deps-auditor"`) including `"counts"` and `"licenses"` as described in the checklist.
 
 ## Existing projects (brownfield)
 

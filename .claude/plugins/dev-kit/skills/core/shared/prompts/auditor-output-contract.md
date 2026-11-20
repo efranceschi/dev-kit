@@ -1,6 +1,14 @@
 # Auditor output contract
 
-All auditor agents and `code-reviewer`, `spec-tracer` end their final message with exactly one fenced JSON block following this schema, preceded by a short prose summary (max 10 lines) in the language given in the prompt.
+All auditor and reviewer agents deliver one JSON result following the schema below.
+
+## Delivery
+1. Your prompt has an `Output file:` line (e.g. `.dev/qa/M1/raw/code-reviewer.json`). Write the JSON object, and only the JSON object, to that path with the Write tool. It is the only file you write; everything else stays read-only.
+2. Validate it: `python3 -I <KIT>/scripts/dev_score.py check --fix <Output file>`. Exit 1 lists what breaks the contract (unknown severity, missing `findings`, unknown `auditor`, invalid JSON): fix the file and run it again until it exits 0. Agents without Bash skip this step; the orchestrator runs it.
+3. Your final message is short: at most 5 lines of prose in the language given in the prompt (verdict, counts by severity, the one or two most important findings by id), then the line `Output: <path>`. Do not repeat the findings or paste the JSON: the orchestrator reads the file, and long messages are paid again on every later turn of the session.
+4. No `Output file:` line (an older orchestrator): end the message with the JSON in one fenced `json` block instead, after the same short summary.
+
+Use exactly these key names and values: `state` (not `status`) in `previous`, the four severities as written, ids `F-001`, `F-002`… unique within your result. `check --fix` normalises common synonyms, but a result it has to rewrite is a contract miss.
 
 ```json
 {
@@ -51,5 +59,5 @@ Rules:
 - Existing projects (`.dev/state.json` has `brownfield`, `conventions.md` §16): a problem that already existed at `brownfield.baseline_ref` and that the scope does not make worse gets `"legacy": true`. Legacy findings never score or block; the orchestrator turns them into `intangible` issues. Do not mark as legacy anything in lines the scope added or changed.
 - Keep `title` ≤ 60 characters. Severity follows `shared/conventions.md` §7.
 - If the scope is empty or cannot be found, return `findings: []`, `verdict: "pass"` and explain in `summary`.
-- Write nothing to the repository. You are read-only except for running tests/linters, scratch builds, and saving screenshots/raw tool output under `.dev/qa/<scope>/` when your own instructions say so.
+- Write nothing to the repository except your `Output file:`. You are read-only otherwise, except for running tests/linters, scratch builds, and saving screenshots/raw tool output under `.dev/qa/<scope>/` when your own instructions say so.
 - The `auditor` value must be your exact agent name: `dev_score.py` maps it to a scoring dimension (code, security, tests, spec, ux, a11y, visual, copy, performance, data, operations, dependencies, docs, design, requirements). The score is computed from your findings by a fixed formula, so severity and confidence must be honest: inflating or hiding findings changes the gate outcome.

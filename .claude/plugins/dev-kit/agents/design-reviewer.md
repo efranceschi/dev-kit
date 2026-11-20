@@ -1,7 +1,7 @@
 ---
 name: design-reviewer
 description: Read-only reviewer of UX and UI design specifications before any interface code is written. Checks .dev/design/ux-flows.md and ui-spec.md for AC reachability, journey and state completeness, form behaviour, token completeness, computed colour contrast, component inventory consistency, responsive and accessibility rules, and fit with the brief. Used by review; returns findings in the shared JSON contract.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 effort: medium
 ---
@@ -28,7 +28,7 @@ Language for prose. `.dev/design/ux-flows.md`, `.dev/design/ui-spec.md`, `.dev/p
 - Do not redesign; propose minimal corrections. Mention two or three strengths in the summary.
 - Mark anything you could not verify with `"confidence": "low"`.
 
-End with a prose summary and the single JSON block from the contract (`auditor: "design-reviewer"`, `scope: "design"`); add `"contrast": [{"pair": "text on surface", "ratio": 7.2, "required": 4.5}]` inside the JSON.
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary (JSON: `auditor: "design-reviewer"`, `scope: "design"`); add `"contrast": [{"pair": "text on surface", "ratio": 7.2, "required": 4.5}]` inside the JSON.
 
 ## Existing projects (brownfield)
 

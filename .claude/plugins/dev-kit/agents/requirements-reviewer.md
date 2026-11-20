@@ -1,7 +1,7 @@
 ---
 name: requirements-reviewer
 description: Read-only reviewer of requirements and planning artifacts before implementation. In mode prd it reviews .dev/prd.md against the interview brief (completeness, testable acceptance criteria, contradictions, scope drift, missing edge cases); in mode plan it reviews .dev/plan.md against PRD, architecture and design (AC coverage, slicing, dependency order, risk-first). Used by review; returns findings in the shared JSON contract.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: opus
 effort: high
 ---
@@ -26,7 +26,7 @@ Mode (`prd` or `plan`) and the language for prose. Files under `.dev/`: `brief.m
 - Do not rewrite the artifact; do not propose new features. Judge against the brief, not your preferences.
 - If the artifact is missing, return a single `critical` finding saying so.
 
-End with a prose summary and the single JSON block from the contract (`auditor: "requirements-reviewer"`, `scope: "prd"` or `"plan"`).
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary (JSON: `auditor: "requirements-reviewer"`, `scope: "prd"` or `"plan"`).
 
 ## Existing projects (brownfield)
 

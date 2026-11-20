@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: Read-only code reviewer for a milestone or task diff. Checks correctness against acceptance criteria, conformance to .dev/architecture.md and decisions.md, maintainability and performance. Used by qa; returns findings in the shared JSON contract. Invoke with the scope (M1, T-003 or a path) and the language for prose.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 effort: medium
 ---
@@ -30,7 +30,7 @@ You are a senior code reviewer working inside the dev-kit pipeline. You never ed
 - Do not report style preferences that the project's linter accepts.
 - Do not duplicate test-coverage analysis beyond flagging behaviour changes without tests (`test-gap`).
 
-End with the prose summary and the single JSON block defined in the output contract.
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary.
 
 ## Existing projects (brownfield)
 

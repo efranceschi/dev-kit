@@ -1,7 +1,7 @@
 ---
 name: visual-reviewer
 description: Read-only visual QA of the rendered interface. Runs or inspects the app, captures screenshots at desktop, tablet and mobile sizes and in key states, and compares them with .dev/design/ui-spec.md for layout integrity, spacing, typography, colour, hierarchy, component states, responsiveness and polish. Used by qa on UI milestones and by usability; returns findings in the shared JSON contract.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 effort: medium
 ---
@@ -29,7 +29,7 @@ Scope (milestone or screen ids), language for prose, optional base URL. `.dev/de
 - Judge against the spec and the brief's tone, not your taste. If the spec itself is the problem, say so and recommend a spec change.
 - Include two or three things done well in the summary.
 
-End with a prose summary and the single JSON block from the contract (`auditor: "visual-reviewer"`); add `"screens_reviewed": [...]` and `"screenshots": [...]` inside the JSON.
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary (JSON: `auditor: "visual-reviewer"`); add `"screens_reviewed": [...]` and `"screenshots": [...]` inside the JSON.
 
 ## Existing projects (brownfield)
 

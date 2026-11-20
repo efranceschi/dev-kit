@@ -1,7 +1,7 @@
 ---
 name: autopilot
 description: Autonomous end-to-end build driver - starting from the interview brief, runs PRD, architecture, UX, UI, plan, then implement -> QA gate -> fix loops per milestone, usability audit, docs and release, pausing only for always-ask decisions, unresolvable blockers or exceeded fix rounds. Resumes from the current phase. Use when the user wants the application built with minimal interaction ("build it", "continue autonomously", "run until QA").
-argument-hint: "[--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1]"
+argument-hint: "[--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N]"
 disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob, Agent, AskUserQuestion, Skill
 ---
@@ -33,7 +33,7 @@ Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` and the autonomy policy
 | usability | - | `usability` (score recorded as review `ux`) | review `ux` pass → docs; fail → implement the fix tasks, re-audit |
 | docs | `ux` (UI products) | `docs all`, `review docs` until pass, then `release --dry-run`, and the real release only if the brief's definition of done includes one (`release` runs `deploy` when `production.when` is `on_release`) | done (`release` sets it) |
 
-`--until` targets: `prd`, `architecture`, `plan`, `usability`, `docs` stop when that row's "then" column is reached; `design` stops after review `design` passes; `qa` stops after the gate of `--milestone` (default: the current one); `release` runs to the end. `release` is not a phase: it is the last action of the `docs` row.
+`--until` targets: `prd`, `architecture`, `plan`, `usability`, `docs` stop when that row's "then" column is reached; `design` stops after review `design` passes; `qa` stops after the gate of `--milestone` (default: the current one); `release` runs to the end. `release` is not a phase: it is the last action of the `docs` row. `--milestones N` stops after N milestone gates pass in this run (with `deploy` done when it applies), with the progress line and the command to resume (`/dev-kit:autopilot`) in a new session or after `/clear`: the state in `.dev/` is all a resume needs, and a fresh context is much cheaper per turn than a long one (`conventions.md` §17).
 
 ## Quality control (score and cut-off)
 - Every checkpoint above is scored 0–100 by independent agents through `dev_score.py`; the cut-offs come from `autonomy.quality` (set in the interview). The driver never advances past a checkpoint whose review or gate is not `pass`; `dev_state.py` refuses a pass below the cut-off.
@@ -56,7 +56,7 @@ Every pause point below first looks up its action; only `ask` opens a question. 
 - Everything else is decided autonomously and logged (`decisions.md`, `open-questions.md`).
 
 ## Progress reporting
-After each phase transition, review and milestone, print one line: phase, tasks done/total, gates and review scores (from `DS status --short`), open questions, issues pulled into the milestone, the local preview URL when a milestone was just deployed (`conventions.md` §11), and the estimated cost so far (run `dev_cost.py ingest` then `dev_cost.py report --json --no-ingest` after each milestone; show `total.usd` and tokens, §14). Keep the user's context light: do not dump artifacts; name the files.
+After each phase transition, review and milestone, print one line: phase, tasks done/total, gates and review scores (from `DS status --short`), open questions, issues pulled into the milestone, the local preview URL when a milestone was just deployed (`conventions.md` §11), and the estimated cost so far (run `dev_cost.py ingest` then `dev_cost.py report --json --no-ingest` after each milestone; show `total.usd` and tokens, §14). Keep the user's context light: do not dump artifacts; name the files, and follow `conventions.md` §17 (agents write their results to files; read `status --short`, scores and consolidated findings, never raw results).
 
 ## End of run
 Run `DS cleanup`. Write the run's feedback on the kit (`DS feedback --trigger autopilot --worked area:note --failed area:note --improve area:note`, at most 3 each, about the dev-kit only, consolidating the agents' `kit_feedback`) and `skill_end`. End the run report with one tip from `DS tip autopilot`. Include the run's estimated cost by stage (`dev_cost.py report`) and suggest `/dev-kit:costs` for the breakdown. Suggest `/dev-kit:feedback` for the session's evaluation by stage (a timestamped report and data export to review and, if the user wants, send to the dev-kit author).

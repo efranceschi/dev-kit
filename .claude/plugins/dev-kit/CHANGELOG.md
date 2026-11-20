@@ -2,6 +2,26 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.15.0 — 2026-11-19
+
+First of three releases from a field report: most of a long run's cost was rework and orchestration context, not writing code. This one makes the cost measurable and the agents' output reliable and small.
+
+### Added
+- `dev_score.py check [--fix] FILE…`: validates auditor results against the output contract and normalises the usual drift (`previous[].status` → `state`, severity synonyms such as `Major`/`nit`/`blocker`, state synonyms such as `fixed`/`still open`, missing or repeated ids, `auditor` from the file name, a JSON block wrapped in prose). What it cannot fix exits 1 with the message to send back to the agent.
+- Auditors and reviewers write their result to the `Output file:` given in the prompt and answer in at most 5 lines; the orchestrator no longer copies JSON out of long messages. The 15 scored agents gain `Write`, limited by the contract to that file.
+- `dev_state.py fix-tasks --from <findings.json> --milestone M [--include F-…]`: one fix task per blocking finding (file, AC, `F-nnn resolved: …`), idempotent; used by `qa`, `usability` and `release`.
+- `autopilot --milestones N`: stop after N approved gates and resume in a fresh session.
+- conventions §17 "Lean orchestration".
+
+### Changed
+- Every Agent call passes `model` and `effort` explicitly from round 1 (conventions §9): hosts that ignore the frontmatter ran every auditor on the orchestrator's model.
+- `dev_score.py score` rejects an unknown severity instead of scoring it silently as `low`, and reads normalised results.
+
+### Fixed
+- `dev_cost.py`: a `requestId` of `"unknown"` (or `null`, or an id too long for the store) collapsed a session into a couple of records; ids now fall back to the message id and the line uuid, and odd ids are kept as a short hash. Stores written before are re-read on the next `ingest`.
+- `dev_cost.py`: model names with gateway or provider decoration (`system.ai.claude-…`, `us.anthropic.claude-…-v1:0`, `anthropic/…`, `@date`, `[1m]`) are normalised; an unlisted model of a known family is priced as the family's first listed model, with a "priced as" warning.
+- `docs/skills.md` was stale after 1.14.0.
+
 ## 1.14.0 — 2026-11-19
 
 Board redesigned around one question: what is happening and what needs me, without scrolling.

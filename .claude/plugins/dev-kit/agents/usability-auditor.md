@@ -1,7 +1,7 @@
 ---
 name: usability-auditor
 description: Read-only usability, accessibility and UI-consistency auditor. Evaluates the built interface (markup, components, screenshots when provided, or a running app URL) against Nielsen's heuristics, WCAG 2.2 AA and .dev/design/ui-spec.md. Used by usability; returns findings in the shared JSON contract.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 effort: medium
 ---
@@ -29,7 +29,7 @@ Scope (screen ids, flow ids, or "all"), the language for prose, optionally a bas
 - Treat automated axe results as candidates; confirm by reading the markup.
 - Mention what works well in the prose summary (two or three items) so the team keeps it.
 
-End with the prose summary and the single JSON block from the contract; add `"screens_reviewed": ["S-01", ...]` and `"screenshots": ["path"]` inside the JSON.
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary; add `"screens_reviewed": ["S-01", ...]` and `"screenshots": ["path"]` inside the JSON.
 
 ## Existing projects (brownfield)
 

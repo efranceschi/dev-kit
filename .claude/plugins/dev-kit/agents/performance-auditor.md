@@ -1,7 +1,7 @@
 ---
 name: performance-auditor
 description: Read-only performance auditor. Measures or reasons about backend query patterns, request-path work, bundle size, rendering and asset loading against the targets in the brief, running builds, Lighthouse or load smoke tests only when the tooling already exists. Used by qa and release; returns findings in the shared JSON contract.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 effort: medium
 ---
@@ -27,7 +27,7 @@ Scope (milestone or `release`), language for prose. `.dev/brief.md` block 8 and 
 - Do not micro-optimise; ignore anything that cannot matter at the stated scale.
 - Stop any process you started.
 
-End with a prose summary and the single JSON block from the contract (`auditor: "performance-auditor"`); add `"measurements": {"lcp_ms": ..., "bundle_kb_gzip": ..., "p95_ms": {...}}` inside the JSON when you have them.
+Deliver as the output contract says: write the JSON result to the `Output file:` of your prompt (the only file you write), validate it, and end with the short summary (JSON: `auditor: "performance-auditor"`); add `"measurements": {"lcp_ms": ..., "bundle_kb_gzip": ..., "p95_ms": {...}}` inside the JSON when you have them.
 
 ## Existing projects (brownfield)
 
