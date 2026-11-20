@@ -390,18 +390,112 @@ class BoardTest(unittest.TestCase):
         self.assertEqual((self.root / ".dev" / "state.json").read_bytes(), state)  # applied by Claude Code, not here
 
     def test_approval_decisions(self):
+        sys.path.insert(0, str(CORE / "scripts"))
+        import dev_worker as dw
         d = self.root / ".dev" / "run" / "approvals"
-        d.mkdir(parents=True)
-        (d / "A-00ff00ff.json").write_text(json.dumps({"id": "A-00ff00ff", "tool": "Bash", "target": "npm test"}))
+        aid = dw.request_approval(self.root, "Bash", "npm test", "R-001", "Bash(npm test:*)", 60)
+        plain = dw.request_approval(self.root, "Write", "src/a.ts", "R-001", None, 60)
         self.board("start", check=True)
         port, tok = self.record()["port"], self.record()["token"]
         st = json.loads(request(port, "GET", "/api/state")[1])
-        self.assertEqual([a["id"] for a in st["inbox"]["approvals"]], ["A-00ff00ff"])
-        self.assertEqual(post(port, "/api/approvals/A-00ff00ff", {"decision": "always"}, tok)[0], 422)
-        self.assertEqual(post(port, "/api/approvals/A-00ff00ff", {"decision": "allow"}, tok)[0], 200)
-        self.assertEqual((d / "A-00ff00ff.decision").read_text(), "allow")
-        self.assertEqual(post(port, "/api/approvals/A-00ff00ff", {"decision": "deny"}, tok)[0], 409)
+        self.assertEqual(sorted(a["id"] for a in st["inbox"]["approvals"]), sorted([aid, plain]))
+        self.assertEqual(next(a for a in st["inbox"]["approvals"] if a["id"] == aid)["rule"], "Bash(npm test:*)")
+        self.assertEqual(post(port, f"/api/approvals/{aid}", {"decision": "always"}, tok)[0], 422)
+        self.assertEqual(post(port, f"/api/approvals/{plain}", {"decision": "allow_session"}, tok)[0], 422)  # no rule to keep
+        self.assertEqual(post(port, f"/api/approvals/{aid}", {"decision": "allow_session"}, tok)[0], 200)
+        self.assertEqual((d / f"{aid}.decision").read_text(), "allow_session")
+        self.assertEqual(post(port, f"/api/approvals/{aid}", {"decision": "deny"}, tok)[0], 409)
         self.assertEqual(post(port, "/api/approvals/A-11111111", {"decision": "deny"}, tok)[0], 404)
+
+    def _permission_hook(self, wait_s="20", **payload):
+        hook = CORE / "scripts" / "dev_agent_hook.py"
+        body = {"hook_event_name": "PermissionRequest", "session_id": "s1", "cwd": str(self.root), "tool_name": "Bash",
+                "tool_input": {"command": "npm test -- --watch=false", "description": "Run the tests"}, **payload}
+        proc = subprocess.Popen([sys.executable, "-I", str(hook)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                                env={**os.environ, "CLAUDE_PROJECT_DIR": str(self.root), "DEV_KIT_APPROVAL_WAIT_S": wait_s})
+        proc.stdin.write(json.dumps(body))
+        proc.stdin.close()
+        return proc
+
+    def _result(self, proc) -> dict:
+        out = proc.stdout.read()
+        proc.stdout.close()
+        proc.wait(timeout=30)
+        self.assertEqual(proc.returncode, 0)
+        return json.loads(out)["hookSpecificOutput"]["decision"] if out.strip() else {}
+
+    def _approval(self, port) -> dict:
+        for _ in range(100):
+            waiting = json.loads(request(port, "GET", "/api/state")[1])["inbox"]["approvals"]
+            if waiting:
+                return waiting[0]
+            time.sleep(0.1)
+        self.fail("the permission never reached the board")
+
+    def test_permission_prompts_are_answered_on_the_board(self):
+        sys.path.insert(0, str(CORE / "scripts"))
+        import dev_worker as dw
+        suggestions = [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm test:*"}], "behavior": "allow",
+                        "destination": "localSettings"},
+                       {"type": "setMode", "mode": "bypassPermissions", "destination": "session"},
+                       {"type": "addRules", "rules": [{"toolName": "Bash"}], "behavior": "deny", "destination": "userSettings"}]
+        # no board request running: Claude Code's own prompt handles it (the hook says nothing, at once)
+        self.assertEqual(self._result(self._permission_hook()), {})
+        self.board("start", check=True)
+        port, tok = self.record()["port"], self.record()["token"]
+        dw.submit(self.root, "run", {"command": "/dev-kit:implement"})
+        dw.claim(self.root, "claude-test", os.getpid())  # this test stands for the Claude Code process: the hook's parent
+        # a question is never a permission
+        self.assertEqual(self._result(self._permission_hook(tool_name="AskUserQuestion")), {})
+        # allow for this session: only the allow rule Claude Code suggested, and only until the session ends
+        proc = self._permission_hook(permission_suggestions=suggestions)
+        a = self._approval(port)
+        self.assertEqual((a["tool"], a["target"], a["request"], a["rule"]), ("Bash", "npm test -- --watch=false", "R-001", "Bash(npm test:*)"))
+        self.assertEqual(post(port, f"/api/approvals/{a['id']}", {"decision": "allow_session"}, tok)[0], 200)
+        self.assertEqual(self._result(proc), {"behavior": "allow", "updatedPermissions": [
+            {"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm test:*"}], "behavior": "allow", "destination": "session"}]})
+        self.assertEqual(json.loads(request(port, "GET", "/api/state")[1])["inbox"]["approvals"], [])
+        # allow once
+        proc = self._permission_hook(tool_name="Write", tool_input={"file_path": "src/a.ts", "content": "SECRET"})
+        a = self._approval(port)
+        self.assertEqual((a["tool"], a["target"], a["rule"]), ("Write", "src/a.ts", None))
+        self.assertNotIn("SECRET", json.dumps(a))
+        post(port, f"/api/approvals/{a['id']}", {"decision": "allow"}, tok)
+        self.assertEqual(self._result(proc), {"behavior": "allow"})
+        # deny
+        proc = self._permission_hook()
+        post(port, f"/api/approvals/{self._approval(port)['id']}", {"decision": "deny"}, tok)
+        d = self._result(proc)
+        self.assertEqual(d["behavior"], "deny")
+        self.assertIn("Denied by the user on the dev-kit board (R-001)", d["message"])
+        # nobody answers
+        d = self._result(self._permission_hook(wait_s="1"))
+        self.assertEqual(d["behavior"], "deny")
+        self.assertIn("Nobody answered", d["message"])
+        self.assertEqual(list((self.root / ".dev" / "run" / "approvals").iterdir()), [])
+        # the request is cancelled on the board while the permission waits
+        proc = self._permission_hook()
+        self._approval(port)
+        post(port, "/api/inbox/R-001/cancel", {}, tok)
+        self.assertIn("R-001 was cancelled", self._result(proc)["message"])
+        # the board is gone: back to Claude Code's own prompt
+        self.board("stop")
+        self.assertEqual(self._result(self._permission_hook()), {})
+
+    def test_hook_trace_records_keys_never_values(self):
+        hook = CORE / "scripts" / "dev_agent_hook.py"
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "cwd": str(self.root), "prompt": "SECRET prompt"}
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(self.root)}
+        subprocess.run([sys.executable, "-I", str(hook)], input=json.dumps(payload), text=True, check=True, env=env)
+        trace = self.root / ".dev" / "run" / "hook-trace.jsonl"
+        self.assertFalse(trace.exists())  # off unless asked for
+        subprocess.run([sys.executable, "-I", str(hook)], input=json.dumps(payload), text=True, check=True,
+                       env={**env, "DEV_KIT_HOOK_TRACE": "1"})
+        rec = json.loads(trace.read_text().splitlines()[-1])
+        self.assertEqual((rec["event"], rec["answered"]), ("UserPromptSubmit", False))
+        self.assertIn("prompt", rec["payload_keys"])
+        self.assertTrue(rec["parents"])
+        self.assertNotIn("SECRET", trace.read_text())
 
     def test_question_options_reach_the_page(self):
         self.ds("add-question", "Which DB?", "--options", "Postgres|SQLite", "--recommended", "SQLite")

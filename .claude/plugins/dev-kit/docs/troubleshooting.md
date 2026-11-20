@@ -35,6 +35,8 @@
 | Board stopped by itself | No open tab and no session listening for 2 hours | Start it again; `--idle-min N` changes the limit (0 = never) |
 | Board: requests stay "waiting" | No Claude Code session is listening | Run `/dev-kit:board` in the project's Claude Code session (it then listens), or `/dev-kit:worker` to run the queue once; the Requests card says "Claude Code: not running" until one does |
 | Board: "Claude Code: open, not listening" | That session ran `/dev-kit:worker` but did not open the board, or its Claude Code has no plugin monitors | Run `/dev-kit:board` there; if it still says "not listening", update Claude Code, and meanwhile `/dev-kit:worker` runs the queue when you ask |
+| Board: a permission waits in Needs you | Claude Code needs it for the request it runs | Allow, Allow for this session (the rule shown, until the session ends) or Deny; with no answer it is denied after 10 minutes |
+| The terminal still asks for permissions during a board request | No board is running, or the request is not a board request | Start the board with `/dev-kit:board`; outside board requests the terminal prompt applies as usual |
 | Board: "It stopped going on by itself" | Continuous mode met something that needs you; the card says what | Deal with it, then "Go on" |
 | Board: "actions off" or no ▶ buttons | It was started with `--actions off` | `/dev-kit:board --actions on` |
 | Board: "another session is the executor" | Two Claude Code sessions ran `/dev-kit:worker` | Keep one; the other is refused while the first is alive |

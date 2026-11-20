@@ -47,6 +47,12 @@ While a request runs, every point that would ask the user (an AskUserQuestion of
 ## Cancel
 At every safe point of a long request (between tasks, before a QA round, before a commit), check `DW show <id> --json`. When `cancel_requested` is true: finish the step in progress without starting another, keep the tree clean (commit only finished, green work; otherwise leave the task's changes in its worktree branch), `DS block` an unfinished task with `--reason "cancelled from the board (<id>)"`, then `DW finish <id> --status cancelled`.
 
+## Permissions
+While a request runs, Claude Code's permission prompts go to the board (`conventions.md` §10): the user allows, allows for this session, or denies there, and a prompt nobody answers in 10 minutes is denied. Nothing to do for it here; just do not work around it:
+- A denied action is not retried, and not attempted another way that needs the same permission (another tool, a script, a subagent).
+- Go on with what does not need it. When the request cannot be finished without it, `DW finish <id> --status failed --note "<tool> denied"` (or `permission not answered`), and `DS block` an unfinished task with the same reason.
+- A denial that says the request was cancelled → follow **Cancel** above.
+
 ## Report
 In the user's language, short: requests done (id, what, result), failed (id, reason), waiting for an answer (id, question), and whether the queue is empty or paused. The board shows the same, live.
 

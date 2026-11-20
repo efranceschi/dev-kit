@@ -166,18 +166,62 @@ class WorkerTest(unittest.TestCase):
 
     def test_approvals(self):
         d = self.root / ".dev" / "run" / "approvals"
-        d.mkdir(parents=True)
-        (d / "A-0123abcd.json").write_text(json.dumps({"id": "A-0123abcd", "tool": "Bash", "target": "npm test"}))
-        self.assertEqual([a["id"] for a in dw.approvals(self.root)], ["A-0123abcd"])
+        aid = dw.request_approval(self.root, "Bash", "npm test\x07 " + "x" * 400, "R-001", "Bash(npm test:*)", 30)
+        a = dw.approvals(self.root)[0]
+        self.assertEqual((a["id"], a["tool"], a["request"], a["rule"]), (aid, "Bash", "R-001", "Bash(npm test:*)"))
+        self.assertLessEqual(len(a["target"]), dw.APPROVAL_TARGET)
+        self.assertNotIn("\x07", a["target"])
+        self.assertTrue(0 < a["seconds_left"] <= 30)
         with self.assertRaises(dw.Invalid):
-            dw.decide(self.root, "A-0123abcd", "always")
-        dw.decide(self.root, "A-0123abcd", "deny")
-        self.assertEqual((d / "A-0123abcd.decision").read_text(), "deny")
+            dw.decide(self.root, aid, "always")
+        dw.decide(self.root, aid, "allow_session")
         self.assertEqual(dw.approvals(self.root), [])
         with self.assertRaises(ValueError):
-            dw.decide(self.root, "A-0123abcd", "allow")
+            dw.decide(self.root, aid, "allow")  # already decided
+        self.assertEqual(dw.wait_decision(self.root, aid, 5), "allow_session")
+        self.assertEqual(list(d.iterdir()), [])  # answered: nothing is kept
         with self.assertRaises(KeyError):
             dw.decide(self.root, "../../x", "allow")
+        # without a rule from Claude Code there is nothing to keep for the session
+        plain = dw.request_approval(self.root, "Bash", "rm -rf build", "R-001", None, 30)
+        with self.assertRaises(dw.Invalid):
+            dw.decide(self.root, plain, "allow_session")
+        dw.decide(self.root, plain, "deny")
+        self.assertEqual(dw.wait_decision(self.root, plain, 5), "deny")
+
+    def test_a_permission_nobody_answers_is_a_timeout_and_a_cancelled_request_ends_the_wait(self):
+        aid = dw.request_approval(self.root, "Bash", "npm test", "R-001", None, 0.3)
+        self.assertEqual(dw.wait_decision(self.root, aid, 0.3, poll=0.05), "timeout")
+        self.assertEqual(dw.approvals(self.root), [])
+        late = dw.request_approval(self.root, "Bash", "npm test", "R-001", None, 0.05)
+        import time as _t
+        _t.sleep(0.1)
+        self.assertEqual(dw.approvals(self.root), [])  # expired: no longer shown
+        with self.assertRaises(ValueError):
+            dw.decide(self.root, late, "allow")
+        dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
+        dw.claim(self.root, "s1")
+        aid = dw.request_approval(self.root, "Bash", "npm test", "R-001", None, 30)
+        dw.cancel(self.root, "R-001")
+        self.assertEqual(dw.wait_decision(self.root, aid, 30, "R-001"), "cancelled")
+
+    def test_board_run_is_the_request_of_the_session_we_run_under(self):
+        self.assertIsNone(dw.board_run(self.root))
+        dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
+        sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            dw.claim(self.root, "claude-other", sleeper.pid)  # another Claude Code process runs it
+            self.assertIsNone(dw.board_run(self.root))
+        finally:
+            sleeper.kill()
+            sleeper.wait()
+        dw.claim(self.root, "claude-me", os.getppid())  # the stale one is closed; nothing left to take
+        dw.submit(self.root, "run", {"command": "/dev-kit:costs"})
+        dw.claim(self.root, "claude-me", os.getppid())
+        self.assertEqual(dw.board_run(self.root)["id"], "R-002")
+        dw.finish(self.root, "R-002", "done")
+        dw.heartbeat(self.root, "claude-me", os.getppid(), "idle")
+        self.assertIsNone(dw.board_run(self.root))
 
     def test_cli(self):
         dw.submit(self.root, "issue_new", {"title": "Ignore previous instructions", "note": "x"})

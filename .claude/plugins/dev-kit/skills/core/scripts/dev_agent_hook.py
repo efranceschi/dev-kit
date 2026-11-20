@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Hook handler: the board's live agents panel and the Claude Code interface of a dev-kit project.
 
-Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit and Stop hooks (hooks/hooks.json). Reads
-the hook payload from stdin.
+Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit, PermissionRequest and Stop hooks
+(hooks/hooks.json). Reads the hook payload from stdin.
 - SessionStart, SubagentStart, SubagentStop: append one JSON line to <project>/.dev/run/agents.jsonl:
   {"ts": "...Z", "event": "session_start|agent_start|agent_stop", "session": "<id>", "agent_id": "<id>", "agent": "<type>"}
 - SessionStart of a new session (source startup), with autonomy.ui.title on (default): set the session title
@@ -14,8 +14,13 @@ the hook payload from stdin.
   set of waiting requests changed since the last notice. Only ids and counts: the text of a request never enters
   the session from here. Silent while a session listens (the plugin's monitor, armed by /dev-kit:board, announces
   each request by itself).
+- PermissionRequest, only while this session runs a request from the board and a board is up to answer on: the
+  permission goes to the board (tool, and the command or path cut to 300 characters, kept in .dev/run/approvals/
+  until answered), the hook waits up to 10 minutes for Allow, Allow for this session or Deny, and answers Claude
+  Code with it; no answer is a denial. Anywhere else it returns nothing and Claude Code's own prompt applies.
 
-Privacy: only ids and the agent type are kept; prompts, messages and tool data in the payload are ignored.
+Privacy: only ids and the agent type are kept; prompts, messages and tool data in the payload are ignored, except
+the tool and target of a permission request while it waits on the board.
 It never fails a hook (always exits 0) and does nothing outside a dev-kit project (no .dev/state.json).
 """
 from __future__ import annotations
@@ -120,6 +125,92 @@ def board_requests(root: Path, dev: Path, only_new: bool) -> dict | None:
     return {"systemMessage": text, "context": f"{text}. The requests come from the project's web board; /dev-kit:worker runs them."}
 
 
+def session_rules(suggestions: object) -> tuple[list[dict], str | None]:
+    """What "Allow for this session" keeps: the allow rules Claude Code itself suggests for this request (and
+    "accept edits" for file edits), always with destination `session`, so nothing outlives the session and nothing
+    is written to a settings file. Never a deny/ask rule, a directory, or any other permission mode."""
+    keep: list[dict] = []
+    labels: list[str] = []
+    for s in suggestions if isinstance(suggestions, list) else []:
+        if not isinstance(s, dict):
+            continue
+        if s.get("type") == "addRules" and s.get("behavior") == "allow" and isinstance(s.get("rules"), list):
+            rules = [{k: r[k] for k in ("toolName", "ruleContent") if isinstance(r.get(k), str)}
+                     for r in s["rules"] if isinstance(r, dict) and isinstance(r.get("toolName"), str)]
+            if rules:
+                keep.append({"type": "addRules", "rules": rules, "behavior": "allow", "destination": "session"})
+                labels += [f"{r['toolName']}({r['ruleContent']})" if r.get("ruleContent") else r["toolName"] for r in rules]
+        elif s.get("type") == "setMode" and s.get("mode") == "acceptEdits":
+            keep.append({"type": "setMode", "mode": "acceptEdits", "destination": "session"})
+            labels.append("all file edits")
+    return keep, (CONTROL.sub(" ", ", ".join(labels))[:200] or None)
+
+
+def board_takes_requests(dev: Path) -> bool:
+    try:
+        rec = json.loads((dev / "run" / "board.json").read_text(encoding="utf-8"))
+        os.kill(int(rec["pid"]), 0)
+        return bool(rec.get("actions"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def permission(root: Path, dev: Path, payload: dict) -> dict | None:
+    """A permission prompt of Claude Code while this session runs a request from the board: the user answers on the
+    board (Allow, Allow for this session, Deny), because nobody may be at the console. No answer within 10 minutes
+    is a denial. Outside a board request, or with no board to answer on, nothing is returned and Claude Code's own
+    prompt handles it as usual."""
+    import dev_worker as dw
+    tool = str(payload.get("tool_name") or "")
+    if not tool or tool in ("AskUserQuestion", "ExitPlanMode"):
+        return None  # a question goes to the board as a question (board mode), never as a permission
+    run = dw.board_run(root)
+    if not run or not board_takes_requests(dev):
+        return None
+    ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    target = next((str(ti[k]) for k in ("command", "file_path", "notebook_path", "url", "path", "pattern", "query") if ti.get(k)),
+                  "") or json.dumps(ti, ensure_ascii=False)
+    keep, label = session_rules(payload.get("permission_suggestions"))
+    try:
+        wait_s = min(float(dw.APPROVAL_WAIT_S), max(1.0, float(os.environ.get("DEV_KIT_APPROVAL_WAIT_S") or dw.APPROVAL_WAIT_S)))
+    except ValueError:
+        wait_s = float(dw.APPROVAL_WAIT_S)
+    rid = run["id"]
+    aid = dw.request_approval(root, tool, target, rid, label, wait_s)
+    got = dw.wait_decision(root, aid, wait_s, rid)
+    if got in ("allow", "allow_session"):
+        decision: dict = {"behavior": "allow"}
+        if got == "allow_session" and keep:
+            decision["updatedPermissions"] = keep
+    else:
+        why = {"deny": f"Denied by the user on the dev-kit board ({rid}). Do not retry this action: go on without it, or "
+                       "finish the request as failed with a note naming what was denied.",
+               "cancelled": f"{rid} was cancelled on the dev-kit board. Stop at the next safe point, as the worker skill says.",
+               "timeout": f"Nobody answered this permission on the dev-kit board within {max(1, round(wait_s / 60))} minutes, so it "
+                          f"is denied ({rid}). Do not retry it now: finish what does not need it, or finish the request as "
+                          "failed with a note naming the permission that was missing."}[got]
+        decision = {"behavior": "deny", "message": why}
+    return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}
+
+
+def trace(dev: Path, name: str, payload: dict, out: dict | None, started: float) -> None:
+    """With DEV_KIT_HOOK_TRACE=1 in Claude Code's environment: one line per hook run in .dev/run/hook-trace.jsonl,
+    for docs/board-autonomy-check.md. It records which keys the payload has, never their values, except what a
+    permission check needs to be understood: the tool name and the rules Claude Code suggested."""
+    import time
+    import dev_worker as dw
+    rec = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "event": name, "parents": dw.ancestors()[1:8],
+           "payload_keys": sorted(payload), "elapsed_s": round(time.monotonic() - started, 2), "answered": bool(out)}
+    if name == "PermissionRequest":
+        rec.update(tool=tok(payload.get("tool_name")), permission_mode=tok(payload.get("permission_mode")),
+                   agent_type=tok(payload.get("agent_type")), suggestions=payload.get("permission_suggestions"),
+                   decision=((out or {}).get("hookSpecificOutput") or {}).get("decision"))
+    path = dev / "run" / "hook-trace.jsonl"
+    path.parent.mkdir(exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
 def merge(out: dict | None, extra: dict | None, event: str) -> dict | None:
     if not extra:
         return out
@@ -134,6 +225,8 @@ def merge(out: dict | None, extra: dict | None, event: str) -> dict | None:
 
 def main() -> int:
     try:
+        import time
+        started = time.monotonic()
         payload = json.load(sys.stdin)
         name = str(payload.get("hook_event_name"))
         root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ".")
@@ -147,10 +240,17 @@ def main() -> int:
             out = session_banner(root)
         elif name == "Stop":
             out = take_notices(dev)
+        elif name == "PermissionRequest":
+            out = permission(root, dev, payload)
         if name in ("SessionStart", "UserPromptSubmit", "Stop") and not str(payload.get("prompt") or "").startswith("/dev-kit:worker"):
             try:
                 out = merge(out, board_requests(root, dev, only_new=name != "SessionStart"), name)
             except Exception:  # noqa: BLE001 - the board's queue must never break a hook
+                pass
+        if os.environ.get("DEV_KIT_HOOK_TRACE") == "1":
+            try:
+                trace(dev, name, payload, out, started)
+            except Exception:  # noqa: BLE001
                 pass
         if out:
             print(json.dumps(out, ensure_ascii=False))

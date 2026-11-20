@@ -1052,17 +1052,25 @@
     box.append(h("span", { class: "answer-free" }, inp, go));
     return box;
   }
+  const DECIDED = { allow: "Allowed", allow_session: "Allowed for this session", deny: "Denied" };
+  const leftText = (ms) => (ms <= 0 ? "No answer in time: denied." : ms < 60000 ? `Denied in ${Math.ceil(ms / 1000)} s without an answer.` : `Denied in ${Math.ceil(ms / 60000)} min without an answer.`);
   function approvalRow(a) {
+    const deadline = lastUpdate + (a.seconds_left || 0) * 1000;
     const decide = async (decision, el) => {
       el.disabled = true;
-      try { await api(`/api/approvals/${a.id}`, { decision }); toast(`${decision === "allow" ? "Allowed" : "Denied"}: ${a.tool}.`); load(); } catch (e) { el.disabled = false; toast(e.message, true); }
+      try { await api(`/api/approvals/${a.id}`, { decision }); toast(`${DECIDED[decision]}: ${a.tool}.`); load(); } catch (e) { el.disabled = false; toast(e.message, true); load(); }
     };
     return h("li", {}, h("span", { class: "id", text: a.tool || "tool" }), h("span", { class: "mono-wrap", text: a.target || "" }),
       h("span", { class: "chip", text: a.request || "" }),
-      h("div", { class: "sub answer" },
+      h("div", { class: "sub answer", role: "group", "aria-label": `Permission for ${a.tool}` },
         h("button", { type: "button", class: "btn btn-sm btn-primary", text: "Allow", onclick: (e) => decide("allow", e.currentTarget) }),
-        h("button", { type: "button", class: "btn btn-sm btn-danger", text: "Deny", onclick: (e) => decide("deny", e.currentTarget) })));
+        a.rule ? h("button", { type: "button", class: "btn btn-sm", title: `Until the Claude Code session ends, without asking again: ${a.rule}`,
+          onclick: (e) => decide("allow_session", e.currentTarget) }, "Allow for this session") : null,
+        h("button", { type: "button", class: "btn btn-sm btn-danger", text: "Deny", onclick: (e) => decide("deny", e.currentTarget) })),
+      a.rule ? h("span", { class: "sub" }, "For this session it would allow: ", h("code", { text: a.rule })) : null,
+      h("span", { class: "sub approval-left", "data-deadline": String(deadline), text: leftText(deadline - Date.now()) }));
   }
+  setInterval(() => document.querySelectorAll(".approval-left[data-deadline]").forEach((el) => { el.textContent = leftText(Number(el.dataset.deadline) - Date.now()); }), 1000);
 
   // ------------------------------------------------------------------ plan: drag tasks and issues between open milestones, add the next milestone, send the draft
   let view = "tasks";

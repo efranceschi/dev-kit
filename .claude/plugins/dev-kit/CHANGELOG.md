@@ -2,6 +2,15 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.26.0 — 2026-11-20
+
+Claude Code's permission prompts are answered on the board while it runs a board request.
+
+### Added
+- `PermissionRequest` hook: while the session runs a request from the board and a board is up, each permission prompt appears in Needs you with the tool and the command or path (cut to 300 characters), and Allow, **Allow for this session** (only the allow rule Claude Code itself suggests, kept until the session ends, written to no settings file) and Deny, with the time left. No answer in 10 minutes is a denial, and so is a request cancelled meanwhile; the denial tells Claude not to retry. Questions (`AskUserQuestion`) never become permissions. Outside a board request, or with no board, nothing changes: Claude Code's own prompt applies. The hook runs inside subagents too.
+- `/dev-kit:worker`: what to do when a permission is denied (no retry, no workaround; go on without it or finish the request as failed).
+- `docs/board-autonomy-check.md`: a 15-minute script to check, on your Claude Code version, that the monitor wakes an idle session and permissions are answered from the board, producing a zip for the kit's author. `DEV_KIT_HOOK_TRACE=1` makes the hooks log event names, process ids and payload keys (never values) to `.dev/run/hook-trace.jsonl` for it.
+
 ## 1.25.0 — 2026-11-20
 
 The session that opened the board listens: a request on the page starts work in Claude Code with nobody at the console.
