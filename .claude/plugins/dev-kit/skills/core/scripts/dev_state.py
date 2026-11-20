@@ -48,7 +48,9 @@ Subcommands
   tip CTX       one contextual tip (tips each show at most twice); tips [--reset] lists them all
   deploy [ENV]  record a deploy (--sha --status ok|failed|rolled_back [--milestone M] [--migration REV])
   preview M     record the local deploy of a milestone (--url --sha [--pid]) or --stopped
-  set KEY VAL   set language | phase | project | stack.<field> | autonomy.<field>[.<sub>] (nested keys merge;
+  release-record  record a cut release (--version [--tag] [--milestones M1,M2 | --hotfix T]): the milestones
+                leave the release train; the phase (conception, planning, construction, stable) is always derived
+  set KEY VAL   set language | project | stack.<field> | autonomy.<field>[.<sub>] (nested keys merge;
                 autonomy.level applies its preset; incl. autonomy.pause_policy.<point>)
   status        human (--short) or --json view; --next prints only the next command; --quiet-if-missing for hooks
   notify TEXT   queue a desktop notification shown at the end of the turn (only with autonomy.ui.notify on)
@@ -76,21 +78,23 @@ import dev_telemetry as tel  # noqa: E402
 import dev_ledger as led  # noqa: E402
 
 STATE_VERSION = 1
-PHASES = [
-    "init", "interview", "prd", "architecture", "ux", "ui", "plan",
-    "implement", "qa", "usability", "docs", "done",
-]
+# Project lifecycle (conventions.md §19): derived from the artifacts, reviews, milestones, issues and releases,
+# never set by hand. Conception and planning run once at the start and again for every scope change; construction
+# runs the milestone cycle and the release train; stable = nothing open, everything built is released.
+PHASES = ["conception", "planning", "construction", "stable"]
+CONCEPTION_STEPS = ["interview", "prd", "architecture", "ux", "ui"]
+PLANNING_STEPS = ["plan"]
+STEP_ARTIFACT = {"interview": "brief", "prd": "prd", "architecture": "architecture", "ux": "ux", "ui": "ui", "plan": "plan"}
+STEP_REVIEW = {"prd": "prd", "ui": "design", "plan": "plan"}  # the design review covers ux and ui
+# phase names of kit versions before 1.30 (a straight line); state.json files still holding one are migrated on load
+LEGACY_PHASES = ["init", "interview", "prd", "architecture", "ux", "ui", "plan",
+                 "implement", "qa", "usability", "docs", "done"]
 TASK_TYPES = {"feature", "fix", "chore", "test", "docs"}
 TASK_STATUSES = {"todo", "in_progress", "done", "blocked", "dropped"}
 FINISHED = ("done", "dropped")  # a dropped task (replan) no longer holds a milestone or the release
 GATES = {"passed", "pending", "skipped"}
 BROWNFIELD_MODES = ("feature", "maintenance", "import")
 DEFAULT_COMMIT_STYLE = "[{task}] {type}: {summary}"  # used when autonomy.commit_style is absent (conventions §5)
-# artifact that must exist before entering each phase (checked by `set phase`, warning only)
-PHASE_ARTIFACTS = [
-    ("prd", "brief.md"), ("architecture", "prd.md"), ("ux", "architecture.md"),
-    ("ui", "design/ux-flows.md"), ("implement", "plan.md"),
-]
 
 DEFAULT_AUTONOMY = {
     "level": "high",
@@ -465,10 +469,16 @@ class Store:
             self.state = json.loads(self.path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             fail(f"state.json is corrupt: {e}", 1)
+        migrate_legacy_phase(self)
         return self.state
 
     def save(self) -> None:
         self.state["updated_at"] = now()
+        try:  # cached for the status line, the session banner and the board, which read state.json directly
+            lc = lifecycle(self)
+            self.state["phase"], self.state["step"], self.state["reopened"] = lc["phase"], lc["step"], lc["reopened"]
+        except Exception:  # noqa: BLE001 - a derived label must never stop the state from being saved
+            pass
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(self.state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         os.replace(tmp, self.path)
@@ -660,7 +670,7 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
         created = False
     else:
         store.state = {
-            "version": STATE_VERSION, "project": None, "language": None, "phase": "init",
+            "version": STATE_VERSION, "project": None, "language": None, "phase": "conception", "step": "interview",
             "autonomy": json.loads(json.dumps(DEFAULT_AUTONOMY)), "stack": {}, "reviews": {}, "milestones": {}, "tasks": {},
             "next_task_id": 1, "next_question_id": 1, "created_at": now(), "updated_at": now(),
         }
@@ -669,10 +679,6 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
         store.state["project"] = a.project
     if a.language:
         store.state["language"] = a.language
-    if a.phase:
-        if a.phase not in PHASES:
-            fail(f"invalid phase {a.phase}; one of {', '.join(PHASES)}")
-        store.state["phase"] = a.phase
     if a.stack_json:
         try:
             store.state["stack"] = json.loads(a.stack_json)
@@ -749,7 +755,7 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
             "|---|---|---|---|---|---|\n\n## Resolved\n| id | resolved on | answer | ADR / task |\n|---|---|---|---|\n",
             encoding="utf-8",
         )
-    store.log("init " + ("created" if created else "updated") + f" (phase={store.state['phase']}, language={store.state.get('language')})")
+    store.log("init " + ("created" if created else "updated") + f" (phase={store.state.get('phase')}, language={store.state.get('language')})")
     print(f"state {'created' if created else 'updated'} at {store.path}")
 
 
@@ -829,8 +835,6 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
                 problems.append(f"{tid}: consumes {d} but does not depend on it (add it to deps)")
         if t["milestone"] not in store.milestones():
             problems.append(f"{tid}: milestone {t['milestone']} not declared")
-    if store.state["phase"] in ("init", "interview", "prd", "architecture", "ux", "ui", "plan") and store.tasks():
-        store.state["phase"] = "implement" if store.state["phase"] == "plan" else store.state["phase"]
     return tasks, (added_m, added_t, updated_t), problems
 
 
@@ -987,8 +991,6 @@ def cmd_start(store: Store, a: argparse.Namespace) -> None:
     issue_sync(store, t)
     t["started_at"] = now()
     t["blocked_reason"] = None
-    if store.state["phase"] in ("plan", "qa"):
-        store.state["phase"] = "implement"
     store.save()
     store.log(f"start {a.task} {t['title']}")
     store.event("task", task=a.task, transition="start", type=t.get("type"), milestone=t.get("milestone"), parallel=bool(a.force and others))
@@ -1026,9 +1028,6 @@ def cmd_done(store: Store, a: argparse.Namespace) -> None:
         msg += f" · hotfix: run qa --scope {a.task}, then release --hotfix (it deploys)"
     elif store.milestone_done(m):
         msg += f" · milestone {m} complete -> run qa {m}"
-        if store.state.get("phase") == "implement":
-            store.state["phase"] = "qa"
-            store.save()
     print(msg)
 
 
@@ -2548,11 +2547,13 @@ def stale_report(store: Store) -> dict:
         if why:
             stale[n] = why
     reviews = []
-    phase = store.state.get("phase")
-    # Once implementation starts, dev_state.py itself appends fix and issue tasks to plan.md: a passed planning
-    # review is no longer re-checked against the files (stale upstream artifacts still are, above).
-    pre_build = phase not in PHASES or PHASES.index(phase) < PHASES.index("implement")
-    for rname, arts in (REVIEW_ARTIFACTS.items() if pre_build else []):
+    # Once a task is done, dev_state.py itself appends fix and issue tasks to plan.md: a passed plan review is no
+    # longer re-checked against the file (a stale upstream still makes plan.md stale, above). PRD and design reviews
+    # are always checked, so a scope change during construction reopens them (conventions.md §19).
+    built = any(v.get("status") == "done" for v in store.tasks().values())
+    for rname, arts in REVIEW_ARTIFACTS.items():
+        if built and rname == "plan":
+            continue
         r = (store.state.get("reviews") or {}).get(rname) or {}
         if r.get("verdict") != "pass" or not r.get("hashes"):
             continue
@@ -2721,30 +2722,13 @@ def cmd_review(store: Store, a: argparse.Namespace) -> None:
     print(f"review {a.name}: {a.value}" + (f" (score {a.score})" if a.score is not None else "") + f" · rounds {r['rounds']}")
 
 
-def missing_artifacts(store: Store, phase: str) -> list[str]:
-    """Artifacts of earlier phases that are absent when moving to `phase` (UI artifacts only for UI products)."""
-    target = PHASES.index(phase)
-    out = []
-    for p, art in PHASE_ARTIFACTS:
-        if PHASES.index(p) > target:
-            continue
-        if art.startswith("design/") and p != phase:
-            continue  # UI artifacts only matter when entering ui itself (UI-less products skip ux/ui)
-        if not (store.dev / art).exists():
-            out.append(art)
-    return out
-
-
 def cmd_set(store: Store, a: argparse.Namespace) -> None:
     store.load()
     key, val = a.key, a.value
     if key == "phase":
-        if val not in PHASES:
-            fail(f"invalid phase {val}; one of {', '.join(PHASES)}")
-        for missing in missing_artifacts(store, val):
-            print(f"warning: entering phase {val} but .dev/{missing} does not exist; run the skill that writes it", file=sys.stderr)
-        store.state["phase"] = val
-    elif key in ("language", "project"):
+        fail("the phase is derived from the artifacts, reviews, milestones and releases (conventions.md §19); "
+             "run the skill of the step instead (`status` shows it)")
+    if key in ("language", "project"):
         store.state[key] = val
     elif key.startswith("autonomy."):
         field = key.split(".", 1)[1]
@@ -2796,7 +2780,7 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
     elif key.startswith("stack."):
         store.state.setdefault("stack", {})[key.split(".", 1)[1]] = val
     else:
-        fail("key must be phase | language | project | autonomy.<field> | stack.<field>")
+        fail("key must be language | project | autonomy.<field> | stack.<field>")
     store.save()
     store.log(f"set {key}={val}")
     if key.startswith("autonomy."):
@@ -2834,7 +2818,7 @@ def render_short(store: Store) -> str:
     open_q = count_open_questions(store)
     name = s.get("project") or store.root.name
     bf = s.get("brownfield")
-    l1 = (f"[dev-kit] {name} · phase: {s.get('phase')} · language: {s.get('language') or '?'}"
+    l1 = (f"[dev-kit] {name} · phase: {phase_label(store, lifecycle(store))} · language: {s.get('language') or '?'}"
           + (f" · existing project: {bf.get('mode', 'feature')} (baseline {bf.get('baseline_ref', '?')})" if bf else "")
           + f" · tasks done {p['done']}/{p['total'] - p['dropped']} · gates: {gates}")
     if inprog:
@@ -2853,54 +2837,228 @@ def render_short(store: Store) -> str:
     return "\n".join([l1, l2, l3])
 
 
-PHASE_COMMAND = {"init": "interview", "interview": "interview", "prd": "prd", "architecture": "architecture",
-                 "ux": "ux", "ui": "ui", "plan": "plan", "usability": "usability", "done": "backlog"}
+# --------------------------------------------------------------------------- project lifecycle (conventions.md §19)
+
+DONE_STEP = ("done", "skipped")
+
+
+def has_ui(store: Store) -> bool:
+    """False when the design review was recorded n/a (product without a UI, or no new UI in an existing project)."""
+    return ((store.state.get("reviews") or {}).get("design") or {}).get("verdict") != "n/a"
+
+
+def migrate_legacy_phase(store: Store) -> None:
+    """state.json written before 1.30 holds a phase of the old straight line; keep what it implied and let the
+    lifecycle be derived from then on (the brief was finished, ux/ui were skipped, the product was released)."""
+    s = store.state
+    old = s.get("phase")
+    if old in PHASES or old not in LEGACY_PHASES:
+        return
+    idx = LEGACY_PHASES.index(old)
+    if idx >= LEGACY_PHASES.index("prd") and (store.dev / "brief.md").exists() and "brief" not in (s.get("artifacts") or {}):
+        s.setdefault("artifacts", {})["brief"] = {"hash": artifact_hash(store, "brief"), "at": now(), "upstream": {},
+                                                  "note": "interview finished before 1.30"}
+    revs = s.setdefault("reviews", {})
+    if idx >= LEGACY_PHASES.index("plan") and not (store.dev / "design" / "ux-flows.md").exists() and "design" not in revs:
+        revs["design"] = {"rounds": 0, "verdict": "n/a", "note": "no UI (skipped before 1.30)", "at": now()}
+    if old == "done" and not s.get("releases"):
+        closed = [m for m, v in sorted((s.get("milestones") or {}).items(), key=lambda kv: int(kv[0][1:]))
+                  if v.get("gate") in ("passed", "skipped")]
+        s["releases"] = [{"version": None, "tag": None, "milestones": closed, "at": s.get("updated_at") or now(),
+                          "note": "released before 1.30"}]
+    s["phase"], s["step"], s["reopened"] = None, None, False
+
+
+def lifecycle_steps(store: Store, rep: dict) -> dict:
+    """State of each conception and planning step: todo | doing | stale | review | done | skipped."""
+    revs = store.state.get("reviews") or {}
+    arts = store.state.get("artifacts") or {}
+    stale = {x["artifact"]: x for x in rep["stale"]}
+    outdated = {x["review"] for x in rep["reviews"]}
+    out = {}
+    for step in CONCEPTION_STEPS + PLANNING_STEPS:
+        art = STEP_ARTIFACT[step]
+        exists = bool(artifact_paths(store, art))
+        rname = STEP_REVIEW.get(step)
+        r = (revs.get(rname) or {}) if rname else {}
+        note = None
+        if step in ("ux", "ui") and not has_ui(store):
+            st, note = "skipped", revs["design"].get("note") or "no UI"
+        elif step == "interview":
+            # the brief is written block by block; `artifact mark brief` closes the interview (a PRD implies it too)
+            st = "done" if "brief" in arts or artifact_paths(store, "prd") else ("doing" if exists else "todo")
+        elif not exists:
+            st = "todo"
+        elif art in stale:
+            st, note = "stale", "; ".join(stale[art]["because"])
+        elif rname and (r.get("verdict") not in ("pass", "n/a") or rname in outdated):
+            st = "review"
+            note = f"review {rname} " + ("outdated" if rname in outdated else (r.get("verdict") or "not run"))
+        else:
+            st = "done"
+        out[step] = {"key": step, "state": st, "note": note}
+    return out
+
+
+def release_train(store: Store, mlist: list[dict]) -> dict:
+    """Milestones closed since the last release and what the next release still needs (usability, docs)."""
+    revs = store.state.get("reviews") or {}
+    releases = store.state.get("releases") or []
+    ms = store.milestones()
+    pending = [x["id"] for x in mlist if x["state"] == "closed"]
+    building = [x["id"] for x in mlist if x["state"] == "open" and x["started"]]
+    since = max((ms[m].get("passed_at") or "" for m in pending), default="")
+
+    def fresh(name: str) -> str:
+        r = revs.get(name) or {}
+        if r.get("verdict") == "n/a" or (r.get("verdict") == "pass" and (r.get("at") or "") >= since):
+            return "done"
+        return "review" if r.get("verdict") in ("pending", "fail") and (r.get("at") or "") >= since else "todo"
+
+    ui = has_ui(store) and (store.dev / "design" / "ui-spec.md").exists()
+    return {"milestones": pending, "ready": bool(pending) and not building and not store.in_progress(),
+            "waiting_for": building, "usability": (fresh("ux") if ui else "n/a") if pending else None,
+            "docs": fresh("docs") if pending else None, "last": releases[-1] if releases else None,
+            "count": len(releases)}
+
+
+def lifecycle(store: Store) -> dict:
+    """Where the project is in its lifecycle: conception -> planning -> construction -> stable, as a cycle. The
+    phase is the most upstream one with work left; the others report their own state, so a scope change in
+    conception and a milestone in construction show side by side (conventions.md §19)."""
+    rep = stale_report(store)
+    steps = lifecycle_steps(store, rep)
+    ts = store.tasks()
+    ms = store.milestones()
+    released = {m for r in store.state.get("releases") or [] for m in r.get("milestones") or []}
+    mlist = []
+    for m in store.milestone_order():
+        live = [v for v in ts.values() if v["milestone"] == m and v["status"] != "dropped"]
+        gate = ms[m].get("gate", "pending")
+        st = "empty" if not live else ("released" if m in released else "closed") if gate in ("passed", "skipped") else "open"
+        mlist.append({"id": m, "title": ms[m].get("title"), "state": st, "gate": gate,
+                      "done": sum(1 for v in live if v["status"] == "done"), "total": len(live),
+                      "started": any(v["status"] in ("done", "in_progress") for v in live)})
+    train = release_train(store, mlist)
+    queue = sorted(k for k, v in issues(store).items() if v.get("status") == "open")
+    planned = any(x["total"] for x in mlist)
+    maintenance = (store.state.get("brownfield") or {}).get("mode") == "maintenance"
+    open_ms = [x["id"] for x in mlist if x["state"] == "open"]
+    pending = {
+        "conception": [k for k in CONCEPTION_STEPS if steps[k]["state"] not in DONE_STEP],
+        "planning": [k for k in PLANNING_STEPS if steps[k]["state"] not in DONE_STEP],
+        "construction": bool(open_ms or any(v["status"] not in FINISHED for v in ts.values()) or queue
+                             or train["milestones"] or (not planned and not maintenance)),
+    }
+    ever_built = any(v["status"] == "done" for v in ts.values()) or bool(released) or any(x["state"] == "closed" for x in mlist)
+    cur = current_milestone(store)
+    if pending["conception"]:
+        phase, step = "conception", pending["conception"][0]
+    elif pending["planning"]:
+        phase, step = "planning", pending["planning"][0]
+    elif pending["construction"]:
+        phase = "construction"
+        step = open_ms[0] if open_ms else ("release" if train["milestones"] else "issues" if queue else None)
+    else:
+        phase, step = "stable", None
+
+    def pstate(p: str) -> str:
+        if p == phase:
+            return "current"
+        if p == "stable":
+            return "upcoming"
+        if pending[p]:
+            return "active" if p == "construction" and ever_built else "upcoming"
+        return "upcoming" if p == "construction" and not ever_built else "done"
+
+    closed = sum(1 for x in mlist if x["state"] in ("closed", "released"))
+    phases = [
+        {"key": "conception", "state": pstate("conception"), "reopened": bool(pending["conception"]) and ever_built,
+         "steps": [steps[k] for k in CONCEPTION_STEPS]},
+        {"key": "planning", "state": pstate("planning"), "reopened": bool(pending["planning"]) and ever_built,
+         "steps": [steps[k] for k in PLANNING_STEPS]},
+        {"key": "construction", "state": pstate("construction"), "reopened": False, "current_milestone": cur,
+         "milestones": mlist, "closed": closed, "queue": queue, "release": train},
+        {"key": "stable", "state": pstate("stable"), "reopened": False},
+    ]
+    return {"phase": phase, "step": step, "reopened": phase in ("conception", "planning") and ever_built,
+            "steps": steps, "phases": phases, "release": train, "queue": queue}
+
+
+def phase_label(store: Store, lc: dict | None = None) -> str:
+    """`conception · prd`, `construction · M3`, `stable`: one label for the status line, banner and reports."""
+    if lc is None:
+        s = store.state
+        if s.get("phase") in PHASES:
+            return " · ".join(x for x in (s["phase"], s.get("step")) if x) + (" (reopened)" if s.get("reopened") else "")
+        lc = lifecycle(store)
+    return " · ".join(x for x in (lc["phase"], lc["step"]) if x) + (" (reopened)" if lc.get("reopened") else "")
 
 
 def next_command(store: Store) -> str:
     """The one command the user most likely runs next. Shown by the status line and the session banner, and the
     last line of a skill's report (conventions.md §15), so Claude Code's prompt suggestion (Tab / Right arrow) offers it."""
-    s = store.state
-    phase = s.get("phase") or "interview"
     ts = store.tasks()
-    revs = s.get("reviews") or {}
-
-    def reviewed(name: str) -> bool:
-        return (revs.get(name) or {}).get("verdict") in ("pass", "n/a")
-
     hot = sorted((t for t, v in ts.items() if v.get("lane") == "hotfix" and v["status"] in ("todo", "in_progress")),
                  key=lambda t: int(t[2:]))
     if hot:
         return f"/dev-kit:implement {hot[0]}"
-    if phase == "architecture" and (store.dev / "prd.md").exists() and not reviewed("prd"):
-        return "/dev-kit:review prd"
-    if phase == "plan" and (store.dev / "design" / "ui-spec.md").exists() and not reviewed("design"):
-        return "/dev-kit:review design"
-    if phase in ("implement", "qa"):
-        if (store.dev / "plan.md").exists() and not reviewed("plan") and not any(v["status"] == "done" for v in ts.values()):
-            return "/dev-kit:review plan"
-        if store.in_progress():
-            return "/dev-kit:implement"
-        for m in store.milestone_order():
-            live = [v for v in ts.values() if v["milestone"] == m and v["status"] != "dropped"]
-            if live and store.milestones()[m].get("gate", "pending") == "pending":
-                if all(v["status"] == "done" for v in live):
-                    return f"/dev-kit:qa {m}"
-                break
-        tid, _ = pick_next(store, None)
-        if tid:
-            return "/dev-kit:implement"
-        if any(v["status"] == "blocked" for v in ts.values()) or count_open_questions(store):
-            return "/dev-kit:interview --gaps"
-        if ts and all(v["status"] in FINISHED for v in ts.values()):
-            has_ui = (store.dev / "design" / "ui-spec.md").exists()
-            return "/dev-kit:usability" if has_ui and not reviewed("ux") else "/dev-kit:docs"
-        return "/dev-kit:plan" if not ts else "/dev-kit:backlog"
-    if phase == "docs":
-        if reviewed("docs"):
-            return "/dev-kit:release"
-        return "/dev-kit:review docs" if "docs" in revs or (store.root / "README.md").exists() else "/dev-kit:docs"
-    return f"/dev-kit:{PHASE_COMMAND.get(phase, 'start')}"
+    lc = lifecycle(store)
+    if lc["phase"] in ("conception", "planning"):
+        step = lc["step"]
+        if lc["steps"][step]["state"] == "review":
+            return f"/dev-kit:review {STEP_REVIEW[step]}"
+        return f"/dev-kit:{step}"
+    if lc["phase"] == "stable":
+        return "/dev-kit:backlog"
+    if store.in_progress():
+        return "/dev-kit:implement"
+    for m in store.milestone_order():
+        live = [v for v in ts.values() if v["milestone"] == m and v["status"] != "dropped"]
+        if live and store.milestones()[m].get("gate", "pending") == "pending":
+            if all(v["status"] == "done" for v in live):
+                return f"/dev-kit:qa {m}"
+            break
+    tid, _ = pick_next(store, None)
+    if tid:
+        return "/dev-kit:implement"
+    if any(v["status"] == "blocked" for v in ts.values()) or count_open_questions(store):
+        return "/dev-kit:interview --gaps"
+    rel = lc["release"]
+    if rel["milestones"] and rel["ready"]:
+        if rel["usability"] == "todo":
+            return "/dev-kit:usability"
+        if rel["docs"] == "review":
+            return "/dev-kit:review docs"
+        if rel["docs"] == "todo":
+            return "/dev-kit:docs"
+        return "/dev-kit:release"
+    return "/dev-kit:plan" if not ts else "/dev-kit:backlog"
+
+
+def cmd_release_record(store: Store, a: argparse.Namespace) -> None:
+    """Record a cut release: the milestones it ships leave the release train (conventions.md §19)."""
+    store.load()
+    ms = store.milestones()
+    if a.hotfix:
+        store.task(a.hotfix)
+        names: list[str] = []
+    elif a.milestones:
+        names = _csv(a.milestones)
+        bad = [m for m in names if m not in ms or ms[m].get("gate") not in ("passed", "skipped")]
+        if bad:
+            fail(f"not closed (gate passed or skipped): {', '.join(bad)}")
+    else:
+        names = lifecycle(store)["release"]["milestones"]
+        if not names:
+            fail("no closed milestone waiting for a release (use --hotfix T-nnn for a patch release)")
+    rel = {"version": a.version, "tag": a.tag or f"v{a.version}", "milestones": names, "at": now()}
+    if a.hotfix:
+        rel["hotfix"] = a.hotfix
+    store.state.setdefault("releases", []).append(rel)
+    store.save()
+    store.log(f"release {rel['version']} ({rel['tag']}): {', '.join(names) or 'hotfix ' + str(a.hotfix)}")
+    print(f"release {rel['version']} recorded ({rel['tag']}): {', '.join(names) or 'hotfix ' + a.hotfix} · phase {phase_label(store)}")
 
 
 def queue_notice(store: Store, text: str) -> None:
@@ -2952,6 +3110,9 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
         out["next_command"] = next_command(store)
         out["open_questions"] = count_open_questions(store)
         out["stale"] = stale_report(store)
+        lc = lifecycle(store)
+        out["phase"], out["step"], out["reopened"] = lc["phase"], lc["step"], lc["reopened"]
+        out["lifecycle"] = {k: lc[k] for k in ("phases", "release", "queue")}
         print(json.dumps(out, indent=2, ensure_ascii=False))
         return
     if a.short:
@@ -2960,7 +3121,9 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
     s = store.state
     p = store.progress()
     print(f"Project: {s.get('project') or store.root.name}")
-    print(f"Phase: {s.get('phase')} · Language: {s.get('language') or '?'} · Autonomy: {s.get('autonomy', {}).get('level')}")
+    lc = lifecycle(store)
+    rel = lc["release"]
+    print(f"Phase: {phase_label(store, lc)} · Language: {s.get('language') or '?'} · Autonomy: {s.get('autonomy', {}).get('level')}")
     stack = s.get("stack") or {}
     if stack:
         print("Stack: " + ", ".join(f"{k}={v}" for k, v in stack.items() if k != "detected_from" and v))
@@ -2973,6 +3136,15 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
     revs = s.get("reviews") or {}
     if revs:
         print("Reviews: " + ", ".join(f"{k}:{v.get('verdict')}" + (f"({v['score']})" if v.get("score") is not None else "") for k, v in revs.items()))
+    todo = [f"{x['key']} ({x['state']})" for x in lc["steps"].values() if x["state"] not in DONE_STEP]
+    if todo and lc["phase"] in ("conception", "planning"):
+        print("Steps left: " + ", ".join(todo))
+    if rel["milestones"] or rel["last"]:
+        last = rel["last"]
+        print("Release train: " + (f"{', '.join(rel['milestones'])} closed since the last release" if rel["milestones"] else "nothing to release")
+              + (f" · usability {rel['usability']} · docs {rel['docs']}" if rel["milestones"] else "")
+              + (f" · waiting for {', '.join(rel['waiting_for'])}" if rel["waiting_for"] else "")
+              + (f" · last: {last.get('tag') or last.get('version') or 'before 1.30'} ({str(last.get('at'))[:10]})" if last else ""))
     q = quality_cfg(store)
     print(f"Quality cut-off: overall {q['min_overall']} · per dimension {q['min_dimension']} · reviews {q['review_min_overall']}")
     if s.get("artifacts"):
@@ -3342,7 +3514,6 @@ def apply_plan_ops(store: Store, ops: list[dict], *, dry_run: bool, as_json: boo
     if not plan_path.exists():
         fail(f"plan not found: {plan_path}")
     stale = bool(base) and base != store.state.get("updated_at")
-    phase_before = store.state.get("phase")
     text, changes, errors, eff = plan_edit(store, ops, plan_path.read_text(encoding="utf-8"))
     out = {"ok": not errors, "changes": changes, "errors": errors, "state_changed_since_draft": stale, "applied": False}
     if not errors and not dry_run:
@@ -3350,8 +3521,6 @@ def apply_plan_ops(store: Store, ops: list[dict], *, dry_run: bool, as_json: boo
             _, _, problems = sync_plan_text(store, text)
         except ValueError as e:
             fail(f"the edited plan does not parse: {e}")
-        if (eff["scheduled"] or eff["moved"] or eff["new_milestones"]) and phase_before in ("usability", "docs", "done"):
-            store.state["phase"] = "implement"
         tmp = plan_path.with_suffix(".md.tmp")
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, plan_path)
@@ -3414,7 +3583,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("init"); s.set_defaults(fn=cmd_init)
-    s.add_argument("--project"); s.add_argument("--language"); s.add_argument("--phase")
+    s.add_argument("--project"); s.add_argument("--language")
     s.add_argument("--stack-json"); s.add_argument("--autonomy-json"); s.add_argument("--force", action="store_true")
     s.add_argument("--brownfield-json", help='existing-project marker, e.g. {"baseline_ref":"dev-kit-baseline","baseline_sha":"<sha>","mode":"feature","first_milestone":1}')
 
@@ -3496,6 +3665,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
     s = sub.add_parser("stale"); s.set_defaults(fn=cmd_stale)
     s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
+    s = sub.add_parser("release-record"); s.set_defaults(fn=cmd_release_record)
+    s.add_argument("--version", required=True); s.add_argument("--tag")
+    s.add_argument("--milestones", help="comma-separated; default: every closed milestone not released yet")
+    s.add_argument("--hotfix", help="patch release of a hotfix task; ships no milestone")
     s = sub.add_parser("set"); s.set_defaults(fn=cmd_set); s.add_argument("key"); s.add_argument("value")
 
     s = sub.add_parser("event"); s.set_defaults(fn=cmd_event)

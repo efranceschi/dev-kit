@@ -19,12 +19,12 @@ Tick each item; note the Claude Code version used.
 - [ ] `mkdir scratch && cd scratch && git init`; start Claude; `/dev-kit:start "API de tarefas com login e painel web"` in Portuguese.
 - [ ] It explains the flow in ≤ 3 lines and invokes `interview` without asking questions itself.
 - [ ] Interview runs block by block (≤ 4 questions per round, recommended option first, "decida por mim" available); skips blocks answered by the opening message.
-- [ ] `.dev/brief.md` written in pt-BR, one section per block; `.dev/state.json` has `language: pt-BR`, `autonomy.level`, `phase: prd`; `.dev/decisions.md` has initial ADRs.
+- [ ] `.dev/brief.md` written in pt-BR, one section per block; `.dev/state.json` has `language: pt-BR`, `autonomy.level`, `artifacts.brief`, and `status --short` says `phase: conception · prd`; `.dev/decisions.md` has initial ADRs.
 - [ ] Closing summary + single confirmation question.
 
-## 2. Autonomous design phases
+## 2. Autonomous conception and planning
 - [ ] `/dev-kit:autopilot --until plan` produces `prd.md` (ACs numbered, testable), `architecture.md` (stack table, data model, contracts), `design/ux-flows.md`, `design/ui-spec.md`, `plan.md` with ≥ 2 milestones; `state.json` has tasks; **no question asked** outside `always_ask` categories; assumptions logged as `ADR-nnn (auto)` and `Q-nnn` rows.
-- [ ] `/dev-kit:status` shows milestones, next task `T-001`.
+- [ ] `/dev-kit:status` shows `Phase: construction · M1`, the milestones and next task `T-001`; the board's lifecycle bar has conception and planning ✓ and construction current.
 
 ## 3. Implementation and gate
 - [ ] `/dev-kit:implement --tasks 2` → two commits `[T-001] …`, `[T-002] …`; `state.json` tasks done with SHAs; tests green.
@@ -32,6 +32,8 @@ Tick each item; note the Claude Code version used.
 - [ ] Finish M1 (`implement --milestone M1`); `dev_state.py next` exits 3 with "gate of M1 is pending".
 - [ ] `/dev-kit:qa M1` spawns the applicable auditors in parallel (see 3b); writes `qa/M1/report.md`, `findings.json` + `scores.json`; blocking findings become `fix` tasks placed first in `next`; gate `pending` or `passed` accordingly.
 - [ ] If pending: `implement` picks the fix tasks first; `qa M1` again → `passed`.
+- [ ] Through the whole milestone (implement, QA, fixes, gate) the phase stays `construction`; after the gate the step is `M2` and `status` shows `Release train: M1 closed since the last release`.
+- [ ] Scope change during M2: `/dev-kit:issue "<new behaviour>"` (class change) → after `prd`, `status --short` says `phase: conception · … (reopened)`, the board shows conception and planning "reopened" and construction still active; after `review prd`, the refreshed design and `plan replan` + `review plan` the phase is back to `construction · M2`.
 
 ## 3b. Quality score and cut-off
 - [ ] In the interview, block 8 offers `standard | premium | prototype`; `state.json` has `autonomy.quality` with the chosen numbers.
@@ -47,19 +49,19 @@ Tick each item; note the Claude Code version used.
 - [ ] `prd` tags ACs `existing`/`new`; `plan` has no walking-skeleton M1 and no tasks for `existing` ACs; `architecture` keeps the stack.
 - [ ] `qa M1` scores only `git diff dev-kit-baseline..HEAD`; a legacy flaw in untouched code is reported `"legacy": true`, becomes an `intangible` issue and does not block the gate.
 - [ ] Repo with Conventional Commits, `docs/adr/0001-*.md`, tag `v2.3.0` and a deploy workflow: `discovery.md` §11 proposes `commit_style` `{type}: {summary}`, the ADR appears as `source: imported`, `production.method` is `external`; a task commit is `feat: …` with trailer `Refs: T-001`; `release --dry-run` proposes `v2.4.0`.
-- [ ] Mode **maintenance** with first milestone `7`: after onboarding the phase is `implement`, `plan.md` has an empty `## M7 — Maintenance`, reviews `prd`/`design`/`plan` are `n/a`; `/dev-kit:issue` with a medium bug schedules a task in M7 (no queue); `status --short` says `existing project: maintenance`; when the task is done `implement` points to `qa M7`; after the gate passes, the next issue opens `M8 — Maintenance` (`add-task` into M7 is refused).
+- [ ] Mode **maintenance** with first milestone `7`: after onboarding the phase is `stable` (no task yet; `construction · M7` once the first issue adds a task), `plan.md` has an empty `## M7 — Maintenance`, reviews `prd`/`design`/`plan` are `n/a`; `/dev-kit:issue` with a medium bug schedules a task in M7 (no queue); `status --short` says `existing project: maintenance`; when the task is done `implement` points to `qa M7`; after the gate passes, the next issue opens `M8 — Maintenance` (`add-task` into M7 is refused).
 - [ ] Onboarding order: `.dev/state.json` exists before discovery; a failing test at the baseline becomes issue `origin: baseline` (visible in `backlog --json`); `session_start` and the onboarding's `skill_start` are in `telemetry.jsonl`.
 - [ ] With `autonomy.level unattended` in the existing project, `pause_policy.dirty_tree` is still `ask`; an uncommitted file of the user is never stashed.
 - [ ] Switching maintenance → feature (`/dev-kit:start "add X"`) reopens reviews `prd`/`design`/`plan` as `pending`.
 - [ ] A repo with only `setup.py` (or only PHP files, or `apps/web/package.json`) is detected as existing (`"greenfield": false`) and onboarded.
 - [ ] Mode **import** with a `docs/prd.md`: the interview asks only blocks the document does not cover and `prd` cites the original ids.
-- [ ] Delete `.dev/prd.md` and run `/dev-kit:start`: it routes to `prd` and says the stage was skipped; `dev_state.py set phase plan` without `prd.md` prints a warning.
+- [ ] Delete `.dev/prd.md` and run `/dev-kit:start`: it routes to `prd` and says the stage was skipped; `status --short` says `phase: conception · prd`; `dev_state.py set phase plan` is refused (the phase is derived).
 
 ## 5. Gaps, usability, docs, release
 - [ ] `/dev-kit:interview --gaps` lists exactly the open `Q-nnn` rows; answering one that contradicts an assumption creates a superseding ADR and (when needed) a fix task.
 - [ ] `/dev-kit:usability --url http://localhost:3000` (if the app runs) runs 4 auditors in parallel, captures screenshots, writes `qa/ux/report.md` with Nielsen/WCAG references and records review `ux` with a score.
 - [ ] `/dev-kit:docs all` writes README, CHANGELOG, user guide, CLAUDE.md section; `review docs` executes the README commands in a temp clone and scores the result.
-- [ ] `/dev-kit:release --dry-run` reports the checklist including the release audit score; real run tags `v0.1.0` and sets phase `done`; nothing is pushed unless `may_push` is true.
+- [ ] `/dev-kit:release --dry-run` reports the checklist including the release audit score; the checklist refuses while a milestone is half built; the real run tags `v0.1.0` and records it (`dev_state.py release-record`): the release train is empty and, with no issue queued, `status` says `Phase: stable`; nothing is pushed unless `may_push` is true. A new issue afterwards brings the phase back to `construction`.
 
 ## 6. Autonomy policy
 - [ ] With `autonomy.level = cautious`, `implement` asks before a library choice; with `high` it logs an ADR instead.

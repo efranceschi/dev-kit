@@ -10,8 +10,12 @@
     { key: "blocked", label: "Blocked", icon: "⛔" },
     { key: "done", label: "Done", icon: "✓" },
   ];
-  const PHASE_LABEL = { init: "init", interview: "interview", prd: "PRD", architecture: "architecture", ux: "UX", ui: "UI",
-    plan: "plan", implement: "implement", qa: "QA", usability: "usability", docs: "docs", done: "done" };
+  // project lifecycle (conventions.md §19): conception -> planning -> construction -> stable, as a cycle
+  const PHASE_NAME = { conception: "Conception", planning: "Planning", construction: "Construction", stable: "Stable" };
+  const PHASE_WORD = { done: "done", current: "current phase", active: "still running", upcoming: "not started" };
+  const STEP_NAME = { interview: "interview", prd: "PRD", architecture: "architecture", ux: "UX", ui: "UI", plan: "plan" };
+  const STEP_WORD = { todo: "to do", doing: "in progress", stale: "out of date", review: "waiting for its review", done: "done", skipped: "skipped" };
+  const STEP_MARK = { todo: "○", doing: "◐", stale: "↻", review: "◐", done: "✓", skipped: "–" };
 
   let data = null;
   let selected = null;       // milestone id chosen by the user (null = follow the current one)
@@ -236,18 +240,49 @@
     $("project").textContent = data.project;
     $("kit-ver").textContent = data.kit && data.kit !== "unknown" ? `v${data.kit}` : "";
     $("bf-mode").textContent = data.brownfield ? `existing project · ${data.brownfield.mode || "feature"} · since ${data.brownfield.baseline_ref || "baseline"}` : "";
-    const phases = data.phases.filter((p) => p !== "init");
-    const idx = phases.indexOf(data.phase);
-    const done = data.phase === "done";
-    const state = (i) => (i < idx || done ? "done" : i === idx ? "current" : "upcoming");
-    $("phase-step").textContent = idx >= 0 ? (done ? "All phases complete" : `Step ${idx + 1} of ${phases.length}`) : "";
-    // one chevron per phase: done ✓, the current one filled with the accent, the rest waiting
-    fill($("phases"), phases.map((p, i) => {
-      const st = state(i);
-      return h("li", { class: `chev st-${st}${i === idx && !done ? " here" : ""}${Math.abs(i - idx) === 1 || (done && i === phases.length - 1) ? " near" : ""}`, "aria-current": i === idx ? "step" : null, title: `${PHASE_LABEL[p] || p}: ${STAGE_WORD[st]}` },
-        h("span", { class: "chev-ico", "aria-hidden": "true", text: st === "done" ? "✓" : String(i + 1) }),
-        h("span", { class: "chev-name", text: PHASE_LABEL[p] || p }),
-        h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[st]}.` }));
+    renderLifecycle();
+  }
+
+  /** One line under each phase: its steps (conception, planning), the milestone and release train (construction). */
+  function phaseDetail(p) {
+    if (p.steps) {
+      return h("span", { class: "lc-steps" }, p.steps.map((x) =>
+        h("span", { class: `lc-step s-${x.state}`, title: `${STEP_NAME[x.key]}: ${STEP_WORD[x.state]}${x.note ? ` (${x.note})` : ""}` },
+          h("span", { "aria-hidden": "true", text: STEP_MARK[x.state] }), ` ${STEP_NAME[x.key]}`,
+          h("span", { class: "visually-hidden", text: ` ${STEP_WORD[x.state]};` }))));
+    }
+    if (p.key === "construction") {
+      const bits = [];
+      const live = p.milestones.filter((m) => m.state !== "empty");
+      if (live.length) bits.push(`${p.current_milestone && p.state !== "done" ? `${p.current_milestone} · ` : ""}${p.closed} of ${live.length} closed`);
+      else if (p.state !== "upcoming") bits.push("no tasks planned");
+      const r = p.release;
+      if (r.milestones.length) bits.push(`next release: ${r.milestones.join(", ")}`);
+      else if (r.last) bits.push(`released ${r.last.tag || r.last.version || "before"}`);
+      if (p.queue.length) bits.push(plural(p.queue.length, "issue") + " queued");
+      return h("span", { class: "lc-note", text: bits.join(" · ") || "milestones M1, M2… after planning" });
+    }
+    return h("span", { class: "lc-note", text: p.state === "current" ? "nothing open, everything released" : "when nothing is open" });
+  }
+
+  function renderLifecycle() {
+    const lc = data.cycle;
+    const idx = lc.phases.findIndex((p) => p.key === data.phase);
+    const cur = lc.phases[idx];
+    const step = data.step ? (STEP_NAME[data.step] || data.step) : "";
+    $("phase-step").textContent = `${PHASE_NAME[data.phase]}${step ? ` · ${step}` : ""}`
+      + (data.reopened ? " · reopened by a change, construction goes on" : "")
+      + (cur && cur.key === "construction" && lc.release.milestones.length && lc.release.ready ? " · release ready" : "");
+    fill($("phases"), lc.phases.map((p, i) => {
+      const here = i === idx;
+      const st = p.state === "active" ? "current" : p.state === "current" ? "current" : p.state;
+      return h("li", { class: `chev lc st-${st}${here ? " here" : ""}${Math.abs(i - idx) === 1 ? " near" : ""}${p.reopened ? " reopened" : ""}`,
+        "aria-current": here ? "step" : null, title: `${PHASE_NAME[p.key]}: ${PHASE_WORD[p.state]}${p.reopened ? ", reopened" : ""}` },
+      h("span", { class: "chev-ico", "aria-hidden": "true", text: p.state === "done" ? "✓" : p.key === "stable" ? "↻" : String(i + 1) }),
+      h("span", { class: "lc-body" },
+        h("span", { class: "chev-name" }, PHASE_NAME[p.key], p.reopened ? h("span", { class: "lc-tag", text: "reopened" }) : null),
+        phaseDetail(p)),
+      h("span", { class: "visually-hidden", text: `: ${PHASE_WORD[p.state]}.` }));
     }));
   }
 

@@ -25,7 +25,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 5. Message catalog (`ux-flows.md` §7.1: required, too long, invalid format, duplicate, not allowed, not found, network, saved/deleted, empty list) and microcopy guide in the **application language(s)** from brief block 2 with examples; conversation and headings stay in the user's language.
 6. Usability checkpoints: for each heuristic that matters here, how the flows satisfy it; list accessibility implications for `ui` (focus order, announcements, target sizes).
 7. Gaps → autonomy rule (`ui_details` and most UX choices are `decide_alone`); log ADRs for notable choices (navigation model, onboarding strategy). Ask only for `always_ask` matters (rare here: e.g. collecting extra personal data).
-8. Write `.dev/design/ux-flows.md`. Run the self-check (`${CLAUDE_SKILL_DIR}/../core/shared/prompts/self-check.md`, which includes `dev_state.py xref`) and fix what it finds, then `dev_state.py artifact mark ux`. Then `dev_state.py set phase ui`; summarise journeys and screen count; next: `ui`.
+8. Write `.dev/design/ux-flows.md`. Run the self-check (`${CLAUDE_SKILL_DIR}/../core/shared/prompts/self-check.md`, which includes `dev_state.py xref`) and fix what it finds, then `dev_state.py artifact mark ux`. Summarise journeys and screen count; next: `ui`.
 
 ## Rules
 - Every AC that involves the interface must be reachable in at least one journey step; check this before finishing.
@@ -35,4 +35,4 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 
 ## Existing projects (brownfield)
 
-When state has `brownfield` (`conventions.md` §16): start the screen inventory from the existing routes and screens in `.dev/discovery.md` §5–6 and tag each `existing` (one line: id, route, file) or `new`/`changed`; journeys, states and forms are specified only for `new`/`changed` screens and for existing screens a `new` AC passes through. Reuse the app's navigation model and microcopy tone; do not redesign. If no `new` AC touches the UI, write nothing, record `dev_state.py review design n/a --note "no new UI"` and set phase `plan`.
+When state has `brownfield` (`conventions.md` §16): start the screen inventory from the existing routes and screens in `.dev/discovery.md` §5–6 and tag each `existing` (one line: id, route, file) or `new`/`changed`; journeys, states and forms are specified only for `new`/`changed` screens and for existing screens a `new` AC passes through. Reuse the app's navigation model and microcopy tone; do not redesign. If no `new` AC touches the UI, write nothing, record `dev_state.py review design n/a --note "no new UI"` (the lifecycle skips `ux` and `ui` and goes to planning).

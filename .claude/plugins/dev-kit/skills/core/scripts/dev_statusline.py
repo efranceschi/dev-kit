@@ -33,7 +33,9 @@ def render(root: Path) -> str:
     store = ds.Store(root)
     store.state = json.loads(store.path.read_text(encoding="utf-8"))
     s = store.state
-    parts = ["dev-kit", str(s.get("phase") or "?")]
+    lc = ds.lifecycle(store)
+    # construction shows its milestone with progress below; conception and planning show their step
+    parts = ["dev-kit", lc["phase"] if lc["phase"] in ("construction", "stable") else ds.phase_label(store, lc)]
     ts = store.tasks()
     for m in store.milestone_order():
         live = [v for v in ts.values() if v["milestone"] == m and v["status"] != "dropped"]

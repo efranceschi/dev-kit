@@ -56,11 +56,24 @@ class Base(unittest.TestCase):
     def ui(self, *args: str, expect: int = 0) -> subprocess.CompletedProcess:
         return self.run_py(UI, "--root", str(self.root), *args, expect=expect)
 
-    def init(self, phase: str = "implement", plan: bool = True) -> None:
-        self.ds("init", "--project", "demo", "--phase", phase)
+    def init(self, phase: str = "construction", plan: bool = True) -> None:
+        """phase "prd": interview finished; "construction": conception and planning done (no UI)."""
+        self.ds("init", "--project", "demo")
+        dev = self.root / ".dev"
+        (dev / "brief.md").write_text("# Brief\n", encoding="utf-8")
+        self.ds("artifact", "mark", "brief")
+        if phase == "construction":
+            for f in ("prd", "architecture"):
+                (dev / f"{f}.md").write_text(f"# {f}\n", encoding="utf-8")
+                self.ds("artifact", "mark", f)
+            self.ds("review", "prd", "pass", "--score", "90")
+            self.ds("review", "design", "n/a", "--note", "no UI")
         if plan:
-            (self.root / ".dev" / "plan.md").write_text(PLAN, encoding="utf-8")
+            (dev / "plan.md").write_text(PLAN, encoding="utf-8")
             self.ds("sync-plan")
+            if phase == "construction":
+                self.ds("artifact", "mark", "plan")
+                self.ds("review", "plan", "pass", "--score", "90")
 
     def state(self) -> dict:
         return json.loads((self.root / ".dev" / "state.json").read_text(encoding="utf-8"))
@@ -137,13 +150,13 @@ class TestStatusLineAndHooks(Base):
         self.ds("review", "plan", "pass", "--score", "90")
         self.ds("start", "T-001")
         line = self.run_py(LINE, stdin=payload).stdout.strip()
-        self.assertEqual(line, "dev-kit · implement · M1 0/1 · ▶ T-001 · next /dev-kit:implement")
+        self.assertEqual(line, "dev-kit · construction · M1 0/1 · ▶ T-001 · next /dev-kit:implement")
         self.assertEqual(self.run_py(LINE, stdin="not json").stdout, "")
 
     def test_session_title_only_on_startup(self) -> None:
         self.init(phase="prd", plan=False)
         out = json.loads(self.hook({"hook_event_name": "SessionStart", "source": "startup", "session_id": "s1"}))
-        self.assertEqual(out["hookSpecificOutput"]["sessionTitle"], "dev-kit · demo · prd")
+        self.assertEqual(out["hookSpecificOutput"]["sessionTitle"], "dev-kit · demo · conception · prd")
         self.assertIn("/dev-kit:prd", out["systemMessage"])
         self.assertEqual(self.hook({"hook_event_name": "SessionStart", "source": "resume", "session_id": "s1"}), "")
         self.ds("set", "autonomy.ui.title", "false")
@@ -172,13 +185,15 @@ class TestNextCommand(Base):
         self.init(phase="prd", plan=False)
         self.assertEqual(self.next(), "/dev-kit:prd")
         (self.root / ".dev" / "prd.md").write_text("# PRD\n", encoding="utf-8")
-        self.ds("set", "phase", "architecture")
         self.assertEqual(self.next(), "/dev-kit:review prd")
         self.ds("review", "prd", "pass", "--score", "90")
         self.assertEqual(self.next(), "/dev-kit:architecture")
+        (self.root / ".dev" / "architecture.md").write_text("# Architecture\n", encoding="utf-8")
+        self.assertEqual(self.next(), "/dev-kit:ux")
+        self.ds("review", "design", "n/a", "--note", "API only")
+        self.assertEqual(self.next(), "/dev-kit:plan")
         (self.root / ".dev" / "plan.md").write_text(PLAN, encoding="utf-8")
         self.ds("sync-plan")
-        self.ds("set", "phase", "implement")
         self.assertEqual(self.next(), "/dev-kit:review plan")
         self.ds("review", "plan", "pass", "--score", "90")
         self.assertEqual(self.next(), "/dev-kit:implement")

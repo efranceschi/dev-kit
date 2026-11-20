@@ -52,11 +52,32 @@ class WorkerTest(unittest.TestCase):
 
     def test_every_next_command_is_runnable(self):
         import dev_state as ds
-        store = ds.Store(self.root)
-        store.load()
-        for phase in ds.PHASES:
-            store.state["phase"] = phase
-            self.assertTrue(any(rx.match(ds.next_command(store)) for rx in dw.RUN_COMMANDS), phase)
+        dev = self.root / ".dev"
+
+        def check(step):
+            store = ds.Store(self.root)
+            store.load()
+            cmd = ds.next_command(store)
+            self.assertTrue(any(rx.match(cmd) for rx in dw.RUN_COMMANDS), f"{step}: {cmd}")
+            return cmd
+
+        # every step of the lifecycle, from the interview to a stable product (conventions.md §19)
+        seen = {check("interview")}
+        run = self.plan()
+        for step in ("T-001", "T-002"):
+            seen.add(check(step))
+            run("start", step)
+            run("done", step)
+            seen.add(check(f"{step} done"))
+            run("gate", f"M{step[-1]}", "passed", "--score", "95")
+        seen.add(check("release"))
+        run("review", "docs", "pass", "--score", "95")
+        run("release-record", "--version", "1.0.0")
+        seen.add(check("stable"))
+        (dev / "prd.md").write_text("# PRD v2\n", encoding="utf-8")
+        seen.add(check("reopened"))
+        self.assertTrue({"/dev-kit:interview", "/dev-kit:implement", "/dev-kit:qa M1", "/dev-kit:docs",
+                         "/dev-kit:backlog", "/dev-kit:review prd"} <= seen, seen)
 
     def test_text_is_cleaned_and_limited(self):
         a = dw.validate("issue_new", {"title": "  Crash‮ on save\x07 ", "type": "bug", "note": "line 1\nline 2\x00"})
@@ -316,7 +337,11 @@ class WorkerTest(unittest.TestCase):
             "# Plan\n\n## M1 — One\n\n### T-001 A\n- status: todo\n- deps:\n- type: feature\n- acceptance:\n  - AC-1: a\n"
             "- test_notes: t\n- files: a.py\n\n## M2 — Two\n\n### T-002 B\n- status: todo\n- deps:\n- type: feature\n"
             "- acceptance:\n  - AC-2: b\n- test_notes: t\n- files: b.py\n", encoding="utf-8")
-        for args in (["set", "phase", "plan"], ["sync-plan"], ["review", "plan", "pass", "--score", "90"]):
+        for f in ("brief.md", "prd.md", "architecture.md"):
+            (self.root / ".dev" / f).write_text(f"# {f}\n", encoding="utf-8")
+        for args in (["artifact", "mark", "all"], ["review", "prd", "pass", "--score", "90"],
+                     ["review", "design", "n/a", "--note", "no UI"], ["sync-plan"], ["artifact", "mark", "plan"],
+                     ["review", "plan", "pass", "--score", "90"]):
             subprocess.run(state + args, check=True, capture_output=True)
         return lambda *a: subprocess.run(state + list(a), check=True, capture_output=True, text=True)
 
@@ -374,7 +399,11 @@ class WorkerTest(unittest.TestCase):
         self.assertEqual(dw.continue_next(self.root)[0]["args"], {"command": "/dev-kit:implement"})
         dw.cancel(self.root, "R-002")
         dw.set_mode(self.root, continuous=True)
-        ds("set", "phase", "done")
+        ds("start", "T-002")
+        ds("done", "T-002")
+        ds("gate", "M2", "passed", "--score", "95")
+        ds("review", "docs", "pass", "--score", "95")
+        ds("release-record", "--version", "1.0.0")
         self.assertEqual(dw.continue_next(self.root)[1], "the next step is /dev-kit:backlog, which is yours to start")
 
     def test_listener_starts_continuous_steps_when_idle(self):

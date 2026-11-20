@@ -2,6 +2,22 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.30.0 — 2026-11-20
+
+The project phase becomes a lifecycle that runs as a cycle: conception → planning → construction → stable. Building and QA belong to each milestone, releases ship a train of closed milestones, and a scope change reopens conception without stopping construction. The phase is derived from `.dev/`, never set by hand.
+
+### Changed
+- `dev_state.py`: the phase is derived by `lifecycle()` from the artifacts and `stale`, the reviews, milestones and gates, the issue queue and the releases. The phases are `conception` (steps `interview`, `prd`, `architecture`, `ux`, `ui`), `planning` (`plan`), `construction` (the current milestone, `release` or `issues`) and `stable`. `status`, `status --short`, `status --json` (`phase`, `step`, `reopened`, `lifecycle`), the status line, the session banner and `status --next` all use it. Before, there were 11 phases set by the skills: `implement` and `qa` flipped back and forth on every milestone, `usability`, `docs` and `done` assumed a single launch, and a scope change moved the phase back.
+- `dev_state.py`: `set phase` and `init --phase` are gone. Skills move the lifecycle only through the trace they already leave: `artifact mark brief` closes the interview, `review design n/a` skips UX/UI for a product without a UI, `review docs pending` marks regenerated docs, and the new `release-record` closes a release.
+- `dev_state.py stale`: once a task is done, only the `plan` review stops being checked against `plan.md` (dev_state.py appends tasks to it). The PRD and design reviews are always checked, so a scope change during construction reopens conception.
+- Release train: closed milestones that no release has shipped yet wait in `lifecycle.release`. `release` ships them between milestones, never with one half built, once `usability` (UI products) and `docs` + `review docs` have passed after the last milestone of the train. It then records the release with `dev_state.py release-record --version X.Y.Z` (or `--hotfix T-nnn` for a patch). With nothing open, the project is `stable`.
+- `autopilot` and `start` route by phase and step instead of the old 11-phase table. `--until` takes the same step names. `issue` class `change` reopens conception and planning while the current milestone keeps going.
+- Board: the "Project phase" bar of 11 chevrons is now "Project lifecycle", four chevrons with what happens inside each: the steps of conception and planning (✓ done, ◐ in progress or waiting for its review, ↻ out of date after a change, crossed out when skipped), the current milestone, closed count, release train and queued issues in construction, and a "reopened" tag when a scope change sends the project back. The cycle is spelled out beside the title. On a phone, the current phase keeps its details and the others shrink to ✓ or their number.
+- Docs: new conventions §19 (project lifecycle). Concepts, README, GET_STARTED, getting started, the plugin README, recipes, glossary (lifecycle, release train, stable), troubleshooting, the e2e checklist and the flow diagram now describe the cycle. The README image shows the new board.
+
+### Migration
+- A `state.json` written by an earlier kit is converted on load. A finished interview becomes `artifact mark brief`, skipped UX/UI become a `design` review `n/a`, and a `done` project becomes a release record of its closed milestones (version unknown). Nothing else changes: the phase is recalculated from then on.
+
 ## 1.29.0 — 2026-11-20
 
 The board's Plan view becomes lanes that scroll sideways at full width, and the task board and the insights share one card.

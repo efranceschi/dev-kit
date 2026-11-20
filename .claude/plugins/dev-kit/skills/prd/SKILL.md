@@ -24,7 +24,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 4. Gaps: apply the autonomy rule. For each gap, write the assumption into §8 with an `ADR-nnn (auto)` appended to `.dev/decisions.md`; add a `Q-nnn` via `dev_state.py add-question` when the user might disagree. For `always_ask` categories (e.g. a must-have that implies a paid service) apply the `pause_policy` action (`conventions.md` §10); only those with `ask` go into one batched AskUserQuestion at the end.
 5. Write `.dev/prd.md` in the user's language. Keep it under ~400 lines; split epics into `.dev/prd/<epic>.md` if larger and link them.
 6. Self-check before finishing: every must-have has ≥ 1 story; every story has ≥ 1 AC; no AC uses vague words (fast, easy, properly) without a number or observable outcome; non-goals listed. Run the self-check (`${CLAUDE_SKILL_DIR}/../core/shared/prompts/self-check.md`, which includes `dev_state.py xref`) and fix what it finds, then `dev_state.py artifact mark prd`. When revising an existing PRD, `dev_state.py stale` then shows which later artifacts must follow.
-7. `dev_state.py set phase architecture`. Summarise: counts of stories/ACs, assumptions made, questions raised. Next: `review prd` (independent score against the cut-off), then `architecture`.
+7. Summarise: counts of stories/ACs, assumptions made, questions raised. Next: `review prd` (independent score against the cut-off), then `architecture`.
 
 ## Revising (when a PRD already exists)
 Apply the change request; mark removed ACs as `(superseded by ADR-nnn)` rather than deleting; append new ACs with new numbers; note in `.dev/log.md` via a `dev_state.py add-question` only if the change needs confirmation. Tell the user that `plan` must be re-run to sync tasks.

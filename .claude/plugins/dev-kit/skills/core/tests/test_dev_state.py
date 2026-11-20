@@ -85,6 +85,30 @@ class Base(unittest.TestCase):
         (self.root / ".dev" / "plan.md").write_text(PLAN, encoding="utf-8")
         self.run_state("sync-plan")
 
+    def conceive(self, ui: bool = False) -> None:
+        """Finish conception and planning: brief, reviewed PRD, architecture, design (or n/a) and reviewed plan."""
+        dev = self.root / ".dev"
+        for f in ("brief.md", "prd.md", "architecture.md"):
+            (dev / f).write_text(f"# {f}\n", encoding="utf-8")
+        self.run_state("artifact", "mark", "brief")
+        self.run_state("artifact", "mark", "prd")
+        self.run_state("review", "prd", "pass", "--score", "90")
+        self.run_state("artifact", "mark", "architecture")
+        if ui:
+            (dev / "design").mkdir(exist_ok=True)
+            (dev / "design" / "ux-flows.md").write_text("# UX\n", encoding="utf-8")
+            (dev / "design" / "ui-spec.md").write_text("# UI\n", encoding="utf-8")
+            self.run_state("artifact", "mark", "ux")
+            self.run_state("artifact", "mark", "ui")
+            self.run_state("review", "design", "pass", "--score", "90")
+        else:
+            self.run_state("review", "design", "n/a", "--note", "no UI")
+        self.run_state("artifact", "mark", "plan")
+        self.run_state("review", "plan", "pass", "--score", "90")
+
+    def lifecycle(self) -> dict:
+        return json.loads(self.run_state("status", "--json").stdout)
+
 
 class TestAgentEventScope(Base):
     def spawns(self) -> list[dict]:
@@ -114,7 +138,7 @@ class TestInitAndSync(Base):
         s = self.state()
         self.assertEqual(s["language"], "pt-BR")
         self.assertEqual(s["project"], "demo")
-        self.assertEqual(s["phase"], "init")
+        self.assertEqual((s["phase"], s["step"]), ("conception", "interview"))
         self.assertEqual(s["stack"]["lang"], "typescript")
         self.assertEqual(s["autonomy"]["level"], "balanced")
         self.assertIn("always_ask", s["autonomy"])
@@ -150,16 +174,10 @@ class TestInitAndSync(Base):
         self.assertEqual(r["verdict"], "n/a")
         self.assertEqual(r["note"], "no new UI")
 
-    def test_set_phase_warns_on_missing_artifacts(self) -> None:
+    def test_phase_cannot_be_set_by_hand(self) -> None:
         self.run_state("init")
-        proc = self.run_state("set", "phase", "plan")
-        self.assertIn("prd.md does not exist", proc.stderr)
-        self.assertIn("architecture.md does not exist", proc.stderr)
-        self.assertNotIn("ux-flows.md", proc.stderr)
-        self.assertEqual(self.state()["phase"], "plan")
-        for f in ("brief.md", "prd.md", "architecture.md"):
-            (self.root / ".dev" / f).write_text("x", encoding="utf-8")
-        self.assertEqual(self.run_state("set", "phase", "plan").stderr, "")
+        self.assertIn("derived", self.run_state("set", "phase", "plan", expect=1).stderr)
+        self.assertNotEqual(self.run_state("init", "--phase", "prd", expect=None).returncode, 0)
 
     def test_empty_maintenance_milestone_syncs(self) -> None:
         self.run_state("init", "--brownfield-json", '{"mode":"maintenance"}')
@@ -173,14 +191,11 @@ class TestInitAndSync(Base):
 
     def test_init_is_idempotent_and_updates_fields(self) -> None:
         self.run_state("init", "--language", "en")
-        out = self.run_state("init", "--language", "pt-BR", "--phase", "prd")
+        out = self.run_state("init", "--language", "pt-BR", "--project", "demo")
         self.assertIn("updated", out.stdout)
         s = self.state()
         self.assertEqual(s["language"], "pt-BR")
-        self.assertEqual(s["phase"], "prd")
-
-    def test_init_rejects_bad_phase(self) -> None:
-        self.run_state("init", "--phase", "bogus", expect=1)
+        self.assertEqual(s["project"], "demo")
 
     def test_sync_plan_parses_milestones_and_tasks(self) -> None:
         self.init_with_plan()
@@ -321,17 +336,16 @@ class TestTransitions(Base):
         self.assertEqual(json.loads(out.stdout)["open_questions"], 1)
 
     def test_set_and_status_views(self) -> None:
-        self.run_state("set", "phase", "implement")
+        self.conceive()
         self.run_state("set", "autonomy.level", "cautious")
         self.run_state("set", "autonomy.max_fix_rounds_per_gate", "5")
-        self.run_state("set", "phase", "nope", expect=1)
         s = self.state()
-        self.assertEqual(s["phase"], "implement")
+        self.assertEqual((s["phase"], s["step"]), ("construction", "M1"))
         self.assertEqual(s["autonomy"]["level"], "cautious")
         self.assertEqual(s["autonomy"]["max_fix_rounds_per_gate"], 5)
         short = self.run_state("status", "--short").stdout.splitlines()
         self.assertEqual(len(short), 3)
-        self.assertIn("phase: implement", short[0])
+        self.assertIn("phase: construction · M1", short[0])
         self.assertIn("next: T-001", short[1])
         full = self.run_state("status").stdout
         self.assertIn("M1 — Walking skeleton", full)
@@ -361,6 +375,128 @@ class TestTransitions(Base):
         proc = subprocess.run([sys.executable, "-I", str(STATE), "status", "--short"], capture_output=True, text=True, cwd=sub)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("[dev-kit]", proc.stdout)
+
+
+class TestLifecycle(Base):
+    """The phase is derived (conventions.md §19): conception -> planning -> construction -> stable, as a cycle."""
+
+    def phases(self) -> dict:
+        return {p["key"]: p for p in self.lifecycle()["lifecycle"]["phases"]}
+
+    def test_new_project_walks_conception_step_by_step(self) -> None:
+        self.run_state("init", "--project", "demo")
+        nxt = lambda: self.run_state("status", "--next").stdout.strip()  # noqa: E731
+        self.assertEqual(nxt(), "/dev-kit:interview")
+        (self.root / ".dev" / "brief.md").write_text("# Brief\n", encoding="utf-8")
+        self.assertEqual(self.lifecycle()["lifecycle"]["phases"][0]["steps"][0]["state"], "doing")
+        self.run_state("artifact", "mark", "brief")
+        self.assertEqual((self.state()["phase"], self.state()["step"]), ("conception", "prd"))
+        (self.root / ".dev" / "prd.md").write_text("# PRD\n", encoding="utf-8")
+        self.run_state("artifact", "mark", "prd")
+        self.assertEqual(nxt(), "/dev-kit:review prd")
+        self.run_state("review", "prd", "pass", "--score", "90")
+        self.assertEqual(nxt(), "/dev-kit:architecture")
+        ph = self.phases()
+        self.assertEqual([ph[k]["state"] for k in ("conception", "planning", "construction", "stable")],
+                         ["current", "upcoming", "upcoming", "upcoming"])
+
+    def test_product_without_ui_skips_ux_and_ui(self) -> None:
+        self.init_with_plan()
+        self.conceive(ui=False)
+        steps = {x["key"]: x["state"] for x in self.phases()["conception"]["steps"]}
+        self.assertEqual((steps["ux"], steps["ui"]), ("skipped", "skipped"))
+        self.assertEqual(self.lifecycle()["phase"], "construction")
+
+    def test_milestones_never_move_the_phase_back(self) -> None:
+        self.init_with_plan()
+        self.conceive()
+        seen = []
+        for t in ("T-001", "T-002"):
+            self.run_state("start", t)
+            seen.append(self.state()["phase"])
+            self.run_state("done", t)
+            seen.append(self.state()["phase"])
+        self.run_state("gate", "M1", "passed", "--score", "90")
+        seen.append(self.state()["phase"])
+        self.assertEqual(set(seen), {"construction"})
+        self.assertEqual(self.state()["step"], "M2")
+
+    def test_scope_change_reopens_conception_while_construction_goes_on(self) -> None:
+        self.init_with_plan()
+        self.conceive()
+        self.run_state("start", "T-001")
+        self.run_state("done", "T-001")
+        (self.root / ".dev" / "prd.md").write_text("# PRD v2\n", encoding="utf-8")
+        lc = self.lifecycle()
+        self.assertEqual((lc["phase"], lc["step"], lc["reopened"]), ("conception", "prd", True))
+        ph = self.phases()
+        self.assertTrue(ph["conception"]["reopened"])
+        self.assertEqual(ph["construction"]["state"], "active")
+        self.assertEqual(self.run_state("status", "--next").stdout.strip(), "/dev-kit:review prd")
+        self.run_state("review", "prd", "pass", "--score", "90")
+        self.assertEqual(self.lifecycle()["step"], "architecture")  # stale: prd changed
+        self.run_state("artifact", "mark", "all")
+        self.assertEqual(self.lifecycle()["phase"], "construction")  # plan reviews are not re-checked once built
+
+    def test_release_train_with_usability_and_docs(self) -> None:
+        self.init_with_plan()
+        self.conceive(ui=True)
+        for t in ("T-001", "T-002"):
+            self.run_state("done", t, "--force")
+        self.run_state("gate", "M1", "passed", "--score", "90")
+        rel = self.lifecycle()["lifecycle"]["release"]
+        self.assertEqual(rel["milestones"], ["M1"])
+        self.assertEqual(self.run_state("status", "--next").stdout.strip(), "/dev-kit:implement")  # M2 first
+        self.run_state("done", "T-003", "--force")
+        self.run_state("gate", "M2", "passed", "--score", "90")
+        nxt = lambda: self.run_state("status", "--next").stdout.strip()  # noqa: E731
+        self.assertEqual(self.state()["step"], "release")
+        self.assertEqual(nxt(), "/dev-kit:usability")
+        self.run_state("review", "ux", "pass", "--score", "90")
+        self.assertEqual(nxt(), "/dev-kit:docs")
+        self.run_state("review", "docs", "pending", "--note", "regenerated")
+        self.assertEqual(nxt(), "/dev-kit:review docs")
+        self.run_state("review", "docs", "pass", "--score", "90")
+        self.assertEqual(nxt(), "/dev-kit:release")
+        self.assertIn("M1, M2", self.run_state("release-record", "--version", "1.0.0").stdout)
+        self.assertEqual(self.state()["phase"], "stable")
+        self.assertEqual(self.state()["releases"][0]["tag"], "v1.0.0")
+        self.run_state("release-record", "--version", "1.0.1", expect=1)  # nothing left to release
+        self.run_state("release-record", "--version", "1.0.1", "--hotfix", "T-003")
+
+    def test_maintenance_project_is_stable_until_an_issue_arrives(self) -> None:
+        self.run_state("init", "--brownfield-json", '{"mode":"maintenance"}')
+        dev = self.root / ".dev"
+        for f in ("brief.md", "prd.md", "architecture.md"):
+            (dev / f).write_text("x\n", encoding="utf-8")
+        (dev / "plan.md").write_text("# Plan\n\n## M1 — Maintenance\n", encoding="utf-8")
+        self.run_state("sync-plan")
+        for r in ("prd", "design", "plan"):
+            self.run_state("review", r, "n/a", "--note", "maintenance mode")
+        self.assertEqual(self.state()["phase"], "stable")
+        self.run_state("add-task", "--milestone", "M1", "--type", "fix", "--title", "Fix login bug")
+        self.assertEqual((self.state()["phase"], self.state()["step"]), ("construction", "M1"))
+
+    def test_state_from_before_1_30_is_migrated(self) -> None:
+        self.init_with_plan()
+        dev = self.root / ".dev"
+        for f in ("brief.md", "prd.md", "architecture.md"):
+            (dev / f).write_text("x\n", encoding="utf-8")
+        s = self.state()
+        s["phase"] = "done"
+        s["reviews"] = {"prd": {"verdict": "pass", "score": 90}, "plan": {"verdict": "pass", "score": 90}}
+        for t in s["tasks"].values():
+            t["status"] = "done"
+        for m in s["milestones"].values():
+            m["gate"] = "passed"
+        (dev / "state.json").write_text(json.dumps(s), encoding="utf-8")
+        self.assertIn("phase: stable", self.run_state("status", "--short").stdout)
+        self.run_state("set", "language", "en")  # any save persists the migration
+        s = self.state()
+        self.assertEqual(s["phase"], "stable")
+        self.assertEqual(s["releases"][0]["milestones"], ["M1", "M2"])
+        self.assertEqual(s["reviews"]["design"]["verdict"], "n/a")
+        self.assertIn("brief", s["artifacts"])
 
 
 class TestDetectStack(unittest.TestCase):
@@ -1207,10 +1343,19 @@ class TestBoardPlanEdits(Base):
         self.assertEqual(self.state()["tasks"]["T-004"]["milestone"], "M3")
         self.assertEqual(self.state()["tasks"]["T-004"]["type"], "chore")
 
-    def test_finished_project_goes_back_to_implement(self) -> None:
-        self.run_state("set", "phase", "done")
-        self.apply([{"op": "new_milestone", "milestone": "M3", "title": "v2"}])
-        self.assertEqual(self.state()["phase"], "implement")
+    def test_new_work_takes_a_stable_project_back_to_construction(self) -> None:
+        self.conceive()
+        for t in ("T-001", "T-002", "T-003"):
+            self.run_state("done", t, "--force")
+        for m in ("M1", "M2"):
+            self.run_state("gate", m, "passed", "--score", "90")
+        self.run_state("release-record", "--version", "1.0.0")
+        self.assertEqual(self.state()["phase"], "stable")
+        self.run_state("add-issue", "--type", "improvement", "--class", "standard", "--title", "Export")
+        self.assertEqual((self.state()["phase"], self.state()["step"]), ("construction", "issues"))
+        self.apply([{"op": "new_milestone", "milestone": "M3", "title": "v2"},
+                    {"op": "schedule_issue", "issue": "I-001", "milestone": "M3"}])
+        self.assertEqual((self.state()["phase"], self.state()["step"]), ("construction", "M3"))
 
     def test_draft_from_the_board_and_json_output(self) -> None:
         sys.path.insert(0, str(SCRIPTS))

@@ -3,7 +3,7 @@
 | Symptom | Why | What to do |
 |---|---|---|
 | Autopilot stops overnight waiting for a permission | Claude Code asks before Bash commands and edits; the kit's own pauses are not the cause | Run `/fewer-permission-prompts` and start with `--permission-mode acceptEdits`; use the `unattended` autonomy level |
-| The session froze or the machine rebooted | Long runs can be interrupted | `/dev-kit:start` reconciles the state with git; `/dev-kit:autopilot` continues from the current phase |
+| The session froze or the machine rebooted | Long runs can be interrupted | `/dev-kit:start` reconciles the state with git; `/dev-kit:autopilot` continues from the current lifecycle step |
 | Processes still running after a run (ports busy, high load) | An agent left a background process | `/dev-kit:start` stops them (only processes inside the project) and frees expired locks; `/dev-kit:status` shows leftovers |
 | A gate keeps failing | Real problems, or the same finding coming back | Read `.dev/qa/<M>/report.md`; from round 2 only previous findings and new medium+ findings count (delta mode). When rounds are exhausted the kit asks (or applies your pause policy) |
 | A gate or review is refused | The score is below the cut-off | Fix the findings and re-run; forcing needs your decision and an ADR, and is never allowed with security below its minimum or critical/high open |
@@ -19,7 +19,9 @@
 | The wrong commit was recorded for a task | A hook rewrote it or the SHA was taken too early | `/dev-kit:start` finds the commit that carries the task and fixes the record after asking you |
 | "event rejected" in a skill | A field or feedback area is not allowlisted | Use the areas in conventions §13; never put project text into an event. Before `init`, events are skipped on purpose |
 | "review … n/a needs --note" | `n/a` must say why | Nothing to do: the skill records the reason and continues; if it repeats, `/dev-kit:feedback` |
-| `set phase` warns that an artifact is missing | An earlier stage was skipped | Run the skill named in the warning, or `/dev-kit:start` to be routed there |
+| `set phase` is refused | The phase is derived from `.dev/` (conventions §19) | Run the skill of the step `status` shows; `/dev-kit:start` routes there |
+| The phase went back to `conception` in the middle of construction | A PRD or design file changed after its review (a scope change, or a hand edit): conception is *reopened* | Finish the change: the step's review (`/dev-kit:review prd`), the refreshed downstream specs and `/dev-kit:plan replan`; the milestone in construction keeps its state. A hand edit with no impact: `dev_state.py artifact mark <name> --note "no impact: …"` and re-run the review |
+| The project never reaches `stable` | A closed milestone waits in the release train, or an issue is queued | `/dev-kit:status` shows the release train; release it (`/dev-kit:release`) or schedule the issue (`/dev-kit:backlog`) |
 | An auditor result shows `F-000` "no parsable result" | The agent wrote no valid result file, even after the `check` output was sent back | Re-run `qa` (the gate cannot pass silently); report it with `/dev-kit:feedback` |
 | A QA report mentions an agent result "not valid" | The agent wrote a result outside the contract | Nothing to do: the skill sends the problem back to the agent and re-checks; synonyms are fixed on their own. If it keeps happening, `/dev-kit:feedback` |
 | `/dev-kit:costs` shows very few requests or `n/d` | Transcripts with `requestId: "unknown"` or gateway model names (before 1.15.0) | Update the kit and run `/dev-kit:costs` again: it re-reads the transcripts, and gateway names are priced (a family match says "priced as") |

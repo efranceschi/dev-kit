@@ -9,7 +9,7 @@ Goal: leave the interview with **every decision the rest of the pipeline would o
 3. **Every question has a recommended option first**, marked "(Recomendado)"/"(Recommended)" in the user's language, and an option meaning "decide for me". "Decide for me" answers are recorded in `brief.md` as `delegated` so later skills know they may decide alone.
 4. **Follow-ups are allowed** (one extra round per block at most) when an answer opens a new branch (e.g. payments = yes → which provider, which currency).
 5. **Write as you go.** After each block, append its section to `.dev/brief.md` (template `shared/templates/brief.md`). If the session dies mid-interview, `interview` resumes at the first block without a section.
-6. **Close.** Show a compact summary (one line per block), ask for a single confirmation, then: derive initial ADRs into `decisions.md`, run `dev_state.py init` with `--language`, `--stack-json` and `--autonomy-json`, set `phase prd` (existing project in `maintenance` mode: hand back to the onboarding instead, `onboarding.md` step 9).
+6. **Close.** Show a compact summary (one line per block), ask for a single confirmation, then: derive initial ADRs into `decisions.md`, run `dev_state.py init` with `--language`, `--stack-json` and `--autonomy-json`, then `dev_state.py artifact mark brief`, which closes the interview step of the lifecycle (existing project in `maintenance` mode: hand back to the onboarding instead, `onboarding.md` step 9).
 
 ## Blocks and items
 

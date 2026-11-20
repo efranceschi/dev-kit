@@ -8,7 +8,7 @@ Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit, Permis
    "transcript": "<path of the subagent's own transcript>"}; the board reads the `Scope:` line of the agent's prompt
   from that transcript to put it on its task card (Claude Code sends no task with the hook).
 - SessionStart of a new session (source startup), with autonomy.ui.title on (default): set the session title
-  ("dev-kit · <project> · <milestone or phase>") and show one line with the next command (systemMessage).
+  ("dev-kit · <project> · <milestone, or phase and step>") and show one line with the next command (systemMessage).
 - Stop, with autonomy.ui.notify on: show the notices queued by dev_state.py (gates, blocks, autopilot) as a
   desktop notification (OSC 9 terminal sequence) and a line in the chat, then clear the queue.
 - SessionStart, UserPromptSubmit and Stop: when the board queued requests for Claude Code (dev_worker.py), one line
@@ -100,7 +100,7 @@ def session_banner(root: Path) -> dict | None:
     store = ds.Store(root)
     store.state = json.loads(store.path.read_text(encoding="utf-8"))
     name = str(store.state.get("project") or root.name)[:40]
-    where = str(store.state.get("phase") or "")
+    where = ds.phase_label(store, ds.lifecycle(store))
     for m in store.milestone_order():
         live = [v for v in store.tasks().values() if v["milestone"] == m and v["status"] != "dropped"]
         if live and store.milestones()[m].get("gate", "pending") == "pending":

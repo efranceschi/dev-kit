@@ -29,11 +29,12 @@
 | **hotfix** | Expedite lane for critical/high bugs in delivered work: one at a time, scoped QA, patch release. |
 | **lane** | Priority lane of a task: hotfix runs first, then cool-down, then the plan. |
 | **legacy** | A finding in code that existed before dev-kit (existing projects): reported with "legacy": true, never scored, turned into an issue. |
+| **lifecycle** | Where the project is: conception (interview, PRD, architecture, UX, UI) → planning (plan) → construction (milestones and the release train) → stable. A cycle, not a line: a scope change reopens conception and planning while construction goes on; a bug or improvement goes straight to construction. Derived from .dev/, never set by hand. |
 | **local preview** | The approved milestone built and run on 127.0.0.1 (keep_running or smoke), per autonomy.local_deploy. |
 | **locked literal** | A text an AC fixes, marked [locked] in the PRD; copy and visual reviews never reword it. |
 | **low cap** | Low findings cost at most 10 points per dimension. |
 | **maintenance milestone** | In maintenance mode, the milestone M<n> — Maintenance that issues fill; its gate runs like any other, then the next issue opens M<n+1>. |
-| **milestone** | A cadence step M1, M2…; the next one starts only after the previous gate passes. Issues never renumber milestones. |
+| **milestone** | A cadence step M1, M2… inside construction; the next one starts only after the previous gate passes. Building and QA belong to the milestone, not to the project phase. Issues never renumber milestones. |
 | **model ladder** | Agents start on their base model and effort; failed dimensions are re-run one step higher, with consent. |
 | **n/a review** | A review that does not apply (e.g. design with no new UI); recorded with a note, it satisfies prerequisites and is not graded. |
 | **out of scope finding** | A problem in shared code the milestone did not change; it becomes an issue and does not score in the gate. |
@@ -43,11 +44,13 @@
 | **prompt suggestion** | Claude Code's greyed-out guess of your next prompt; every dev-kit report ends with the next command so it is offered. Tab or Right arrow takes it. |
 | **QA harness** | Playwright with mocks that captures every screen and state (qa:shots) and runs axe (qa:a11y); added by plan to the first UI milestone. |
 | **recorded test run** | A green suite stored per commit; the test auditor and the gate reuse it until the code it covers changes. |
+| **release train** | The milestones closed since the last release. A release ships them between milestones, after usability (UI apps) and docs; release records it and the train empties. |
 | **session log** | .dev/telemetry.jsonl: structured, high-level events of the run, without project data. |
 | **shared baseline** | Suite, lint, type-check, data smoke and screenshots run once per QA round and read by every auditor. |
 | **slot** | Per-agent isolation number that gives each agent its own port, database and scratch folder. |
+| **stable** | Lifecycle phase with nothing open: no milestone in progress, no queued issue, everything built is released. The next issue or change starts the cycle again. |
 | **stale artifact** | A PRD, architecture, design or plan whose sources changed after it was last updated; review brings it up to date before any reviewer runs. |
-| **status line** | Line under the Claude Code prompt; the dev-kit one shows phase, milestone progress, the running task and the next command. |
+| **status line** | Line under the Claude Code prompt; the dev-kit one shows the lifecycle phase (with the step in conception and planning), milestone progress, the running task and the next command. |
 | **task checks** | Self-check plus cheap copy and static a11y agents at the end of each UI task (autonomy.task_checks), so the gate confirms instead of discovers. |
 | **task contract** | What a task provides to others (table, route, fields), written in plan.md as contract: and given to the tasks that consume it. |
 | **work ledger** | Record of verified work with the fingerprint of its inputs; only unchanged work that was clean is reused, with spot checks. |

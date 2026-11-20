@@ -354,14 +354,32 @@ button.run-chip:hover { background: var(--surface-3); }
 .chev.st-upcoming { background: var(--surface-3); color: var(--text-secondary); }
 
 /* project phase bar */
-.phasebar { display: grid; gap: 8px; }
-.phasebar-head { display: flex; align-items: baseline; gap: 10px; }
+.phasebar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.phasebar-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.phasebar-head h2 { white-space: nowrap; }
 .phasebar-head h2 { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted); font-weight: 650; }
 .phase-step { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .phase-chevrons { --tip: 16px; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, .18)); }
 .phase-chevrons .chev { flex: 1 1 auto; flex-direction: row; align-items: center; gap: 8px; min-height: 48px; }
 .phase-chevrons .chev.here { flex-grow: 2; }
 .phase-chevrons .chev-name { text-transform: capitalize; }
+.phase-cycle { margin-left: auto; font-size: 11.5px; color: var(--text-muted); }
+/* lifecycle: each phase lists what happens inside it (steps, milestone and release train) */
+.phase-chevrons .chev.lc { flex: 1 1 0; min-height: 62px; }
+.phase-chevrons .chev.lc.here { flex-grow: 1.7; }
+.lc-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lc-steps { display: flex; flex-wrap: wrap; gap: 4px; }
+.lc-step { font-size: 11.5px; font-weight: 600; line-height: 1; padding: 3px 7px; border-radius: 999px; white-space: nowrap;
+  background: color-mix(in srgb, currentColor 12%, transparent); }
+.lc-step.s-done { opacity: .78; }
+.chev.here .lc-step.s-done { opacity: 1; }
+.lc-step.s-skipped { opacity: .5; text-decoration: line-through; }
+.lc-step.s-todo, .lc-step.s-doing, .lc-step.s-stale, .lc-step.s-review { background: color-mix(in srgb, currentColor 24%, transparent); }
+.chev.here .lc-step.s-todo, .chev.here .lc-step.s-doing, .chev.here .lc-step.s-stale, .chev.here .lc-step.s-review { background: #fff; color: #4c1d95; }
+.lc-note { font-size: 12px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .9; }
+.lc-tag { margin-left: 8px; font-size: 10.5px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; padding: 2px 6px; border-radius: 6px;
+  background: color-mix(in srgb, var(--warning) 55%, transparent); color: var(--text-primary); vertical-align: 2px; }
+.chev.here .lc-tag { background: #fff; color: #4c1d95; }
 .chev-ico { flex: none; width: 22px; height: 22px; display: inline-grid; place-items: center; border-radius: 50%; font-size: 11.5px; font-weight: 800;
   background: color-mix(in srgb, currentColor 16%, transparent); font-variant-numeric: tabular-nums; }
 .chev.st-done .chev-ico { background: var(--good); color: #fff; }
@@ -503,10 +521,10 @@ dialog p { color: var(--text-secondary); }
 @media (max-width: 1180px) {
   .workspace { grid-template-columns: minmax(0, 1fr); }
   .feed { flex: none; max-height: 420px; min-height: 0; }
-  /* phases: only the current one keeps its name; the others show ✓ or their number (name in the tooltip) */
-  .phase-chevrons .chev:not(.here) { flex: 0 0 auto; }
-  .phase-chevrons .chev:not(.here) .chev-name { display: none; }
-  .phase-chevrons .chev.here { flex: 1 1 auto; }
+  /* lifecycle: only the current phase keeps its details; the others show their name (details in the tooltip) */
+  .phase-chevrons .chev:not(.here) .lc-steps, .phase-chevrons .chev:not(.here) .lc-note { display: none; }
+  .phase-chevrons .chev.lc:not(.here) { flex: 0 1 auto; min-height: 52px; }
+  .phase-cycle { display: none; }
   .ms-top { flex-wrap: wrap; }
   .ms-facts { flex-basis: 100%; }
   .stage-top { align-items: flex-start; }
@@ -533,11 +551,19 @@ dialog p { color: var(--text-secondary); }
   .topbar { gap: 10px; }
   .kicker { display: none; }
   .stage-run .run-chip { flex-wrap: wrap; row-gap: 2px; border-radius: 14px; }
-  /* phases on a phone: previous, current and next only; "Step n of N" gives the rest */
-  .phase-chevrons .chev:not(.here):not(.near) { display: none; }
-  .phase-chevrons .chev:not(.here) { flex: 0 0 auto; }
-  .phase-chevrons .chev.here { flex: 1 1 auto; }
+  /* lifecycle on a phone: the current phase with its details; the others shrink to ✓ or their number */
+  .phase-chevrons .chev:not(.here) .chev-name { display: none; }
+  .phase-chevrons .chev.lc:not(.here) { flex: 0 0 auto; }
+  .phase-chevrons .chev.lc.here { flex: 1 1 auto; }
   .phase-chevrons .chev.here .chev-name { font-size: 14.5px; }
+  .phase-chevrons { --tip: 12px; }
+  .phase-chevrons .chev.lc:not(.here) { padding: 8px calc(var(--tip) + 2px) 8px calc(var(--tip) + 6px); }
+  .phase-chevrons .chev.lc:not(.here):first-child { padding-left: 10px; }
+  .phase-chevrons .chev.lc.here { flex: 1 1 0; min-width: 0; }
+  .phase-step { flex-basis: 100%; }
+  .phase-chevrons .chev.here .chev-name { white-space: normal; }
+  .lc-tag { display: inline-block; margin: 2px 0 0; }
+  .lc-note { white-space: normal; }
   .ms-top { flex-wrap: wrap; }
   .ms-label { display: none; }
   .tabs-row { flex-basis: 100%; --tip: 10px; }
