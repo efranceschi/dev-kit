@@ -19,6 +19,7 @@
     {"id": "status-backlog", "context": "status", "command": "/dev-kit:backlog", "en": "/dev-kit:backlog lists everything pending: issues, tasks, parked questions, deferred findings and deploys."},
     {"id": "status-unattended", "context": "status", "en": "To let autopilot run overnight: autonomy level unattended plus a permission allowlist (/fewer-permission-prompts)."},
     {"id": "implement-hotfix", "context": "implement", "en": "Hotfix tasks run before everything else, even with a pending gate. Only one hotfix is open at a time."},
+    {"id": "settings-words", "context": "settings", "en": "Ask for settings in plain words, e.g. /dev-kit:settings stricter gates, or /dev-kit:settings show to see them all."},
     {"id": "autopilot-fresh-session", "context": "autopilot", "command": "/dev-kit:autopilot --milestones 2", "en": "Long runs cost more per turn as the session grows. --milestones N stops after N gates; resume in a new session."},
     {"id": "autopilot-issues", "context": "autopilot", "en": "Between milestones autopilot pulls queued issues into the buffer and, with cool-down on, fixes small ones first."},
     {"id": "costs-csv", "context": "costs", "en": "Need your own prices? /dev-kit:costs --csv exports every token count; prices live in .dev/costs/prices.json."},

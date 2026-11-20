@@ -520,6 +520,10 @@
         {
           "arg": "--only code,security,...",
           "meaning": "run a subset of auditors"
+        },
+        {
+          "arg": "--full",
+          "meaning": "audit everything again, without reusing earlier clean reviews"
         }
       ],
       "examples": [
@@ -640,6 +644,46 @@
         "issue",
         "status",
         "interview"
+      ]
+    },
+    {
+      "name": "settings",
+      "category": "start",
+      "one_line": "Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips.",
+      "when": "You want the kit more or less autonomous or strict, to turn something on or off, or to see the configuration.",
+      "args": [
+        {
+          "arg": "show",
+          "meaning": "current settings and their effect"
+        },
+        {
+          "arg": "<what to change, in words>",
+          "meaning": "e.g. \"run overnight\", \"stricter gates\", \"no tips\""
+        },
+        {
+          "arg": "tips off|on|always|reset",
+          "meaning": "tips; reset shows them again"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:settings",
+          "what": "see how the kit is configured"
+        },
+        {
+          "command": "/dev-kit:settings run overnight without asking",
+          "what": "unattended level with the floors kept"
+        },
+        {
+          "command": "/dev-kit:settings tips off",
+          "what": "no more tips"
+        }
+      ],
+      "produces": "the changed setting in .dev/state.json and an ADR for decisions",
+      "related": [
+        "interview",
+        "status",
+        "help"
       ]
     },
     {
@@ -852,7 +896,7 @@
         "alone"
       ],
       "steps": [
-        "Choose 'unattended with floors' in the interview (or: dev_state.py set autonomy.level unattended)",
+        "Choose 'unattended with floors' in the interview, or later: /dev-kit:settings run overnight without asking",
         "Cover permission prompts: /fewer-permission-prompts and --permission-mode acceptEdits",
         "Run inside tmux: claude --permission-mode acceptEdits \"/dev-kit:autopilot\"",
         "In the morning: /dev-kit:status, /dev-kit:backlog, /dev-kit:costs, /dev-kit:interview --gaps"
@@ -974,7 +1018,7 @@
       "steps": [
         "/dev-kit:start to reconcile state with git",
         "/dev-kit:autopilot continues from the current phase",
-        "dev_state.py cleanup if processes were left behind"
+        "/dev-kit:start also stops processes and frees locks left by the crash"
       ]
     },
     {
@@ -1004,8 +1048,8 @@
         "tips off"
       ],
       "steps": [
-        "/dev-kit:interview --gaps to revisit decisions",
-        "Or directly: dev_state.py set autonomy.<field> <value> (level, quality, cooldown, issue_buffer_pct, tips, model_policy, pause_policy…)"
+        "/dev-kit:settings <what you want, in words> (level, quality bar, rounds, reuse, task checks, buffer, deploys, tips)",
+        "/dev-kit:interview --gaps to revisit product decisions"
       ]
     },
     {
@@ -1091,11 +1135,11 @@
     },
     {
       "term": "stale artifact",
-      "definition": "A PRD, architecture, design or plan whose sources changed after it was marked; dev_state.py stale lists them, review refreshes them first."
+      "definition": "A PRD, architecture, design or plan whose sources changed after it was last updated; review brings it up to date before any reviewer runs."
     },
     {
       "term": "output file",
-      "definition": "Where an auditor writes its JSON result (given in its prompt); dev_score.py check validates it, the agent answers in a few lines."
+      "definition": "Where an auditor writes its result (given in its prompt); the kit validates it, and the agent answers in a few lines."
     },
     {
       "term": "task checks",
@@ -1103,11 +1147,11 @@
     },
     {
       "term": "recorded test run",
-      "definition": "A green suite stored per commit (dev_state.py tests record); the test auditor and the gate reuse it until the code it covers changes."
+      "definition": "A green suite stored per commit; the test auditor and the gate reuse it until the code it covers changes."
     },
     {
       "term": "work ledger",
-      "definition": "Record of verified work with the fingerprint of its inputs (dev_state.py ledger); only unchanged ok work is reused, with spot checks."
+      "definition": "Record of verified work with the fingerprint of its inputs; only unchanged work that was clean is reused, with spot checks."
     },
     {
       "term": "shared baseline",
@@ -1119,7 +1163,7 @@
     },
     {
       "term": "task contract",
-      "definition": "What a task provides to others (table, route, fields) in plan.md contract:, given to consumers by dev_state.py brief."
+      "definition": "What a task provides to others (table, route, fields), written in plan.md as contract: and given to the tasks that consume it."
     },
     {
       "term": "locked literal",
@@ -1127,7 +1171,7 @@
     },
     {
       "term": "exclusive resource",
-      "definition": "Something one agent may use at a time (remote session, shared DB, emulator), guarded by dev_state.py lock."
+      "definition": "Something one agent may use at a time (remote session, shared DB, emulator), listed in the architecture and locked while in use."
     },
     {
       "term": "out of scope finding",
@@ -1231,7 +1275,7 @@
     },
     {
       "term": "dropped task",
-      "definition": "A task removed by a replan (dev_state.py drop): kept for history, never counted by milestones, next or release."
+      "definition": "A task removed by a replan: kept for history, never counted by milestones, next or release."
     },
     {
       "term": "access link",
