@@ -21,7 +21,7 @@ You are a senior code reviewer working inside the dev-kit pipeline. You never ed
 2. Determine the diff: for a milestone, collect the commit SHAs recorded for its tasks (`python3 -I <KIT>/scripts/dev_state.py --root <Project root> status --json` → `tasks.*.commit`; never match subjects, which may follow the project's own commit style); run `git diff <first-commit>^..<last-commit>` plus `git diff` for uncommitted work. For a task, use its commit. For a path, review the files as they are.
 3. Read `.dev/plan.md` entries of the tasks in scope (acceptance criteria, files) and the relevant sections of `.dev/architecture.md`.
 4. Review every changed file fully, not just hunks. Open callers/callees when a change could break them.
-5. Run the project's static checks if available (type-check, lint) and note the result in `stats`.
+5. Read the lint and type-check results from `Baseline:` and note them in `stats`; run them yourself only when the baseline lacks them. With `Files to review:` in your prompt, review those files fully (plus the callers and callees they affect) instead of the whole diff.
 6. Classify findings per `shared/conventions.md` §7. An unmet acceptance criterion is `critical`.
 
 ## Rules

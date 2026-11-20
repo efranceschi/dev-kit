@@ -1,7 +1,7 @@
 ---
 name: costs
-description: Cost summary of dev-kit work shown in the chat - token usage (input, output, cache write and read) and estimated cost in US$ (API-equivalent) per stage, agent, model or session, read from Claude Code's local transcripts and attributed to stages by the session log; optional CSV with every token count so the user can price it with their own rates. Use when the user asks how much was spent, the project's or session's cost, tokens per stage, or which agent or stage costs the most. Read-only.
-argument-hint: "[--all | --since YYYY-MM-DD] [--by stage|agent|model|session] [--csv]"
+description: Cost summary of dev-kit work shown in the chat - token usage (input, output, cache write and read) and estimated cost in US$ (API-equivalent) per stage, agent, model or session, and with --time where the time went per agent and skill plus what the work ledger reused, read from Claude Code's local transcripts and attributed to stages by the session log; optional CSV with every token count so the user can price it with their own rates. Use when the user asks how much was spent, the project's or session's cost, tokens per stage, or which agent or stage costs the most. Read-only.
+argument-hint: "[--all | --since YYYY-MM-DD] [--by stage|agent|model|session] [--csv] [--time]"
 allowed-tools: Read, Bash, Grep, Glob
 ---
 
@@ -17,7 +17,7 @@ Let `DC` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root 
 ## Procedure
 1. Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` §14. Log `DS event skill_start --set skill=costs --set args_kind=period`.
 2. `DC report --json <period args> --by <grouping>` (it ingests the transcripts first). The JSON has `period`, `source` (`transcripts` or `skills (partial)`), `rows` (key, requests, input, output, cache_write_5m, cache_write_1h, cache_read, tokens, usd, usd_complete, share), `total`, `prices_as_of` and `warnings`. In an existing project, `--all` starts when dev-kit was adopted (state `created_at`): Claude Code sessions in the folder before that are not counted. If `total.requests` is 0, explain why (no transcripts for this project on this machine, or nothing ran in the period; suggest `--all`) and stop.
-3. With `--csv`, also run `DC export <period args>` and keep the path it prints.
+3. With `--csv`, also run `DC export <period args>` and keep the path it prints. With `--time`, run `DC report --time --json <period args>` instead of step 2 and show `Kind | Name | % | Runs | Avg min | Max min` sorted by share (say that a skill's time includes the agents it waits for, so shares overlap), then the ledger table (`reuse`: per scope, units reviewed, reused and spot-checked) and one line on where the time went.
 4. Show in the chat, in the user's language, short:
    - **Header:** period, estimated total in US$ (say it is the API-equivalent estimate, not a charge), total tokens and number of requests.
    - **Table** by the grouping: `Stage | US$ | % | Input | Output | Cache write | Cache read`, sorted by cost; tokens in k/M; `n/d` where `usd_complete` is false. Stage names: `orchestration` is the main session outside any skill.

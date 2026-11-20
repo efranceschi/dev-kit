@@ -38,7 +38,7 @@ Use exactly these key names and values: `state` (not `status`) in `previous`, th
     }
   ],
   "previous": [
-    {"id": "F-003", "state": "closed | open", "evidence": "how you verified it"}
+    {"id": "F-003", "state": "closed | open", "partial": "true when open but partly fixed (optional)", "evidence": "how you verified it"}
   ],
   "kit_feedback": {
     "worked": [{"area": "qa", "note": "≤140 chars about the dev-kit"}],
@@ -50,6 +50,12 @@ Use exactly these key names and values: `state` (not `status`) in `previous`, th
 ```
 
 Re-runs (delta mode, round ≥ 2): your prompt lists the previous round's findings of your dimension. For **each** of them, verify it against the current code or artifact and report it in `previous` as `closed` (fixed, with evidence) or `open` (still there). An omitted previous finding counts as open. Do not repeat a previous finding in `findings`; report there only what is new. New `low` findings are recorded but do not affect the score in a re-run, so spend your effort on closing the old ones and on anything new that is medium or worse.
+
+Incremental audits (`conventions.md` §18):
+- `Baseline: <path>` in your prompt holds the suite, lint, type-check, data smoke and harness results of this round. Read it; do not run those again. Run a command yourself only for what the baseline lacks and your dimension needs (a scanner, one targeted test, a query), and say so in `stats`.
+- `Files to review:` lists the files you must review this round (changed, with open findings, or a spot check); read their direct callers and callees as needed. The other files of the scope were verified unchanged by an earlier round of your dimension: do not re-audit them, but a finding you notice there in passing is still reported.
+- A previous finding that is only partly fixed stays `"state": "open"` with `"partial": true` and evidence of what is left; never `closed`.
+- A problem that another dimension also reports (same file and line): report it anyway from your angle; `dev_score.py consolidate` links the two and one fix task is created.
 
 Document reviews in delta mode (prd, design, plan, docs; your prompt then also gives `Changes since round <n-1>:` with a diff of the artifact):
 - Review the **changed text** and what it directly affects (a renamed entity, an edited AC and the tasks, screens or metrics that cite it). Do not re-read the whole document looking for new defects: the first round did that.

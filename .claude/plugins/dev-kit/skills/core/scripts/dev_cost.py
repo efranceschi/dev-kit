@@ -4,6 +4,7 @@
 Standard library only. Usage:
   python3 -I dev_cost.py --root DIR ingest [--transcripts DIR]
   python3 -I dev_cost.py --root DIR report [--by stage|agent|model|session] [--all | --since YYYY-MM-DD] [--json] [--no-ingest]
+  python3 -I dev_cost.py --root DIR report --time [--all | --since D] [--json]   time per agent and skill, ledger reuse
   python3 -I dev_cost.py --root DIR export [--stamp YYYYMMDD-HHMMSS] [--all | --since D] [--no-ingest]
 
 Source: Claude Code's local transcripts (~/.claude/projects/<project>/<session>.jsonl and
@@ -433,6 +434,66 @@ def build_report(dev: Path, by: str, mode: str, since: str | None) -> dict:
     return rep
 
 
+def build_time_report(dev: Path, mode: str, since: str | None) -> dict:
+    """Where the time went: per agent type (from the subagent transcripts: first to last request of each run) and
+    per skill (skill_end durations of the session log), plus the work the ledger reused (conventions.md §18).
+    Shares are of the sum of all rows; a skill's time includes the agents it waits for, so they overlap."""
+    events, _ = tel.read_events(dev)
+    usage, period = period_filter(attribute(load_usage(dev), events), events, mode, since, dev)
+    runs: dict[tuple[str, str], list[datetime]] = {}
+    for r in usage:
+        if r.get("agent") in (None, "main"):
+            continue
+        ts = parse_ts(r.get("ts"))
+        if ts:
+            runs.setdefault((str(r["agent"]), str(r.get("agent_id") or r.get("src"))), []).append(ts)
+    rows: dict[str, dict] = {}
+
+    def add(kind: str, name: str, minutes: float) -> None:
+        row = rows.setdefault(f"{kind}:{name}", {"kind": kind, "name": name, "runs": 0, "total_min": 0.0, "max_min": 0.0})
+        row["runs"] += 1
+        row["total_min"] += minutes
+        row["max_min"] = max(row["max_min"], minutes)
+
+    for (agent, _), tss in runs.items():
+        add("agent", agent, (max(tss) - min(tss)).total_seconds() / 60)
+    evs = tel.filter_period(events, mode, since) if mode != "all" else events
+    for e in evs:
+        if e.get("event") == "skill_end" and isinstance(e.get("duration_s"), (int, float)):
+            add("skill", str(e.get("skill") or "other"), float(e["duration_s"]) / 60)
+    base = sum(r["total_min"] for r in rows.values())
+    out = sorted(rows.values(), key=lambda r: -r["total_min"])
+    for r in out:
+        r["share"] = round(100 * r["total_min"] / base, 1) if base else 0.0
+        r["avg_min"] = round(r["total_min"] / r["runs"], 1) if r["runs"] else 0.0
+        r["total_min"] = round(r["total_min"], 1)
+        r["max_min"] = round(r["max_min"], 1)
+    reuse: dict[str, dict] = {}
+    for e in evs:
+        if e.get("event") == "ledger":
+            x = reuse.setdefault(str(e.get("scope")), {"plans": 0, "review": 0, "reuse": 0, "spot": 0})
+            x["plans"] += 1
+            for k in ("review", "reuse", "spot"):
+                x[k] += int(e.get(k) or 0)
+    return {"period": period, "base_hours": round(base / 60, 1), "rows": out, "reuse": reuse,
+            "note": "skill time includes the agents it waits for, so shares overlap"}
+
+
+def render_time(rep: dict) -> str:
+    lines = [f"Time by agent and skill ({rep['period']}) · base {rep['base_hours']} h of recorded activity",
+             "(a skill's time includes the agents it waits for; shares overlap)", "",
+             f"{'kind':<6} {'name':<24}{'share':>7}{'runs':>6}{'avg min':>9}{'max min':>9}"]
+    for r in rep["rows"]:
+        lines.append(f"{r['kind']:<6} {r['name']:<24}{r['share']:>6.1f}%{r['runs']:>6}{r['avg_min']:>9.1f}{r['max_min']:>9.1f}")
+    if not rep["rows"]:
+        lines.append("no timed activity in this period")
+    if rep["reuse"]:
+        lines += ["", f"{'reused by the ledger':<28}{'plans':>6}{'reviewed':>10}{'reused':>8}{'spot':>6}"]
+        for k, x in sorted(rep["reuse"].items()):
+            lines.append(f"{k:<28}{x['plans']:>6}{x['review']:>10}{x['reuse']:>8}{x['spot']:>6}")
+    return "\n".join(lines)
+
+
 def fmt_tokens(n: int) -> str:
     return f"{n / 1e6:.2f}M" if n >= 1e6 else (f"{n / 1e3:.1f}k" if n >= 1e3 else str(n))
 
@@ -501,6 +562,7 @@ def main(argv: list[str] | None = None) -> int:
         if name == "report":
             s.add_argument("--by", choices=["stage", "agent", "model", "session"], default="stage")
             s.add_argument("--json", action="store_true")
+            s.add_argument("--time", action="store_true", help="time per agent and skill instead of cost")
         else:
             s.add_argument("--stamp")
     a = p.parse_args(argv)
@@ -515,6 +577,10 @@ def main(argv: list[str] | None = None) -> int:
     if not a.no_ingest:
         ingest(dev, root, a.transcripts)
     mode = "all" if a.all else ("since" if a.since else "session")
+    if a.cmd == "report" and a.time:
+        rep = build_time_report(dev, mode, a.since)
+        print(json.dumps(rep, indent=2) if a.json else render_time(rep))
+        return 0
     if a.cmd == "report":
         rep = build_report(dev, a.by, mode, a.since)
         print(json.dumps(rep, indent=2) if a.json else render(rep))

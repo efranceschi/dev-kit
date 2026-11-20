@@ -6,7 +6,9 @@ Standard library only. Run with: python3 -I dev_state.py <subcommand> [...]
 Subcommands
   init          create .dev/ and state.json (idempotent; updates given fields)
   sync-plan     read .dev/plan.md and add/update milestones and tasks (never touches status)
-  next          print the next task to work on (fix tasks first, deps satisfied, gate respected)
+  brief T       base prompt of an implementer for task T (languages, commands, verification rule, history)
+  next          print the next task to work on (fix tasks first, deps satisfied, gate respected); --batch N: tasks
+                that can run in parallel (no common files, one serialising file at most)
   start T       mark task in_progress
   done T        mark task done (optionally --commit SHA)
   block T       mark task blocked (--reason)
@@ -18,6 +20,8 @@ Subcommands
   gate M        set milestone gate: passed | pending | skipped (passed needs --score >= cut-off)
   artifact mark NAME  record that an artifact (brief|prd|architecture|ux|ui|plan|all) is up to date with its upstream
   stale         artifacts whose upstream changed since they were marked, and passed reviews now out of date
+  ledger        work ledger (conventions §18): plan | record (files of an audit dimension), sections |
+                record-sections (document review), put | check | get KEY, drop --prefix; reuse only unchanged ok work
   tests         record | lookup: test results per commit (.dev/run/test-runs.jsonl) so a green suite is not re-run
                 on unchanged code (--kind unit|integration|e2e|all, --paths); lookup exits 3 when nothing is reusable
   xref          cross-document checks: ACs without tasks, unknown ACs, unspecified screens, unknown ADRs and deps
@@ -57,6 +61,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir; dev_telemetry lives next to us
 import dev_telemetry as tel  # noqa: E402
+import dev_ledger as led  # noqa: E402
 
 STATE_VERSION = 1
 PHASES = [
@@ -106,6 +111,9 @@ DEFAULT_AUTONOMY = {
     # Cheap checks at the end of each task (conventions.md §7): ui = copy and static a11y agents on tasks that touch
     # UI files (haiku) | all = also on other tasks with user-facing strings | off = implementer self-check only.
     "task_checks": "ui",
+    # Incremental work (conventions.md §18): reuse verified units whose inputs did not change. spot_check_pct of the
+    # reused units is re-verified each round; full_on_last_gate turns the cache off for the last milestone gate.
+    "incremental": {"enabled": True, "spot_check_pct": 10, "full_on_last_gate": False},
     # Production deploy (conventions.md §12). when: per_milestone | on_release | manual | none.
     "production": {"when": "none", "method": None, "host": None, "targets": [], "smoke": [], "prerequisites": []},
     "task_time_budget_min": 30,
@@ -318,6 +326,15 @@ def check_autonomy_field(field: str, val: object) -> object:
     elif field == "on_park":
         if val not in ON_PARK:
             fail(f"autonomy.on_park must be one of {', '.join(ON_PARK)}")
+    elif field == "incremental":
+        if not isinstance(val, dict) or set(val) - {"enabled", "spot_check_pct", "full_on_last_gate"}:
+            fail("autonomy.incremental must be an object with enabled, spot_check_pct, full_on_last_gate")
+        if "spot_check_pct" in val and (not isinstance(val["spot_check_pct"], (int, float)) or isinstance(val["spot_check_pct"], bool)
+                                        or not 0 <= val["spot_check_pct"] <= 100):
+            fail("autonomy.incremental.spot_check_pct must be a number between 0 and 100")
+        for k in ("enabled", "full_on_last_gate"):
+            if k in val and not isinstance(val[k], bool):
+                fail(f"autonomy.incremental.{k} must be true or false")
     elif field == "task_checks":
         if val not in TASK_CHECKS:
             fail(f"autonomy.task_checks must be one of {', '.join(TASK_CHECKS)}")
@@ -816,8 +833,54 @@ def pick_next(store: Store, milestone: str | None) -> tuple[str | None, str]:
     return None, "nothing to do"
 
 
+# Files that make tasks run one at a time (implement --parallel): registries, barrels, migration heads, manifests.
+SERIAL_FILES = re.compile(r"(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|"
+                          r"poetry\.lock|uv\.lock|Cargo\.(toml|lock)|go\.(mod|sum)|Gemfile(\.lock)?|__init__\.py|"
+                          r"index\.(t|j)sx?|routes?\.(t|j)sx?|urls\.py|CHANGELOG\.md|README\.md)$|(^|/)(migrations?|alembic)/")
+
+
+def pick_batch(store: Store, milestone: str | None, n: int) -> tuple[list[str], str]:
+    """Up to n ready tasks that can run in parallel: no shared files between them, at most one that touches a
+    serialising file (SERIAL_FILES, or `shared` in the plan) or lists no files, hotfixes alone."""
+    first, why = pick_next(store, milestone)
+    if first is None:
+        return [], why
+    ts = store.tasks()
+    t0 = ts[first]
+    if t0.get("lane") == "hotfix" or n <= 1:
+        return [first], ""
+    m = t0["milestone"]
+    ready = [t for t, v in ts.items() if v["milestone"] == m and v["status"] == "todo" and v.get("lane") != "hotfix"
+             and all(ts.get(d, {}).get("status") == "done" for d in v["deps"])]
+    ready.sort(key=lambda t: (t != first, 0 if ts[t].get("lane") == "cooldown" else 1, 0 if ts[t]["type"] == "fix" else 1, int(t[2:])))
+    chosen, files, serial_used = [], set(), False
+    for t in ready:
+        fs = set(ts[t].get("files") or [])
+        serial = (not fs) or bool(ts[t].get("shared")) or any(SERIAL_FILES.search(f) for f in fs)
+        if fs & files or (serial and serial_used):
+            continue
+        chosen.append(t)
+        files |= fs
+        serial_used = serial_used or serial
+        if len(chosen) >= n:
+            break
+    return chosen, ""
+
+
 def cmd_next(store: Store, a: argparse.Namespace) -> None:
     store.load()
+    if getattr(a, "batch", None):
+        batch, why = pick_batch(store, a.milestone, a.batch)
+        if not batch:
+            print(json.dumps({"tasks": [], "reason": why}) if a.json else f"no task available: {why}")
+            sys.exit(3)
+        if a.json:
+            print(json.dumps({"tasks": [{"task": t, **store.tasks()[t]} for t in batch]}, ensure_ascii=False))
+        else:
+            for t in batch:
+                v = store.tasks()[t]
+                print(f"{t} [{v['milestone']}] ({v['type']}) {v['title']}" + (f" · files: {', '.join(v['files'])}" if v["files"] else ""))
+        return
     tid, why = pick_next(store, a.milestone)
     if tid is None:
         if a.json:
@@ -1028,8 +1091,9 @@ def cmd_fix_tasks(store: Store, a: argparse.Namespace) -> None:
         if sev not in block_on and f["id"] not in extra:
             continue
         anchor = f"{source}#{f['id']}"
-        if anchor in existing:
-            skipped.append(f["id"])
+        twins = {f"{source}#{x}" for x in f.get("same_as") or []}
+        if anchor in existing or twins & existing:
+            skipped.append(f["id"])  # already has a task, or the same problem reported by another dimension has one
             continue
         cond = str(f.get("recommendation") or f.get("failure_scenario") or "the finding no longer reproduces").strip()
         acc = [f"{f['id']} resolved: {cond[:200]}"]
@@ -1419,6 +1483,199 @@ def cmd_tests(store: Store, a: argparse.Namespace) -> None:
         return
     print(f"no reusable {a.kind} run for {head[:7]}; run the suite and record it")
     sys.exit(3)
+
+
+def _csv(v: str | None) -> list[str]:
+    return [x.strip() for x in (v or "").split(",") if x.strip()]
+
+
+def _files_arg(store: Store, a: argparse.Namespace) -> list[str]:
+    files = _csv(getattr(a, "files", None))
+    src = getattr(a, "files_from", None)
+    if src:
+        path = Path(src) if Path(src).is_absolute() else store.root / src
+        try:
+            files += [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        except OSError as e:
+            fail(f"cannot read {src}: {e}")
+    return list(dict.fromkeys(files))
+
+
+def _finding_refs(store: Store, paths: list[str]) -> list[dict]:
+    out = []
+    for src in paths:
+        path = Path(src) if Path(src).is_absolute() else store.root / src
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            fail(f"cannot read findings from {src}: {e}")
+        items = data.get("findings", []) if isinstance(data, dict) else data
+        for f in items if isinstance(items, list) else []:
+            if not isinstance(f, dict) or f.get("legacy"):
+                continue
+            files = f.get("files") if isinstance(f.get("files"), list) else [f.get("file")]
+            for x in files:
+                if x:
+                    out.append({"file": str(x).split(":")[0], "line": f.get("line")})
+    return out
+
+
+def _norm_rel(store: Store, rel: str) -> str:
+    if (store.root / rel).exists() or not (store.dev / rel).exists():
+        return rel
+    return f".dev/{rel}"
+
+
+def cmd_ledger(store: Store, a: argparse.Namespace) -> None:
+    """Work ledger (conventions.md §18): reuse verified work whose inputs did not change."""
+    store.load()
+    inc = {"enabled": True, "spot_check_pct": 10, **(store.state.get("autonomy", {}).get("incremental") or {})}
+    salt = _csv(getattr(a, "salt", None)) + [f"kit:{tel.kit_version()}"]
+    context = _csv(getattr(a, "context", None))
+    no_cache = bool(getattr(a, "no_cache", False)) or not inc.get("enabled", True)
+    spot = inc.get("spot_check_pct", 10) if getattr(a, "spot_pct", None) is None else a.spot_pct
+    seed = getattr(a, "seed", None) or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    act = a.action
+
+    def out(obj: dict, human: str) -> None:
+        print(json.dumps(obj, indent=2, ensure_ascii=False) if getattr(a, "json", False) else human)
+
+    if act in ("plan", "record"):
+        if not a.prefix:
+            fail(f"ledger {act} needs --prefix (e.g. audit:code)")
+        files = _files_arg(store, a)
+        if not files:
+            fail(f"ledger {act} needs --files or --files-from")
+        # an entry is a file (its own unit) or `unit=file1+file2` (e.g. a screen and the files of its route)
+        units = {}
+        for f in files:
+            name, _, ins = f.partition("=")
+            units[name] = [x for x in ins.split("+") if x] if ins else [name]
+        if act == "plan":
+            res = led.plan(store.dev, store.root, a.prefix, units, context, salt, _csv(a.shared), spot, seed, no_cache)
+            res.pop("fingerprints", None)
+            store.event("ledger", scope=tel.scope_token(a.prefix), review=len(res["review"]), reuse=len(res["reuse"]),
+                        spot=len(res["spot"]), no_cache=no_cache)
+            out(res, f"{a.prefix}: review {len(res['review'])} · reuse {len(res['reuse'])} · spot {len(res['spot'])}"
+                + f" · never reviewed {len(res['never'])}" + (" · shared changed" if res["shared_changed"] else "")
+                + "".join(f"\n  review {x['unit']} ({x['why']})" for x in res["review"]))
+            return
+        hits = {_norm_rel(store, r["file"]) for r in _finding_refs(store, _csv(a.findings_from))}
+        # a unit has findings when a finding names the unit itself (a screen id) or one of its files
+        with_findings = {u for u, ins in units.items() if u in hits or hits & set(ins)}
+        res = led.record(store.dev, store.root, a.prefix, units, context, salt, with_findings, a.ref, _csv(a.shared))
+        out(res, f"{a.prefix}: recorded {res['ok']} ok, {res['findings']} with findings")
+        return
+    if act in ("sections", "record-sections"):
+        if not a.target:
+            fail(f"ledger {act} needs --target (prd, design, plan, docs)")
+        files = _files_arg(store, a) or [f".dev/{x}" for n in led_review_artifacts(a.target) for x in ARTIFACT_FILES[n] if "*" not in x]
+        if act == "sections":
+            res = led.section_plan(store.dev, store.root, a.target, files, context, salt, spot, seed, no_cache)
+            store.event("ledger", scope=tel.scope_token(f"review:{a.target}"), review=len(res["review"]),
+                        reuse=len(res["reuse"]), spot=len(res["spot"]), no_cache=no_cache)
+            out(res, f"review {a.target}: {len(res['review'])} of {res['sections']} section(s) to review, {len(res['reuse'])} reused"
+                + "".join(f"\n  {x['file']} § {x['section']} (lines {x['lines'][0]}-{x['lines'][1]}): {x['why']}" for x in res["review"]))
+            return
+        lines: dict[str, list[int]] = {}
+        for r in _finding_refs(store, _csv(a.findings_from)):
+            if isinstance(r.get("line"), int):
+                lines.setdefault(_norm_rel(store, r["file"]), []).append(r["line"])
+        res = led.section_record(store.dev, store.root, a.target, files, context, salt, lines)
+        out(res, f"review {a.target}: recorded {res['ok']} section(s) ok, {res['findings']} with findings")
+        return
+    if act == "drop":
+        if not a.prefix:
+            fail("ledger drop needs --prefix")
+        n = led.drop(store.dev, a.prefix)
+        print(f"dropped {n} unit(s) under {a.prefix}")
+        return
+    if not a.key:
+        fail(f"ledger {act} needs a KEY")
+    recs = led.load(store.dev)
+    if act == "get":
+        rec = recs.get(a.key)
+        if not rec:
+            print(f"no record for {a.key}")
+            sys.exit(3)
+        print(json.dumps(rec, ensure_ascii=False))
+        return
+    fp = led.fingerprint(store.root, _files_arg(store, a), context, salt)
+    if act == "check":
+        ok = not no_cache and led.reusable(recs.get(a.key), fp)
+        out({"key": a.key, "reusable": ok, "record": recs.get(a.key)}, f"{a.key}: {'reuse' if ok else 'redo'}")
+        if not ok:
+            sys.exit(3)
+        return
+    if act == "put":
+        try:
+            rec = led.put(store.dev, a.key, fp, a.result or "ok", a.ref, a.note)
+        except ValueError as e:
+            fail(str(e))
+        out(rec, f"{a.key}: {rec['result']}")
+        return
+    fail(f"unknown ledger action {act}")
+
+
+def led_review_artifacts(target: str) -> list[str]:
+    return REVIEW_ARTIFACTS.get(target, [])
+
+
+def _section_rows(text: str, heading_re: str) -> list[tuple[str, str]]:
+    m = re.search(heading_re, text, flags=re.M)
+    if not m:
+        return []
+    body = text[m.end():]
+    nxt = re.search(r"^## ", body, flags=re.M)
+    body = body[:nxt.start()] if nxt else body
+    rows = []
+    for ln in body.splitlines():
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")] if ln.strip().startswith("|") else []
+        if len(cells) >= 2 and cells[1] and not set(cells[1]) <= set("-: ") and cells[0].lower() not in ("purpose",):
+            rows.append((cells[0], cells[1]))
+    return rows
+
+
+def cmd_brief(store: Store, a: argparse.Namespace) -> None:
+    """The base prompt of an implementer for one task, generated from state and architecture (implement)."""
+    store.load()
+    t = store.tasks().get(a.task)
+    if t is None:
+        fail(f"unknown task {a.task}")
+    arch = (store.dev / "architecture.md").read_text(encoding="utf-8", errors="replace") if (store.dev / "architecture.md").exists() else ""
+    brief = (store.dev / "brief.md").read_text(encoding="utf-8", errors="replace") if (store.dev / "brief.md").exists() else ""
+    m = re.search(r"(?im)^\W*(?:application|app|ui|interface|product)\s+language[^:\n]*:\s*(.+)$", brief)
+    app_lang = m.group(1).strip()[:80] if m else "see .dev/brief.md block 2"
+    cmds = _section_rows(arch, r"^## 8\b.*$")
+    deps = [f"{d} ({(store.tasks()[d].get('commit') or '')[:7] or 'no commit'}) {store.tasks()[d]['title']}" for d in t.get("deps") or [] if d in store.tasks()]
+    hist = led.load(store.dev).get(f"task:{a.task}")
+    kit = Path(__file__).resolve().parents[1]
+    out = [f"Task: {a.task} — {t['title']} (milestone {t['milestone']}, type {t['type']})",
+           f"Kit root: {kit}", f"Project root: {store.root}",
+           f"Language for prose (report): {store.state.get('language') or 'en'} · application language (UI copy): {app_lang}",
+           f"Base commit: {_git(store, 'rev-parse', '--short', 'HEAD') or '-'}", "", "Acceptance:"]
+    out += [f"  - {x}" for x in t.get("acceptance") or ["(none listed: ask the orchestrator)"]]
+    out += [f"Test notes: {t.get('test_notes') or '-'}", f"Files: {', '.join(t.get('files') or []) or '-'}"]
+    if deps:
+        out += ["Depends on (done): " + "; ".join(deps)]
+    if t.get("contract"):
+        out += [f"Contract this task must provide: {t['contract']}"]
+    for c in t.get("consumes") or []:
+        ct = store.tasks().get(c, {})
+        if ct.get("contract"):
+            out += [f"Contract you consume from {c}: {ct['contract']}"]
+    if cmds:
+        out += ["", "Commands (architecture.md §8):"] + [f"  - {k}: {v}" for k, v in cmds]
+    out += ["", "Verification you run (conventions.md §18): unit tests, lint and type-check, plus only the integration tests "
+            "of this task's ACs and of the modules you changed (e.g. -k AC-n or their paths). The orchestrator runs the full "
+            "suite once after merging, so do not run it more than once yourself.",
+            "Worktree rules (resource-isolation.md): one simple command per Bash call; no heredocs and no `cd … &&` chains; "
+            "write scripts and files with Write/Edit; link node_modules/.venv from the Project root instead of installing; "
+            "never commit or touch git state."]
+    if hist:
+        out += ["", f"Previous attempt ({hist.get('result')}, {hist.get('at')}): {hist.get('note') or '-'}"
+                + (f" · its work is on {hist['ref']}: start from it, do not redo what it finished" if hist.get("ref") else "")]
+    print("\n".join(out))
 
 
 def _int_tail(rev: str | None) -> int | None:
@@ -2363,8 +2620,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("sync-plan"); s.set_defaults(fn=cmd_sync_plan); s.add_argument("--plan")
 
+    s = sub.add_parser("brief"); s.set_defaults(fn=cmd_brief); s.add_argument("task")
     s = sub.add_parser("next"); s.set_defaults(fn=cmd_next)
     s.add_argument("--milestone"); s.add_argument("--json", action="store_true")
+    s.add_argument("--batch", type=int, help="up to N ready tasks that can run in parallel")
 
     s = sub.add_parser("start"); s.set_defaults(fn=cmd_start); s.add_argument("task"); s.add_argument("--force", action="store_true")
     s = sub.add_parser("done"); s.set_defaults(fn=cmd_done); s.add_argument("task"); s.add_argument("--commit"); s.add_argument("--force", action="store_true")
@@ -2397,6 +2656,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("artifact"); s.set_defaults(fn=cmd_artifact)
     s.add_argument("action", choices=["mark"]); s.add_argument("name"); s.add_argument("--note")
+    s = sub.add_parser("ledger"); s.set_defaults(fn=cmd_ledger)
+    s.add_argument("action", choices=["plan", "record", "sections", "record-sections", "put", "check", "get", "drop"])
+    s.add_argument("key", nargs="?"); s.add_argument("--prefix"); s.add_argument("--target")
+    s.add_argument("--files"); s.add_argument("--files-from"); s.add_argument("--context"); s.add_argument("--salt")
+    s.add_argument("--shared"); s.add_argument("--findings-from"); s.add_argument("--result"); s.add_argument("--ref")
+    s.add_argument("--note"); s.add_argument("--spot-pct", type=float); s.add_argument("--seed")
+    s.add_argument("--no-cache", action="store_true"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("tests"); s.set_defaults(fn=cmd_tests)
     s.add_argument("action", choices=["record", "lookup"]); s.add_argument("--kind", default="all")
     s.add_argument("--sha"); s.add_argument("--command"); s.add_argument("--passed", type=int); s.add_argument("--failed", type=int)

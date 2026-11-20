@@ -307,3 +307,30 @@ The orchestrating session (the skill that spawns agents, and `autopilot` above i
 - **Do not re-run what is recorded.** A green suite is recorded per commit (`dev_state.py tests record`, written by `implement` and `qa`); the test auditor and the gate read it with `tests lookup` and run a suite again only when the code it covers changed. A dimension whose files did not change keeps its result (§9).
 - **Fresh sessions between milestones.** State lives in `.dev/`, so a run resumes from any session. For long builds, `autopilot --milestones N` stops after N approved gates with the command to resume; start a new session (or `/clear`) and run it. Within one session, Claude Code's own context compaction still applies.
 
+## 18. Incremental work (`dev_state.py ledger`)
+
+Rework is where long runs spend their time: the same suite run by three agents, every file re-audited after a two-line fix, every screen captured again, a whole document re-read for a changed paragraph. The rule: **never redo verified work whose inputs did not change; never let reuse lower the bar.**
+
+**The ledger** (`.dev/run/ledger.jsonl`, machine-local) records each unit of verification with the fingerprint of its inputs: the unit's own files, the context it was judged against (`--context`: checklists, specs) and salt (`--salt`: model tier; the kit version is always added). A unit is reused only when the fingerprint is identical **and** its last result was `ok`.
+
+| unit | key | own inputs (`--files`) | context (`--context`) |
+|---|---|---|---|
+| auditor pass over a file | `audit:<dimension>:<file>` (`ledger plan`/`record --prefix audit:<dimension>`) | the file | the dimension's checklist; `.dev/architecture.md` for code, data and ops; the PRD and plan for spec and tests; `ui-spec.md` and `ux-flows.md` for a11y, visual, copy and ux |
+| document section | `review:<target>:<file>#<section>` (`ledger sections`/`record-sections`) | the section text | the reviewer's checklist; for `plan` also the PRD, architecture and design |
+| screenshot or axe run | `shot:<S-nn>:<state>:<viewport>` | the screen's route files (ui-spec screen map) | tokens, mocks, harness config |
+| dependency audit | `deps:<lockfile>` | the lockfile | — |
+| secrets scan | `secrets:<sha>` | — (the commit) | — |
+| implementation attempt | `task:T-xxx` | — | — (`--result failed`, `--note` what was tried, `--ref` the branch with the partial work) |
+
+Test runs keep their own record (`dev_state.py tests record|lookup`, `qa` §2), with the same rules.
+
+**Rules that keep the quality** (enforced by `dev_ledger.py`, applied by the skills):
+1. **Conservative invalidation.** Any change to an input, a context file, the kit version or the salt invalidates the unit. A stale spec (`dev_state.py stale`) is a changed context. When unsure, redo.
+2. **Findings never close from the cache.** A unit whose last result was `findings` is always reviewed again, and an open finding stays open (and scored) until an auditor marks it `closed` with evidence.
+3. **Full coverage.** Every unit is reviewed at least once (`never` in the plan); reuse starts from the second round.
+4. **Spot checks.** Each plan re-reviews a seeded sample of the reusable units (`autonomy.incremental.spot_check_pct`, default 10%, at least one). If a spot-checked unit gets a new finding, the cache was wrong for that dimension: `ledger drop --prefix audit:<dimension>:` and review the whole dimension in that round.
+5. **Neighbours and shared files.** An auditor that reviews a unit also reads the direct callers and callees it needs to judge it. When a file listed with `--shared` (registries, schema, shared config, anything marked `shared` in the plan) changed, every unit of the plan is reviewed.
+6. **A full sweep before shipping.** `release` audits with `--no-cache` (and the last milestone gate too when `autonomy.incremental.full_on_last_gate` is true). The ledger only shortens the road there.
+
+`autonomy.incremental.enabled: false` turns reuse off everywhere (every plan answers "review"). `dev_cost.py report --time` shows the time per agent and skill and how much each ledger plan reused.
+

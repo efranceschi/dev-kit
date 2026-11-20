@@ -53,6 +53,8 @@ dev / staging / prod, how each is run, migrations strategy, CI pipeline steps.
 Production (if `production.when` is not `none`): method and host · install command (with dry-run if any) · migrate command · rollback command · backup location · smoke checks · prerequisites (name → how it is provided; never the value).
 Local preview (if `local_deploy` is on): build + start command, port, bind address `127.0.0.1`, smoke check (URL or example command), stop command.
 
+Long jobs (backfills, imports, pipelines) with how to tell they finished: QA starts the environment auditors only after them (`qa` §2).
+
 ## 8. Testing strategy and commands (summary; details in `qa/test-plan.md`)
 Pyramid per layer, tools, what must be e2e, coverage target.
 
@@ -65,7 +67,9 @@ Pyramid per layer, tools, what must be e2e, coverage target.
 | type-check | |
 | build | |
 | e2e | |
+| test (unit only) | |
 | test (integration only), if separate | |
+| data smoke (new tables have rows, jobs report ok), if the product loads data | |
 | QA screenshots (`qa:shots`, `shared/templates/qa-harness.md`) | |
 | QA accessibility scan (`qa:a11y`) | |
 

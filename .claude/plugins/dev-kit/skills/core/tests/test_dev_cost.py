@@ -117,6 +117,28 @@ class TestIngest(Base):
         self.assertTrue(any("priced as claude-opus-5-5" in w for w in rep["warnings"]))
 
 
+class TestTime(Base):
+    def test_time_by_agent_and_skill_with_ledger_reuse(self) -> None:
+        self.write_sub("a1", "implementer", line("q1", "claude-sonnet-5-5", "2026-11-18T10:00:00Z", agent_id="a1") +
+                       line("q2", "claude-sonnet-5-5", "2026-11-18T10:20:00Z", agent_id="a1"))
+        self.write_sub("a2", "implementer", line("q3", "claude-sonnet-5-5", "2026-11-18T11:00:00Z", agent_id="a2") +
+                       line("q4", "claude-sonnet-5-5", "2026-11-18T11:10:00Z", agent_id="a2"))
+        self.write_sub("a3", "test-auditor", line("q5", "claude-sonnet-5-5", "2026-11-18T12:00:00Z", agent_id="a3") +
+                       line("q6", "claude-sonnet-5-5", "2026-11-18T12:30:00Z", agent_id="a3"))
+        self.sh(STATE, "event", "skill_end", "--set", "skill=qa", "--set", "status=ok", "--set", "duration_s=2400")
+        (self.root / "src").mkdir()
+        (self.root / "src" / "a.py").write_text("x = 1\n")
+        self.sh(STATE, "ledger", "plan", "--prefix", "audit:code", "--files", "src/a.py")
+        rep = json.loads(self.sh(COST, "report", "--time", "--all", "--json", "--transcripts", str(self.tdir)).stdout)
+        rows = {(r["kind"], r["name"]): r for r in rep["rows"]}
+        imp = rows[("agent", "implementer")]
+        self.assertEqual((imp["runs"], imp["avg_min"], imp["max_min"]), (2, 15.0, 20.0))
+        self.assertEqual(rows[("skill", "qa")]["total_min"], 40.0)
+        self.assertAlmostEqual(imp["share"], 30 / 100 * 100, places=1)  # 30 of 100 minutes
+        self.assertEqual(rep["reuse"]["audit:code"]["review"], 1)
+        self.assertIn("implementer", self.sh(COST, "report", "--time", "--all", "--transcripts", str(self.tdir)).stdout)
+
+
 class TestAttribution(Base):
     def ev(self, *args: str) -> None:
         self.sh(STATE, "event", *args)

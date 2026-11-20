@@ -2,6 +2,29 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.18.0 — 2026-11-20
+
+Incremental work. A second field report (52 h of activity on 1.14) showed the time going into redoing verified work: implementers running the whole integration suite per task (37% of the time), QA rounds of up to 150 minutes, every auditor running `make check` again, every screen captured again by two agents, whole documents re-read for a changed paragraph. Rule of this release: never redo verified work whose inputs did not change, and never let reuse lower the bar.
+
+### Added
+- Work ledger (`dev_state.py ledger`, module `dev_ledger.py`, conventions §18): every verified unit (auditor pass over a file, document section, screen capture, dependency audit, implementation attempt) is recorded with the fingerprint of its own files, its context (checklists, specs) and salt (model tier, kit version). `plan`/`record` for audit dimensions and screens (`unit=file+file`), `sections`/`record-sections` for document reviews, `put`/`check`/`get` for single units, `drop` to invalidate.
+- Quality rules: conservative invalidation; findings never close from the cache (units with findings are always reviewed again); every unit reviewed at least once; seeded spot checks (`autonomy.incremental.spot_check_pct`, default 10%, at least one) and a full re-run of the dimension when a spot check finds something; shared files invalidate the whole plan; `release` audits with `--no-cache` (also the last gate with `full_on_last_gate`). `autonomy.incremental.enabled false` turns reuse off.
+- `qa`: one shared baseline per round (`.dev/qa/<M>/baseline.json`: suite, lint, type-check, data smoke, one QA harness run for visual and a11y) read by every auditor; `Files to review:` per auditor from the ledger; static auditors start at once, environment auditors after the baseline and after long jobs; a failing data smoke stops the environment auditors for that round.
+- `dev_score.py consolidate`: `findings.json` and `findings-round-<n>.json` with stable ids across rounds, deferred and legacy apart, and `same_as` links between dimensions (one fix task).
+- `dev_score.py select`: which auditors a re-run needs (open findings or changed files in their dimension); the others keep their result with `"carried": true`.
+- Document reviews from round 2 get `Sections to review:` (changed sections, sections citing a changed id, sections with findings, spot sample) instead of the whole document; `review all` runs independent targets in parallel.
+- `dev_state.py next --batch N`: ready tasks that can run in parallel; `autopilot` runs in parallel by default when the brief allows it.
+- `dev_state.py brief T-xxx`: an implementer's base prompt from state and architecture (languages, §8 commands, verification rule, worktree rules, contracts, previous attempt).
+- Failed or blocked attempts keep their branch and notes (`ledger put task:T-xxx --result failed`); the next attempt continues from them.
+- `dev_cost.py report --time` and `/dev-kit:costs --time`: share, runs, average and maximum minutes per agent and skill, plus what each ledger plan reused (new `ledger` telemetry event).
+
+### Changed
+- Implementers run unit, lint, type-check and only the integration tests their task affects; the full suite runs once per merge in the orchestrator.
+- Auditors read the baseline instead of running the suite, lint, type-check or captures: test-auditor confirms assertions, flakiness and coverage, running only the AC tests it needs, in the background and within `Time budget:`; security scans only commits after the last scan and skips an unchanged lockfile's audit; spec-tracer reads test results from the baseline; requirements-reviewer judges merit and leaves form to `xref`; copy-reviewer gets the application and report languages.
+- Contract: `partial: true` for a partly fixed finding (stays open), duplicates across dimensions reported and linked, rules for `Baseline:` and `Files to review:`; isolation: long commands in the background, time budgets.
+- `fix-tasks` creates one task for findings linked by `same_as`; `autopilot` logs `skill_end` for `implement` per milestone.
+- `architecture.md` template: unit-only and data-smoke commands, long jobs in §7.
+
 ## 1.17.0 — 2026-11-20
 
 Third release from the field report: gates that confirm instead of discover, and less repeated work (test suites run three times, a deploy per fix batch, auditors reporting fixes made while they read, agents without browsers or dependencies in their worktree).
