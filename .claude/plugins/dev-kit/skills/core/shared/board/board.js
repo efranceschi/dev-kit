@@ -264,6 +264,51 @@
   const skillRuns = () => ((data && data.agents && data.agents.runs) || []);
   const runCmd = (r) => `/dev-kit:${r.skill}${r.scope ? ` ${r.scope}` : ""}`;
   const since = (t) => h("span", { class: "agent-time", "data-start": t, text: dur((Date.now() - parseT(t)) / 1000) });
+  // Every skill that runs has a place on the board, so work that is not a task card is visible where it happens.
+  // Orchestrators (autopilot, worker, start…) only show in the top bar; the work they start shows in its place.
+  const RUN_PLACE = {
+    interview: ["conception", "step:interview"], prd: ["conception", "step:prd"], architecture: ["conception", "step:architecture"],
+    ux: ["conception", "step:ux"], ui: ["conception", "step:ui"], plan: ["planning", "step:plan"], issue: ["planning", "backlog"],
+    qa: ["construction", "qa"], implement: ["construction", "tasks"], test: ["construction", "tasks"],
+    usability: ["stable", "checks"], docs: ["stable", "checks"], release: ["construction", "release"], deploy: ["stable", "prod"],
+  };
+  const REVIEW_PLACE = { prd: ["conception", "step:prd"], design: ["conception", "step:ui"], plan: ["planning", "step:plan"], docs: ["stable", "checks"], ux: ["stable", "checks"] };
+  function runPlace(r) {
+    if (r.skill === "review") return REVIEW_PLACE[r.scope] || null;
+    return RUN_PLACE[r.skill] || null;
+  }
+  /** Runs shown at a place (e.g. "step:prd", "checks"); the design review also lights the UX step. */
+  const runsAt = (where) => skillRuns().filter((r) => { const p = runPlace(r); return p && (p[1] === where || (where === "step:ux" && p[1] === "step:ui" && r.skill === "review")); });
+  const phaseRunning = (ph) => skillRuns().some((r) => { const p = runPlace(r); return p && p[0] === ph; });
+  // which skills spawn each agent (agents/*.md and the skills that call them): an agent with no task or gate belongs to
+  // the latest of those runs that started before it, or else to the latest run of any kind
+  const AGENT_SKILLS = {
+    "requirements-reviewer": ["review"], "design-reviewer": ["review"], "docs-reviewer": ["review", "docs", "release"],
+    architect: ["architecture"], "usability-auditor": ["usability"], "a11y-auditor": ["usability", "qa"], "visual-reviewer": ["usability", "qa"],
+    "copy-reviewer": ["usability", "qa"], "spec-tracer": ["qa", "release"], "security-auditor": ["qa", "release"], "ops-reviewer": ["qa", "release"],
+    "deps-auditor": ["qa", "release"], "performance-auditor": ["qa", "release"], "data-reviewer": ["qa", "release"], "code-reviewer": ["qa"],
+    "test-auditor": ["qa"], implementer: ["implement"],
+  };
+  function ownerRun(a) {
+    const before = skillRuns().filter((r) => runPlace(r) && parseT(r.started_at) <= parseT(a.started_at) + 5000);
+    const want = AGENT_SKILLS[a.agent] || [];
+    const fit = before.filter((r) => want.includes(r.skill));
+    const pick = (fit.length ? fit : before).sort((x, y) => parseT(x.started_at) - parseT(y.started_at));
+    return pick[pick.length - 1] || null;
+  }
+  /** Agents not tied to a task card or a QA gate, working for one of these runs. */
+  const looseAgents = (runs) => activeAgents().filter((a) => !a.node && runs.includes(ownerRun(a)));
+  /** "● Running now" banner for a card: the command(s), for how long, and the agents working for it. */
+  function runBanner(runs) {
+    if (!runs.length) return null;
+    const ags = looseAgents(runs);
+    return h("div", { class: "run-banner", role: "status" },
+      h("span", { class: "rn-dot", "aria-hidden": "true" }), h("strong", { text: "Running now" }),
+      runs.map((r) => h("span", { class: "rb-cmd" }, h("code", { text: runCmd(r) }), " ", since(r.started_at))),
+      ags.length ? h("span", { class: "rb-agents" }, ags.map((a) => h("span", { class: "agent-chip" }, agentBits(a, true)))) : null);
+  }
+  function fillRunSlot(id, where) { const el = $(id); if (el) fill(el, runBanner([].concat(...[].concat(where).map(runsAt)))); }
+
   function renderRunning() {
     const runs = skillRuns(), ags = activeAgents();
     const btn = $("run-btn");
@@ -342,6 +387,8 @@
         h("span", { class: "chev-name" }, PHASE_NAME[p.key], p.reopened ? h("span", { class: "lc-tag", text: "reopened" }) : null,
           i === idx && !sel ? h("span", { class: "lc-tag now-tag", text: "now" }) : null),
         badge ? h("span", { class: "lc-badge", text: badge }) : null),
+      phaseRunning(p.key) ? h("span", { class: "lc-run", title: `Running now in ${PHASE_NAME[p.key]}: ${skillRuns().filter((r) => (runPlace(r) || [])[0] === p.key).map(runCmd).join(", ")}` },
+        h("span", { class: "rn-dot", "aria-hidden": "true" }), "running") : null,
       need ? h("span", { class: "lc-needs", title: `${plural(need, "item")} in Needs you`, text: String(need) }) : null,
       h("span", { class: "visually-hidden", text: `: ${PHASE_WORD[p.state]}${i === idx ? ", the project is here" : ""}${badge ? `, ${badge}` : ""}${need ? `, ${plural(need, "item")} need you` : ""}.` }));
     }));
@@ -1010,12 +1057,13 @@
     st.push({ key: "smoke", name: "Smoke test", tasks: [],
       state: !smokeOn ? "na" : m.preview ? "done" : "upcoming",
       note: !smokeOn ? "Local preview off" : m.preview ? (m.preview.pid != null ? "Preview running" : "Passed") : passed ? "Not recorded" : "Runs inside QA" });
-    st.push({ key: "deploy", name: "Deploy", tasks: [],
-      state: !deployOn ? "na" : dep && dep.status === "ok" ? "done" : dep ? "failed" : passed ? "current" : "upcoming",
-      note: !deployOn ? (lc.deploy_when === "on_release" ? "At release" : "Not per milestone")
+    const deploying = passed && runsAt("prod").length > 0;  // a deploy runs now (this milestone is past its gate)
+    st.push({ key: "deploy", name: "Deploy", tasks: [], running: deploying,
+      state: deploying ? "current" : !deployOn ? "na" : dep && dep.status === "ok" ? "done" : dep ? "failed" : passed ? "current" : "upcoming",
+      note: deploying ? "Running now" : !deployOn ? (lc.deploy_when === "on_release" ? "At release" : "Not per milestone")
         : dep && dep.status === "ok" ? `${(dep.sha || "").slice(0, 7)}${dep.at && Number.isFinite(parseT(dep.at)) ? ` · ${fmtDate(parseT(dep.at))}` : ""}`
         : dep ? stLabel(dep.status) : passed ? "Waiting for" : "After the gate",
-      cmd: deployOn && passed && !(dep && dep.status === "ok") ? "/dev-kit:deploy" : null });
+      cmd: !deploying && deployOn && passed && !(dep && dep.status === "ok") ? "/dev-kit:deploy" : null });
     const closed = passed && (!deployOn || (dep && dep.status === "ok"));
     st.push({ key: "close", name: "Closed", tasks: [], state: closed ? "done" : "upcoming",
       note: closed ? (m.passed_at && Number.isFinite(parseT(m.passed_at)) ? fmtDate(parseT(m.passed_at)) : "Milestone closed") : "" });
@@ -1055,9 +1103,11 @@
             h("span", { class: "chip next-chip", text: "next up" }), h("span", { class: "tid", text: data.next.task }), h("span", { class: "run-title", text: nt.title }));
         }
       }
-      return h("li", { class: `chev stage st-${x.state}${x.here ? " here" : ""}`, "aria-current": x.here ? "step" : null },
+      const isRun = x.running || (x.key === "qa" && qaState(m).running);
+      return h("li", { class: `chev stage st-${x.state}${x.here ? " here" : ""}${isRun ? " running" : ""}`, "aria-current": x.here ? "step" : null },
         h("div", { class: "stage-top" }, h("span", { class: "stage-ico", "aria-hidden": "true", text: STAGE_ICON[x.state] }),
-          h("span", { class: "stage-name", text: x.name }), h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[x.state]}.` })),
+          h("span", { class: "stage-name", text: x.name }), isRun ? h("span", { class: "lc-run" }, h("span", { class: "rn-dot", "aria-hidden": "true" }), "running") : null,
+          h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[x.state]}${isRun ? ", running now" : ""}.` })),
         x.note ? h("span", { class: "stage-note" }, x.note, x.cmd ? [" ", cmd(x.cmd)] : null,
           x.key === "qa" && hasDoc(`qa/${m.id}/report.md`) ? [" ", docLink(`qa/${m.id}/report.md`, "report")] : null) : null,
         x.trail && x.trail.length ? h("ol", { class: "qa-trail", "aria-label": "QA rounds" },
@@ -1185,8 +1235,10 @@
   /** One conception or planning step: state, why it is out of date, its files in .dev/, and the command that moves it on. */
   function stepCard(x) {
     const files = (data.artifacts || {})[x.key] || [];
+    const running = runsAt(`step:${x.key}`);
     const c = x.state === "review" ? STEP_REVIEW_CMD[x.key] : ["todo", "doing", "stale"].includes(x.state) ? STEP_CMD[x.key] : null;
-    return h("li", { class: `step-card s-${x.state}` },
+    return h("li", { class: `step-card s-${x.state}${running.length ? " running" : ""}` },
+      runBanner(running),
       h("div", { class: "step-top" }, h("span", { class: "step-mark", "aria-hidden": "true", text: STEP_MARK[x.state] }),
         h("strong", { text: STEP_TITLE[x.key] || x.key }), h("span", { class: `chip step-st s-${x.state}`, text: STEP_WORD[x.state] })),
       h("p", { class: "card-sub", text: STEP_ABOUT[x.key] || "" }),
@@ -1221,6 +1273,7 @@
     fill($("pl-step"), (phaseOf("planning").steps || []).map(stepCard));
     fill($("pl-review"), reviewList(["plan"], ""));
     renderBacklog(data.current_milestone);
+    fillRunSlot("run-backlog", "backlog");
     const ms = data.milestones;
     const closed = ms.filter((m) => m.gate === "passed" || m.gate === "skipped").length;
     $("road-sub").textContent = ms.length ? `${closed} of ${plural(ms.length, "milestone")} closed. Open one to see it in construction.` : "";
@@ -1248,9 +1301,11 @@
 
   /** Construction › Next release: the closed milestones waiting for a release and what the release still needs. */
   function renderTrain() {
+    fillRunSlot("run-train", ["release", "checks"]);
     const tr = data.cycle.release || {};
     const word = { done: "✓ done", todo: "○ to do", review: "◐ waiting for its review", "n/a": "– not needed" };
     const r = relShown();
+    if (runsAt("release").length || runsAt("checks").length) $("train-card").hidden = false;
     if (r) {
       // planned releases: the release shown, what it still needs, and the decision when it waits for the user
       $("train-card").hidden = false;
@@ -1272,8 +1327,9 @@
     }
     $("train-h").textContent = "Next release";
     const waiting = tr.milestones || [];
-    $("train-card").hidden = !waiting.length;
-    if (!waiting.length) return;
+    const busy = runsAt("release").length || runsAt("checks").length;
+    $("train-card").hidden = !waiting.length && !busy;
+    if (!waiting.length) { $("train-sub").textContent = ""; fill($("train")); return; }
     $("train-sub").textContent = tr.ready ? "Ready to cut" : `After ${(tr.waiting_for || []).join(", ") || "the open work"}`;
     fill($("train"),
       h("span", { class: "train-ms" }, waiting.map((id) => h("button", { type: "button", class: "chip train-chip", text: id, title: `Show ${id}`, onclick: () => openMilestone(id) }))),
@@ -1293,6 +1349,9 @@
       fact("Releases", String(rel.length), rel.length ? h("span", { class: "card-sub", text: `last ${rel.at(-1).tag || rel.at(-1).version || ""}` }) : null),
       c && (Number(c.usd) > 0 || Number(c.tokens) > 0) ? fact("Cost (estimate)", `US$ ${Number(c.usd || 0).toFixed(2)}`, h("span", { class: "card-sub", text: `${compact(c.tokens || 0)} tokens` }))
         : fact("Cost", "not computed", h("span", { class: "fact-cmd" }, copyBtn("/dev-kit:costs"))));
+    fillRunSlot("run-prod", "prod");
+    fillRunSlot("run-checks", "checks");
+    fillRunSlot("run-releases", "release");
     // production
     const pr = data.production, lc = data.lifecycle || {};
     const when = { per_milestone: "after each milestone", on_release: "at each release", manual: "by hand", none: "no production environment" };

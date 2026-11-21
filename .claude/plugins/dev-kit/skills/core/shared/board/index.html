@@ -93,7 +93,7 @@
         <section class="phase-panel" id="phase-planning" role="tabpanel" aria-labelledby="ph-planning" hidden>
           <div class="cols-2 phase-row">
             <section class="card" aria-labelledby="pl-h"><div class="card-head"><h2 id="pl-h">Plan</h2><p class="card-sub">Milestones and tasks from the PRD, architecture and design</p></div><ol class="step-grid one" id="pl-step"></ol><div id="pl-review"></div></section>
-            <section class="card" aria-labelledby="pl-bl-h"><div class="card-head"><h2 id="pl-bl-h">Backlog</h2><p class="card-sub" id="pb-sub"></p></div><div id="product-backlog" class="stack"></div></section>
+            <section class="card" aria-labelledby="pl-bl-h"><div class="card-head"><h2 id="pl-bl-h">Backlog</h2><p class="card-sub" id="pb-sub"></p></div><div class="run-slot" id="run-backlog"></div><div id="product-backlog" class="stack"></div></section>
           </div>
           <section class="card" aria-labelledby="road-h"><div class="card-head"><h2 id="road-h">Roadmap</h2><p class="card-sub" id="road-sub">Every milestone in plan order. Open one to see it in construction.</p></div><ol class="road" id="roadmap"></ol></section>
           <section class="card plan-host-card" id="plan-host-card" aria-labelledby="plan-host-h" hidden><div class="card-head"><h2 id="plan-host-h">Plan the milestones</h2><p class="card-sub">Drag tasks and issues between open milestones, then send the draft</p></div><div class="planner" id="planner" hidden></div></section>
@@ -127,6 +127,7 @@
 
           <section class="card train-card" id="train-card" aria-labelledby="train-h" hidden>
             <div class="card-head"><h2 id="train-h">Next release</h2><p class="card-sub" id="train-sub"></p></div>
+            <div class="run-slot" id="run-train"></div>
             <div class="train" id="train"></div>
           </section>
 
@@ -208,10 +209,10 @@
         <section class="phase-panel" id="phase-stable" role="tabpanel" aria-labelledby="ph-stable" hidden>
           <section class="card" aria-labelledby="st-sum-h"><div class="card-head"><h2 id="st-sum-h">Project</h2><p class="card-sub" id="st-sum-sub"></p></div><div class="facts-grid" id="st-summary"></div></section>
           <div class="cols-2 phase-row">
-            <section class="card" aria-labelledby="st-prod-h"><div class="card-head"><h2 id="st-prod-h">Production</h2><p class="card-sub" id="st-prod-sub"></p></div><div id="st-prod"></div></section>
-            <section class="card" aria-labelledby="st-rev-h"><div class="card-head"><h2 id="st-rev-h">Release checks</h2><p class="card-sub" id="st-rev-sub"></p></div><div id="st-reviews"></div></section>
+            <section class="card" aria-labelledby="st-prod-h"><div class="card-head"><h2 id="st-prod-h">Production</h2><p class="card-sub" id="st-prod-sub"></p></div><div class="run-slot" id="run-prod"></div><div id="st-prod"></div></section>
+            <section class="card" aria-labelledby="st-rev-h"><div class="card-head"><h2 id="st-rev-h">Release checks</h2><p class="card-sub" id="st-rev-sub"></p></div><div class="run-slot" id="run-checks"></div><div id="st-reviews"></div></section>
           </div>
-          <section class="card" aria-labelledby="st-rel-h"><div class="card-head"><h2 id="st-rel-h">Releases</h2><p class="card-sub">Newest first</p></div><div id="st-releases"></div></section>
+          <section class="card" aria-labelledby="st-rel-h"><div class="card-head"><h2 id="st-rel-h">Releases</h2><p class="card-sub">Newest first</p></div><div class="run-slot" id="run-releases"></div><div id="st-releases"></div></section>
         </section>
       </div>
 

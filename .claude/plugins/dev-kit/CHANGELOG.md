@@ -2,6 +2,18 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.2.3 — 2026-11-21
+
+### Added
+- Board: work that is not a task card shows where it happens, not only in the top bar. Each running skill has a place.
+  - Interview, PRD, architecture, UX, UI and plan, and the review of each (`review design` lights UX and UI): the step card gets a "Running now" banner with the command, its time and its agents.
+  - `qa`: the QA & fixes stage (as before). `deploy`: the milestone's Deploy stage and Stable › Production.
+  - `release`, `usability` and `docs`: the release card in Construction and Stable › Release checks and Releases.
+  - `issue`: Planning › Backlog.
+  - Orchestrators (autopilot, worker, start…) show only in the top bar; the work they start shows in its place.
+- Board: a "● running" tag on the lifecycle tab of each phase where something runs. The running stage of a milestone also gets the tag and an outline.
+- Board: an agent with no task or QA gate is shown under the skill that called it. The agent type names the skills that can call it, and of those the run that started latest before the agent owns it; an unknown agent goes to the latest run.
+
 ## 2.2.2 — 2026-11-21
 
 ### Added

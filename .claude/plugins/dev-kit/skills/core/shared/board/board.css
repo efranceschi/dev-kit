@@ -961,3 +961,20 @@ body.compact .cons-nav .stage.here { flex-grow: 1.4; }
 @media (max-width: 700px) {
   .run-now .rn-label, .run-now .rn-count { display: none; }
 }
+
+/* ---------- work that is not a task card, shown where it happens (2.2.3) */
+.lc-run { display: inline-flex; align-items: center; gap: 5px; flex: none; font-size: 10.5px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--good) 22%, var(--surface-1)); color: var(--text-primary); }
+.chev.here .lc-run, .stage.here .lc-run { background: #fff; color: #14532d; }
+.lc-run .rn-dot, .run-banner .rn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); animation: agent-pulse 1.6s ease-in-out infinite; }
+.phase-chevrons .lc-run { margin-left: auto; }
+.phase-chevrons .lc-run + .lc-needs { margin-left: 6px; }
+.run-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; font-size: 12.5px;
+  border: 1px solid color-mix(in srgb, var(--good) 55%, var(--border)); background: color-mix(in srgb, var(--good) 10%, var(--surface-1)); }
+.run-banner .rb-cmd code { font-family: var(--mono); font-size: 12px; }
+.run-banner .agent-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.run-banner .rb-agents { display: inline-flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
+.step-card.running { border-color: color-mix(in srgb, var(--good) 65%, var(--border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--good) 40%, transparent); }
+.step-card .run-banner { margin: 0; }
+.stage.running { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--good) 70%, transparent); }
+@media (max-width: 700px) { .phase-chevrons .chev:not(.here) .lc-run { font-size: 0; padding: 4px; } }
