@@ -294,17 +294,19 @@ Milestones M1..Mn and small vertical-slice tasks T-xxx with dependencies, ACs an
 
 **When:** After design (or architecture for UI-less products), and to replan remaining work.
 
-**Usage:** `/dev-kit:plan [milestone focus | 'replan']`
+**Usage:** `/dev-kit:plan [milestone focus | 'replan' | --annotate-risk]`
 
 | Argument | Meaning |
 |---|---|
 | `milestone focus` | plan one area |
 | `replan` | rewrite only todo tasks of future milestones |
+| `--annotate-risk` | add the risk fields to tasks already planned, without replanning |
 
 **Examples:**
 
 - `/dev-kit:plan`: plan the whole build
 - `/dev-kit:plan replan`: after a scope change
+- `/dev-kit:plan --annotate-risk`: existing plan, before the next milestone
 
 **Produces:** .dev/plan.md synced into .dev/state.json
 

@@ -378,6 +378,10 @@
         {
           "arg": "replan",
           "meaning": "rewrite only todo tasks of future milestones"
+        },
+        {
+          "arg": "--annotate-risk",
+          "meaning": "add the risk fields to tasks already planned, without replanning"
         }
       ],
       "examples": [
@@ -388,6 +392,10 @@
         {
           "command": "/dev-kit:plan replan",
           "what": "after a scope change"
+        },
+        {
+          "command": "/dev-kit:plan --annotate-risk",
+          "what": "existing plan, before the next milestone"
         }
       ],
       "produces": ".dev/plan.md synced into .dev/state.json",

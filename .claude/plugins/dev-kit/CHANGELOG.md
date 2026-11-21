@@ -2,6 +2,37 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.32.0 — 2026-11-20
+
+Model and effort are chosen per task, before it starts, by a deterministic risk rule. A router then learns from the project's own runs which model and effort is cheapest once QA rounds and escaped findings are priced in, and corrects itself when it gets one wrong. The same risk profile sets the round-1 model of the auditors in the gate.
+
+### Added
+- Plan risk fields (`conventions.md` §4): `risk`, `complexity`, `uncertainty`, `risk_reasons`, `opportunity` (`downgrade-ok`, `parallel-safe`, `batchable`, `reuse:<module>`), and an override `tier:` that requires a `tier_reason:`. `plan` fills them. `plan --annotate-risk` adds them to tasks already planned without replanning, through the new `dev_state.py set-risk`. `add-task` takes the same flags, and `issue` uses them.
+- `dev_risk.py`: the tier rule (`conventions.md` §9 "Tier per task").
+  - The score is a base by type plus the weights of objective signals: auth or secrets paths, external send or production, migrations, new or preview API, integration of 2+ tasks, wide change, failed before, reopened or fixing a high finding, plus the planner's `risk: high`, `complexity: high` and `downgrade-ok`.
+  - The tier then sets the implementer: `speed` haiku / medium (haiku / low for the fix of a low finding), `balanced` sonnet / medium, `balanced+` sonnet / high, `quality` opus / high.
+  - A task that failed before starts at least one tier above its previous attempt.
+- `dev_state.py tier T` and a `Tier:`/`Route:` pair in `brief` (for example `Tier: quality (7) → opus / high: auth path +3, integrates T-101, T-118 +2, …`). `start` records the tier and the route in the task and logs a `route` event.
+- `dev_router.py` (`route`, `observe`, `learn`, `explain`, `reset`): a model/effort router with two feedback loops over `.dev/router.json` (`conventions.md` §9 "Router").
+  - It picks the arm with the lowest expected cost in QA-round units (US$, time, rounds, escapes, failures), weighted by `autonomy.model_policy.router.balance` (`balanced`, `speed`, `cost`, `quality`). An arm needs 3 runs before it can replace the rule.
+  - Fast loop: two failures in a row raise a context for the rest of the milestone. A routed downgrade that fails is recorded as a mistake, reverts the context to the rule and blocks downgrades for 5 tasks.
+  - Slow loop, at every passed gate: the records are rebuilt, and contexts that keep needing rounds go one tier up. The rule's weights are learned within ±2.
+  - Exploration is deterministic. Optional budget per milestone.
+  - Floors it never breaks: tasks with auth, send or schema signals never go below their rule tier, security-auditor never below sonnet / high, spec-tracer always opus / high, at most one tier from the rule.
+- `dev_state.py risk-report M [--all]`: predicted tier against what happened, per task and per tier. It shows the findings attributed by file, rounds, time and tokens, and the readings `loose_rule`, `maybe_overpaid`, `lacked_effort` and `missed_opportunity`. A passed gate writes it to `.dev/qa/M/risk-report.md` and runs `dev_router.py learn M` by itself.
+- `dev_state.py risk-profile M`: the milestone's high-risk tasks, the seams between them and the round-1 model/effort of each auditor. `qa` uses it with `dev_router.py route --audit` and gives every auditor the high-risk tasks to check first.
+- `xref` reports `risk_disagrees` when a plan's `risk` contradicts the objective signals, and notes pending tasks without risk fields.
+- Telemetry: `tier` and `risk_score` on `task`, `agent_spawn` and `agent_end`, and a new `route` event.
+
+### Changed
+- `copy-reviewer` runs on sonnet from round 1 (it was the weakest dimension of every gate on haiku), including the task checks. The §9 ladder gains the `balanced+` row (sonnet / high → opus / medium → opus / high). Effort is raised for lack of care and the model for lack of understanding; `xhigh` is only an escalation and `max` is never used by default.
+- `implement`: in sequential mode, tasks routed to `speed` or `quality` go to one implementer with that model. In `--parallel`, every implementer gets its task's route. `fix-tasks` records the `finding_severity` of each fix task. `block` counts attempts.
+
+### Existing projects
+- Nothing needs to be replanned. Tasks without risk fields get their tier from the objective signals alone (the brief says so), and old fix tasks take the severity of their source finding. A `state.json` without the new keys uses the defaults.
+- The first passed gate (or `dev_router.py learn --backfill`) seeds the router from the history that already exists. Tasks started before this version get a retroactive tier, marked as such in the report.
+- The rule applies from this version on, so models change for some work: docs and test tasks can go to haiku, tasks touching auth or external sends to opus, and copy review to sonnet. To go back to the 1.31 models, set `autonomy.model_policy.risk_tiers off` and `autonomy.model_policy.router.mode off` (`/dev-kit:settings`).
+
 ## 1.31.0 — 2026-11-20
 
 The board drains requests queued before it started and follows plugin updates.

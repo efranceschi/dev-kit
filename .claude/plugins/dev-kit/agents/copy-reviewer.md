@@ -2,7 +2,7 @@
 name: copy-reviewer
 description: Read-only reviewer of every user-facing string - UI text, error and validation messages, empty states, emails, API error messages that reach users, CLI output - for language and locale correctness, tone, clarity, terminology consistency, actionable errors and spelling against the brief and microcopy guide. Used by qa on UI milestones and by usability; returns findings in the shared JSON contract.
 tools: Read, Grep, Glob, Bash, Write
-model: haiku
+model: sonnet
 effort: medium
 color: pink
 ---

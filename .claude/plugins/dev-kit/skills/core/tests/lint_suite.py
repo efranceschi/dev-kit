@@ -39,6 +39,7 @@ NON_SCORED = {"architect", "implementer"}
 ALLOW_NON_ENGLISH = {
     "skills/core/shared/checklists/copy-review.md": "forms of address example (tu/você)",
     "docs/e2e-checklist.md": "the Portuguese end-to-end scenario quotes simulated user input",
+    "skills/core/scripts/dev_risk.py": "risk keywords also match task titles written in the user's language (Portuguese)",
 }
 ENGLISH_WORDS_WITH_ACCENTS = {"résumé", "café", "naïve", "façade", "cliché", "déjà"}
 NON_ENGLISH = re.compile(r"[ãõçáéíóúâêôàÃÕÇÁÉÍÓÚÂÊÔÀñ]|\b(?:não|você|também|está|então|porque|usuário|projeto|tarefa|"
@@ -260,7 +261,7 @@ def cli_surface(script: Path) -> dict | None:
 
 
 ALIASES = {"DS": "dev_state.py", "SC": "dev_score.py", "DC": "dev_cost.py", "DB": "dev_board.py", "UI": "dev_ui.py",
-           "DW": "dev_worker.py"}
+           "DW": "dev_worker.py", "DR": "dev_router.py"}
 CODE_SPAN = re.compile(r"`([^`\n]+)`")
 
 
