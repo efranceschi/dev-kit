@@ -1757,6 +1757,7 @@
       else renderStable();
     });
     updateAttention();
+    pinOffsets();
     stickyLayout();
     $("main").setAttribute("aria-busy", "false");
     if (firstRender) {
@@ -2141,23 +2142,42 @@
     resizeT = setTimeout(render, 150);
   });
 
-  // chevrons stay on screen while scrolling: compact once the page moves (with a margin so it does not flicker),
-  // and construction's strip sits right under the lifecycle bar
+  // chevrons stay on screen while scrolling, shrinking to a compact strip once the page has moved.
+  // Shrinking the pinned strips makes the page shorter above the content, and the browser keeps the content still by
+  // lowering scrollY by that much. With a fixed threshold that drop crossed it back and the strips flickered between
+  // the two sizes. So the strip compacts only past the height it will lose (measured, plus a margin) and expands only
+  // at the very top: after either switch scrollY lands on the same side of the threshold.
   let stickyRaf = 0;
+  const pinned = () => [document.querySelector(".topbar"), document.querySelector(".phasebar"), $("cons-nav")].filter(Boolean);
+  const pinnedHeight = () => pinned().reduce((n, el) => n + el.offsetHeight, 0);  // a hidden strip measures 0
+  const shrink = {};   // per phase shown: pinned height when full and when compact, as last measured
+  const lostHeight = () => {
+    const m = shrink[shownPhase()];
+    return m && m.full && m.compact ? Math.max(0, m.full - m.compact) : 260;  // not measured yet: a safe margin
+  };
   function stickyLayout() {
     stickyRaf = 0;
     const y = window.scrollY || 0;
     const body = document.body;
-    if (y > 64 && !body.classList.contains("compact")) body.classList.add("compact");
-    else if (y < 16 && body.classList.contains("compact")) body.classList.remove("compact");
-    // each pinned strip sits under the one above it: top bar, then the lifecycle tabs, then construction's chevrons
+    const on = body.classList.contains("compact");
+    if (!on && y > lostHeight() + 40) body.classList.add("compact");
+    else if (on && y <= 4) body.classList.remove("compact");
+  }
+  // offsets of the stacked strips (top bar, then lifecycle tabs, then construction's chevrons) follow their height
+  // on every frame of the transition, so the lower strips slide with the upper ones instead of jumping at the end
+  function pinOffsets() {
     const top = document.querySelector(".topbar"), bar = document.querySelector(".phasebar");
-    if (top) document.documentElement.style.setProperty("--topbar-h", `${top.offsetHeight}px`);
-    if (bar) document.documentElement.style.setProperty("--phasebar-h", `${bar.offsetHeight}px`);
+    const set = (k, v) => { if (document.documentElement.style.getPropertyValue(k) !== v) document.documentElement.style.setProperty(k, v); };
+    if (top) set("--topbar-h", `${top.offsetHeight}px`);
+    if (bar) set("--phasebar-h", `${bar.offsetHeight}px`);
+    const m = (shrink[shownPhase()] = shrink[shownPhase()] || {});
+    m[document.body.classList.contains("compact") ? "compact" : "full"] = pinnedHeight();
+  }
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(() => pinOffsets());
+    pinned().forEach((el) => ro.observe(el));
   }
   window.addEventListener("scroll", () => { if (!stickyRaf) stickyRaf = requestAnimationFrame(stickyLayout); }, { passive: true });
-  // the compact strips shrink with a short transition: measure again once it ends
-  document.addEventListener("transitionend", (e) => { if (e.target && e.target.classList && (e.target.classList.contains("topbar") || e.target.classList.contains("phasebar")) && !stickyRaf) stickyRaf = requestAnimationFrame(stickyLayout); });
 
   setInterval(tickUpdated, 1000);
   load();

@@ -2,6 +2,15 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.2.1 — 2026-11-21
+
+### Fixed
+- Board: the pinned strips no longer flicker while scrolling. Shrinking them made the page shorter above the content, and the browser lowered the scroll position by that much to keep the content still. With a fixed threshold that drop crossed it back, so the strips switched sizes over and over. Now the compact strip starts only past the height it will lose (measured per phase, plus a margin) and the full one returns only at the very top, so each switch lands on the same side.
+- Board: the shrink is smooth.
+  - The parts that go away (lifecycle caption, badges, stage notes, QA rounds, running chips, milestone facts, top-bar kicker and "updated") collapse with an animated height or width and fade, instead of disappearing at once.
+  - The offsets of the stacked strips follow their height on every frame (ResizeObserver), so construction's strip slides under the lifecycle tabs instead of jumping at the end.
+  - The pinned layers are opaque and filter-free: no backdrop blur on the top bar and no drop-shadow filter on the lifecycle tabs, which were repainted on every scrolled frame.
+
 ## 2.2.0 — 2026-11-21
 
 The board opens the project's documents in place, lists milestones newest first, and shows how long each milestone took and what it cost.

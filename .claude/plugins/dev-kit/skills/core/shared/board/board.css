@@ -111,8 +111,7 @@ code { font-family: var(--mono); font-size: 0.92em; background: var(--surface-3)
   position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; gap: 20px;
   padding: 10px 28px;
-  background: color-mix(in srgb, var(--page) 80%, transparent);
-  backdrop-filter: blur(14px) saturate(140%);
+  background: var(--page);  /* opaque: a blurred pinned layer repaints on every scrolled frame */
   border-bottom: 1px solid var(--border);
 }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 0 1 auto; margin-right: auto; }
@@ -362,7 +361,7 @@ button.run-chip:hover { background: var(--surface-3); }
 .phasebar-head h2 { white-space: nowrap; }
 .phasebar-head h2 { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted); font-weight: 650; }
 .phase-step { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-.phase-chevrons { --tip: 16px; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, .18)); }
+.phase-chevrons { --tip: 16px; }
 .phase-chevrons .chev { flex: 1 1 auto; flex-direction: row; align-items: center; gap: 8px; min-height: 48px; }
 .phase-chevrons .chev.here { flex-grow: 2; }
 .phase-chevrons .chev-name { text-transform: capitalize; }
@@ -861,28 +860,40 @@ dialog p { color: var(--text-secondary); }
 .train-chip.ok { color: var(--good-text); }
 .rel-decide { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
 .rel-decide textarea { min-width: 220px; flex: 1 1 260px; font: inherit; }
+/* Compact strip (2.2.1). Nothing pinned uses display:none or filters while scrolling: the parts that go away collapse
+   (max-height / max-width with opacity), so the shrink animates instead of jumping, and the only layers kept on top
+   of the content are opaque (no backdrop blur, no drop-shadow filter to repaint on every frame). */
+.phasebar { box-shadow: 0 10px 14px -14px rgba(0, 0, 0, .45); }
+.phasebar-head, .lc-badge, .topbar .kicker, .cons-nav .ms-facts, .cons-nav .stage-note, .cons-nav .qa-trail, .cons-nav .stage-run,
+.cons-nav .next-btn, .cons-nav .stage-blocked { max-height: 5em; overflow: hidden; }
+.topbar .updated, .cons-nav .ms-label, .cons-nav .tab-current { max-width: 16em; overflow: hidden; }
+body.compact .phasebar-head, body.compact .lc-badge, body.compact .topbar .kicker, body.compact .cons-nav .ms-facts,
+body.compact .cons-nav .stage-note, body.compact .cons-nav .qa-trail, body.compact .cons-nav .stage-run,
+body.compact .cons-nav .next-btn, body.compact .cons-nav .stage-blocked { max-height: 0; opacity: 0; margin-top: 0; margin-bottom: 0; pointer-events: none; }
+body.compact .topbar .updated, body.compact .cons-nav .ms-label, body.compact .cons-nav .tab-current { max-width: 0; opacity: 0; margin: 0; padding: 0; }
+body.compact .phasebar { gap: 0; }
 body.compact .phase-chevrons .chev.lc { min-height: 34px; padding-top: 4px; padding-bottom: 4px; }
 body.compact .phase-chevrons .chev-ico { width: 18px; height: 18px; font-size: 10px; }
 body.compact .phase-chevrons .chev.here .chev-name, body.compact .phase-chevrons .chev-name { font-size: 13px; }
-body.compact .lc-badge, body.compact .phase-cycle, body.compact .phasebar-head { display: none; }
-/* the top bar stays too, slimmer once scrolled */
 body.compact .topbar { padding-top: 5px; padding-bottom: 5px; }
-body.compact .topbar .kicker, body.compact .topbar .updated { display: none; }
 body.compact #project { font-size: 15px; }
 body.compact .cons-nav { gap: 6px; padding: 6px 10px; }
-body.compact .cons-nav .ms-label, body.compact .cons-nav .ms-facts, body.compact .cons-nav .tab-current { display: none; }
-body.compact .cons-nav .stage { min-height: 0; padding-top: 4px; padding-bottom: 4px; }
-body.compact .cons-nav .stage-note, body.compact .cons-nav .qa-trail, body.compact .cons-nav .stage-run,
-body.compact .cons-nav .next-btn, body.compact .cons-nav .stage-blocked { display: none; }
+body.compact .cons-nav .stage { min-height: 0; padding-top: 4px; padding-bottom: 4px; gap: 0; }
 body.compact .cons-nav .stage.here { flex-grow: 1.4; }
 @media (max-width: 860px) {
   /* stacked stages would fill the screen: once scrolled only the stage in progress stays */
-  body.compact .cons-nav .stages .stage:not(.here) { display: none; }
+  .cons-nav .stages .stage:not(.here) { max-height: 8em; overflow: hidden; }
+  body.compact .cons-nav .stages .stage:not(.here) { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; margin-top: 0; }
   body.compact .cons-nav .stages .stage.here { margin: 0; border-radius: 10px; clip-path: none; padding: 5px 12px; }
   .rel-stages { flex-basis: 100%; }
 }
 @media (prefers-reduced-motion: no-preference) {
-  .topbar, .phasebar, .cons-nav, .chev, .stage { transition: padding .15s ease, min-height .15s ease; }
+  .topbar, .phasebar, .cons-nav, .phase-chevrons .chev, .cons-nav .stage, .chev-ico, .chev-name, #project,
+  .phasebar-head, .lc-badge, .topbar .kicker, .topbar .updated, .cons-nav .ms-label, .cons-nav .ms-facts, .cons-nav .tab-current,
+  .cons-nav .stage-note, .cons-nav .qa-trail, .cons-nav .stage-run, .cons-nav .next-btn, .cons-nav .stage-blocked {
+    transition: max-height .22s ease, max-width .22s ease, opacity .16s ease, padding .22s ease, margin .22s ease, gap .22s ease,
+      min-height .22s ease, font-size .22s ease, width .22s ease, height .22s ease;
+  }
 }
 
 /* ---------- velocity: hours and cost per milestone (2.2) */
