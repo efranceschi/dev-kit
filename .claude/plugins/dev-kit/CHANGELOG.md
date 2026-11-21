@@ -2,6 +2,17 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.2.4 — 2026-11-21
+
+### Changed
+- Board: the "Next release" card is gone from Construction. It took the middle of the screen to list closed milestones and checks that rarely asked for anything. Each of its parts already has another place:
+  - The count of closed milestones waiting is on the Construction tab (`N to release`).
+  - The usability and docs checks are in Stable › Release checks.
+  - `/dev-kit:release`, when it is the next step, shows in the milestone card and in the top bar.
+  - A planned release's state and milestones are in the release strip and its stages.
+  - A release waiting for approval shows in Needs you, with the dossier, Approve and Reject.
+- Board: a running `/dev-kit:release` shows in Stable › Releases, and as a "running" tag on the release stage in progress in Construction.
+
 ## 2.2.3 — 2026-11-21
 
 ### Added

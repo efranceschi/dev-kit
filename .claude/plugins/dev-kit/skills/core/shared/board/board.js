@@ -270,7 +270,7 @@
     interview: ["conception", "step:interview"], prd: ["conception", "step:prd"], architecture: ["conception", "step:architecture"],
     ux: ["conception", "step:ux"], ui: ["conception", "step:ui"], plan: ["planning", "step:plan"], issue: ["planning", "backlog"],
     qa: ["construction", "qa"], implement: ["construction", "tasks"], test: ["construction", "tasks"],
-    usability: ["stable", "checks"], docs: ["stable", "checks"], release: ["construction", "release"], deploy: ["stable", "prod"],
+    usability: ["stable", "checks"], docs: ["stable", "checks"], release: ["stable", "releases"], deploy: ["stable", "prod"],
   };
   const REVIEW_PLACE = { prd: ["conception", "step:prd"], design: ["conception", "step:ui"], plan: ["planning", "step:plan"], docs: ["stable", "checks"], ux: ["stable", "checks"] };
   function runPlace(r) {
@@ -460,10 +460,13 @@
     const order = ["in_progress", "ready_for_review", "awaiting_approval", "deploying_prod", "released"];
     const at = order.indexOf(shown.status);
     const live = shown.milestones.filter((mid) => { const m = data.milestones.find((x) => x.id === mid); return m && tasksOf(m).length; }).length;
+    const releasing = shown.status !== "released" && runsAt("releases").length > 0;  // /dev-kit:release runs now
     const stage = (i, name, note, cmdText, na) => {
       const state = na ? "na" : at > i ? "done" : at === i ? "current" : "upcoming";
-      return h("li", { class: `chev stage st-${state}${at === i && !na ? " here" : ""}`, "aria-current": at === i ? "step" : null },
+      const run = releasing && at === i && !na;
+      return h("li", { class: `chev stage st-${state}${at === i && !na ? " here" : ""}${run ? " running" : ""}`, "aria-current": at === i ? "step" : null },
         h("div", { class: "stage-top" }, h("span", { class: "stage-ico", "aria-hidden": "true", text: STAGE_ICON[state] }), h("span", { class: "stage-name", text: name }),
+          run ? h("span", { class: "lc-run" }, h("span", { class: "rn-dot", "aria-hidden": "true" }), "running") : null,
           h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[state]}.` })),
         note ? h("span", { class: "stage-note" }, note, cmdText ? [" ", cmd(cmdText)] : null) : null);
     };
@@ -1299,45 +1302,6 @@
     fill($("roadmap"), ms.length ? byRel : h("li", { class: "empty" }, "No milestones yet. They appear after ", cmd("/dev-kit:plan"), "."));
   }
 
-  /** Construction › Next release: the closed milestones waiting for a release and what the release still needs. */
-  function renderTrain() {
-    fillRunSlot("run-train", ["release", "checks"]);
-    const tr = data.cycle.release || {};
-    const word = { done: "✓ done", todo: "○ to do", review: "◐ waiting for its review", "n/a": "– not needed" };
-    const r = relShown();
-    if (runsAt("release").length || runsAt("checks").length) $("train-card").hidden = false;
-    if (r) {
-      // planned releases: the release shown, what it still needs, and the decision when it waits for the user
-      $("train-card").hidden = false;
-      $("train-h").textContent = `${r.id} · ${r.title}`;
-      $("train-sub").textContent = REL_WORD[r.status] + (r.rounds ? ` · ${plural(r.rounds, "rejection")} so far` : "");
-      const isNext = tr.release === r.id;
-      const last = (r.history || []).filter((x) => x.event === "rejected").at(-1);
-      fill($("train"),
-        h("span", { class: "train-ms" }, r.milestones.map((id) => { const m = data.milestones.find((x) => x.id === id);
-          const ok = m && (m.gate === "passed" || m.gate === "skipped");
-          return h("button", { type: "button", class: `chip train-chip${ok ? " ok" : ""}`, text: `${ok ? "✓ " : ""}${id}`, title: `Show ${id}${m && m.title ? ` · ${m.title}` : ""}`, onclick: () => openMilestone(id) }); })),
-        isNext && tr.usability && r.status === "ready_for_review" ? h("span", { class: `train-check s-${tr.usability}` }, `Usability ${word[tr.usability] || tr.usability}`) : null,
-        isNext && tr.docs && r.status === "ready_for_review" ? h("span", { class: `train-check s-${tr.docs}` }, `Docs ${word[tr.docs] || tr.docs}`) : null,
-        r.dossier ? h("span", { class: "train-check" }, docLink(r.dossier, "Dossier")) : null,
-        last ? h("span", { class: "train-check" }, `Last rejection → ${last.milestone}`) : null,
-        r.status === "ready_for_review" ? cmd("/dev-kit:release") : null,
-        r.status === "awaiting_approval" ? releaseDecision(r) : null);
-      return;
-    }
-    $("train-h").textContent = "Next release";
-    const waiting = tr.milestones || [];
-    const busy = runsAt("release").length || runsAt("checks").length;
-    $("train-card").hidden = !waiting.length && !busy;
-    if (!waiting.length) { $("train-sub").textContent = ""; fill($("train")); return; }
-    $("train-sub").textContent = tr.ready ? "Ready to cut" : `After ${(tr.waiting_for || []).join(", ") || "the open work"}`;
-    fill($("train"),
-      h("span", { class: "train-ms" }, waiting.map((id) => h("button", { type: "button", class: "chip train-chip", text: id, title: `Show ${id}`, onclick: () => openMilestone(id) }))),
-      tr.usability ? h("span", { class: `train-check s-${tr.usability}` }, `Usability ${word[tr.usability] || tr.usability}`) : null,
-      tr.docs ? h("span", { class: `train-check s-${tr.docs}` }, `Docs ${word[tr.docs] || tr.docs}`) : null,
-      tr.ready ? cmd("/dev-kit:release") : null);
-  }
-
   function renderStable() {
     const p = data.progress, c = data.costs, ms = data.milestones, rel = data.releases || [];
     const closed = ms.filter((m) => m.gate === "passed" || m.gate === "skipped").length;
@@ -1351,7 +1315,7 @@
         : fact("Cost", "not computed", h("span", { class: "fact-cmd" }, copyBtn("/dev-kit:costs"))));
     fillRunSlot("run-prod", "prod");
     fillRunSlot("run-checks", "checks");
-    fillRunSlot("run-releases", "release");
+    fillRunSlot("run-releases", "releases");
     // production
     const pr = data.production, lc = data.lifecycle || {};
     const when = { per_milestone: "after each milestone", on_release: "at each release", manual: "by hand", none: "no production environment" };
@@ -1375,7 +1339,7 @@
       hasDoc(`release-notes-${r.version}.md`) ? docLink(`release-notes-${r.version}.md`, r.tag || r.version, null, "id") : h("span", { class: "id", text: r.tag || r.version || "release" }),
       h("span", { text: (r.release ? `${r.release} · ` : "") + (r.hotfix ? `Hotfix ${r.hotfix}` : (r.milestones || []).join(", ") || "—") }),
       h("span", { class: "chip", text: r.version || "" }), r.at && Number.isFinite(parseT(r.at)) ? h("span", { class: "sub", text: fmtDate(parseT(r.at)) }) : null)))
-      : h("div", { class: "empty", text: "No release yet. Closed milestones wait in Construction › Next release." }));
+      : h("div", { class: "empty", text: "No release yet. Closed milestones wait for the next release (the Construction tab counts them)." }));
   }
 
   function tickAgents() {
@@ -1859,7 +1823,7 @@
       placePlanner(); applyView();
       if (ph === "conception") renderConception();
       else if (ph === "planning") { renderPlanning(); renderPlan(); }
-      else if (ph === "construction") { renderReleases(); renderTrain(); renderTabs(); renderMilestone(m); renderStages(m); renderKanban(m); renderInsights(m, curId); }
+      else if (ph === "construction") { renderReleases(); renderTabs(); renderMilestone(m); renderStages(m); renderKanban(m); renderInsights(m, curId); }
       else renderStable();
     });
     updateAttention();

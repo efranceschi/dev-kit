@@ -636,7 +636,8 @@ class BoardTest(unittest.TestCase):
         planning = html[html.index('id="phase-planning"'):html.index('id="phase-construction"')]
         for el in ('id="roadmap"', 'id="product-backlog"', 'id="planner"'):
             self.assertIn(el, planning)
-        nav = html[html.index('id="cons-nav"'):html.index('id="train-card"')]
+        nav = html[html.index('id="cons-nav"'):html.index('id="board-card"')]
+        self.assertNotIn('id="train-card"', html)  # the "Next release" card is gone (2.2.4)
         for el in ('id="rel-tabs"', 'id="rel-stages"', 'id="tabs"', 'id="stages"'):
             self.assertIn(el, nav)
         self.assertEqual(request(self.record()["port"], "GET", "/assets/favicon-alert.svg")[0], 200)  # the tab's "needs you" icon
