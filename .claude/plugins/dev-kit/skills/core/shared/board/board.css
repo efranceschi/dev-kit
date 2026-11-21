@@ -376,7 +376,7 @@ button.run-chip:hover { background: var(--surface-3); }
 .lc-step.s-skipped { opacity: .5; text-decoration: line-through; }
 .lc-step.s-todo, .lc-step.s-doing, .lc-step.s-stale, .lc-step.s-review { background: color-mix(in srgb, currentColor 24%, transparent); }
 .chev.here .lc-step.s-todo, .chev.here .lc-step.s-doing, .chev.here .lc-step.s-stale, .chev.here .lc-step.s-review { background: #fff; color: #4c1d95; }
-.lc-note { font-size: 12px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .9; }
+.lc-count { font-variant-numeric: tabular-nums; font-weight: 750; }
 .lc-tag { margin-left: 8px; font-size: 10.5px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; padding: 2px 6px; border-radius: 6px;
   background: color-mix(in srgb, var(--warning) 55%, transparent); color: var(--text-primary); vertical-align: 2px; }
 .chev.here .lc-tag { background: #fff; color: #4c1d95; }
@@ -522,7 +522,7 @@ dialog p { color: var(--text-secondary); }
   .workspace { grid-template-columns: minmax(0, 1fr); }
   .feed { flex: none; max-height: 420px; min-height: 0; }
   /* lifecycle: only the current phase keeps its details; the others show their name (details in the tooltip) */
-  .phase-chevrons .chev:not(.here) .lc-steps, .phase-chevrons .chev:not(.here) .lc-note { display: none; }
+  .phase-chevrons .chev:not(.here) .lc-steps { display: none; }
   .phase-chevrons .chev.lc:not(.here) { flex: 0 1 auto; min-height: 52px; }
   .phase-cycle { display: none; }
   .ms-top { flex-wrap: wrap; }
@@ -563,7 +563,6 @@ dialog p { color: var(--text-secondary); }
   .phase-step { flex-basis: 100%; }
   .phase-chevrons .chev.here .chev-name { white-space: normal; }
   .lc-tag { display: inline-block; margin: 2px 0 0; }
-  .lc-note { white-space: normal; }
   .ms-top { flex-wrap: wrap; }
   .ms-label { display: none; }
   .tabs-row { flex-basis: 100%; --tip: 10px; }

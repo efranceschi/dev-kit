@@ -2,6 +2,14 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.30.1 — 2026-11-20
+
+The board's lifecycle bar shows only finite stages and sub-stages.
+
+### Changed
+- Board: Construction gets two sub-stages like the other phases, **milestones** and **release**, each with a short count (`milestones 9/12` closed, `release 9` waiting in the train). The current milestone, the ids waiting for the release and the queued issues move to the tooltip. Before, the chevron printed `M10 · 9 of 12 closed · next release: M1, M2, … · 4 issues queued`, which grew with the project and got cut off. Stable shows only its name, and the title says the sub-stage (`Construction · milestones`) instead of a milestone id.
+- `dev_state.py`: in `status --json` → `lifecycle.phases`, construction lists `steps` (`milestones`, `release`) with `state`, `count` and `note`. Phase, step, status line and next command are unchanged.
+
 ## 1.30.0 — 2026-11-20
 
 The project phase becomes a lifecycle that runs as a cycle: conception → planning → construction → stable. Building and QA belong to each milestone, releases ship a train of closed milestones, and a scope change reopens conception without stopping construction. The phase is derived from `.dev/`, never set by hand.

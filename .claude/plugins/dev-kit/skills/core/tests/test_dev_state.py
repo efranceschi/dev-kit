@@ -446,6 +446,9 @@ class TestLifecycle(Base):
         self.run_state("gate", "M1", "passed", "--score", "90")
         rel = self.lifecycle()["lifecycle"]["release"]
         self.assertEqual(rel["milestones"], ["M1"])
+        sub = {x["key"]: x for x in self.phases()["construction"]["steps"]}
+        self.assertEqual((sub["milestones"]["state"], sub["milestones"]["count"]), ("doing", "1/2"))
+        self.assertEqual((sub["release"]["state"], sub["release"]["count"]), ("doing", "1"))  # M2 not started: can ship now
         self.assertEqual(self.run_state("status", "--next").stdout.strip(), "/dev-kit:implement")  # M2 first
         self.run_state("done", "T-003", "--force")
         self.run_state("gate", "M2", "passed", "--score", "90")
@@ -458,7 +461,13 @@ class TestLifecycle(Base):
         self.assertEqual(nxt(), "/dev-kit:review docs")
         self.run_state("review", "docs", "pass", "--score", "90")
         self.assertEqual(nxt(), "/dev-kit:release")
+        sub = {x["key"]: x for x in self.phases()["construction"]["steps"]}
+        self.assertEqual((sub["milestones"]["state"], sub["milestones"]["count"]), ("done", "2/2"))
+        self.assertEqual((sub["release"]["state"], sub["release"]["count"]), ("doing", "2"))
+        self.assertIn("M1–M2 waiting", sub["release"]["note"])
         self.assertIn("M1, M2", self.run_state("release-record", "--version", "1.0.0").stdout)
+        sub = {x["key"]: x for x in self.phases()["construction"]["steps"]}
+        self.assertEqual((sub["release"]["state"], sub["release"]["count"]), ("done", None))
         self.assertEqual(self.state()["phase"], "stable")
         self.assertEqual(self.state()["releases"][0]["tag"], "v1.0.0")
         self.run_state("release-record", "--version", "1.0.1", expect=1)  # nothing left to release

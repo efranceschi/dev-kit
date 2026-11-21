@@ -21,7 +21,7 @@ You answer one thorough interview. The kit then writes the PRD, architecture and
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/dev-kit-board-dark.png">
-    <img src=".github/assets/dev-kit-board.png" alt="dev-kit board of a sample project: the project lifecycle as four chevrons (conception and planning done with their steps ticked, construction current at M3 with 2 of 6 milestones closed, M2 waiting in the release train and one issue queued, stable next), the milestones as chevrons with the current one between its neighbours, its goal and stage, a highlighted Needs you strip with one blocked task and one open question, and the milestone stages as chevrons with three implementer agents and a test auditor running in the Build stage" width="900">
+    <img src=".github/assets/dev-kit-board.png" alt="dev-kit board of a sample project: the project lifecycle as four chevrons (conception and planning done with their steps ticked, construction current with its two sub-stages, milestones 2 of 6 closed and one milestone waiting for the release, stable next), the milestones as chevrons with the current one between its neighbours, its goal and stage, a highlighted Needs you strip with one blocked task and one open question, and the milestone stages as chevrons with three implementer agents and a test auditor running in the Build stage" width="900">
   </picture>
   <br>
   <sub><code>/dev-kit:board</code> shows the build in <b>real time</b> in your browser: where the project is in its lifecycle, what needs you, the stage of the milestone with what is running in it (QA rounds included), then the task kanban, quality gates, burndown and activity.</sub>
