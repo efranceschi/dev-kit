@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" width="960" height="360" role="img" aria-labelledby="t d" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="t">How dev-kit works</title>
+  <desc id="d">Conception: interview, PRD and review, architecture, UX, UI and review. Planning: plan grouped into releases, then review, and every replan. Construction per milestone: pull issues, implement and test, QA gate with fix rounds, smoke, deploy. Per planned release: usability, docs and review, release audit, dossier, your approval, production deploy and smoke, released; a rejection becomes a fixes milestone. Stable: nothing open, everything released. A bug or improvement returns to construction; a scope change to conception and planning.</desc>
+  <style>
+    .txt { fill: #1f2328; } .sub { fill: #57606a; } .ph { font-weight: 700; font-size: 15px; } .s { font-size: 13px; }
+    .row { fill: #f6f8fa; stroke: #d0d7de; } .k1 { fill: #8b5cf6; } .k2 { fill: #0ea5e9; } .k3 { fill: #d97706; } .k4 { fill: #16a34a; }
+    .step { fill: #ffffff; stroke: #d0d7de; } .gate { fill: #fee2e2; stroke: #dc2626; } .gtxt { fill: #991b1b; font-weight: 700; }
+    .arr { fill: none; stroke: #6e7781; stroke-width: 1.4; } .head { fill: #6e7781; } .lbl { fill: #57606a; font-size: 12px; font-style: italic; }
+    @media (prefers-color-scheme: dark) {
+      .txt { fill: #e6edf3; } .sub, .lbl { fill: #9da7b3; }
+      .row { fill: #161b22; stroke: #30363d; } .step { fill: #0d1117; stroke: #30363d; }
+      .gate { fill: #4a1414; stroke: #f87171; } .gtxt { fill: #fecaca; } .arr { stroke: #8b949e; } .head { fill: #8b949e; }
+    }
+  </style>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+
+  <rect class="row" x="10" y="10" width="940" height="52" rx="10"/><rect class="k1" x="10" y="10" width="6" height="52" rx="3"/>
+  <text class="txt ph" x="30" y="41">Conception</text>
+  <text class="sub s" x="170" y="41">interview → PRD → review → architecture → UX → UI → review</text>
+
+  <rect class="row" x="10" y="72" width="940" height="52" rx="10"/><rect class="k2" x="10" y="72" width="6" height="52" rx="3"/>
+  <text class="txt ph" x="30" y="103">Planning</text>
+  <text class="sub s" x="170" y="103">plan (milestones grouped into releases R1, R2…) → review · and every replan</text>
+
+  <rect class="row" x="10" y="134" width="940" height="140" rx="10"/><rect class="k3" x="10" y="134" width="6" height="140" rx="3"/>
+  <text class="txt ph" x="30" y="165">Construction</text>
+  <text class="txt s" x="170" y="165" font-weight="700">per milestone, on its own</text>
+  <text class="sub s" x="170" y="186">pull issues → implement ⇄ test → QA gate → (fixes → QA)* → smoke → deploy (when per milestone)</text>
+  <text class="txt s" x="170" y="218" font-weight="700">per planned release, when its milestones are closed</text>
+  <text class="sub s" x="170" y="240">usability → docs → review → release audit → dossier →</text>
+  <rect class="gate" x="530" y="226" width="106" height="20" rx="10" stroke-width="1.2"/>
+  <text class="gtxt s" x="583" y="240" text-anchor="middle">your approval</text>
+  <text class="sub s" x="644" y="240">→ production + smoke → released</text>
+  <text class="lbl" x="170" y="262">rejected → a fixes milestone in the same release · no milestone of the next release starts before</text>
+
+  <rect class="row" x="10" y="284" width="940" height="52" rx="10"/><rect class="k4" x="10" y="284" width="6" height="52" rx="3"/>
+  <text class="txt ph" x="30" y="315">Stable</text>
+  <text class="sub s" x="170" y="315">nothing open, everything released</text>
+  <text class="lbl" x="440" y="315">↺ bug or improvement → construction · scope change → conception</text>
+</svg>

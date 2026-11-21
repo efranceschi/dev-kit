@@ -2,6 +2,14 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.1.2 — 2026-11-21
+
+### Changed
+- Docs: the ASCII diagrams of the READMEs are now SVG. Both follow the reader's light or dark theme and show the current model, including planned releases and the approval gate.
+  - Repository README: `.github/assets/dev-kit-lifecycle.svg`, the lifecycle with the two levels of construction.
+  - Plugin README: `docs/how-it-works.svg`, the steps of each phase.
+  - The repository README's lifecycle paragraph now describes planned releases and the approval instead of closed milestones waiting.
+
 ## 2.1.1 — 2026-11-21
 
 ### Fixed

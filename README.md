@@ -6,17 +6,11 @@ You answer one thorough interview. The kit then writes the PRD, architecture and
 
 ## How a project moves
 
-```
-  conception ──────► planning ──────► construction ──────► stable
-  interview, PRD,    milestones and   M1 → M2 → M3 …       nothing open,
-  architecture,      tasks, reviewed  build → QA → deploy  everything
-  UX, UI, reviewed                    + next release       released
-       ▲                  ▲                                    │
-       │                  └──── bug or improvement ────────────┤
-       └──────────────────────── scope change ─────────────────┘
-```
+<p align="center">
+  <img src=".github/assets/dev-kit-lifecycle.svg" alt="The project lifecycle as four chevrons: 1 conception (interview, PRD, architecture, UX, UI, each reviewed), 2 planning (milestones grouped into releases R1, R2…), 3 construction (milestone by milestone, release by release) and 4 stable (nothing open, everything released). Under construction, two levels: the milestone loop runs on its own (plan, build, QA and fixes, smoke, deploy when per milestone, closed); a release, once all its milestones are closed, goes through audit, dossier, your approval, production and smoke, released, and a rejection becomes a fixes milestone in the same release. Arrows back: a bug or improvement returns to construction, a scope change to conception." width="900">
+</p>
 
-**Conception** and **planning** happen once at the start, and again, only for what changed, whenever the scope changes. **Construction** builds the product one milestone at a time: each milestone has its own cycle (build, QA and fixes, deploy), so building and QA are never "the project's phase", they happen in every milestone. Closed milestones ride the **next release** until a release ships them. When nothing is open and everything is released, the project is **stable**; the next issue starts the cycle again. The kit works out the phase from what is in `.dev/`, so it never gets out of step with the work ([concepts](.claude/plugins/dev-kit/docs/concepts.md#lifecycle-conception-planning-construction-19)).
+**Conception** and **planning** happen once at the start, and again, only for what changed, whenever the scope changes. **Construction** builds the product one milestone at a time: each milestone has its own cycle (build, QA and fixes, deploy), so building and QA are never "the project's phase", they happen in every milestone. The plan groups milestones into **releases**: milestones run on their own, and each release waits for **your approval** before it goes to production (a rejection becomes a fixes milestone in the same release). When nothing is open and everything is released, the project is **stable**; the next issue starts the cycle again. The kit works out the phase from what is in `.dev/`, so it never gets out of step with the work ([concepts](.claude/plugins/dev-kit/docs/concepts.md#lifecycle-conception-planning-construction-19)).
 
 <p align="center">
   <picture>

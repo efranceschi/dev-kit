@@ -50,14 +50,9 @@ All 25 skills by category, with arguments and examples: [skills](docs/skills.md)
 
 ## How it works, in short
 
-```
-conception    interview → prd → review → architecture → ux → ui → review
-planning      plan → review                                  (and every replan)
-construction  per milestone: pull issues → implement ⇄ test → qa gate → (fixes → qa)* → deploy
-              next release: usability → docs → review → release   (closed milestones, between milestones)
-stable        nothing open, everything released
-                 ↺ bug or improvement → construction · scope change → conception and planning
-```
+<p align="center">
+  <img src="docs/how-it-works.svg" alt="How dev-kit works. Conception: interview, PRD, review, architecture, UX, UI, review. Planning: plan with milestones grouped into releases R1, R2…, review, and every replan. Construction, per milestone on its own: pull issues, implement and test, QA gate, fix rounds, smoke, deploy when per milestone; per planned release when its milestones are closed: usability, docs, review, release audit, dossier, your approval, production and smoke, released, and a rejection becomes a fixes milestone in the same release, with no milestone of the next release starting before. Stable: nothing open, everything released; a bug or improvement returns to construction, a scope change to conception." width="900">
+</p>
 
 - **The lifecycle is a cycle**, derived from `.dev/` and never set by hand: a scope change reopens conception and planning while the milestone in construction keeps going; `/dev-kit:status` shows the phase and step (`construction · M3`).
 - **Milestones** M1, M2… are the cadence of construction; each ends with a scored quality gate (0–100 per dimension, cut-off set in the interview). Building and QA belong to the milestone, not to the project phase.
