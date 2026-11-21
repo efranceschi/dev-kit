@@ -41,7 +41,7 @@ Step by step: [getting started](docs/getting-started.md).
 | report a bug or ask for an improvement | `/dev-kit:issue "what happens"` |
 | see everything pending | `/dev-kit:backlog` |
 | put it in production | `/dev-kit:deploy` |
-| ship the closed milestones (the release train) | `/dev-kit:release` |
+| ship the closed milestones (the next release) | `/dev-kit:release` |
 | know how much it cost | `/dev-kit:costs` |
 | review the session or send feedback to the author | `/dev-kit:feedback` |
 | run it overnight | [recipe](docs/recipes.md#let-it-run-overnight) |
@@ -54,7 +54,7 @@ All 25 skills by category, with arguments and examples: [skills](docs/skills.md)
 conception    interview → prd → review → architecture → ux → ui → review
 planning      plan → review                                  (and every replan)
 construction  per milestone: pull issues → implement ⇄ test → qa gate → (fixes → qa)* → deploy
-              release train: usability → docs → review → release   (closed milestones, between milestones)
+              next release: usability → docs → review → release   (closed milestones, between milestones)
 stable        nothing open, everything released
                  ↺ bug or improvement → construction · scope change → conception and planning
 ```
@@ -76,7 +76,7 @@ Full picture: [concepts](docs/concepts.md) and the [flow diagram](docs/dev-kit-f
 | [skills](docs/skills.md) | every skill: when, arguments, examples, outputs |
 | [agents](docs/agents.md) | every agent: role, model tier, who calls it |
 | [concepts](docs/concepts.md) | lifecycle, state, gates and scores, autonomy, isolation, issues, deploy, costs, logs |
-| [glossary](docs/glossary.md) | lifecycle, release train, AC, ADR, gate, delta, buffer, cool-down, hotfix, slot, park… |
+| [glossary](docs/glossary.md) | lifecycle, next release, AC, ADR, gate, delta, buffer, cool-down, hotfix, slot, park… |
 | [troubleshooting](docs/troubleshooting.md) | when something goes wrong |
 | [maintainers](docs/maintainers.md) | layout, scripts, tests, how docs are generated |
 

@@ -116,8 +116,8 @@
   let expanded = new Set();  // kanban columns showing every card
   let mobileCol = null;      // column shown on narrow screens (null = pick the most useful one)
   let goalOpen = false;      // milestone goal expanded
-  // construction: one card, one row of tabs - the board views (tasks, plan) and the insights
-  const VIEWS = ["tasks", "plan", ...INS];
+  // construction: one card, one row of tabs - the task board and the insights (the plan view lives in Planning)
+  const VIEWS = ["tasks", ...INS];
   const VIEW_KEY = "board-view-v2";
   // the phase shown: null follows the project's phase; a phase picked by the user stays until "Back to the current phase"
   const PHASE_KEY = "board-phase-v1";
@@ -264,7 +264,8 @@
     if (p.key === "planning") return st[0] ? STEP_WORD[st[0].state] : "";
     if (p.key === "construction") {
       const ms = st.find((x) => x.key === "milestones"), rel = st.find((x) => x.key === "release");
-      return [ms && ms.count ? `${ms.count} closed` : null, rel && rel.count ? `${rel.count} to release` : null].filter(Boolean).join(" · ");
+      const relWord = rel && rel.count ? (rel.state === "review" ? `${rel.count} awaits you` : /^R\d/.test(rel.count) ? null : `${rel.count} to release`) : null;
+      return [ms && ms.count ? `${ms.count} closed` : null, relWord].filter(Boolean).join(" · ");
     }
     const n = (data.releases || []).length;
     return n ? plural(n, "release") : "";
@@ -315,10 +316,98 @@
     setPhase(PHASES[i], true); e.preventDefault();
   });
 
+  // ------------------------------------------------------------------ planned releases: construction shows one release and its milestones
+  let relSel = null;         // release chosen by the user (null = the next release to ship)
+  const relPlan = () => (data && data.cycle && data.cycle.releases) || [];
+  const relShown = () => {
+    const rp = relPlan();
+    if (!rp.length) return null;
+    if (relSel && rp.some((r) => r.id === relSel)) return rp.find((r) => r.id === relSel);
+    return rp.find((r) => r.status !== "released") || rp[rp.length - 1];
+  };
+  /** The milestones the construction tabs show: those of the release shown, or every milestone without planned releases. */
+  function msInView() {
+    const r = relShown();
+    return r ? data.milestones.filter((m) => r.milestones.includes(m.id)) : data.milestones;
+  }
   function currentId() {
-    const ids = data.milestones.map((m) => m.id);
+    const ms = msInView();
+    const ids = ms.map((m) => m.id);
     if (selected && ids.includes(selected)) return selected;
-    return data.current_milestone || ids[0] || null;
+    if (data.current_milestone && ids.includes(data.current_milestone)) return data.current_milestone;
+    const open = ms.find((m) => m.gate === "pending" && tasksOf(m).length);
+    return (open && open.id) || ids[ids.length - 1] || null;
+  }
+  function selectRelease(rid, focus) {
+    relSel = rid === (relPlan().find((r) => r.status !== "released") || {}).id ? null : rid;
+    selected = null; expanded = new Set(); goalOpen = false; mobileCol = null;
+    render();
+    if (focus && $(`rel-${rid}`)) $(`rel-${rid}`).focus();
+  }
+  const REL_WORD = { in_progress: "in progress", ready_for_review: "ready for review", awaiting_approval: "waiting for your approval",
+    deploying_prod: "approved · going to production", released: "released" };
+  /** The release strip (R1 ✓ › R2 ● › R3 ○) and the stages of the release shown: milestones, dossier, approval, production, released. */
+  function renderReleases() {
+    const rp = relPlan();
+    $("rel-row").hidden = !rp.length;
+    if (!rp.length) return;
+    const shown = relShown();
+    fill($("rel-tabs"), rp.map((r, i) => {
+      const done = r.status === "released", sel = r.id === shown.id;
+      const live = r.milestones.filter((mid) => { const m = data.milestones.find((x) => x.id === mid); return m && tasksOf(m).length; }).length;
+      const state = sel ? "here" : done ? "st-done" : r.status === "in_progress" && !r.closed.length ? "st-upcoming" : "st-current";
+      return h("button", { type: "button", role: "tab", id: `rel-${r.id}`, "aria-selected": String(sel), tabindex: sel ? "0" : "-1",
+        class: `schev ${state}${i === 0 ? " chev-first" : ""}${i === rp.length - 1 ? " chev-last" : ""}`, title: `${r.id} · ${r.title}: ${REL_WORD[r.status]}`,
+        onclick: () => selectRelease(r.id, true) },
+      done ? h("span", { class: "tab-ok", "aria-hidden": "true", text: "✓" }) : h("span", { class: `tab-dot${r.status === "awaiting_approval" ? " wait" : r.closed.length ? " active" : ""}`, "aria-hidden": "true" }),
+      h("strong", { text: r.id }), h("span", { class: "tab-count", text: `${r.closed.length}/${live}` }),
+      r.status === "awaiting_approval" ? h("span", { class: "tab-qa", text: "approve" }) : null,
+      h("span", { class: "visually-hidden", text: `: ${REL_WORD[r.status]}` }));
+    }));
+    const lc = data.lifecycle || {};
+    const prodOn = lc.deploy_when && lc.deploy_when !== "none";
+    const order = ["in_progress", "ready_for_review", "awaiting_approval", "deploying_prod", "released"];
+    const at = order.indexOf(shown.status);
+    const live = shown.milestones.filter((mid) => { const m = data.milestones.find((x) => x.id === mid); return m && tasksOf(m).length; }).length;
+    const stage = (i, name, note, cmdText, na) => {
+      const state = na ? "na" : at > i ? "done" : at === i ? "current" : "upcoming";
+      return h("li", { class: `chev stage st-${state}${at === i && !na ? " here" : ""}`, "aria-current": at === i ? "step" : null },
+        h("div", { class: "stage-top" }, h("span", { class: "stage-ico", "aria-hidden": "true", text: STAGE_ICON[state] }), h("span", { class: "stage-name", text: name }),
+          h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[state]}.` })),
+        note ? h("span", { class: "stage-note" }, note, cmdText ? [" ", cmd(cmdText)] : null) : null);
+    };
+    const rej = (shown.history || []).filter((x) => x.event === "rejected").length;
+    fill($("rel-stages"),
+      stage(0, "Milestones", `${shown.closed.length}/${live} closed${rej ? ` · ${plural(rej, "rejection")}` : ""}`),
+      stage(1, "Dossier", at === 1 ? "Audit and submit:" : shown.dossier ? "Submitted" : "", at === 1 ? "/dev-kit:release" : null),
+      stage(2, "Your approval", at === 2 ? "Waiting for you" : at > 2 ? "Approved" : ""),
+      stage(3, "Production", !prodOn ? "No production" : at === 3 ? "Deploy and smoke:" : "", at === 3 ? "/dev-kit:release" : null, !prodOn && at !== 3),
+      stage(4, "Released", at === 4 ? ((data.releases || []).filter((x) => x.release === shown.id).map((x) => x.tag || x.version).join(", ") || "Recorded") : ""));
+  }
+  $("rel-tabs").addEventListener("keydown", (e) => {
+    const rp = relPlan();
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !rp.length) return;
+    let i = rp.findIndex((r) => r.id === relShown().id);
+    i = e.key === "Home" ? 0 : e.key === "End" ? rp.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + rp.length) % rp.length;
+    selectRelease(rp[i].id, true); e.preventDefault();
+  });
+  /** Approve, or reject with what must change: queued for Claude Code, which records it (release-decide --request). */
+  const rejectDrafts = {};
+  function releaseDecision(r) {
+    if (!actionsOn()) return h("span", { class: "sub" }, "Decide in Claude Code with ", cmd("/dev-kit:release"));
+    const sent = inbox().open.find((x) => x.action === "release_decision" && x.args && x.args.release === r.id);
+    if (sent) return h("div", { class: "sub answer-sent", text: `Decision sent (${sent.id}): ${sent.args.decision}. Claude Code applies it.` });
+    const box = h("div", { class: "sub answer rel-decide", role: "group", "aria-label": `Decision on ${r.id}` });
+    const ta = h("textarea", { id: `rej-${r.id}`, maxlength: "4000", rows: "3", class: "answer-input", "aria-label": `What must change in ${r.id}, one item per line`,
+      placeholder: "What must change, one item per line (each becomes a fix task)" });
+    ta.value = rejectDrafts[r.id] || "";
+    ta.addEventListener("input", () => { rejectDrafts[r.id] = ta.value; });
+    const send = async (args, el) => { el.disabled = true; try { await queue("release_decision", { release: r.id, ...args }); delete rejectDrafts[r.id]; } catch (e) { el.disabled = false; } };
+    box.append(
+      h("button", { type: "button", class: "btn btn-sm btn-primary", text: `Approve ${r.id}`, onclick: (e) => send({ decision: "approve" }, e.currentTarget) }),
+      h("span", { class: "answer-free" }, ta, h("button", { type: "button", class: "btn btn-sm btn-danger", id: `rej-send-${r.id}`, text: "Reject",
+        onclick: (e) => { const v = ta.value.trim(); if (v) send({ decision: "reject", feedback: v }, e.currentTarget); else { ta.focus(); toast("Write what must change before rejecting.", true); } } })));
+    return box;
   }
   const currentMilestone = () => (data && data.milestones.find((x) => x.id === currentId())) || null;
   function selectMilestone(id, focusTab) {
@@ -340,7 +429,7 @@
   }
   function renderTabs() {
     const cur = currentId();
-    const ms = data.milestones;
+    const ms = msInView();
     const [a, b] = tabWindow(ms.map((m) => m.id), cur);
     // milestones as one chevron strip: [+N earlier] M-1 › M › M+1 [+N later], coloured by the milestone's state
     const hasEarlier = a > 0, hasLater = b < ms.length;
@@ -658,9 +747,10 @@
     // milestones past the QA limit with no blocked card to show it (the round failed on scores alone)
     const stuck = data.milestones.filter((m) => qaState(m).exhausted && !qaState(m).fixBlocked.length);
     const approvals = actionsOn() ? inbox().approvals : [];
-    const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length;
+    const waitingRel = relPlan().filter((r) => r.status === "awaiting_approval");
+    const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length + waitingRel.length;
     // which phase each item belongs to: the tabs show the count, the rows a tag that opens the phase
-    needsBy = { conception: 0, planning: 0, construction: blocked.length + hot.length + stuck.length, stable: 0 };
+    needsBy = { conception: 0, planning: 0, construction: blocked.length + hot.length + stuck.length + waitingRel.length, stable: 0 };
     if (approvals.length) needsBy[data.phase] = (needsBy[data.phase] || 0) + approvals.length;
     data.questions.forEach((q) => { needsBy[questionPhase(q)] += 1; });
     // the strip exists only while something needs the user; warnings alone ride along but do not open it
@@ -671,6 +761,11 @@
     if (!n) { fill($("impediments")); return; }
     fill($("impediments"),
       approvals.length ? listBlock("Claude Code asks permission", approvals.map(approvalRow), "") : null,
+      waitingRel.length ? listBlock("Releases waiting for your approval", waitingRel.map((r) => h("li", {}, h("span", { class: "id", text: r.id }),
+        h("span", { text: `${r.title} · ${plural(r.closed.length, "milestone")} closed` }),
+        h("button", { type: "button", class: "link-btn", text: "Open", onclick: () => { selectRelease(r.id); setPhase("construction"); } }),
+        r.dossier ? h("span", { class: "sub" }, "Dossier: ", h("code", { text: r.dossier })) : null,
+        releaseDecision(r))), "", false, "construction") : null,
       stuck.length ? listBlock("QA rounds used up", stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }),
         h("span", { text: `${qaState(m).qa.runs - 1} fix rounds used of ${qaState(m).max} (${qaReason(qaState(m).qa, m) || "see the QA report"}). Keep fixing, accept with an ADR, or replan.` }),
         h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))), "", false, "construction") : null,
@@ -696,7 +791,8 @@
 
   // ------------------------------------------------------------------ stages of the milestone, in the order the kit runs them
   // Plan → Build → QA gate ⇄ Fixes → Smoke (local preview, inside qa) → Deploy (per-milestone production) → Closed
-  const isFix = (t) => t.type === "fix" && Boolean(t.source);
+  // fixes of a QA round sit in the QA & fixes stage; a rejected release's fixes are the build of its fixes milestone
+  const isFix = (t) => t.type === "fix" && Boolean(t.source) && !String(t.source).startsWith("release:");
   /** Where the QA loop of a milestone stands: rounds run, fixes, whether a round is running now. */
   function qaState(m) {
     const qa = m.qa || { runs: m.qa_runs || 0, history: [] };
@@ -932,6 +1028,9 @@
   }
   /** Shows a milestone in Construction, from anywhere on the board. */
   function openMilestone(id) {
+    const m = data.milestones.find((x) => x.id === id);
+    const first = (relPlan().find((r) => r.status !== "released") || {}).id;
+    relSel = m && m.release && m.release !== first ? m.release : null;
     selected = id; expanded = new Set(); goalOpen = false; mobileCol = null;
     setPhase("construction");
     $("main").scrollIntoView({ block: "start" });
@@ -986,7 +1085,7 @@
     const ms = data.milestones;
     const closed = ms.filter((m) => m.gate === "passed" || m.gate === "skipped").length;
     $("road-sub").textContent = ms.length ? `${closed} of ${plural(ms.length, "milestone")} closed. Open one to see it in construction.` : "";
-    fill($("roadmap"), ms.length ? ms.map((m) => {
+    const row = (m) => {
       const x = milestoneInfo(m);
       const done = m.gate === "passed" || m.gate === "skipped";
       return h("li", {}, h("button", { type: "button", class: `road-row${done ? " done" : ""}${m.id === data.current_milestone ? " cur" : ""}`, onclick: () => openMilestone(m.id) },
@@ -996,16 +1095,43 @@
         m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null,
         h("span", { class: "road-count", text: `${x.done}/${x.total}` }),
         roadMeter(x)));
-    }) : h("li", { class: "empty" }, "No milestones yet. They appear after ", cmd("/dev-kit:plan"), "."));
+    };
+    const rp = relPlan();
+    const byRel = rp.length ? rp.flatMap((r) => [h("li", { class: `road-rel s-${r.status}` }, h("strong", { text: r.id }), h("span", { text: r.title }),
+      h("span", { class: "chip", text: REL_WORD[r.status] })), ...ms.filter((m) => r.milestones.includes(m.id)).map(row)])
+      .concat(ms.filter((m) => !rp.some((r) => r.milestones.includes(m.id))).map(row)) : ms.map(row);
+    $("road-sub").textContent += rp.length ? ` ${plural(rp.length, "planned release")}: each waits for your approval before production.` : "";
+    fill($("roadmap"), ms.length ? byRel : h("li", { class: "empty" }, "No milestones yet. They appear after ", cmd("/dev-kit:plan"), "."));
   }
 
   /** Construction › Next release: the closed milestones waiting for a release and what the release still needs. */
   function renderTrain() {
     const tr = data.cycle.release || {};
+    const word = { done: "✓ done", todo: "○ to do", review: "◐ waiting for its review", "n/a": "– not needed" };
+    const r = relShown();
+    if (r) {
+      // planned releases: the release shown, what it still needs, and the decision when it waits for the user
+      $("train-card").hidden = false;
+      $("train-h").textContent = `${r.id} · ${r.title}`;
+      $("train-sub").textContent = REL_WORD[r.status] + (r.rounds ? ` · ${plural(r.rounds, "rejection")} so far` : "");
+      const isNext = tr.release === r.id;
+      const last = (r.history || []).filter((x) => x.event === "rejected").at(-1);
+      fill($("train"),
+        h("span", { class: "train-ms" }, r.milestones.map((id) => { const m = data.milestones.find((x) => x.id === id);
+          const ok = m && (m.gate === "passed" || m.gate === "skipped");
+          return h("button", { type: "button", class: `chip train-chip${ok ? " ok" : ""}`, text: `${ok ? "✓ " : ""}${id}`, title: `Show ${id}${m && m.title ? ` · ${m.title}` : ""}`, onclick: () => openMilestone(id) }); })),
+        isNext && tr.usability && r.status === "ready_for_review" ? h("span", { class: `train-check s-${tr.usability}` }, `Usability ${word[tr.usability] || tr.usability}`) : null,
+        isNext && tr.docs && r.status === "ready_for_review" ? h("span", { class: `train-check s-${tr.docs}` }, `Docs ${word[tr.docs] || tr.docs}`) : null,
+        r.dossier ? h("span", { class: "train-check" }, "Dossier ", h("code", { text: r.dossier })) : null,
+        last ? h("span", { class: "train-check" }, `Last rejection → ${last.milestone}`) : null,
+        r.status === "ready_for_review" ? cmd("/dev-kit:release") : null,
+        r.status === "awaiting_approval" ? releaseDecision(r) : null);
+      return;
+    }
+    $("train-h").textContent = "Next release";
     const waiting = tr.milestones || [];
     $("train-card").hidden = !waiting.length;
     if (!waiting.length) return;
-    const word = { done: "✓ done", todo: "○ to do", review: "◐ waiting for its review", "n/a": "– not needed" };
     $("train-sub").textContent = tr.ready ? "Ready to cut" : `After ${(tr.waiting_for || []).join(", ") || "the open work"}`;
     fill($("train"),
       h("span", { class: "train-ms" }, waiting.map((id) => h("button", { type: "button", class: "chip train-chip", text: id, title: `Show ${id}`, onclick: () => openMilestone(id) }))),
@@ -1045,7 +1171,7 @@
     $("st-rev-sub").textContent = cutoffNote();
     fill($("st-reviews"), reviewList(["ux", "docs", ...others], "No checks."));
     fill($("st-releases"), rel.length ? h("ul", { class: "list" }, rel.slice().reverse().map((r) => h("li", {},
-      h("span", { class: "id", text: r.tag || r.version || "release" }), h("span", { text: r.hotfix ? `Hotfix ${r.hotfix}` : (r.milestones || []).join(", ") || "—" }),
+      h("span", { class: "id", text: r.tag || r.version || "release" }), h("span", { text: (r.release ? `${r.release} · ` : "") + (r.hotfix ? `Hotfix ${r.hotfix}` : (r.milestones || []).join(", ") || "—") }),
       h("span", { class: "chip", text: r.version || "" }), r.at && Number.isFinite(parseT(r.at)) ? h("span", { class: "sub", text: fmtDate(parseT(r.at)) }) : null)))
       : h("div", { class: "empty", text: "No release yet. Closed milestones wait in Construction › Next release." }));
   }
@@ -1114,6 +1240,7 @@
     if (x.action === "issue_new") return `New ${a.type === "improvement" ? "improvement" : a.type === "change" ? "change" : "bug"}: ${a.title || ""}`;
     if (x.action === "answer_question") return `Answer to ${a.question}: ${a.option || a.answer || ""}`;
     if (x.action === "plan_draft") return `Plan draft · ${plural((a.ops || []).length, "change")}`;
+    if (x.action === "release_decision") return `${a.decision === "approve" ? "Approve" : "Reject"} ${a.release}`;
     return x.action;
   }
   const REQ_WORD = { pending: "waiting", running: "running", needs_input: "needs your answer", done: "done", failed: "failed", cancelled: "cancelled", stale: "stopped" };
@@ -1472,21 +1599,14 @@
     box.querySelector(".plan-cols").scrollLeft = scrollX;
     box.querySelectorAll(".pcol-list[data-key]").forEach((l) => { if (scrollY[l.dataset.key]) l.scrollTop = scrollY[l.dataset.key]; });
   }
-  const VIEW_TITLE = { tasks: "Task board", plan: "Plan the milestones", burndown: "Burndown", velocity: "Velocity", gates: "Milestone gates" };
-  const viewsShown = () => VIEWS.filter((v) => v !== "plan" || actionsOn());
-  /** The plan view (drag, draft, send) lives in two places: its own card in Planning and the Plan tab of Construction. */
-  const planShown = () => actionsOn() && (shownPhase() === "planning" || (shownPhase() === "construction" && view === "plan"));
-  function placePlanner() {
-    const pl = $("planner");
-    const inPlanning = shownPhase() === "planning" && actionsOn();
-    $("plan-host-card").hidden = !inPlanning;
-    if (inPlanning) { if (pl.parentElement !== $("plan-host")) $("plan-host").append(pl); pl.setAttribute("aria-labelledby", "plan-host-h"); pl.removeAttribute("role"); }
-    else { if (pl.previousElementSibling !== $("view-tasks")) $("view-tasks").after(pl); pl.setAttribute("aria-labelledby", "tab-plan"); pl.setAttribute("role", "tabpanel"); }
-  }
+  const VIEW_TITLE = { tasks: "Task board", burndown: "Burndown", velocity: "Velocity", gates: "Milestone gates" };
+  const viewsShown = () => VIEWS;
+  /** The plan view (drag, draft, send) lives only in Planning, while the board takes requests. */
+  const planShown = () => actionsOn() && shownPhase() === "planning";
+  function placePlanner() { $("plan-host-card").hidden = !planShown(); }
   /** Tabs, panels, heading and layout for the current view (Plan only while the board takes requests). */
   function applyView() {
     if (!viewsShown().includes(view)) view = "tasks";
-    $("tab-plan").hidden = !actionsOn();
     document.querySelectorAll("#view-switch [role=tab]").forEach((b) => {
       const on = b.dataset.view === view;
       b.setAttribute("aria-selected", String(on));
@@ -1495,7 +1615,6 @@
     $("view-tasks").hidden = view !== "tasks";
     INS.forEach((k) => { $(`ins-${k}`).hidden = k !== view; });
     $("board-card").dataset.view = view;
-    $("board-card").classList.toggle("planning", view === "plan");
     $("workspace").classList.toggle("planning", planShown());
     $("board-h").textContent = VIEW_TITLE[view];
   }
@@ -1504,7 +1623,6 @@
     applyView();
     if (data && data.ok && shownPhase() === "construction") {
       renderKanban(currentMilestone());
-      renderPlan();
       renderInsights(currentMilestone(), currentId());
     }
     if (focus) document.querySelector(`#view-switch [data-view="${view}"]`).focus();
@@ -1537,10 +1655,11 @@
       placePlanner(); applyView();
       if (ph === "conception") renderConception();
       else if (ph === "planning") { renderPlanning(); renderPlan(); }
-      else if (ph === "construction") { renderTrain(); renderTabs(); renderMilestone(m); renderStages(m); renderKanban(m); renderPlan(); renderInsights(m, curId); }
+      else if (ph === "construction") { renderReleases(); renderTrain(); renderTabs(); renderMilestone(m); renderStages(m); renderKanban(m); renderInsights(m, curId); }
       else renderStable();
     });
     updateAttention();
+    stickyLayout();
     $("main").setAttribute("aria-busy", "false");
     if (firstRender) {
       firstRender = false;
@@ -1691,8 +1810,8 @@
 
   // milestone tabs: arrow keys move between milestones
   $("tabs").addEventListener("keydown", (e) => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !data || !data.milestones.length) return;
-    const ids = data.milestones.map((m) => m.id);
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !data || !msInView().length) return;
+    const ids = msInView().map((m) => m.id);
     let i = ids.indexOf(currentId());
     i = e.key === "Home" ? 0 : e.key === "End" ? ids.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + ids.length) % ids.length;
     selectMilestone(ids[i], true); e.preventDefault();
@@ -1706,6 +1825,20 @@
     clearTimeout(resizeT);
     resizeT = setTimeout(render, 150);
   });
+
+  // chevrons stay on screen while scrolling: compact once the page moves (with a margin so it does not flicker),
+  // and construction's strip sits right under the lifecycle bar
+  let stickyRaf = 0;
+  function stickyLayout() {
+    stickyRaf = 0;
+    const y = window.scrollY || 0;
+    const body = document.body;
+    if (y > 64 && !body.classList.contains("compact")) body.classList.add("compact");
+    else if (y < 16 && body.classList.contains("compact")) body.classList.remove("compact");
+    const bar = document.querySelector(".phasebar");
+    if (bar) document.documentElement.style.setProperty("--phasebar-h", `${bar.offsetHeight}px`);
+  }
+  window.addEventListener("scroll", () => { if (!stickyRaf) stickyRaf = requestAnimationFrame(stickyLayout); }, { passive: true });
 
   setInterval(tickUpdated, 1000);
   load();

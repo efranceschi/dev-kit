@@ -11,9 +11,9 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 | [`start`](#start) | Entry point: starts a new project, adopts an existing codebase (feature, maintenance or import mode) or resumes, and routes to the next skill. |
 | [`help`](#help) | Help inside Claude Code: what to do next, how each skill works, recipes and concepts. |
 | [`interview`](#interview) | Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md with the autonomy policy. |
-| [`status`](#status) | Read-only dashboard: lifecycle phase and step, release train, milestones, gates, scores, issues, preview, production drift, cost so far. |
-| [`board`](#board) | Live board in the browser, navigated by lifecycle phase: the four phases (conception, planning, construction, stable) are its tabs, each showing only what belongs to it - conception its steps, PRD and design reviews, decisions and scope changes; planning the plan and its review, the roadmap of milestones, the issue queue and the drag-and-drop plan; construction the next release, the milestones as chevrons (previous, current, next), the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, plan, burndown, velocity and gates; stable the project totals, production, release checks and releases. What needs you, the requests and the activity stay on every phase; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy. |
-| [`worker`](#worker) | Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick. |
+| [`status`](#status) | Read-only dashboard: lifecycle phase and step, next release, milestones, gates, scores, issues, preview, production drift, cost so far. |
+| [`board`](#board) | Live board in the browser, navigated by lifecycle phase: the four phases (conception, planning, construction, stable) are its tabs, each showing only what belongs to it - conception its steps, PRD and design reviews, decisions and scope changes; planning the plan and its review, the roadmap of milestones, the issue queue and the drag-and-drop plan; construction the planned releases as chevrons with their stages (milestones, dossier, your approval, production, released) and the milestones of the release shown (previous, current, next), the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, burndown, velocity and gates; stable the project totals, production, release checks and releases. Every chevron stays on screen while you scroll, in a compact strip. What needs you (with Approve and Reject for a release waiting for you), the requests and the activity stay on every phase; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy. |
+| [`worker`](#worker) | Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft, release approval or rejection) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick. |
 | [`settings`](#settings) | Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips, status line and notifications. |
 
 ## Specify
@@ -31,7 +31,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 
 | Skill | What it does |
 |---|---|
-| [`autopilot`](#autopilot) | Drives the build on its own: conception and planning, then milestone after milestone and the release train, until the project is stable; pauses follow your autonomy settings. |
+| [`autopilot`](#autopilot) | Drives the build on its own: conception and planning, then milestone after milestone and the next release, until the project is stable; pauses follow your autonomy settings. |
 | [`implement`](#implement) | Implements ready tasks test-first, full suite, one commit per task; hotfix lane first. |
 | [`test`](#test) | Test strategy and test writing: plan, missing tests for a task or path, flaky tests. |
 
@@ -55,7 +55,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 |---|---|
 | [`deploy`](#deploy) | Production deploy of an approved milestone or release: preflight, backup, dry-run, install, migrations, smoke checks. |
 | [`docs`](#docs) | Project documentation from the artifacts and code: README, user guide, API reference, CHANGELOG. |
-| [`release`](#release) | Ships the release train (the milestones closed since the last release): audits, version, CHANGELOG, tag and the release record; patch releases for hotfixes. |
+| [`release`](#release) | Ships the next release (the milestones closed since the last release, or the next planned release): audits, the approval dossier and your approve/reject decision for a planned release, then version, CHANGELOG, tag, production deploy and the release record; patch releases for hotfixes. |
 
 ## Observe
 
@@ -137,7 +137,7 @@ Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md
 
 ### status
 
-Read-only dashboard: lifecycle phase and step, release train, milestones, gates, scores, issues, preview, production drift, cost so far.
+Read-only dashboard: lifecycle phase and step, next release, milestones, gates, scores, issues, preview, production drift, cost so far.
 
 **When:** Any time you want a quick picture of the project.
 
@@ -157,7 +157,7 @@ Read-only dashboard: lifecycle phase and step, release train, milestones, gates,
 
 ### board
 
-Live board in the browser, navigated by lifecycle phase: the four phases (conception, planning, construction, stable) are its tabs, each showing only what belongs to it - conception its steps, PRD and design reviews, decisions and scope changes; planning the plan and its review, the roadmap of milestones, the issue queue and the drag-and-drop plan; construction the next release, the milestones as chevrons (previous, current, next), the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, plan, burndown, velocity and gates; stable the project totals, production, release checks and releases. What needs you, the requests and the activity stay on every phase; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy.
+Live board in the browser, navigated by lifecycle phase: the four phases (conception, planning, construction, stable) are its tabs, each showing only what belongs to it - conception its steps, PRD and design reviews, decisions and scope changes; planning the plan and its review, the roadmap of milestones, the issue queue and the drag-and-drop plan; construction the planned releases as chevrons with their stages (milestones, dossier, your approval, production, released) and the milestones of the release shown (previous, current, next), the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, burndown, velocity and gates; stable the project totals, production, release checks and releases. Every chevron stays on screen while you scroll, in a compact strip. What needs you (with Approve and Reject for a release waiting for you), the requests and the activity stay on every phase; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy.
 
 **When:** When you want to watch the project visually or drive it from the browser, e.g. away from the console; it updates by itself.
 
@@ -186,7 +186,7 @@ Live board in the browser, navigated by lifecycle phase: the four phases (concep
 
 ### worker
 
-Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick.
+Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft, release approval or rejection) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick.
 
 **When:** It starts by itself in the session that opened the board with /dev-kit:board, each time a request arrives. Run it by hand in any other session when the board, the session banner or the status line (▣) says requests are waiting.
 
@@ -334,7 +334,7 @@ Scored independent review (0-100, with cut-off) of the PRD, design, plan or docs
 
 ### autopilot
 
-Drives the build on its own: conception and planning, then milestone after milestone and the release train, until the project is stable; pauses follow your autonomy settings.
+Drives the build on its own: conception and planning, then milestone after milestone and the next release, until the project is stable; pauses follow your autonomy settings.
 
 **When:** After the interview, when you want the app built with minimal interaction (also overnight).
 
@@ -564,24 +564,28 @@ Project documentation from the artifacts and code: README, user guide, API refer
 
 ### release
 
-Ships the release train (the milestones closed since the last release): audits, version, CHANGELOG, tag and the release record; patch releases for hotfixes.
+Ships the next release (the milestones closed since the last release, or the next planned release): audits, the approval dossier and your approve/reject decision for a planned release, then version, CHANGELOG, tag, production deploy and the release record; patch releases for hotfixes.
 
-**When:** Between milestones, when closed milestones wait in the release train (the board and status show it), or after a hotfix.
+**When:** Between milestones, when closed milestones wait for the next release or a planned release has all its milestones closed (the board and status show it), to approve or reject a release waiting for you, or after a hotfix.
 
-**Usage:** `/dev-kit:release [version e.g. 1.0.0 | --dry-run | --hotfix]`
+**Usage:** `/dev-kit:release [version e.g. 1.0.0 | --dry-run | --hotfix | --approve | --reject "feedback"]`
 
 | Argument | Meaning |
 |---|---|
 | `version` | explicit version |
 | `--dry-run` | check without changing anything |
 | `--hotfix` | patch release for a closed hotfix |
+| `--approve` | approve the planned release waiting for you |
+| `--reject "feedback"` | reject it; each line of feedback becomes a fix task |
 
 **Examples:**
 
+- `/dev-kit:release`: check, audit and submit the next planned release for your approval (or decide on the one waiting)
+- `/dev-kit:release --reject "the error message on duplicate email is unclear"`: send the release back with what must change
 - `/dev-kit:release --dry-run`: see what would happen
 - `/dev-kit:release --hotfix`: ship a hotfix as a patch version
 
-**Produces:** version bump, release notes, tag, release record (the train empties; with nothing open the project is stable)
+**Produces:** version bump, release notes, tag, release record (nothing waits any more; with nothing open the project is stable)
 
 **Related:** [`deploy`](#deploy), [`docs`](#docs)
 

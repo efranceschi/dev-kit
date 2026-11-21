@@ -55,8 +55,11 @@ Subcommands
   tip CTX       one contextual tip (tips each show at most twice); tips [--reset] lists them all
   deploy [ENV]  record a deploy (--sha --status ok|failed|rolled_back [--milestone M] [--migration REV])
   preview M     record the local deploy of a milestone (--url --sha [--pid]) or --stopped
-  release-record  record a cut release (--version [--tag] [--milestones M1,M2 | --hotfix T]): the milestones
-                leave the release train; the phase (conception, planning, construction, stable) is always derived
+  release-submit R  freeze a planned release for the user's approval (--dossier PATH): awaiting approval
+  release-decide R  the user's decision: --approve, or --reject --feedback ITEM… (a fixes milestone in the release),
+                or --request R-nnn (the decision made on the board)
+  release-record  record a cut release (--version [--tag] [--release R | --milestones M1,M2 | --hotfix T]): the
+                milestones are no longer waiting for a release; the phase (conception, planning, construction, stable) is always derived
   set KEY VAL   set language | project | stack.<field> | autonomy.<field>[.<sub>] (nested keys merge;
                 autonomy.level applies its preset; incl. autonomy.pause_policy.<point>)
   status        human (--short) or --json view; --next prints only the next command; --quiet-if-missing for hooks
@@ -89,7 +92,7 @@ import dev_router as router  # noqa: E402
 STATE_VERSION = 1
 # Project lifecycle (conventions.md §19): derived from the artifacts, reviews, milestones, issues and releases,
 # never set by hand. Conception and planning run once at the start and again for every scope change; construction
-# runs the milestone cycle and the release train; stable = nothing open, everything built is released.
+# runs the milestone cycle and the next release; stable = nothing open, everything built is released.
 PHASES = ["conception", "planning", "construction", "stable"]
 CONCEPTION_STEPS = ["interview", "prd", "architecture", "ux", "ui"]
 PLANNING_STEPS = ["plan"]
@@ -463,6 +466,9 @@ UI_KEYS = ("offered", "spinner_tips", "statusline", "title", "notify")
 
 
 MILESTONE_RE = re.compile(r"^##\s+(M\d+)\s*(?:[—–-]+\s*)?(.*?)\s*$")
+RELEASE_RE = re.compile(r"^##\s+(R\d+)\s*(?:[—–-]+\s*)?(.*?)\s*$")  # a planned release groups the milestones below it (§4)
+RELEASE_STATUSES = ("in_progress", "ready_for_review", "awaiting_approval", "deploying_prod", "released")
+RELEASE_SIZE = (2, 5)  # milestones per release the planner aims for (§4 grouping rules)
 TASK_RE = re.compile(r"^###\s+(T-\d{3,})\s+(.*?)\s*$")
 FIELD_RE = re.compile(r"^-\s+([a-z_]+):\s*(.*?)\s*$")
 SUBITEM_RE = re.compile(r"^\s{2,}-\s+(.*?)\s*$")
@@ -541,7 +547,13 @@ class Store:
         return self.state.setdefault("milestones", {})
 
     def milestone_order(self) -> list[str]:
-        return sorted(self.milestones().keys(), key=lambda m: int(m[1:]))
+        """Plan order: by release when releases are planned (a release's fixes milestone stays inside it), then by number."""
+        ms = self.milestones()
+        rplan = self.state.get("release_plan") or []
+        if not rplan:
+            return sorted(ms.keys(), key=lambda m: int(m[1:]))
+        idx = {m: i for i, r in enumerate(rplan) for m in r.get("milestones") or []}
+        return sorted(ms.keys(), key=lambda m: (idx.get(m, len(rplan)), int(m[1:])))
 
     def task(self, tid: str) -> dict:
         t = self.tasks().get(tid)
@@ -570,7 +582,16 @@ class Store:
         return bool(ts) and all(v["status"] == "done" for v in ts)
 
     def gate_open_for(self, m: str) -> tuple[bool, str]:
-        """A milestone is workable if every previous milestone has gate passed/skipped (or has no tasks)."""
+        """A milestone is workable if every previous milestone has gate passed/skipped (or has no tasks), and, with
+        planned releases, every earlier release is released (no milestone of R2 starts while R1 waits, §19)."""
+        rel = release_of(self, m)
+        if rel:
+            for r in self.state.get("release_plan") or []:
+                if r["id"] == rel:
+                    break
+                st = release_status(self, r["id"])["status"]
+                if st != "released":
+                    return False, f"{m} is in {rel}; {r['id']} must be released first ({st.replace('_', ' ')})"
         for prev in self.milestone_order():
             if prev == m:
                 return True, ""
@@ -597,12 +618,19 @@ def parse_plan(text: str) -> tuple[dict, dict]:
     cur_m: str | None = None
     cur_t: str | None = None
     cur_field: str | None = None
+    cur_r: str | None = None
     for raw in text.splitlines():
         line = raw.rstrip()
+        r = RELEASE_RE.match(line)
+        if r:
+            cur_r, cur_m, cur_t, cur_field = r.group(1), None, None, None
+            continue
+        if line.startswith("# "):
+            cur_r = None
         m = MILESTONE_RE.match(line)
         if m:
             cur_m, cur_t, cur_field = m.group(1), None, None
-            milestones[cur_m] = {"title": m.group(2) or cur_m}
+            milestones[cur_m] = {"title": m.group(2) or cur_m, "release": cur_r}
             continue
         t = TASK_RE.match(line)
         if t:
@@ -850,11 +878,40 @@ def record_baseline(store: Store, tasks: dict) -> int:
     return added
 
 
+def plan_releases(text: str, milestones: dict) -> tuple[list[dict], list[str]]:
+    """The planned releases of plan.md in order ({id, title, milestones}) and the grouping problems found."""
+    out: list[dict] = []
+    problems: list[str] = []
+    for line in text.splitlines():
+        r = RELEASE_RE.match(line.rstrip())
+        if r:
+            if any(x["id"] == r.group(1) for x in out):
+                problems.append(f"release {r.group(1)} is declared twice")
+                continue
+            out.append({"id": r.group(1), "title": r.group(2) or r.group(1), "milestones": []})
+    for m, info in milestones.items():
+        rel = next((x for x in out if x["id"] == info.get("release")), None)
+        if rel is not None:
+            rel["milestones"].append(m)
+    if out:
+        loose = [m for m, info in milestones.items() if not info.get("release")]
+        if loose:
+            problems.append(f"milestones outside any release: {', '.join(loose)} (put them under a '## R<n>' heading)")
+        for x in out:
+            n = len(x["milestones"])
+            if not n:
+                problems.append(f"release {x['id']} has no milestone")
+            elif n > RELEASE_SIZE[1]:
+                problems.append(f"release {x['id']} has {n} milestones; aim for {RELEASE_SIZE[0]} to {RELEASE_SIZE[1]} so its review stays short")
+    return out, problems
+
+
 def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int], list[str]]:
     """Bring state in line with plan.md text, in memory: milestones and tasks added or updated (never status), each
     task's position in the plan as `seq` (the order `next` follows within a milestone). Returns the parsed tasks,
     the counts (milestones added, tasks added, tasks updated) and the problems found. Raises ValueError."""
     milestones, tasks = parse_plan(text)
+    rplan, rel_problems = plan_releases(text, milestones)
     added_m = added_t = updated_t = 0
     for m, info in milestones.items():
         if m not in store.milestones():
@@ -862,6 +919,14 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
             added_m += 1
         else:
             store.milestones()[m]["title"] = info["title"]
+        if info.get("release"):
+            store.milestones()[m]["release"] = info["release"]
+        else:
+            store.milestones()[m].pop("release", None)
+    if rplan:
+        store.state["release_plan"] = rplan
+    else:
+        store.state.pop("release_plan", None)
     max_id = int(store.state.get("next_task_id", 1)) - 1
     for seq, (tid, t) in enumerate(tasks.items(), 1):
         t["seq"] = seq
@@ -902,7 +967,7 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
         if t["milestone"] not in store.milestones():
             problems.append(f"{tid}: milestone {t['milestone']} not declared")
         problems += risk.check_risk_fields(tid, t)
-    return tasks, (added_m, added_t, updated_t), problems
+    return tasks, (added_m, added_t, updated_t), rel_problems + problems
 
 
 def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
@@ -3198,13 +3263,68 @@ def lifecycle_steps(store: Store, rep: dict) -> dict:
     return out
 
 
-def release_train(store: Store, mlist: list[dict]) -> dict:
-    """Milestones closed since the last release and what the next release still needs (usability, docs)."""
+# ---------------------------------------------------------------- planned releases and their human gate (§19)
+
+def release_of(store: Store, m: str) -> str | None:
+    """The planned release a milestone belongs to (None without a release plan)."""
+    for r in store.state.get("release_plan") or []:
+        if m in (r.get("milestones") or []):
+            return r["id"]
+    return None
+
+
+def release_gate(store: Store, rid: str) -> dict:
+    return store.state.setdefault("release_state", {}).setdefault(rid, {"status": None, "rounds": 0, "history": []})
+
+
+def release_status(store: Store, rid: str) -> dict:
+    """Where a planned release stands: in_progress -> ready_for_review -> awaiting_approval -> deploying_prod ->
+    released. in_progress and ready_for_review are derived from its milestones; the others come from
+    `release-submit`, `release-decide` and `release-record`."""
+    r = next((x for x in store.state.get("release_plan") or [] if x["id"] == rid), None)
+    mids = (r or {}).get("milestones") or []
+    ts, ms = store.tasks(), store.milestones()
+    live = {m: [v for v in ts.values() if v["milestone"] == m and v["status"] != "dropped"] for m in mids}
+    closed = [m for m in mids if live[m] and ms.get(m, {}).get("gate") in ("passed", "skipped")]
+    open_ = [m for m in mids if live[m] and m not in closed]
+    rs = (store.state.get("release_state") or {}).get(rid) or {}
+    shipped = any(x.get("release") == rid for x in store.state.get("releases") or [])
+    if shipped:
+        st = "released"
+    elif open_ or not closed or store.in_progress() and any(ts[t]["milestone"] in mids for t in store.in_progress()):
+        st = "in_progress"
+    elif rs.get("status") == "approved":
+        st = "deploying_prod"
+    elif rs.get("status") == "awaiting_approval":
+        st = "awaiting_approval"
+    else:
+        st = "ready_for_review"
+    return {"id": rid, "title": (r or {}).get("title") or rid, "status": st, "milestones": mids, "closed": closed, "open": open_,
+            "rounds": rs.get("rounds", 0), "dossier": rs.get("dossier"), "submitted_at": rs.get("submitted_at"),
+            "decided_at": rs.get("decided_at"), "history": (rs.get("history") or [])[-5:]}
+
+
+def release_plan_status(store: Store) -> list[dict]:
+    return [release_status(store, r["id"]) for r in store.state.get("release_plan") or []]
+
+
+def current_release(store: Store) -> dict | None:
+    """The first planned release not released yet."""
+    return next((x for x in release_plan_status(store) if x["status"] != "released"), None)
+
+
+def pending_release(store: Store, mlist: list[dict]) -> dict:
+    """Milestones closed since the last release and what the next release still needs (usability, docs). With
+    planned releases the next release is the current one: its closed milestones, and it is ready once all are closed."""
     revs = store.state.get("reviews") or {}
     releases = store.state.get("releases") or []
     ms = store.milestones()
     pending = [x["id"] for x in mlist if x["state"] == "closed"]
     building = [x["id"] for x in mlist if x["state"] == "open" and x["started"]]
+    cur = current_release(store) if store.state.get("release_plan") else None
+    if cur:
+        pending = [m for m in cur["closed"] if any(x["id"] == m and x["state"] == "closed" for x in mlist)]
+        building = cur["open"]
     since = max((ms[m].get("passed_at") or "" for m in pending), default="")
 
     def fresh(name: str) -> str:
@@ -3217,7 +3337,8 @@ def release_train(store: Store, mlist: list[dict]) -> dict:
     return {"milestones": pending, "ready": bool(pending) and not building and not store.in_progress(),
             "waiting_for": building, "usability": (fresh("ux") if ui else "n/a") if pending else None,
             "docs": fresh("docs") if pending else None, "last": releases[-1] if releases else None,
-            "count": len(releases)}
+            "count": len(releases), "release": cur["id"] if cur else None, "status": cur["status"] if cur else None,
+            "title": cur["title"] if cur else None}
 
 
 def lifecycle(store: Store) -> dict:
@@ -3237,7 +3358,7 @@ def lifecycle(store: Store) -> dict:
         mlist.append({"id": m, "title": ms[m].get("title"), "state": st, "gate": gate,
                       "done": sum(1 for v in live if v["status"] == "done"), "total": len(live),
                       "started": any(v["status"] in ("done", "in_progress") for v in live)})
-    train = release_train(store, mlist)
+    train = pending_release(store, mlist)
     queue = sorted(k for k, v in issues(store).items() if v.get("status") == "open")
     planned = any(x["total"] for x in mlist)
     maintenance = (store.state.get("brownfield") or {}).get("mode") == "maintenance"
@@ -3282,7 +3403,7 @@ def lifecycle(store: Store) -> dict:
         {"key": "stable", "state": pstate("stable"), "reopened": False},
     ]
     return {"phase": phase, "step": step, "reopened": phase in ("conception", "planning") and ever_built,
-            "steps": steps, "phases": phases, "release": train, "queue": queue}
+            "steps": steps, "phases": phases, "release": train, "queue": queue, "releases": release_plan_status(store)}
 
 
 def _ms_range(ids: list[str]) -> str:
@@ -3306,10 +3427,13 @@ def construction_steps(live: list[dict], closed: int, open_ms: list[str], cur: s
     if queue:
         note += f" · {len(queue)} issue{'s' if len(queue) != 1 else ''} queued"
     waiting = train["milestones"]
+    if train.get("status") == "awaiting_approval":
+        return [{"key": "milestones", "state": ms_state, "count": f"{closed}/{len(live)}" if live else None, "note": note},
+                {"key": "release", "state": "review", "count": train["release"], "note": f"{train['release']} waits for your approval"}]
     if waiting:
         rel_state = "doing" if train["ready"] else "todo"
-        rel_note = f"{_ms_range(waiting)} waiting for the release" + ("" if train["ready"] else
-                                                                     f" · after {', '.join(train['waiting_for'])}")
+        rel_note = (f"{train['release']}: " if train.get("release") else "") + f"{_ms_range(waiting)} waiting for the release" + (
+            "" if train["ready"] else f" · after {', '.join(train['waiting_for'])}")
     else:
         last = train["last"]
         rel_state = "done" if last else "todo"
@@ -3358,6 +3482,8 @@ def next_command(store: Store) -> str:
     if any(v["status"] == "blocked" for v in ts.values()) or count_open_questions(store):
         return "/dev-kit:interview --gaps"
     rel = lc["release"]
+    if rel.get("status") in ("awaiting_approval", "deploying_prod"):
+        return "/dev-kit:release"  # the release asks for the decision, or finishes the approved one
     if rel["milestones"] and rel["ready"]:
         if rel["usability"] == "todo":
             return "/dev-kit:usability"
@@ -3369,11 +3495,133 @@ def next_command(store: Store) -> str:
     return "/dev-kit:plan" if not ts else "/dev-kit:backlog"
 
 
+def _planned(store: Store, rid: str) -> dict:
+    if not re.fullmatch(r"R\d{1,3}", rid or ""):
+        fail(f"invalid release id {rid!r} (R1, R2…)")
+    if not any(r["id"] == rid for r in store.state.get("release_plan") or []):
+        fail(f"{rid} is not a planned release (plan.md has no '## {rid} — …' heading)")
+    return release_status(store, rid)
+
+
+def cmd_release_submit(store: Store, a: argparse.Namespace) -> None:
+    """Freeze a release candidate: every milestone of the release closed, the dossier written; the release then waits
+    for the user's approval, the one human gate of construction (conventions.md §19)."""
+    store.load()
+    st = _planned(store, a.release)
+    if st["status"] not in ("ready_for_review", "awaiting_approval"):
+        fail(f"{a.release} is {st['status'].replace('_', ' ')}" + (f"; still open: {', '.join(st['open'])}" if st["open"] else ""))
+    if a.dossier and not (store.root / a.dossier).exists():
+        fail(f"dossier not found: {a.dossier}")
+    g = release_gate(store, a.release)
+    g.update(status="awaiting_approval", submitted_at=now(), dossier=a.dossier or g.get("dossier"))
+    g.setdefault("history", []).append({"at": now(), "event": "submitted", "dossier": a.dossier})
+    store.save()
+    store.log(f"release {a.release} submitted for approval" + (f" ({a.dossier})" if a.dossier else ""))
+    store.event("release_gate", scope=a.release, transition="submit")
+    queue_notice(store, f"dev-kit: {a.release} waits for your approval")
+    print(f"{a.release}: awaiting approval · approve or reject on the board or with /dev-kit:release")
+
+
+def _decision_args(store: Store, a: argparse.Namespace) -> tuple[str, list[str], str | None]:
+    """--approve/--reject with --feedback, or --request R-nnn: the decision made on the board, read from its request."""
+    if a.request:
+        import dev_worker as dw
+        x = dw.item(store.root, a.request)
+        if x is None or x.get("action") != "release_decision":
+            fail(f"{a.request} is not a release decision from the board")
+        args = x["args"]
+        if args.get("release") != a.release:
+            fail(f"{a.request} decides {args.get('release')}, not {a.release}")
+        fb = [ln.strip(" -*\t") for ln in str(args.get("feedback") or "").splitlines()]
+        return args["decision"], [f for f in fb if f], a.request
+    if a.approve == a.reject:
+        fail("give exactly one of --approve, --reject or --request R-nnn")
+    return ("approve" if a.approve else "reject"), [f.strip() for f in a.feedback or [] if f.strip()], None
+
+
+def cmd_release_decide(store: Store, a: argparse.Namespace) -> None:
+    """The user's decision on a release waiting for approval. Approve: production deploy, smoke and release-record
+    follow. Reject: the feedback becomes a fixes milestone at the end of the same release, one fix task per item,
+    and the release goes back to construction (the only case where a milestone is created outside plan, §15)."""
+    store.load()
+    st = _planned(store, a.release)
+    if st["status"] != "awaiting_approval":
+        fail(f"{a.release} is {st['status'].replace('_', ' ')}, not awaiting approval")
+    decision, feedback, ref = _decision_args(store, a)
+    g = release_gate(store, a.release)
+    if decision == "approve":
+        g.update(status="approved", decided_at=now())
+        g.setdefault("history", []).append({"at": now(), "event": "approved", **({"ref": ref} if ref else {})})
+        store.save()
+        store.log(f"release {a.release} approved" + (f" ({ref})" if ref else ""))
+        store.event("release_gate", scope=a.release, transition="approve")
+        print(f"{a.release}: approved · next: production deploy, smoke and release-record (/dev-kit:release)")
+        return
+    if not feedback:
+        fail("a rejection needs feedback: at least one --feedback item (each becomes a fix task)")
+    if len(feedback) > 20:
+        fail("at most 20 feedback items per rejection")
+    plan_path = store.dev / "plan.md"
+    if not plan_path.exists():
+        fail(f"plan not found: {plan_path}")
+    rnd = int(g.get("rounds", 0)) + 1
+    mid = f"M{max([int(x[1:]) for x in store.milestones()] or [0]) + 1}"
+    title = f"{a.release} · Fixes" + (f" {rnd}" if rnd > 1 else "")
+    doc = PlanDoc(plan_path.read_text(encoding="utf-8"))
+    last = [m for m in st["milestones"] if doc.has_milestone(m)]
+    if not last:
+        fail(f"no milestone of {a.release} found in plan.md")
+    doc.add_milestone(mid, title, after=last[-1])
+    n = int(store.state.get("next_task_id", 1))
+    existing = {int(x[2:]) for x in store.tasks()}
+    tids = []
+    for item_text in feedback:
+        while n in existing:
+            n += 1
+        tid = f"T-{n:03d}"
+        existing.add(n)
+        tids.append(tid)
+        block = task_block(tid, {"title": item_text[:100], "type": "fix", "deps": [], "acceptance": [item_text],
+                                 "test_notes": f"From the rejection of {a.release}: show the reviewer it is fixed.", "files": []})
+        doc.put({"kind": "task", "id": tid, "lines": block.rstrip("\n").splitlines()}, mid)
+    text = doc.text()
+    try:
+        _, _, problems = sync_plan_text(store, text)
+    except ValueError as e:
+        fail(f"the edited plan does not parse: {e}")
+    for tid in tids:
+        store.tasks()[tid]["source"] = f"release:{a.release}"
+    g.update(status=None, rounds=rnd, decided_at=now())
+    g.setdefault("history", []).append({"at": now(), "event": "rejected", "milestone": mid, "tasks": tids, **({"ref": ref} if ref else {})})
+    tmp = plan_path.with_suffix(".md.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, plan_path)
+    store.save()
+    store.log(f"release {a.release} rejected: {mid} — {title} with {', '.join(tids)}" + (f" ({ref})" if ref else ""))
+    store.event("release_gate", scope=a.release, transition="reject", tasks=len(tids))
+    print(f"{a.release}: rejected · {mid} {title}: {', '.join(tids)}")
+    for w in problems:
+        print(f"  warning: {w}")
+
+
 def cmd_release_record(store: Store, a: argparse.Namespace) -> None:
-    """Record a cut release: the milestones it ships leave the release train (conventions.md §19)."""
+    """Record a cut release: the milestones it ships no longer wait for a release (conventions.md §19). A planned
+    release is recorded only after its approval (`release-decide --approve`)."""
     store.load()
     ms = store.milestones()
-    if a.hotfix:
+    rid = None
+    if a.release:
+        st = _planned(store, a.release)
+        if st["status"] != "deploying_prod":
+            fail(f"{a.release} is {st['status'].replace('_', ' ')}; it is recorded after its approval (release-decide {a.release} --approve)")
+        rid, names = a.release, st["closed"]
+    elif not a.hotfix and store.state.get("release_plan"):
+        cur = current_release(store)
+        if cur:
+            fail(f"releases are planned: record {cur['id']} with --release {cur['id']} after its approval")
+    if rid:
+        pass
+    elif a.hotfix:
         store.task(a.hotfix)
         names: list[str] = []
     elif a.milestones:
@@ -3386,6 +3634,11 @@ def cmd_release_record(store: Store, a: argparse.Namespace) -> None:
         if not names:
             fail("no closed milestone waiting for a release (use --hotfix T-nnn for a patch release)")
     rel = {"version": a.version, "tag": a.tag or f"v{a.version}", "milestones": names, "at": now()}
+    if rid:
+        rel["release"] = rid
+        g = release_gate(store, rid)
+        g.update(status="released")
+        g.setdefault("history", []).append({"at": now(), "event": "released", "version": a.version})
     if a.hotfix:
         rel["hotfix"] = a.hotfix
     store.state.setdefault("releases", []).append(rel)
@@ -3445,7 +3698,7 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
         out["stale"] = stale_report(store)
         lc = lifecycle(store)
         out["phase"], out["step"], out["reopened"] = lc["phase"], lc["step"], lc["reopened"]
-        out["lifecycle"] = {k: lc[k] for k in ("phases", "release", "queue")}
+        out["lifecycle"] = {k: lc[k] for k in ("phases", "release", "queue", "releases")}
         print(json.dumps(out, indent=2, ensure_ascii=False))
         return
     if a.short:
@@ -3472,9 +3725,16 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
     todo = [f"{x['key']} ({x['state']})" for x in lc["steps"].values() if x["state"] not in DONE_STEP]
     if todo and lc["phase"] in ("conception", "planning"):
         print("Steps left: " + ", ".join(todo))
+    if lc.get("releases"):
+        print("Releases: " + " · ".join(f"{x['id']} {x['status'].replace('_', ' ')} ({len(x['closed'])}/{len([m for m in x['milestones']])})"
+                                        for x in lc["releases"]))
+        if rel.get("status") == "awaiting_approval":
+            g = (s.get("release_state") or {}).get(rel["release"]) or {}
+            print(f"Needs your approval: {rel['release']}" + (f" · dossier {g['dossier']}" if g.get("dossier") else "")
+                  + " · approve or reject on the board or with /dev-kit:release")
     if rel["milestones"] or rel["last"]:
         last = rel["last"]
-        print("Release train: " + (f"{', '.join(rel['milestones'])} closed since the last release" if rel["milestones"] else "nothing to release")
+        print("Next release: " + (f"{', '.join(rel['milestones'])} closed since the last release" if rel["milestones"] else "nothing to release")
               + (f" · usability {rel['usability']} · docs {rel['docs']}" if rel["milestones"] else "")
               + (f" · waiting for {', '.join(rel['waiting_for'])}" if rel["waiting_for"] else "")
               + (f" · last: {last.get('tag') or last.get('version') or 'before 1.30'} ({str(last.get('at'))[:10]})" if last else ""))
@@ -3675,10 +3935,13 @@ class PlanDoc:
         for slot, x in zip(slots, order):
             self.segs[slot] = segs[x]
 
-    def add_milestone(self, m: str, title: str) -> None:
+    def add_milestone(self, m: str, title: str, after: str | None = None) -> None:
         owners = self.milestone_of()
         nums = [(int(o[1:]), i) for i, o in enumerate(owners) if o]
-        at = (max(i for n, i in nums if n == max(n for n, _ in nums)) + 1) if nums else len(self.segs)
+        if after:
+            at = self._end_of(after)
+        else:
+            at = (max(i for n, i in nums if n == max(n for n, _ in nums)) + 1) if nums else len(self.segs)
         self.segs.insert(at, {"kind": "text", "lines": [f"## {m} — {title}", ""]})
 
     def text(self) -> str:
@@ -4014,8 +4277,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
     s = sub.add_parser("stale"); s.set_defaults(fn=cmd_stale)
     s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
+    s = sub.add_parser("release-submit"); s.set_defaults(fn=cmd_release_submit)
+    s.add_argument("release"); s.add_argument("--dossier", help="path of the dossier, relative to the project root")
+    s = sub.add_parser("release-decide"); s.set_defaults(fn=cmd_release_decide)
+    s.add_argument("release"); s.add_argument("--approve", action="store_true"); s.add_argument("--reject", action="store_true")
+    s.add_argument("--feedback", action="append", help="one rejection item (repeat); each becomes a fix task")
+    s.add_argument("--request", help="the board request (R-nnn) holding the decision")
     s = sub.add_parser("release-record"); s.set_defaults(fn=cmd_release_record)
     s.add_argument("--version", required=True); s.add_argument("--tag")
+    s.add_argument("--release", help="the planned release (R1…) being recorded, after its approval")
     s.add_argument("--milestones", help="comma-separated; default: every closed milestone not released yet")
     s.add_argument("--hotfix", help="patch release of a hotfix task; ships no milestone")
     s = sub.add_parser("set"); s.set_defaults(fn=cmd_set); s.add_argument("key"); s.add_argument("value")

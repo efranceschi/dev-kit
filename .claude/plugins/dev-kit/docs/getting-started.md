@@ -57,7 +57,7 @@ Nothing in your code, docs or history is changed by the onboarding. From then on
 
 | You want | Run |
 |---|---|
-| where the project stands (lifecycle phase and step, release train) | `/dev-kit:status` |
+| where the project stands (lifecycle phase and step, next release) | `/dev-kit:status` |
 | a live board in the browser (or on your phone) | `/dev-kit:board` (`--host 0.0.0.0` to share it) |
 | what is pending and what to do next | `/dev-kit:backlog` |
 | report a bug or an idea | `/dev-kit:issue "what happens"` |
@@ -67,7 +67,7 @@ Nothing in your code, docs or history is changed by the onboarding. From then on
 
 ## 6. Release, and keep the product evolving
 
-Each closed milestone joins the **release train**. A release ships the train between milestones: the usability audit (apps with a UI), the project docs and their review, then `/dev-kit:release` (`--dry-run` first), which tags the version and records it. `autopilot` runs this for you at the end of the planned milestones when your brief asks for releases. If production deploys are configured, `/dev-kit:deploy` installs each approved milestone or the release.
+Each closed milestone waits for the **next release**. A release ships them between milestones: the usability audit (apps with a UI), the project docs and their review, then `/dev-kit:release` (`--dry-run` first), which tags the version and records it. `autopilot` runs this for you at the end of the planned milestones when your brief asks for releases. If production deploys are configured, `/dev-kit:deploy` installs each approved milestone or the release.
 
 With no milestone open, no issue queued and everything released, the project is **stable**. That is a resting point, not an end:
 

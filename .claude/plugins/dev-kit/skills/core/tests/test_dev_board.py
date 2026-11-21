@@ -628,13 +628,17 @@ class BoardTest(unittest.TestCase):
         # construction: one work card, the board views and the insights are tabs of it; quality and backlog went to their phases
         card = html[html.index('id="board-card"'):html.index('id="phase-stable"')]
         self.assertIn('id="phase-construction"', html[:html.index('id="board-card"')])
-        for el in ('id="tab-tasks"', 'id="tab-plan"', 'id="ins-burndown"', 'id="ins-velocity"', 'id="ins-gates"'):
+        for el in ('id="tab-tasks"', 'id="ins-burndown"', 'id="ins-velocity"', 'id="ins-gates"'):
             self.assertIn(el, card)
-        for el in ('id="ins-quality"', 'id="ins-backlog"', 'class="card insights"'):
+        for el in ('id="ins-quality"', 'id="ins-backlog"', 'class="card insights"', 'id="tab-plan"'):
             self.assertNotIn(el, html)
+        # the plan view lives only in planning; construction keeps its chevrons (releases, milestones, stages) in one sticky strip
         planning = html[html.index('id="phase-planning"'):html.index('id="phase-construction"')]
-        for el in ('id="roadmap"', 'id="product-backlog"', 'id="plan-host"'):
+        for el in ('id="roadmap"', 'id="product-backlog"', 'id="planner"'):
             self.assertIn(el, planning)
+        nav = html[html.index('id="cons-nav"'):html.index('id="train-card"')]
+        for el in ('id="rel-tabs"', 'id="rel-stages"', 'id="tabs"', 'id="stages"'):
+            self.assertIn(el, nav)
         self.assertEqual(request(self.record()["port"], "GET", "/assets/favicon-alert.svg")[0], 200)  # the tab's "needs you" icon
 
     def test_state_endpoint_is_read_only_and_complete(self):
@@ -661,6 +665,25 @@ class BoardTest(unittest.TestCase):
         self.assertEqual((d["releases"], d["production"]), ([], None))
         self.assertEqual(set(d["artifacts"]), {"interview", "prd", "architecture", "ux", "ui", "plan"})
         self.assertEqual(state_file.read_bytes(), before)
+
+    def test_release_decision_only_for_a_release_waiting_for_approval(self):
+        mod = self._mod()
+        plan = PLAN.replace("## M1", "## R1 — First\n\n## M1", 1)
+        (self.root / ".dev" / "plan.md").write_text(plan, encoding="utf-8")
+        self.ds("sync-plan")
+        d = mod.build_state(self.root)
+        self.assertEqual([(r["id"], r["status"]) for r in d["cycle"]["releases"]], [("R1", "in_progress")])
+        self.assertEqual(d["milestones"][0]["release"], "R1")
+        self.assertIn("not waiting for your approval", mod.release_decision_errors(self.root, {"release": "R1", "decision": "approve"})[0])
+        for tid in [t for t, v in json.loads((self.root / ".dev" / "state.json").read_text())["tasks"].items()]:
+            self.ds("done", tid, "--force")
+        self.ds("gate", d["milestones"][0]["id"], "passed", "--score", "90")
+        self.ds("release-submit", "R1")
+        self.assertEqual(mod.release_decision_errors(self.root, {"release": "R1", "decision": "approve"}), [])
+        sys.path.insert(0, str(CORE / "scripts"))
+        import dev_worker as dw
+        dw.submit(self.root, "release_decision", {"release": "R1", "decision": "approve"})
+        self.assertIn("already queued", mod.release_decision_errors(self.root, {"release": "R1", "decision": "approve"})[0])
 
     def test_decisions_are_listed_newest_first_without_the_template_placeholder(self):
         mod = self._mod()

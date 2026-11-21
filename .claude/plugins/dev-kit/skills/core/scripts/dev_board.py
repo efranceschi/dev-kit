@@ -821,7 +821,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         dep = next((d for d in reversed(prod) if d.get("milestone") == m), None)
         milestones.append({"id": m, "title": info.get("title"), "goal": goals.get(m, ""), "gate": info.get("gate", "pending"),
                            "score": info.get("score"), "qa_runs": info.get("qa_runs", 0), "passed_at": info.get("passed_at"),
-                           "preview": info.get("preview"),
+                           "preview": info.get("preview"), "release": info.get("release"),
                            "deploy": {k: dep.get(k) for k in ("status", "sha", "at")} if dep else None,
                            "qa": qa_detail(store.dev, m, info, events, qa_run if qa_scope == m else None),
                            "tasks": [tid for tid, t in tasks.items() if t["milestone"] == m]})
@@ -840,7 +840,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
     return {
         "ok": True,
         "project": s.get("project") or root.name,
-        **{k: lc[k] for k in ("phase", "step", "reopened")}, "cycle": {k: lc[k] for k in ("phases", "release", "queue")},
+        **{k: lc[k] for k in ("phase", "step", "reopened")}, "cycle": {k: lc[k] for k in ("phases", "release", "queue", "releases")},
         "language": s.get("language"),
         "created_at": s.get("created_at"), "updated_at": s.get("updated_at"),
         "autonomy": (s.get("autonomy") or {}).get("level"),
@@ -860,7 +860,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "log": sorted(log_tail(_read(store.dev / "log.md")) + live_feed(events), key=lambda r: _ts(r.get("at")), reverse=True)[:LOG_TAIL],
         "costs": costs,
         "decisions": decisions_list(_read(store.dev / "decisions.md")),
-        "releases": [{k: r.get(k) for k in ("version", "tag", "milestones", "at", "hotfix")}
+        "releases": [{k: r.get(k) for k in ("version", "tag", "milestones", "at", "hotfix", "release")}
                      for r in s.get("releases") or [] if isinstance(r, dict)],
         "production": production_info(store),
         "artifacts": {step: [str(p.relative_to(root)) for p in ds.artifact_paths(store, art)]
@@ -870,6 +870,25 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "board": {k: board.get(k) for k in ("pid", "port", "url", "started_at", "host", "exposed", "actions")} if board else None,
         "generated_at": ds.now(),
     }
+
+
+def release_decision_errors(root: Path, args: object) -> list[str]:
+    """A release decision is queued only for a release waiting for approval, once (read-only check)."""
+    rid = args.get("release") if isinstance(args, dict) else None
+    if not isinstance(rid, str) or not re.fullmatch(r"R\d{1,3}", rid):
+        return []  # dw.validate reports the field
+    store = ds.Store(root)
+    try:
+        store.load()
+    except SystemExit:
+        return ["the project state could not be read"]
+    st = ds.release_status(store, rid)
+    if st["status"] != "awaiting_approval":
+        return [f"{rid} is {st['status'].replace('_', ' ')}, not waiting for your approval"]
+    if any(x.get("action") == "release_decision" and (x.get("args") or {}).get("release") == rid
+           and x.get("status") in ("pending", "running", "needs_input") for x in dw.items(root)):
+        return [f"a decision on {rid} is already queued"]
+    return []
 
 
 def draft_errors(root: Path, args: object) -> list[str]:
@@ -1150,6 +1169,10 @@ class Handler(BaseHTTPRequestHandler):
                     errors = draft_errors(root, args)
                     if errors:
                         return self._json(422, {"ok": False, "error": "invalid draft", "errors": errors})
+                if action == "release_decision":
+                    errors = release_decision_errors(root, args)
+                    if errors:
+                        return self._json(409, {"ok": False, "error": "release not waiting", "errors": errors})
                 return self._json(201, {"ok": True, "item": dw.submit(root, action, args)})
             if path == "/api/worker/mode":
                 return self._json(200, {"ok": True, "modes": dw.set_mode(root, body.get("paused"), body.get("continuous"))})

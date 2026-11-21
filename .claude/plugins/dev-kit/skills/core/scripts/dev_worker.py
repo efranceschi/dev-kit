@@ -304,10 +304,19 @@ def validate(action: object, args: object) -> dict:
     elif action == "plan_draft":
         out["ops"] = _plan_ops(args.get("ops"), errors)
         out["base"] = clean(args.get("base"), "base", 40, errors, required=False)
+    elif action == "release_decision":
+        # the one human gate of construction (conventions.md §19): approve, or reject with what must change
+        out["release"] = _pattern(args.get("release"), "release", r"^R\d{1,3}$", errors)
+        out["decision"] = args.get("decision")
+        if out["decision"] not in ("approve", "reject"):
+            errors.append("decision must be approve or reject")
+        out["feedback"] = clean(args.get("feedback"), "feedback", 4000, errors, required=False, multiline=True)
+        if out["decision"] == "reject" and not out["feedback"]:
+            errors.append("a rejection needs feedback: what must change, one item per line")
     else:
-        raise Invalid(["action must be one of run, issue_new, answer_question, plan_draft"])
+        raise Invalid(["action must be one of run, issue_new, answer_question, plan_draft, release_decision"])
     allowed = {"run": {"command"}, "issue_new": {"title", "type", "note"}, "answer_question": {"question", "option", "answer"},
-               "plan_draft": {"ops", "base"}}[action]  # type: ignore[index]
+               "plan_draft": {"ops", "base"}, "release_decision": {"release", "decision", "feedback"}}[action]  # type: ignore[index]
     extra = set(args) - allowed
     if extra:
         errors.append(f"unknown field {sorted(extra)[0]}")
@@ -844,7 +853,8 @@ def watch(root: Path, poll: float = 2.0, once: bool = False, emit=None, grace: f
 def describe(x: dict) -> str:
     a = x.get("args") or {}
     what = {"run": a.get("command"), "issue_new": f"new {a.get('type', 'issue')}", "answer_question": f"answer to {a.get('question')}",
-            "plan_draft": f"plan draft ({len(a.get('ops') or [])} change(s))"}.get(x.get("action"), x.get("action"))
+            "plan_draft": f"plan draft ({len(a.get('ops') or [])} change(s))",
+            "release_decision": f"{a.get('decision')} {a.get('release')}"}.get(x.get("action"), x.get("action"))
     return f"{x['id']} {x['status']}: {what}"
 
 

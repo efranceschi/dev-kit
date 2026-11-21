@@ -28,7 +28,7 @@
 <g id="clust4" class="cluster">
 <title>cluster_end</title>
 <path fill="none" stroke="#2f6fb0" stroke-dasharray="5,2" d="M123.75,-111.5C123.75,-111.5 639.75,-111.5 639.75,-111.5 645.75,-111.5 651.75,-117.5 651.75,-123.5 651.75,-123.5 651.75,-602.75 651.75,-602.75 651.75,-608.75 645.75,-614.75 639.75,-614.75 639.75,-614.75 123.75,-614.75 123.75,-614.75 117.75,-614.75 111.75,-608.75 111.75,-602.75 111.75,-602.75 111.75,-123.5 111.75,-123.5 111.75,-117.5 117.75,-111.5 123.75,-111.5"/>
-<text xml:space="preserve" text-anchor="middle" x="381.75" y="-600.3" font-family="Helvetica,sans-Serif" font-size="11.00">3 · Construction: the release train (closed milestones not released yet; cut between milestones, none half built)</text>
+<text xml:space="preserve" text-anchor="middle" x="381.75" y="-600.3" font-family="Helvetica,sans-Serif" font-size="11.00">3 · Construction: the next release (closed milestones not released yet; cut between milestones, none half built)</text>
 </g>
 <g id="clust5" class="cluster">
 <title>cluster_obs</title>
@@ -535,7 +535,7 @@
 <title>ship&#45;&gt;usab</title>
 <path fill="none" stroke="#3c8d40" d="M509.75,-667.63C509.75,-646.92 509.75,-619.93 509.75,-599.2"/>
 <polygon fill="#3c8d40" stroke="#3c8d40" points="513.25,-599.34 509.75,-589.34 506.25,-599.34 513.25,-599.34"/>
-<text xml:space="preserve" text-anchor="middle" x="557.75" y="-643.45" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#3c8d40">train ready</text>
+<text xml:space="preserve" text-anchor="middle" x="557.75" y="-643.45" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#3c8d40">next release ready</text>
 <text xml:space="preserve" text-anchor="middle" x="557.75" y="-633.7" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#3c8d40">(no milestone open,</text>
 <text xml:space="preserve" text-anchor="middle" x="557.75" y="-623.95" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#3c8d40">or between milestones)</text>
 </g>
@@ -624,7 +624,7 @@
 <text xml:space="preserve" text-anchor="middle" x="524.75" y="-158.05" font-family="Helvetica,sans-Serif" font-size="11.00">version + tag + release notes</text>
 <text xml:space="preserve" text-anchor="middle" x="524.75" y="-146.8" font-family="Helvetica,sans-Serif" font-size="11.00">deploy when production.when = on_release</text>
 <text xml:space="preserve" text-anchor="middle" x="524.75" y="-135.55" font-family="Helvetica,sans-Serif" font-size="11.00">(push/publish only if authorized)</text>
-<text xml:space="preserve" text-anchor="middle" x="524.75" y="-124.3" font-family="Helvetica,sans-Serif" font-size="11.00">release&#45;record: the train empties</text>
+<text xml:space="preserve" text-anchor="middle" x="524.75" y="-124.3" font-family="Helvetica,sans-Serif" font-size="11.00">release&#45;record: nothing waits any more</text>
 </g>
 <!-- relaud&#45;&gt;done -->
 <g id="edge43" class="edge">
@@ -734,7 +734,7 @@
 <title>status</title>
 <path fill="#efe7f8" stroke="#7a5aa6" d="M1958.5,-63.38C1958.5,-63.38 1647,-63.38 1647,-63.38 1641,-63.38 1635,-57.38 1635,-51.38 1635,-51.38 1635,-33.62 1635,-33.62 1635,-27.62 1641,-21.62 1647,-21.62 1647,-21.62 1958.5,-21.62 1958.5,-21.62 1964.5,-21.62 1970.5,-27.62 1970.5,-33.62 1970.5,-33.62 1970.5,-51.38 1970.5,-51.38 1970.5,-57.38 1964.5,-63.38 1958.5,-63.38"/>
 <text xml:space="preserve" text-anchor="middle" x="1802.75" y="-48.92" font-family="Helvetica,sans-Serif" font-size="11.00">/dev&#45;kit:status</text>
-<text xml:space="preserve" text-anchor="middle" x="1802.75" y="-37.67" font-family="Helvetica,sans-Serif" font-size="11.00">lifecycle phase · step, release train, gates, preview, production drift,</text>
+<text xml:space="preserve" text-anchor="middle" x="1802.75" y="-37.67" font-family="Helvetica,sans-Serif" font-size="11.00">lifecycle phase · step, next release, gates, preview, production drift,</text>
 <text xml:space="preserve" text-anchor="middle" x="1802.75" y="-26.43" font-family="Helvetica,sans-Serif" font-size="11.00">leftover processes, cost so far</text>
 </g>
 <!-- board -->

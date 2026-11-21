@@ -98,7 +98,7 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 
 ## Ship a version
 
-1. Release between milestones: /dev-kit:status (or the board) shows the release train, the closed milestones not released yet
+1. Release between milestones: /dev-kit:status (or the board) shows the next release, the closed milestones not released yet
 2. /dev-kit:usability for apps with a UI, then /dev-kit:docs all and /dev-kit:review docs
 3. /dev-kit:release --dry-run to see the checklist and the version it would use
 4. /dev-kit:release (tags and records the release; pushes and deploys only as the brief allows)

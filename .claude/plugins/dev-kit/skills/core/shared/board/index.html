@@ -92,15 +92,16 @@
             <section class="card" aria-labelledby="pl-bl-h"><div class="card-head"><h2 id="pl-bl-h">Backlog</h2><p class="card-sub" id="pb-sub"></p></div><div id="product-backlog" class="stack"></div></section>
           </div>
           <section class="card" aria-labelledby="road-h"><div class="card-head"><h2 id="road-h">Roadmap</h2><p class="card-sub" id="road-sub">Every milestone in plan order. Open one to see it in construction.</p></div><ol class="road" id="roadmap"></ol></section>
-          <section class="card plan-host-card" id="plan-host-card" aria-labelledby="plan-host-h" hidden><div class="card-head"><h2 id="plan-host-h">Plan the milestones</h2><p class="card-sub">The same draft as Construction › Plan</p></div><div id="plan-host"></div></section>
+          <section class="card plan-host-card" id="plan-host-card" aria-labelledby="plan-host-h" hidden><div class="card-head"><h2 id="plan-host-h">Plan the milestones</h2><p class="card-sub">Drag tasks and issues between open milestones, then send the draft</p></div><div class="planner" id="planner" hidden></div></section>
         </section>
 
         <section class="phase-panel" id="phase-construction" role="tabpanel" aria-labelledby="ph-construction" hidden>
-          <section class="card train-card" id="train-card" aria-labelledby="train-h" hidden>
-            <div class="card-head"><h2 id="train-h">Next release</h2><p class="card-sub" id="train-sub"></p></div>
-            <div class="train" id="train"></div>
-          </section>
-          <section class="card milestone" aria-labelledby="ms-title">
+          <div class="cons-nav card" id="cons-nav">
+            <div class="rel-row" id="rel-row" hidden>
+              <span class="ms-label" id="rel-label">Releases</span>
+              <div role="tablist" class="rel-tabs" id="rel-tabs" aria-labelledby="rel-label"></div>
+              <ol class="chevrons stages rel-stages" id="rel-stages" aria-label="Stages of the release"></ol>
+            </div>
             <div class="ms-top">
               <span class="ms-label" id="tabs-label">Milestones</span>
               <div class="tabs-row">
@@ -117,6 +118,15 @@
               </div>
               <div class="ms-facts" id="ms-facts"></div>
             </div>
+            <ol class="chevrons stages" id="stages" aria-labelledby="stages-h"></ol>
+          </div>
+
+          <section class="card train-card" id="train-card" aria-labelledby="train-h" hidden>
+            <div class="card-head"><h2 id="train-h">Next release</h2><p class="card-sub" id="train-sub"></p></div>
+            <div class="train" id="train"></div>
+          </section>
+
+          <section class="card milestone" aria-labelledby="ms-title">
             <div class="ms-body">
               <div class="ms-text">
                 <h2 id="ms-title">—</h2>
@@ -131,11 +141,7 @@
                 <p class="ms-next" id="ms-next"></p>
               </div>
             </div>
-          </section>
-
-          <section class="card stages-card" aria-labelledby="stages-h">
-            <div class="card-head"><h2 id="stages-h">Milestone stages</h2><p class="card-sub" id="stages-sub"></p></div>
-            <ol class="chevrons stages" id="stages"></ol>
+            <p class="stages-sub"><span class="visually-hidden" id="stages-h">Milestone stages</span><span class="card-sub" id="stages-sub"></span></p>
             <p class="also-running" id="also-running" hidden></p>
           </section>
 
@@ -145,7 +151,6 @@
               <div role="tablist" class="work-tabs" id="view-switch" aria-label="Construction views">
                 <span class="tab-group" role="presentation">
                   <button type="button" role="tab" id="tab-tasks" aria-controls="view-tasks" data-view="tasks">Tasks</button>
-                  <button type="button" role="tab" id="tab-plan" aria-controls="planner" data-view="plan" hidden>Plan</button>
                 </span>
                 <span class="tab-group" role="presentation" title="Insights">
                   <button type="button" role="tab" id="ins-tab-burndown" aria-controls="ins-burndown" data-view="burndown">Burndown</button>
@@ -170,7 +175,6 @@
               <div class="col-tabs seg-switch" id="col-tabs" role="group" aria-label="Column shown"></div>
               <div class="kanban" id="kanban"></div>
             </div>
-            <div role="tabpanel" class="planner" id="planner" aria-labelledby="tab-plan" hidden></div>
             <div role="tabpanel" id="ins-gates" aria-labelledby="ins-tab-gates" tabindex="0" hidden>
               <p class="card-sub" id="dod-sub"></p>
               <div id="dod"></div>

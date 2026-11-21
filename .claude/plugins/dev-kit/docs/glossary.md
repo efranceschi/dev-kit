@@ -29,7 +29,7 @@
 | **hotfix** | Expedite lane for critical/high bugs in delivered work: one at a time, scoped QA, patch release. |
 | **lane** | Priority lane of a task: hotfix runs first, then cool-down, then the plan. |
 | **legacy** | A finding in code that existed before dev-kit (existing projects): reported with "legacy": true, never scored, turned into an issue. |
-| **lifecycle** | Where the project is: conception (interview, PRD, architecture, UX, UI) → planning (plan) → construction (milestones and the release train) → stable. A cycle, not a line: a scope change reopens conception and planning while construction goes on; a bug or improvement goes straight to construction. Derived from .dev/, never set by hand. |
+| **lifecycle** | Where the project is: conception (interview, PRD, architecture, UX, UI) → planning (plan) → construction (milestones and the next release) → stable. A cycle, not a line: a scope change reopens conception and planning while construction goes on; a bug or improvement goes straight to construction. Derived from .dev/, never set by hand. |
 | **local preview** | The approved milestone built and run on 127.0.0.1 (keep_running or smoke), per autonomy.local_deploy. |
 | **locked literal** | A text an AC fixes, marked [locked] in the PRD; copy and visual reviews never reword it. |
 | **low cap** | Low findings cost at most 10 points per dimension. |
@@ -37,14 +37,16 @@
 | **milestone** | A cadence step M1, M2… inside construction; the next one starts only after the previous gate passes. Building and QA belong to the milestone, not to the project phase. Issues never renumber milestones. |
 | **model ladder** | Agents start on their base model and effort; failed dimensions are re-run one step higher, with consent. |
 | **n/a review** | A review that does not apply (e.g. design with no new UI); recorded with a note, it satisfies prerequisites and is not graded. |
+| **next release** | The milestones closed since the last release, or the first planned release not released yet. A release ships them between milestones, after usability (UI apps) and docs; release records it, and nothing waits any more. |
 | **out of scope finding** | A problem in shared code the milestone did not change; it becomes an issue and does not score in the gate. |
 | **output file** | Where an auditor writes its result (given in its prompt); the kit validates it, and the agent answers in a few lines. |
 | **park** | Pause-point action: never wait; record the question with the recommended answer, block only what depends on it and continue (the default of most points under the unattended level, available at any level). |
 | **pause policy** | What the kit does at each pause point: ask, preauthorize within a limit, apply the recommendation, or park. |
+| **planned release** | A group of 2 to 5 milestones under a '## R<n>' heading of plan.md that delivers a complete value journey; a critical delivery (payments, auth, sensitive migration) ends one. Milestones of a later release start only after the earlier one is released. |
 | **prompt suggestion** | Claude Code's greyed-out guess of your next prompt; every dev-kit report ends with the next command so it is offered. Tab or Right arrow takes it. |
 | **QA harness** | Playwright with mocks that captures every screen and state (qa:shots) and runs axe (qa:a11y); added by plan to the first UI milestone. |
 | **recorded test run** | A green suite stored per commit; the test auditor and the gate reuse it until the code it covers changes. |
-| **release train** | The milestones closed since the last release. A release ships them between milestones, after usability (UI apps) and docs; release records it and the train empties. |
+| **release gate** | The one human gate of construction: when every milestone of a planned release is closed, release writes its dossier and waits; you approve (production deploy, smoke, record) or reject with what must change (a fixes milestone in the same release). |
 | **session log** | .dev/telemetry.jsonl: structured, high-level events of the run, without project data. |
 | **shared baseline** | Suite, lint, type-check, data smoke and screenshots run once per QA round and read by every auditor. |
 | **slot** | Per-agent isolation number that gives each agent its own port, database and scratch folder. |

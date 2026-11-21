@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 VERSION = 1
-ID_RE = re.compile(r"^(T-\d{1,5}|M\d{1,3}|F-\d{1,5}|Q-\d{1,5}|ADR-\d{1,5}|I-\d{1,5})$")
+ID_RE = re.compile(r"^(T-\d{1,5}|M\d{1,3}|R\d{1,3}|F-\d{1,5}|Q-\d{1,5}|ADR-\d{1,5}|I-\d{1,5})$")
 TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,39}$")
 
 COUNTS = {"critical", "high", "medium", "low"}
@@ -55,6 +55,7 @@ SCHEMA: dict[str, dict[str, str]] = {
     "escalation": {"agent": "tok", "from": "mtok", "to": "mtok", "consent": "tok"},
     "preview": {"scope": "tok", "mode": "tok", "status": "tok"},
     "deploy": {"scope": "tok", "env": "tok", "status": "tok", "commits_behind": "num", "migrations_behind": "num"},
+    "release_gate": {"scope": "tok", "transition": "tok", "tasks": "num"},
     "cleanup": {"killed": "num", "stale_files": "num", "skipped": "num"},
     "config": {"key": "tok", "value": "tok"},
     "issue": {"issue": "tok", "type": "tok", "class": "tok", "transition": "tok", "severity": "tok", "origin": "tok"},
@@ -385,6 +386,8 @@ def stage_of(e: dict) -> str | None:
         return "implement"
     if ev in ("preview", "deploy"):
         return "deploy"
+    if ev == "release_gate":
+        return "docs_release"
     if ev in ("pause", "escalation", "session_feedback"):
         return "autopilot"
     if ev == "cleanup":

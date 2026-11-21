@@ -364,7 +364,7 @@ button.run-chip:hover { background: var(--surface-3); }
 .phase-chevrons .chev.here { flex-grow: 2; }
 .phase-chevrons .chev-name { text-transform: capitalize; }
 .phase-cycle { margin-left: auto; font-size: 11.5px; color: var(--text-muted); }
-/* lifecycle: each phase lists what happens inside it (steps, milestone and release train) */
+/* lifecycle: each phase lists what happens inside it (steps, milestone and next release) */
 .phase-chevrons .chev.lc { flex: 1 1 0; min-height: 62px; }
 .phase-chevrons .chev.lc.here { flex-grow: 1.7; }
 .lc-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -839,4 +839,41 @@ dialog p { color: var(--text-secondary); }
 @media (max-width: 700px) {
   .phase-chevrons .chev:not(.here) .lc-badge { display: none; }
   .phase-chevrons .chev:not(.here) .lc-needs { margin-left: 4px; }
+}
+
+/* ---------- chevrons stay on screen while scrolling (2.1): the lifecycle tabs, then construction's releases, milestones
+   and stages; once the page scrolls they shrink to a compact strip so they cost little height */
+.phasebar { position: sticky; top: 0; z-index: 30; background: var(--page); margin: -8px -6px 0; padding: 8px 6px; border-radius: 0 0 12px 12px; }
+.cons-nav { position: sticky; top: var(--phasebar-h, 72px); z-index: 25; display: grid; gap: 10px; padding: 12px 14px; }
+.cons-nav .ms-top { margin: 0; }
+.rel-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.rel-tabs { display: flex; }
+.rel-stages { flex: 1 1 420px; min-width: 0; }
+.rel-stages .stage { min-height: 0; padding-top: 7px; padding-bottom: 7px; }
+.tab-dot.wait { background: var(--critical); }
+.stages-sub { margin-top: 10px; }
+.road-rel { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 2px 4px; font-size: 13px; }
+.road-rel:first-child { margin-top: 0; }
+.road-rel.s-released { color: var(--text-muted); }
+.train-chip.ok { color: var(--good-text); }
+.rel-decide { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.rel-decide textarea { min-width: 220px; flex: 1 1 260px; font: inherit; }
+body.compact .phase-chevrons .chev.lc { min-height: 34px; padding-top: 4px; padding-bottom: 4px; }
+body.compact .phase-chevrons .chev-ico { width: 18px; height: 18px; font-size: 10px; }
+body.compact .phase-chevrons .chev.here .chev-name, body.compact .phase-chevrons .chev-name { font-size: 13px; }
+body.compact .lc-badge, body.compact .phase-cycle, body.compact .phasebar-head { display: none; }
+body.compact .cons-nav { gap: 6px; padding: 6px 10px; }
+body.compact .cons-nav .ms-label, body.compact .cons-nav .ms-facts, body.compact .cons-nav .tab-current { display: none; }
+body.compact .cons-nav .stage { min-height: 0; padding-top: 4px; padding-bottom: 4px; }
+body.compact .cons-nav .stage-note, body.compact .cons-nav .qa-trail, body.compact .cons-nav .stage-run,
+body.compact .cons-nav .next-btn, body.compact .cons-nav .stage-blocked { display: none; }
+body.compact .cons-nav .stage.here { flex-grow: 1.4; }
+@media (max-width: 860px) {
+  /* stacked stages would fill the screen: once scrolled only the stage in progress stays */
+  body.compact .cons-nav .stages .stage:not(.here) { display: none; }
+  body.compact .cons-nav .stages .stage.here { margin: 0; border-radius: 10px; clip-path: none; padding: 5px 12px; }
+  .rel-stages { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .phasebar, .cons-nav, .chev, .stage { transition: padding .15s ease, min-height .15s ease; }
 }

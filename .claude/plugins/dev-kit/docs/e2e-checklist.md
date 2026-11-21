@@ -32,7 +32,7 @@ Tick each item; note the Claude Code version used.
 - [ ] Finish M1 (`implement --milestone M1`); `dev_state.py next` exits 3 with "gate of M1 is pending".
 - [ ] `/dev-kit:qa M1` spawns the applicable auditors in parallel (see 3b); writes `qa/M1/report.md`, `findings.json` + `scores.json`; blocking findings become `fix` tasks placed first in `next`; gate `pending` or `passed` accordingly.
 - [ ] If pending: `implement` picks the fix tasks first; `qa M1` again → `passed`.
-- [ ] Through the whole milestone (implement, QA, fixes, gate) the phase stays `construction`; after the gate the step is `M2` and `status` shows `Release train: M1 closed since the last release`.
+- [ ] Through the whole milestone (implement, QA, fixes, gate) the phase stays `construction`; after the gate the step is `M2` and `status` shows `Next release: M1 closed since the last release`.
 - [ ] Scope change during M2: `/dev-kit:issue "<new behaviour>"` (class change) → after `prd`, `status --short` says `phase: conception · … (reopened)`, the board shows conception and planning "reopened" and construction still active; after `review prd`, the refreshed design and `plan replan` + `review plan` the phase is back to `construction · M2`.
 
 ## 3b. Quality score and cut-off
@@ -61,7 +61,8 @@ Tick each item; note the Claude Code version used.
 - [ ] `/dev-kit:interview --gaps` lists exactly the open `Q-nnn` rows; answering one that contradicts an assumption creates a superseding ADR and (when needed) a fix task.
 - [ ] `/dev-kit:usability --url http://localhost:3000` (if the app runs) runs 4 auditors in parallel, captures screenshots, writes `qa/ux/report.md` with Nielsen/WCAG references and records review `ux` with a score.
 - [ ] `/dev-kit:docs all` writes README, CHANGELOG, user guide, CLAUDE.md section; `review docs` executes the README commands in a temp clone and scores the result.
-- [ ] `/dev-kit:release --dry-run` reports the checklist including the release audit score; the checklist refuses while a milestone is half built; the real run tags `v0.1.0` and records it (`dev_state.py release-record`): the release train is empty and, with no issue queued, `status` says `Phase: stable`; nothing is pushed unless `may_push` is true. A new issue afterwards brings the phase back to `construction`.
+- [ ] `/dev-kit:release --dry-run` reports the checklist including the release audit score; the checklist refuses while a milestone is half built; the real run tags `v0.1.0` and records it (`dev_state.py release-record`): the next release is empty and, with no issue queued, `status` says `Phase: stable`; nothing is pushed unless `may_push` is true. A new issue afterwards brings the phase back to `construction`.
+- [ ] With `## R1`/`## R2` headings in `plan.md`: no task of R2 starts while R1 is not released; when R1's milestones are closed, `/dev-kit:release` writes `.dev/releases/R1/dossier.md`, submits it and stops; the board shows R1 in Needs you and on the Construction release strip with Approve and Reject; a rejection with two lines adds `M<n> — R1 · Fixes` with two fix tasks before R2; an approval lets `release` tag, deploy, smoke and record R1, and R2 starts.
 
 ## 6. Autonomy policy
 - [ ] With `autonomy.level = cautious`, `implement` asks before a library choice; with `high` it logs an ADR instead.

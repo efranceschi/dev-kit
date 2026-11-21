@@ -1,6 +1,6 @@
 ---
 name: status
-description: Read-only dashboard of a dev-kit project - lifecycle phase and step, release train, milestones, task progress, gates, blockers, open questions and the next task. Use when the user asks for progress, status, what's blocked, or what comes next. Makes no changes to the project or its state (it only records which tip was shown).
+description: Read-only dashboard of a dev-kit project - lifecycle phase and step, next release, milestones, task progress, gates, blockers, open questions and the next task. Use when the user asks for progress, status, what's blocked, or what comes next. Makes no changes to the project or its state (it only records which tip was shown).
 argument-hint: "[--json]"
 allowed-tools: Read, Bash, Grep, Glob
 ---

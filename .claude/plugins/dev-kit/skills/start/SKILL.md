@@ -46,7 +46,7 @@ If the injected output above contains a Python "can't open file" error, the kit 
      | conception · prd / architecture / ux / ui | the step's skill, or its review (`review prd`, `review design`) when the step waits for it; a reopened step (scope change) is refreshed the same way |
      | planning · plan | `plan` (`plan replan` after a scope change), then `review plan` |
      | construction · M<n> | `implement` (or `autopilot` to run until the next gate); `qa <M>` when the milestone's tasks are done and its gate is pending |
-     | construction · release | the release train: `usability` (UI products), `docs`, `review docs`, then `release` |
+     | construction · release | the next release: `usability` (UI products), `docs`, `review docs`, then `release`; a planned release waiting for approval routes to `release`, which asks for the decision |
      | construction · issues | `backlog` (queued issues wait to be scheduled) |
      | stable | nothing open: `issue` for new work, `backlog` to look |
    - If the user's input names a different intent (e.g. "add feature X", "run QA"), honour it instead: a bug, improvement or scope change goes through `issue` (a scope change is class `change`: `prd` → `review prd` → `plan` replan); open questions go through `interview --gaps`. Existing project in `maintenance` mode and the user asks for a feature: switch with `DS init --brownfield-json '{"mode":"feature"}'` (it reopens the `n/a` reviews), then `interview --express` on the change, `prd` revision and `plan replan`.

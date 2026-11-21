@@ -2,6 +2,43 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.1.0 — 2026-11-21
+
+Releases are planned, and approving them is the one human gate of construction. The plan groups milestones into releases (R1, R2…). Milestones still run on their own. When every milestone of a release is closed, `release` audits it, writes an approval dossier and waits. The user then approves it (production deploy, smoke, record) or rejects it with what must change, which becomes a fixes milestone inside the same release. On the board, the Plan view now lives only in Planning, and every chevron stays on screen while scrolling. "Release train" is no longer used anywhere: the term suggests a human-run train, and this kit has none.
+
+### Added
+- Planned releases (`conventions.md` §4): `## R<n> — title` headings in `plan.md` group the milestones below them.
+  - `sync-plan` records `release_plan` and each milestone's `release`. It warns about a release with no milestone or more than 5, and about milestones outside any release.
+  - Milestones follow release order.
+  - No milestone of a later release starts while an earlier one is not released. `next` and `start` say why.
+- `plan` groups the milestones by three rules: a complete value journey per release, a risky delivery (payments, auth, sensitive migration) ends a release, and 2–5 milestones each. It also explains each cut. The template has an R1 heading, and requirements-reviewer (mode plan) checks the grouping.
+- Release gate (`conventions.md` §19): `in_progress → ready_for_review → awaiting_approval → deploying_prod → released`, in `status --json` → `lifecycle.releases` and in `status`, which shows "Needs your approval".
+  - `dev_state.py release-submit R --dossier PATH` freezes the candidate.
+  - `release-decide R --approve`, `--reject --feedback ITEM…` or `--request R-nnn` (the decision made on the board, read from the request, so the feedback is never retyped into a shell).
+  - `release-record --release R` refuses a planned release before its approval.
+  - Each step is logged as a `release_gate` telemetry event.
+- Rejecting a release adds `M<last+1> — R<n> · Fixes` at the end of that release, with one `fix` task per feedback line (`source: release:R<n>`). This is the one documented exception to "issues never create milestones" (§15).
+- `release` runs in two passes for a planned release.
+  - Pass 1: checklist, suite, secrets and release audit, then the dossier `.dev/releases/R<n>/dossier.md` (new template `release-dossier.md`), `release-submit`, and stop.
+  - Decision: from the board, or in the chat with `--approve` / `--reject "…"` or a question.
+  - Pass 2, once approved: version, tag, production deploy and its smoke checks, then `release-record --release`. The approval also confirms `production_deploy` for that commit. Every other pause point is unchanged.
+  - `autopilot` stops at the submission and never decides.
+- Board request `release_decision` (`dev_worker.py`, `/dev-kit:worker`): approve, or reject with feedback. The server queues it only while the release waits for approval, and only once.
+- Board › Construction:
+  - Planned releases as chevrons (R1 ✓ › R2 ● › R3 ○) with the stages of the release shown: milestones, dossier, your approval, production, released.
+  - The milestone tabs show that release's milestones.
+  - A release card shows its milestones, the dossier path, the last rejection, and Approve / Reject when it waits for you.
+  - Needs you lists the releases waiting for approval, with the same buttons. The Construction tab says "R1 awaits you".
+- Board › Planning: the roadmap is grouped by release, with each release's state.
+- Board: the lifecycle tabs, and in Construction the releases, milestones and stages, stay pinned while the page scrolls. They shrink to a compact strip (badges and stage notes hidden). On narrow screens only the stage in progress stays.
+- Glossary: "planned release" and "release gate".
+
+### Changed
+- Board: the Plan view (drag and draft) lives only in Planning. Construction's tabs are Tasks, Burndown, Velocity and Gates.
+- Board: the Construction controls (releases, milestone tabs, milestone stages) are one strip above the milestone card. The separate "Milestone stages" card is gone.
+- "Release train" is renamed "next release" in skills, docs, status output and code (`dev_state.pending_release`).
+- The fix tasks of a rejected release count as the build of its fixes milestone on the board's stages, not as QA fixes.
+
 ## 2.0.0 — 2026-11-21
 
 The board is navigated by lifecycle phase. The four lifecycle chevrons are now the page's tabs, and the panel below shows only what belongs to the phase chosen. That cuts most of the scrolling and leaves room to improve each phase on its own. It opens the 2.x line, which also brings planned releases and a human release gate. The last 1.x is tagged `dev-kit-v1.32.0`.

@@ -10,13 +10,13 @@ You answer one thorough interview. The kit then writes the PRD, architecture and
   conception ──────► planning ──────► construction ──────► stable
   interview, PRD,    milestones and   M1 → M2 → M3 …       nothing open,
   architecture,      tasks, reviewed  build → QA → deploy  everything
-  UX, UI, reviewed                    + release train      released
+  UX, UI, reviewed                    + next release       released
        ▲                  ▲                                    │
        │                  └──── bug or improvement ────────────┤
        └──────────────────────── scope change ─────────────────┘
 ```
 
-**Conception** and **planning** happen once at the start, and again, only for what changed, whenever the scope changes. **Construction** builds the product one milestone at a time: each milestone has its own cycle (build, QA and fixes, deploy), so building and QA are never "the project's phase", they happen in every milestone. Closed milestones ride the **release train** until a release ships them. When nothing is open and everything is released, the project is **stable**; the next issue starts the cycle again. The kit works out the phase from what is in `.dev/`, so it never gets out of step with the work ([concepts](.claude/plugins/dev-kit/docs/concepts.md#lifecycle-conception-planning-construction-19)).
+**Conception** and **planning** happen once at the start, and again, only for what changed, whenever the scope changes. **Construction** builds the product one milestone at a time: each milestone has its own cycle (build, QA and fixes, deploy), so building and QA are never "the project's phase", they happen in every milestone. Closed milestones ride the **next release** until a release ships them. When nothing is open and everything is released, the project is **stable**; the next issue starts the cycle again. The kit works out the phase from what is in `.dev/`, so it never gets out of step with the work ([concepts](.claude/plugins/dev-kit/docs/concepts.md#lifecycle-conception-planning-construction-19)).
 
 <p align="center">
   <picture>
@@ -32,7 +32,7 @@ You answer one thorough interview. The kit then writes the PRD, architecture and
 - **Skills for the whole lifecycle**, invoked as `/dev-kit:<name>`, such as `interview`, `prd`, `architecture`, `ux`, `ui`, `plan`, `implement`, `test`, `qa`, `review`, `usability`, `docs`, `release`, `deploy`, plus `autopilot`, `status`, `board`, `backlog`, `issue`, `costs`, `feedback`, `help` and `start`.
 - **Specialised agents** that the skills call: an implementer, an architecture consultant and a team of read-only reviewers (code, security, tests, accessibility, data, performance, copy and more).
 - **Quality gates**: each milestone ends with a scored review (0-100 per dimension) that must clear a cut-off before the next one starts.
-- **Releases as a train**: closed milestones wait for the next release; `/dev-kit:release` ships them between milestones, after the usability audit and docs.
+- **Planned releases with one human gate**: the plan groups milestones into releases (R1, R2…: a complete value journey each, 2–5 milestones, a risky delivery ends one). Milestones run on their own; when a release is complete, `/dev-kit:release` audits it, writes an approval dossier and waits for you to approve (production deploy, smoke, release) or reject with what must change (a fixes milestone in the same release). Without planned releases, closed milestones wait for the next release, shipped between milestones after the usability audit and docs.
 - **Adjustable autonomy**: from supervised (asks at each decision, always with a recommendation) to unattended (parks what needs you and keeps going).
 - **Bugs and ideas** found at any time are classified and routed with `/dev-kit:issue`, without renumbering the plan: bugs and improvements go straight to construction; a scope change reopens conception and planning while the current milestone keeps going.
 - **Existing projects too**: in a codebase not built with dev-kit, `/dev-kit:start` first tags a baseline and learns the project (stack, commands, your commit and version conventions, existing docs). You pick a mode (new feature, maintenance only, or import your own PRD/specs); audits then judge only what changed, and old problems become issues instead of blocking.

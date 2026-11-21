@@ -4,14 +4,17 @@
 > Status of tasks lives in `.dev/state.json`; the `status:` lines below are informative. Parser contract: `shared/conventions.md` §4.
 
 ## Milestone overview
-| Milestone | Goal | ACs covered | Gate |
-|---|---|---|---|
-| M1 | Walking skeleton: project setup, CI, one end-to-end slice | AC-1, AC-2 | pending |
-| M2 | … | | pending |
+| Release | Milestone | Goal | ACs covered | Gate |
+|---|---|---|---|---|
+| R1 | M1 | Walking skeleton: project setup, CI, one end-to-end slice | AC-1, AC-2 | pending |
+| R1 | M2 | … | | pending |
 
 Ordering rules used: setup and CI first; then the highest-priority must-have as a thin end-to-end slice; infrastructure only when a feature needs it; fix tasks jump the queue.
 
 Existing projects: no walking skeleton (scaffold, tooling and CI exist; skip T-001 below); milestones start at `M<brownfield.first_milestone>`; `existing` ACs get no tasks. In maintenance mode the whole plan is `# Plan` plus an empty `## M<n> — Maintenance`, filled by `/dev-kit:issue`.
+
+## R1 — {{release title: the value journey it delivers}}
+{{why the release ends here: complete journey, risk isolated (payments, auth, sensitive migration), 2–5 milestones}}
 
 ## M1 — {{milestone title}}
 {{one-paragraph goal and exit criterion}}

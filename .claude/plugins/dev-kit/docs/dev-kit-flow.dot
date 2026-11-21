@@ -84,19 +84,19 @@ digraph G {
   fix -> impl [color="#b33a3a"];
 
   subgraph cluster_end {
-    label="3 · Construction: the release train (closed milestones not released yet; cut between milestones, none half built)"; fontsize=11; style="rounded,dashed"; color="#2f6fb0";
+    label="3 · Construction: the next release (closed milestones not released yet; cut between milestones, none half built)"; fontsize=11; style="rounded,dashed"; color="#2f6fb0";
     usab [label="usability\na11y + usability + visual + copy\n(score = review ux, delta rounds)"];
     docs [label="docs all\n→ README, docs/, CHANGELOG"];
     rdoc [label="review docs\ndocs-reviewer (haiku)", fillcolor="#e3f4e1", color="#3c8d40"];
     rel  [label="release\n(--dry-run first)", fillcolor="#dbe9fb", color="#2f6fb0"];
     relaud [shape=Mrecord, fillcolor="#ffe0cc", color="#c25b1a",
             label="{RELEASE AUDIT IN PARALLEL|spec-tracer · security · ops\ndeps · data (if database)\nperformance · docs-reviewer|fails → fix tasks → implement → release again}"];
-    done [label="version + tag + release notes\ndeploy when production.when = on_release\n(push/publish only if authorized)\nrelease-record: the train empties", fillcolor="#d6f0d6", color="#3c8d40"];
+    done [label="version + tag + release notes\ndeploy when production.when = on_release\n(push/publish only if authorized)\nrelease-record: nothing waits any more", fillcolor="#d6f0d6", color="#3c8d40"];
   }
 
   stable [label="4 · stable\nnothing open · every milestone released\nthe next issue or change starts the cycle again\n(the phase is derived from .dev/, never set)", shape=box, style="rounded,filled,bold", fillcolor="#d6f0d6", color="#3c8d40"];
 
-  ship -> usab [label="train ready\n(no milestone open,\nor between milestones)", color="#3c8d40", fontcolor="#3c8d40"];
+  ship -> usab [label="next release ready\n(no milestone open,\nor between milestones)", color="#3c8d40", fontcolor="#3c8d40"];
   done -> stable [label="nothing open", color="#3c8d40", fontcolor="#3c8d40"];
   stable -> issue [label="new bug, idea\nor change", style=dashed, color="#3c8d40", fontcolor="#3c8d40", constraint=false];
   usab -> docs -> rdoc -> rel -> relaud -> done;
@@ -108,7 +108,7 @@ digraph G {
 
   subgraph cluster_obs {
     label="Anytime · issues and follow-up (issue writes; the others are read-only; all recorded in the log)"; fontsize=11; style="rounded,dashed"; color="#7a5aa6";
-    status   [label="/dev-kit:status\nlifecycle phase · step, release train, gates, preview, production drift,\nleftover processes, cost so far", fillcolor="#efe7f8", color="#7a5aa6"];
+    status   [label="/dev-kit:status\nlifecycle phase · step, next release, gates, preview, production drift,\nleftover processes, cost so far", fillcolor="#efe7f8", color="#7a5aa6"];
     board    [label="/dev-kit:board\nlive board in the browser: what needs you,\nrunning agents, kanban, burndown, backlog\n(--host 0.0.0.0: shared with an access link)", fillcolor="#efe7f8", color="#7a5aa6"];
     costs    [label="/dev-kit:costs\ntokens (input, output, cache) and\nestimated US$ per stage, agent, model\n(from local transcripts; CSV on request)", fillcolor="#efe7f8", color="#7a5aa6"];
     feedback [label="/dev-kit:feedback\ngrade 0-100 per stage with reasons,\nwhat worked / failed, suggestions;\ntimestamped report + export for the author", fillcolor="#efe7f8", color="#7a5aa6"];

@@ -149,7 +149,7 @@
     {
       "name": "status",
       "category": "start",
-      "one_line": "Read-only dashboard: lifecycle phase and step, release train, milestones, gates, scores, issues, preview, production drift, cost so far.",
+      "one_line": "Read-only dashboard: lifecycle phase and step, next release, milestones, gates, scores, issues, preview, production drift, cost so far.",
       "when": "Any time you want a quick picture of the project.",
       "args": [
         {
@@ -173,7 +173,7 @@
     {
       "name": "board",
       "category": "start",
-      "one_line": "Live board in the browser, navigated by lifecycle phase: the four phases (conception, planning, construction, stable) are its tabs, each showing only what belongs to it - conception its steps, PRD and design reviews, decisions and scope changes; planning the plan and its review, the roadmap of milestones, the issue queue and the drag-and-drop plan; construction the next release, the milestones as chevrons (previous, current, next), the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, plan, burndown, velocity and gates; stable the project totals, production, release checks and releases. What needs you, the requests and the activity stay on every phase; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy.",
+      "one_line": "Live board in the browser, navigated by lifecycle phase: the four phases (conception, planning, construction, stable) are its tabs, each showing only what belongs to it - conception its steps, PRD and design reviews, decisions and scope changes; planning the plan and its review, the roadmap of milestones, the issue queue and the drag-and-drop plan; construction the planned releases as chevrons with their stages (milestones, dossier, your approval, production, released) and the milestones of the release shown (previous, current, next), the stages of the milestone (plan, build, QA & fixes with its rounds, smoke, deploy, closed) with the tasks and agents running in each, the task kanban with live agents and task details, burndown, velocity and gates; stable the project totals, production, release checks and releases. Every chevron stays on screen while you scroll, in a compact strip. What needs you (with Approve and Reject for a release waiting for you), the requests and the activity stay on every phase; with buttons that ask Claude Code for work (run the next step, new issue, answer a question, a plan draft made by dragging cards, go on by itself) and start it in the session that opened the board; light or dark; local, shared on your network with an access link, or behind your reverse proxy.",
       "when": "When you want to watch the project visually or drive it from the browser, e.g. away from the console; it updates by itself.",
       "args": [
         {
@@ -234,7 +234,7 @@
     {
       "name": "worker",
       "category": "start",
-      "one_line": "Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick.",
+      "one_line": "Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft, release approval or rejection) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick.",
       "when": "It starts by itself in the session that opened the board with /dev-kit:board, each time a request arrives. Run it by hand in any other session when the board, the session banner or the status line (▣) says requests are waiting.",
       "args": [
         {
@@ -432,7 +432,7 @@
     {
       "name": "autopilot",
       "category": "build",
-      "one_line": "Drives the build on its own: conception and planning, then milestone after milestone and the release train, until the project is stable; pauses follow your autonomy settings.",
+      "one_line": "Drives the build on its own: conception and planning, then milestone after milestone and the next release, until the project is stable; pauses follow your autonomy settings.",
       "when": "After the interview, when you want the app built with minimal interaction (also overnight).",
       "args": [
         {
@@ -788,8 +788,8 @@
     {
       "name": "release",
       "category": "ship",
-      "one_line": "Ships the release train (the milestones closed since the last release): audits, version, CHANGELOG, tag and the release record; patch releases for hotfixes.",
-      "when": "Between milestones, when closed milestones wait in the release train (the board and status show it), or after a hotfix.",
+      "one_line": "Ships the next release (the milestones closed since the last release, or the next planned release): audits, the approval dossier and your approve/reject decision for a planned release, then version, CHANGELOG, tag, production deploy and the release record; patch releases for hotfixes.",
+      "when": "Between milestones, when closed milestones wait for the next release or a planned release has all its milestones closed (the board and status show it), to approve or reject a release waiting for you, or after a hotfix.",
       "args": [
         {
           "arg": "version",
@@ -802,9 +802,25 @@
         {
           "arg": "--hotfix",
           "meaning": "patch release for a closed hotfix"
+        },
+        {
+          "arg": "--approve",
+          "meaning": "approve the planned release waiting for you"
+        },
+        {
+          "arg": "--reject \"feedback\"",
+          "meaning": "reject it; each line of feedback becomes a fix task"
         }
       ],
       "examples": [
+        {
+          "command": "/dev-kit:release",
+          "what": "check, audit and submit the next planned release for your approval (or decide on the one waiting)"
+        },
+        {
+          "command": "/dev-kit:release --reject \"the error message on duplicate email is unclear\"",
+          "what": "send the release back with what must change"
+        },
         {
           "command": "/dev-kit:release --dry-run",
           "what": "see what would happen"
@@ -814,7 +830,7 @@
           "what": "ship a hotfix as a patch version"
         }
       ],
-      "produces": "version bump, release notes, tag, release record (the train empties; with nothing open the project is stable)",
+      "produces": "version bump, release notes, tag, release record (nothing waits any more; with nothing open the project is stable)",
       "related": [
         "deploy",
         "docs"
@@ -1161,7 +1177,7 @@
         "publish"
       ],
       "steps": [
-        "Release between milestones: /dev-kit:status (or the board) shows the release train, the closed milestones not released yet",
+        "Release between milestones: /dev-kit:status (or the board) shows the next release, the closed milestones not released yet",
         "/dev-kit:usability for apps with a UI, then /dev-kit:docs all and /dev-kit:review docs",
         "/dev-kit:release --dry-run to see the checklist and the version it would use",
         "/dev-kit:release (tags and records the release; pushes and deploys only as the brief allows)"
@@ -1196,11 +1212,19 @@
     },
     {
       "term": "lifecycle",
-      "definition": "Where the project is: conception (interview, PRD, architecture, UX, UI) → planning (plan) → construction (milestones and the release train) → stable. A cycle, not a line: a scope change reopens conception and planning while construction goes on; a bug or improvement goes straight to construction. Derived from .dev/, never set by hand."
+      "definition": "Where the project is: conception (interview, PRD, architecture, UX, UI) → planning (plan) → construction (milestones and the next release) → stable. A cycle, not a line: a scope change reopens conception and planning while construction goes on; a bug or improvement goes straight to construction. Derived from .dev/, never set by hand."
     },
     {
-      "term": "release train",
-      "definition": "The milestones closed since the last release. A release ships them between milestones, after usability (UI apps) and docs; release records it and the train empties."
+      "term": "next release",
+      "definition": "The milestones closed since the last release, or the first planned release not released yet. A release ships them between milestones, after usability (UI apps) and docs; release records it, and nothing waits any more."
+    },
+    {
+      "term": "planned release",
+      "definition": "A group of 2 to 5 milestones under a '## R<n>' heading of plan.md that delivers a complete value journey; a critical delivery (payments, auth, sensitive migration) ends one. Milestones of a later release start only after the earlier one is released."
+    },
+    {
+      "term": "release gate",
+      "definition": "The one human gate of construction: when every milestone of a planned release is closed, release writes its dossier and waits; you approve (production deploy, smoke, record) or reject with what must change (a fixes milestone in the same release)."
     },
     {
       "term": "stable",

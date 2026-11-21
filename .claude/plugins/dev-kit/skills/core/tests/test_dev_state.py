@@ -441,7 +441,7 @@ class TestLifecycle(Base):
         self.run_state("artifact", "mark", "all")
         self.assertEqual(self.lifecycle()["phase"], "construction")  # plan reviews are not re-checked once built
 
-    def test_release_train_with_usability_and_docs(self) -> None:
+    def test_pending_release_with_usability_and_docs(self) -> None:
         self.init_with_plan()
         self.conceive(ui=True)
         for t in ("T-001", "T-002"):
@@ -510,6 +510,156 @@ class TestLifecycle(Base):
         self.assertEqual(s["reviews"]["design"]["verdict"], "n/a")
         self.assertIn("brief", s["artifacts"])
 
+
+
+RPLAN = """# Implementation plan — demo
+
+## R1 — Sign-up journey
+Why it ends here: a user can sign up end to end.
+
+## M1 — Skeleton
+Ship a skeleton.
+
+### T-001 Scaffold
+- status: todo
+- deps:
+- type: chore
+- acceptance:
+  - AC-1 scaffold runs
+- test_notes: smoke
+- files: app.py
+
+## M2 — Sign-up
+### T-002 Sign-up form
+- status: todo
+- deps: T-001
+- type: feature
+- acceptance:
+  - AC-2 a visitor signs up
+- test_notes: e2e
+- files: signup.py
+
+## R2 — Payments
+
+## M3 — Checkout
+### T-003 Checkout
+- status: todo
+- deps: T-002
+- type: feature
+- acceptance:
+  - AC-3 a user pays
+- test_notes: e2e
+- files: pay.py
+"""
+
+
+class TestPlannedReleases(Base):
+    """Planned releases group milestones in plan.md; each one waits for the user's approval (conventions.md §19)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.run_state("init", "--language", "en", "--project", "demo")
+        (self.root / ".dev" / "plan.md").write_text(RPLAN, encoding="utf-8")
+        self.run_state("sync-plan")
+        TestLifecycle.conceive(self)  # type: ignore[arg-type]
+
+    def nxt(self) -> str:
+        return self.run_state("status", "--next").stdout.strip()
+
+    def rel(self, rid: str) -> dict:
+        return next(x for x in self.lifecycle()["lifecycle"]["releases"] if x["id"] == rid)
+
+    def close(self, *ms_tasks: tuple[str, list[str]]) -> None:
+        for m, ts in ms_tasks:
+            for tid in ts:
+                self.run_state("done", tid, "--force")
+            self.run_state("gate", m, "passed", "--score", "90")
+
+    def test_sync_records_releases_and_warns_on_grouping(self) -> None:
+        s = self.state()
+        self.assertEqual([(r["id"], r["milestones"]) for r in s["release_plan"]], [("R1", ["M1", "M2"]), ("R2", ["M3"])])
+        self.assertEqual({m: v.get("release") for m, v in s["milestones"].items()}, {"M1": "R1", "M2": "R1", "M3": "R2"})
+        loose = RPLAN.replace("## R1 — Sign-up journey", "## M9 — Loose\n\n## R1 — Sign-up journey")
+        (self.root / ".dev" / "plan.md").write_text(loose, encoding="utf-8")
+        self.assertIn("milestones outside any release: M9", self.run_state("sync-plan").stdout)
+        big = RPLAN.replace("## R2 — Payments\n", "")
+        for n in range(4, 8):
+            big += f"\n## M{n} — Extra {n}\n"
+        (self.root / ".dev" / "plan.md").write_text(big, encoding="utf-8")
+        self.assertIn("release R1 has 7 milestones", self.run_state("sync-plan").stdout)
+        (self.root / ".dev" / "plan.md").write_text(RPLAN.replace("## R1 — Sign-up journey\n", "").replace("## R2 — Payments\n", ""), encoding="utf-8")
+        self.run_state("sync-plan")
+        self.assertNotIn("release_plan", self.state())  # no release heading: back to the implicit next release
+        self.assertNotIn("release", self.state()["milestones"]["M1"])
+
+    def test_release_gate_from_submission_to_stable(self) -> None:
+        self.assertEqual(self.rel("R1")["status"], "in_progress")
+        self.close(("M1", ["T-001"]), ("M2", ["T-002"]))
+        self.assertEqual(self.rel("R1")["status"], "ready_for_review")
+        # no milestone of R2 starts while R1 is not released
+        self.assertIn("R1 must be released first", self.run_state("next", expect=None).stdout + self.run_state("next", expect=None).stderr)
+        self.run_state("start", "T-003", expect=1)
+        self.run_state("review", "docs", "pass", "--score", "90")
+        self.assertEqual(self.nxt(), "/dev-kit:release")
+        self.run_state("release-decide", "R1", "--approve", expect=1)  # not submitted yet
+        self.run_state("release-record", "--version", "1.0.0", expect=1)  # planned: needs --release and the approval
+        self.run_state("release-record", "--version", "1.0.0", "--release", "R1", expect=1)
+        (self.root / ".dev" / "releases" / "R1").mkdir(parents=True)
+        (self.root / ".dev" / "releases" / "R1" / "dossier.md").write_text("# R1\n", encoding="utf-8")
+        self.run_state("release-submit", "R1", "--dossier", ".dev/releases/R1/dossier.md")
+        self.assertEqual(self.rel("R1")["status"], "awaiting_approval")
+        self.assertEqual(self.nxt(), "/dev-kit:release")
+        self.assertIn("Needs your approval: R1", self.run_state("status").stdout)
+        sub = {x["key"]: x for x in self.lifecycle()["lifecycle"]["phases"][2]["steps"]}
+        self.assertEqual((sub["release"]["state"], sub["release"]["count"]), ("review", "R1"))
+        # rejection: a fixes milestone at the end of R1, before R2, one fix task per item
+        self.run_state("release-decide", "R1", "--reject", expect=1)  # feedback required
+        out = self.run_state("release-decide", "R1", "--reject", "--feedback", "Unclear duplicate-email error",
+                             "--feedback", "Button hidden on mobile").stdout
+        self.assertIn("M4 R1 · Fixes: T-004, T-005", out)
+        s = self.state()
+        self.assertEqual(s["release_plan"][0]["milestones"], ["M1", "M2", "M4"])
+        self.assertEqual((s["tasks"]["T-004"]["type"], s["tasks"]["T-004"]["source"]), ("fix", "release:R1"))
+        self.assertEqual(s["tasks"]["T-004"]["acceptance"], ["Unclear duplicate-email error"])
+        plan = (self.root / ".dev" / "plan.md").read_text(encoding="utf-8")
+        self.assertLess(plan.index("## M4 — R1 · Fixes"), plan.index("## R2 — Payments"))
+        self.assertEqual(self.rel("R1")["status"], "in_progress")
+        self.assertEqual(self.run_state("next").stdout.split()[0], "T-004")
+        self.close(("M4", ["T-004", "T-005"]))
+        self.run_state("release-submit", "R1")
+        self.run_state("release-decide", "R1", "--approve")
+        self.assertEqual(self.rel("R1")["status"], "deploying_prod")
+        self.assertIn("R1 · Fixes", plan)
+        self.assertIn("M1, M2, M4", self.run_state("release-record", "--version", "1.0.0", "--release", "R1").stdout)
+        self.assertEqual(self.rel("R1")["status"], "released")
+        self.assertEqual(self.state()["releases"][-1]["release"], "R1")
+        self.assertEqual(self.run_state("next").stdout.split()[0], "T-003")  # R2 may start now
+        self.assertEqual(self.state()["phase"], "construction")
+        self.close(("M3", ["T-003"]))
+        self.run_state("review", "docs", "pass", "--score", "91")
+        self.run_state("release-submit", "R2")
+        self.run_state("release-decide", "R2", "--approve")
+        self.run_state("release-record", "--version", "1.1.0", "--release", "R2")
+        self.assertEqual(self.state()["phase"], "stable")
+        events = [json.loads(x) for x in (self.root / ".dev" / "telemetry.jsonl").read_text().splitlines()]
+        gates = [e for e in events if e.get("event") == "release_gate"]
+        self.assertEqual([e.get("transition") for e in gates][:3], ["submit", "reject", "submit"])
+
+    def test_board_decision_is_read_from_its_request(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        import dev_worker as dw
+        self.close(("M1", ["T-001"]), ("M2", ["T-002"]))
+        self.run_state("release-submit", "R1")
+        with self.assertRaises(dw.Invalid):
+            dw.validate("release_decision", {"release": "R1", "decision": "reject"})  # no feedback
+        with self.assertRaises(dw.Invalid):
+            dw.validate("release_decision", {"release": "M1", "decision": "approve"})
+        item = dw.submit(self.root, "release_decision", {"release": "R1", "decision": "reject",
+                                                         "feedback": "- First thing\n\n* Second thing\n"})
+        self.run_state("release-decide", "R2", "--request", item["id"], expect=1)  # decides R1, not R2
+        out = self.run_state("release-decide", "R1", "--request", item["id"]).stdout
+        self.assertIn("T-004, T-005", out)
+        self.assertEqual(self.state()["tasks"]["T-005"]["title"], "Second thing")
 
 class TestDetectStack(unittest.TestCase):
     def run_detect(self, root: Path) -> dict:
