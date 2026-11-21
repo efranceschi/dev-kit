@@ -2,6 +2,44 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.0.0 — 2026-11-21
+
+The board is navigated by lifecycle phase. The four lifecycle chevrons are now the page's tabs, and the panel below shows only what belongs to the phase chosen. That cuts most of the scrolling and leaves room to improve each phase on its own. It opens the 2.x line, which also brings planned releases and a human release gate. The last 1.x is tagged `dev-kit-v1.32.0`.
+
+### Breaking
+- Board: the Quality and Backlog tabs are gone. Their parts moved to the phase they belong to.
+  - The PRD and design reviews moved to Conception.
+  - The plan review, the issue queue, scheduled issues and later milestones moved to Planning.
+  - Milestone gates moved to Construction, as the Gates tab.
+  - The usability and docs reviews moved to Stable, as release checks.
+- Board: the milestone card no longer shows the project's task count and cost. They moved to Stable › Project. The card now shows the milestone's issue buffer and the issues scheduled in it.
+- Board: the remembered view key changed (`board-view-v2`), so the first visit opens on Tasks.
+
+### Added
+- Board: lifecycle chevrons as tabs (`role=tab`, arrow keys, Home and End).
+  - Each tab shows its name, its state and one short badge: steps done, the plan's state, milestones closed and waiting for a release, or the number of releases. The sub-stages are in the tooltip.
+  - A "now" tag marks the phase the project is in.
+  - A red count shows how many Needs-you items belong to the phase.
+  - The board follows the project's phase until you pick another one. The choice is remembered, and "Back to the current phase" returns.
+- Board › Conception:
+  - One card per step (interview, PRD, architecture, UX, UI) with its state, why it is out of date, its files in `.dev/` and the command that moves it on (▶ when the board takes requests).
+  - The PRD and design reviews.
+  - The decisions of `decisions.md`, newest first, superseded ones dimmed.
+  - The scope-change issues.
+- Board › Planning:
+  - The plan step and its review.
+  - A roadmap of every milestone (goal, done/total, gate). Opening a milestone shows it in Construction.
+  - The backlog.
+  - The Plan view (drag and draft). It is the same draft as Construction › Plan.
+- Board › Construction: a "Next release" card while closed milestones wait for a release. It shows their ids, the usability and docs checks and `/dev-kit:release` when the release is ready.
+- Board › Stable:
+  - The project's tasks, milestones closed, releases and cost.
+  - Production: the commit that runs, the last failed attempt and how far behind the checkout it is.
+  - The usability, docs and other reviews.
+  - The releases, newest first.
+- Board: each Needs-you block, and each open question, has a tag that opens its phase. The phase of a question comes from the skill that raised it.
+- `dev_board.py` `/api/state`: `decisions` (id, title, status, date), `releases`, `production` (current and last deploy, drift) and `artifacts` (the files of each step).
+
 ## 1.32.0 — 2026-11-20
 
 Model and effort are chosen per task, before it starts, by a deterministic risk rule. A router then learns from the project's own runs which model and effort is cheapest once QA rounds and escaped findings are priced in, and corrects itself when it gets one wrong. The same risk profile sets the round-1 model of the auditors in the gate.

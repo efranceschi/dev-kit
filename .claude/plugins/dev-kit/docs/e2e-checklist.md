@@ -24,7 +24,7 @@ Tick each item; note the Claude Code version used.
 
 ## 2. Autonomous conception and planning
 - [ ] `/dev-kit:autopilot --until plan` produces `prd.md` (ACs numbered, testable), `architecture.md` (stack table, data model, contracts), `design/ux-flows.md`, `design/ui-spec.md`, `plan.md` with ≥ 2 milestones; `state.json` has tasks; **no question asked** outside `always_ask` categories; assumptions logged as `ADR-nnn (auto)` and `Q-nnn` rows.
-- [ ] `/dev-kit:status` shows `Phase: construction · M1`, the milestones and next task `T-001`; the board's lifecycle bar has conception and planning ✓ and construction current.
+- [ ] `/dev-kit:status` shows `Phase: construction · M1`, the milestones and next task `T-001`; the board opens on the Construction tab, its lifecycle tabs have conception and planning ✓ and construction marked "now".
 
 ## 3. Implementation and gate
 - [ ] `/dev-kit:implement --tasks 2` → two commits `[T-001] …`, `[T-002] …`; `state.json` tasks done with SHAs; tests green.

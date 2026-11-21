@@ -761,3 +761,82 @@ dialog p { color: var(--text-secondary); }
 .tcard.s-in_progress, .pcard.s-in_progress, .chip.st-chip.s-in_progress, .chip.req-st.s-running,
 .badge.warn, .qa-pill.run, .exec.on { animation: chev-pulse 1.8s ease-in-out infinite; }
 .tab-dot.active, .st-in_progress, .exec.on::before { animation: agent-pulse 1.6s ease-in-out infinite; }
+
+/* ---------- lifecycle phases as the page's tabs (2.0): one panel per phase below the bar */
+.phase-chevrons button.chev { font: inherit; border: 0; text-align: left; cursor: pointer; }
+.phase-chevrons button.chev:hover:not(.here) { filter: brightness(1.08); }
+.phase-chevrons button.chev:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -4px; }
+.phase-chevrons .chev.lc { min-height: 52px; }
+.phase-chevrons .chev.here:not(.now) { animation: none; }
+.phase-chevrons .chev.now:not(.here) { box-shadow: inset 0 -3px 0 var(--warning); }
+.lc-badge { font-size: 11.5px; font-weight: 600; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.lc-needs { flex: none; margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 999px;
+  background: var(--critical); color: #fff; font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.now-tag { background: color-mix(in srgb, var(--warning) 55%, transparent); }
+.phase-panel { display: grid; gap: 14px; min-width: 0; align-content: start; }
+.phase-panel[hidden] { display: none; }
+.phase-row { margin-top: 0; gap: 14px; }
+.stack { display: grid; gap: 14px; }
+.phase-tag { font: inherit; font-size: 10.5px; font-weight: 650; padding: 1px 7px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--border-strong); background: transparent; color: var(--accent-text); letter-spacing: 0; text-transform: none; }
+.phase-tag:hover { background: var(--surface-3); }
+.q-tags { display: inline-flex; gap: 6px; align-items: center; justify-self: end; }
+.list li.muted { opacity: .6; }
+.more-list { margin-top: 8px; }
+.more-list > summary { cursor: pointer; font-size: 12.5px; color: var(--accent-text); margin-bottom: 6px; }
+
+/* conception and planning steps */
+.step-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.step-grid.one { grid-template-columns: minmax(0, 1fr); margin-bottom: 10px; }
+.step-card { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); min-width: 0; }
+.step-card.s-todo, .step-card.s-doing, .step-card.s-stale, .step-card.s-review { border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); }
+.step-card.s-skipped { opacity: .6; }
+.step-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.step-top strong { font-size: 14px; }
+.step-mark { flex: none; width: 20px; height: 20px; display: inline-grid; place-items: center; border-radius: 50%; font-size: 11px; font-weight: 800;
+  background: color-mix(in srgb, currentColor 16%, transparent); }
+.step-card.s-done .step-mark { background: var(--good); color: #fff; }
+.step-st { margin-left: auto; }
+.step-st.s-done { color: var(--good-text); }
+.step-st.s-stale, .step-st.s-review, .step-st.s-doing { color: var(--text-primary); background: color-mix(in srgb, var(--warning) 30%, var(--surface-3)); }
+.step-note { font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.step-files { font-family: var(--mono); font-size: 11.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-act { margin-top: auto; }
+
+/* planning roadmap */
+.road { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.road-row { font: inherit; color: inherit; width: 100%; text-align: left; cursor: pointer; display: grid; align-items: center; gap: 4px 12px;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto minmax(60px, 120px);
+  padding: 9px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
+.road-row:hover { background: var(--surface-3); border-color: var(--border-strong); }
+.road-row.cur { border-color: color-mix(in srgb, var(--accent-a) 60%, var(--border)); }
+.road-row .tab-current { grid-column: 4; }
+.road-text { display: flex; flex-direction: column; min-width: 0; }
+.road-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.road-goal { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.road-count { grid-column: 5; font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--text-secondary); }
+.road-meter { grid-column: 6; height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.road-meter > span { display: block; height: 100%; background: var(--good); }
+
+/* construction: next release */
+.train { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; font-size: 13px; }
+.train-ms { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.train-chip { font: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--border-strong); }
+.train-check { color: var(--text-secondary); }
+.train-check.s-done { color: var(--good-text); }
+
+/* stable: project facts */
+.facts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.fact { display: flex; flex-direction: column; gap: 2px; padding: 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
+.fact-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); font-weight: 650; }
+.fact-value { font-size: 20px; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 860px) {
+  .road-row { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+  .road-row .tab-current, .road-meter { display: none; }
+  .road-count { grid-column: 4; }
+}
+@media (max-width: 700px) {
+  .phase-chevrons .chev:not(.here) .lc-badge { display: none; }
+  .phase-chevrons .chev:not(.here) .lc-needs { margin-left: 4px; }
+}

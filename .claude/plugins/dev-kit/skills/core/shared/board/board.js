@@ -17,6 +17,14 @@
     milestones: "milestones", release: "release" };
   const STEP_WORD = { todo: "to do", doing: "in progress", stale: "out of date", review: "waiting for its review", done: "done", skipped: "skipped" };
   const STEP_MARK = { todo: "○", doing: "◐", stale: "↻", review: "◐", done: "✓", skipped: "–" };
+  const PHASES = ["conception", "planning", "construction", "stable"];
+  const STEP_TITLE = { interview: "Interview", prd: "PRD", architecture: "Architecture", ux: "UX", ui: "UI", plan: "Plan" };
+  const STEP_ABOUT = { interview: "Requirements interview, written to brief.md", prd: "Product requirements with numbered acceptance criteria",
+    architecture: "Stack, data model, contracts and ADRs", ux: "Journeys, screens and every screen state", ui: "Design tokens, components and screen specs",
+    plan: "Milestones of small tasks, with dependencies" };
+  const STEP_CMD = { interview: "/dev-kit:interview", prd: "/dev-kit:prd", architecture: "/dev-kit:architecture", ux: "/dev-kit:ux", ui: "/dev-kit:ui", plan: "/dev-kit:plan" };
+  const STEP_REVIEW_CMD = { prd: "/dev-kit:review prd", ux: "/dev-kit:review design", ui: "/dev-kit:review design", plan: "/dev-kit:review plan" };
+  const REVIEW_NAME = { prd: "PRD", design: "Design", plan: "Plan", ux: "Usability", docs: "Docs" };
 
   let data = null;
   let selected = null;       // milestone id chosen by the user (null = follow the current one)
@@ -101,16 +109,21 @@
 
   const store = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
   const TASK_RE = /^T-\d{1,5}$/;
-  const INS = ["quality", "burndown", "velocity", "backlog"];
+  const INS = ["burndown", "velocity", "gates"];
   const COL_LIMIT = 3;       // cards shown per kanban column before "Show all"
   let query = "";            // text filter of the kanban
   let typeFilter = "";       // task type filter of the kanban
   let expanded = new Set();  // kanban columns showing every card
   let mobileCol = null;      // column shown on narrow screens (null = pick the most useful one)
   let goalOpen = false;      // milestone goal expanded
-  // one card, one row of tabs: the board views (tasks, plan) and the insights
+  // construction: one card, one row of tabs - the board views (tasks, plan) and the insights
   const VIEWS = ["tasks", "plan", ...INS];
-  const VIEW_KEY = "board-view-v1";
+  const VIEW_KEY = "board-view-v2";
+  // the phase shown: null follows the project's phase; a phase picked by the user stays until "Back to the current phase"
+  const PHASE_KEY = "board-phase-v1";
+  let phasePick = PHASES.includes(store.get(PHASE_KEY, "")) ? store.get(PHASE_KEY, "") : null;
+  const shownPhase = () => (phasePick && PHASES.includes(phasePick) ? phasePick : (data && data.phase) || "conception");
+  let needsBy = {};          // items of "Needs you" per phase, shown on the phase tabs
   let view = VIEWS.includes(store.get(VIEW_KEY, "")) ? store.get(VIEW_KEY, "") : "tasks";
   let firstRender = true;
 
@@ -244,37 +257,63 @@
     renderLifecycle();
   }
 
-  /** The finite sub-stages of a phase as pills (✓ ◐ ○ ↻), each with at most a short count; details in the tooltip. */
-  function phaseDetail(p) {
-    if (!p.steps || !p.steps.length) return null;
-    return h("span", { class: "lc-steps" }, p.steps.map((x) =>
-      h("span", { class: `lc-step s-${x.state}`, title: `${STEP_NAME[x.key]}: ${STEP_WORD[x.state]}${x.note ? ` (${x.note})` : ""}` },
-        h("span", { "aria-hidden": "true", text: STEP_MARK[x.state] }), ` ${STEP_NAME[x.key]}`,
-        x.count ? h("span", { class: "lc-count", text: ` ${x.count}` }) : null,
-        h("span", { class: "visually-hidden", text: ` ${STEP_WORD[x.state]}${x.note ? `, ${x.note}` : ""};` }))));
+  /** One short badge per phase (the details live inside the phase): steps done, the plan's state, milestones closed, releases. */
+  function phaseBadge(p) {
+    const st = p.steps || [];
+    if (p.key === "conception") { const live = st.filter((x) => x.state !== "skipped"); return live.length ? `${live.filter((x) => x.state === "done").length}/${live.length}` : ""; }
+    if (p.key === "planning") return st[0] ? STEP_WORD[st[0].state] : "";
+    if (p.key === "construction") {
+      const ms = st.find((x) => x.key === "milestones"), rel = st.find((x) => x.key === "release");
+      return [ms && ms.count ? `${ms.count} closed` : null, rel && rel.count ? `${rel.count} to release` : null].filter(Boolean).join(" · ");
+    }
+    const n = (data.releases || []).length;
+    return n ? plural(n, "release") : "";
   }
+  const phaseTip = (p) => [`${PHASE_NAME[p.key]}: ${PHASE_WORD[p.state]}${p.reopened ? ", reopened" : ""}`,
+    ...(p.steps || []).map((x) => `${STEP_NAME[x.key]}: ${STEP_WORD[x.state]}${x.note ? ` (${x.note})` : ""}`)].join("\n");
 
+  /** The lifecycle bar is the page's top navigation: one tab per phase; the panel below shows only that phase. */
   function renderLifecycle() {
     const lc = data.cycle;
     const idx = lc.phases.findIndex((p) => p.key === data.phase);
     const cur = lc.phases[idx];
+    const shown = shownPhase();
     // the sub-stage in progress, never a milestone id: the bar names only finite stages and sub-stages
     const sub = cur && cur.steps ? (cur.steps.find((x) => !["done", "skipped"].includes(x.state)) || null) : null;
     const step = sub ? STEP_NAME[sub.key] : "";
-    $("phase-step").textContent = `${PHASE_NAME[data.phase]}${step ? ` · ${step}` : ""}`
+    $("phase-step").textContent = `Now: ${PHASE_NAME[data.phase]}${step ? ` · ${step}` : ""}`
       + (data.reopened ? " · reopened by a change, construction goes on" : "");
+    $("phase-back").hidden = shown === data.phase;
     fill($("phases"), lc.phases.map((p, i) => {
-      const here = i === idx;
-      const st = p.state === "active" ? "current" : p.state === "current" ? "current" : p.state;
-      return h("li", { class: `chev lc st-${st}${here ? " here" : ""}${Math.abs(i - idx) === 1 ? " near" : ""}${p.reopened ? " reopened" : ""}`,
-        "aria-current": here ? "step" : null, title: `${PHASE_NAME[p.key]}: ${PHASE_WORD[p.state]}${p.reopened ? ", reopened" : ""}` },
+      const sel = p.key === shown;
+      const st = p.state === "active" ? "current" : p.state;
+      const badge = phaseBadge(p);
+      const need = needsBy[p.key] || 0;
+      return h("button", { type: "button", role: "tab", id: `ph-${p.key}`, "aria-controls": `phase-${p.key}`, "aria-selected": String(sel), tabindex: sel ? "0" : "-1",
+        class: `chev lc st-${st}${sel ? " here" : ""}${i === idx ? " now" : ""}${p.reopened ? " reopened" : ""}`, title: phaseTip(p),
+        onclick: () => setPhase(p.key) },
       h("span", { class: "chev-ico", "aria-hidden": "true", text: p.state === "done" ? "✓" : p.key === "stable" ? "↻" : String(i + 1) }),
       h("span", { class: "lc-body" },
-        h("span", { class: "chev-name" }, PHASE_NAME[p.key], p.reopened ? h("span", { class: "lc-tag", text: "reopened" }) : null),
-        phaseDetail(p)),
-      h("span", { class: "visually-hidden", text: `: ${PHASE_WORD[p.state]}.` }));
+        h("span", { class: "chev-name" }, PHASE_NAME[p.key], p.reopened ? h("span", { class: "lc-tag", text: "reopened" }) : null,
+          i === idx && !sel ? h("span", { class: "lc-tag now-tag", text: "now" }) : null),
+        badge ? h("span", { class: "lc-badge", text: badge }) : null),
+      need ? h("span", { class: "lc-needs", title: `${plural(need, "item")} in Needs you`, text: String(need) }) : null,
+      h("span", { class: "visually-hidden", text: `: ${PHASE_WORD[p.state]}${i === idx ? ", the project is here" : ""}${badge ? `, ${badge}` : ""}${need ? `, ${plural(need, "item")} need you` : ""}.` }));
     }));
   }
+  function setPhase(p, focus) {
+    phasePick = data && p === data.phase ? null : p;   // picking the current phase goes back to following it
+    store.set(PHASE_KEY, phasePick || "");
+    render();
+    if (focus && $(`ph-${shownPhase()}`)) $(`ph-${shownPhase()}`).focus();
+  }
+  $("phase-back").addEventListener("click", () => setPhase(data.phase, true));
+  $("phases").addEventListener("keydown", (e) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !data || !data.ok) return;
+    let i = PHASES.indexOf(shownPhase());
+    i = e.key === "Home" ? 0 : e.key === "End" ? PHASES.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + PHASES.length) % PHASES.length;
+    setPhase(PHASES[i], true); e.preventDefault();
+  });
 
   function currentId() {
     const ids = data.milestones.map((m) => m.id);
@@ -376,13 +415,14 @@
     }));
     $("segbar").setAttribute("aria-label", order.map((k) => `${label(k)} ${counts[k]}`).join(", "));
     fill($("seg-legend"), order.map((k) => h("li", {}, h("span", { class: `swatch st-${k}`, "aria-hidden": "true" }), `${label(k)} ${counts[k]}`)));
-    const p = data.progress, c = data.costs;
-    const badge = gateBadge(m);
+    // project totals and cost live in Stable; here only what belongs to this milestone: its issues and its gate
+    const b = data.backlog || {};
+    const buf = b.buffer && m && b.buffer.milestone === m.id ? b.buffer : null;
+    const sched = m ? Object.entries(b.issues || {}).filter(([, v]) => v.scheduled_in === m.id && ["scheduled", "in_progress"].includes(v.status)) : [];
     fill($("ms-facts"),
-      h("span", { title: "Tasks done in the whole project", text: `Project ${p.done}/${p.total}` }),
-      c && (Number(c.usd) > 0 || Number(c.tokens) > 0) ? h("span", { title: `${compact(c.tokens || 0)} tokens (API-equivalent estimate)`, text: `Cost US$ ${Number(c.usd || 0).toFixed(2)}` })
-        : h("span", { class: "fact-cmd", title: "Run /dev-kit:costs to compute the estimated cost" }, "Cost not computed", copyBtn("/dev-kit:costs")),
-      badge);
+      buf || sched.length ? h("span", { title: [buf ? `${buf.pct}% of the milestone reserved for issues` : null, sched.length ? `Scheduled here: ${sched.map(([id, v]) => `${id} ${v.title || ""}`).join("; ")}` : null].filter(Boolean).join("\n"),
+        text: [buf ? `Issue buffer ${buf.used}/${buf.capacity}` : null, sched.length ? plural(sched.length, "issue") : null].filter(Boolean).join(" · ") }) : null,
+      gateBadge(m));
   }
   $("goal-more").addEventListener("click", () => { goalOpen = !goalOpen; renderMilestone(currentMilestone()); });
 
@@ -595,11 +635,21 @@
   }
 
   // ------------------------------------------------------------------ needs you, activity
-  function listBlock(title, items, emptyText, good) {
-    return h("div", {}, h("div", { class: "list-title" }, title, items.length ? h("span", { class: "chip", text: String(items.length) }) : null),
+  /** A small button naming a phase: it opens that phase. */
+  const phaseTag = (p) => h("button", { type: "button", class: "phase-tag", title: `Open ${PHASE_NAME[p]}`, text: PHASE_NAME[p], onclick: () => setPhase(p) });
+  function listBlock(title, items, emptyText, good, phase) {
+    return h("div", {}, h("div", { class: "list-title" }, title, items.length ? h("span", { class: "chip", text: String(items.length) }) : null, phase ? phaseTag(phase) : null),
       items.length ? h("ul", { class: "list" }, items) : h("div", { class: `empty${good ? " good" : ""}`, text: emptyText }));
   }
 
+  /** The phase an open question belongs to, from the skill that raised it. */
+  function questionPhase(q) {
+    const by = String(q.by || "").toLowerCase();
+    if (/interview|prd|architect|\bux\b|\bui\b|design|brief/.test(by)) return "conception";
+    if (/\bplan\b|requirements/.test(by)) return "planning";
+    if (/release|deploy|docs|usability/.test(by)) return "stable";
+    return "construction";
+  }
   function renderImpediments() {
     const blocked = Object.entries(data.tasks).filter(([, t]) => t.status === "blocked");
     const b = data.backlog || {};
@@ -609,6 +659,10 @@
     const stuck = data.milestones.filter((m) => qaState(m).exhausted && !qaState(m).fixBlocked.length);
     const approvals = actionsOn() ? inbox().approvals : [];
     const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length;
+    // which phase each item belongs to: the tabs show the count, the rows a tag that opens the phase
+    needsBy = { conception: 0, planning: 0, construction: blocked.length + hot.length + stuck.length, stable: 0 };
+    if (approvals.length) needsBy[data.phase] = (needsBy[data.phase] || 0) + approvals.length;
+    data.questions.forEach((q) => { needsBy[questionPhase(q)] += 1; });
     // the strip exists only while something needs the user; warnings alone ride along but do not open it
     const strip = $("needs");
     strip.hidden = !n;
@@ -619,15 +673,15 @@
       approvals.length ? listBlock("Claude Code asks permission", approvals.map(approvalRow), "") : null,
       stuck.length ? listBlock("QA rounds used up", stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }),
         h("span", { text: `${qaState(m).qa.runs - 1} fix rounds used of ${qaState(m).max} (${qaReason(qaState(m).qa, m) || "see the QA report"}). Keep fixing, accept with an ADR, or replan.` }),
-        h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))), "") : null,
+        h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))), "", false, "construction") : null,
       hot.length ? listBlock("Open hotfixes", hot.map((id) => h("li", {}, h("span", { class: "id", text: String(id) }),
-        h("span", { text: (data.tasks[id] || (b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))), "") : null,
+        h("span", { text: (data.tasks[id] || (b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))), "", false, "construction") : null,
       blocked.length ? listBlock("Blocked tasks", blocked.map(([id, t]) => h("li", { class: "has-btn" },
         h("button", { type: "button", class: "row-btn", "data-tid": id, "aria-haspopup": "dialog", onclick: () => openTask(id) },
           h("span", { class: "id", text: id }), h("span", { text: t.title }), h("span", { class: "chip", text: t.milestone }),
-          h("span", { class: "sub bad", text: t.blocked_reason || "No reason recorded" })))), "") : null,
+          h("span", { class: "sub bad", text: t.blocked_reason || "No reason recorded" })))), "", false, "construction") : null,
       data.questions.length ? listBlock("Open questions", data.questions.map((q) => h("li", {}, h("span", { class: "id", text: q.id }), h("span", {}, linkify(q.question)),
-        h("span", { class: "chip", text: q.by || "?" }), q.assumption ? h("span", { class: "sub", text: `Assumed meanwhile: ${q.assumption}` }) : null,
+        h("span", { class: "q-tags" }, h("span", { class: "chip", text: q.by || "?" }), phaseTag(questionPhase(q))), q.assumption ? h("span", { class: "sub", text: `Assumed meanwhile: ${q.assumption}` }) : null,
         actionsOn() ? answerBox(q) : null)), "") : null,
       warns.length ? listBlock("Warnings", warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
       actionsOn() && data.questions.length ? h("p", { class: "needs-hint" }, "Answer here: Claude Code records the answer and continues what was waiting on it.") : null,
@@ -825,24 +879,39 @@
       h("span", { class: "score", text: score != null ? `${score} / ${cut}` : `— / ${cut}` }), mm);
   }
 
-  function renderDoD() {
+  /** Review rows (score against its cut-off) for the given review keys, then the ones not run yet. */
+  function reviewList(keys, emptyText) {
     const q = data.quality;
-    $("dod-sub").textContent = `Cut-off: gates ${q.min_overall} · reviews ${q.review_min_overall}. Rows show the score against its cut-off mark.`;
-    const base = ["prd", "design", "plan", "ux", "docs"];
-    const revs = [...base.map((k) => [k, data.reviews[k] || {}]), ...Object.entries(data.reviews).filter(([k]) => !base.includes(k))];
-    const rname = (k) => (k.length <= 3 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1));
+    const rname = (k) => REVIEW_NAME[k] || (k.length <= 3 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1));
     const started = (v) => v.score != null || (v.verdict && v.verdict !== "pending");
-    const revRows = revs.filter(([, v]) => started(v)).map(([k, v]) => dodRow(rname(k), v.score ?? null, k === "ux" ? q.min_overall : q.review_min_overall, v.verdict));
-    const revPending = revs.filter(([, v]) => !started(v)).map(([k]) => rname(k));
+    const rows = [], pend = [];
+    keys.forEach((k) => {
+      const v = data.reviews[k] || {};
+      if (started(v)) rows.push(dodRow(rname(k), v.score ?? null, k === "ux" ? q.min_overall : q.review_min_overall, v.verdict));
+      else pend.push(rname(k));
+    });
+    return h("div", {}, rows.length ? h("div", { class: "list" }, rows) : null,
+      pend.length ? h("p", { class: "pending-line", text: `Not run yet: ${pend.join(", ")}` }) : null,
+      !rows.length && !pend.length ? h("div", { class: "empty", text: emptyText }) : null);
+  }
+  const OWN_REVIEWS = ["prd", "design", "plan", "ux", "docs"];
+  const cutoffNote = () => `Cut-off: reviews ${data.quality.review_min_overall} · usability ${data.quality.min_overall}. Rows show the score against its cut-off mark.`;
+
+  /** Construction › Gates: the QA gate of every milestone that ran one. */
+  function renderGates() {
+    const q = data.quality;
+    $("dod-sub").textContent = `Cut-off ${q.min_overall} overall · ${q.min_dimension} per dimension. Rows show the score against its cut-off mark.`;
     const gStarted = (m) => m.score != null || m.gate !== "pending";
-    const gateRows = data.milestones.filter(gStarted).map((m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? "fail" : m.gate)).reverse();
-    const gatePending = data.milestones.filter((m) => !gStarted(m)).map((m) => m.id);
-    const block = (title, rows, pending, emptyText) => h("div", {}, h("div", { class: "list-title", text: title }),
-      rows.length ? h("div", { class: "list" }, rows) : !pending.length ? h("div", { class: "empty", text: emptyText }) : null,
+    const rows = data.milestones.filter(gStarted).map((m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? "fail" : m.gate)).reverse();
+    const pending = data.milestones.filter((m) => !gStarted(m)).map((m) => m.id);
+    fill($("dod"), rows.length ? h("div", { class: "list" }, rows) : !pending.length ? h("div", { class: "empty", text: "No milestones yet." }) : null,
       pending.length ? h("p", { class: "pending-line", text: `Not run yet: ${pending.join(", ")}` }) : null);
-    fill($("dod"), block("Reviews", revRows, revPending, "No reviews."), block("Milestone gates", gateRows, gatePending, "No milestones yet."));
   }
 
+  const issueLi = (i) => h("li", {}, h("span", { class: "id", text: i.id }), h("span", { text: i.title || "" }),
+    h("span", { class: `chip${i.c === "expedite" ? " lane-hotfix" : ""}`, text: i.c || i.status }),
+    h("span", { class: "sub", text: [i.type, i.severity, i.origin === "baseline" ? "pre-existing" : null, i.scheduled_in ? `→ ${i.scheduled_in}` : null, i.c && i.status && i.c !== i.status ? i.status : null].filter(Boolean).join(" · ") }));
+  /** Planning › Backlog: the issue queue by class of service, the issues already scheduled, and what later milestones hold. */
   function renderBacklog(cur) {
     const b = data.backlog || {};
     const issues = b.issues || {};
@@ -853,33 +922,132 @@
     const later = data.milestones.slice(curIdx + 1).map((m) => ({ m, left: tasksOf(m).filter((t) => t.status !== "done").length })).filter((x) => x.left);
     const laterTasks = later.reduce((n, x) => n + x.left, 0);
     $("pb-sub").textContent = `${plural(queued.length, "queued issue")} · ${plural(laterTasks, "task")} in later milestones`;
-    const issueLi = (i) => h("li", {}, h("span", { class: "id", text: i.id }), h("span", { text: i.title || "" }),
-      h("span", { class: `chip${i.c === "expedite" ? " lane-hotfix" : ""}`, text: i.c || i.status }),
-      h("span", { class: "sub", text: [i.type, i.severity, i.origin === "baseline" ? "pre-existing" : null, i.scheduled_in ? `→ ${i.scheduled_in}` : null].filter(Boolean).join(" · ") }));
-    const buf = b.buffer;
-    let meter = null;
-    if (buf) {
-      meter = h("div", { class: "meter" });
-      const sp = h("span"); sp.style.width = `${Math.min(100, buf.capacity ? (buf.used / buf.capacity) * 100 : 0)}%`;
-      meter.append(sp);
-    }
     fill($("product-backlog"),
       listBlock("Issue queue", queued.map(issueLi), "No issues waiting.", true),
-      scheduled.length || buf ? h("div", { class: "list-wrap" },
-        scheduled.length ? listBlock("Scheduled issues", scheduled.map(([id, v]) => issueLi({ id, c: v.class, ...v })), "") : null,
-        buf ? h("div", {}, h("div", { class: "list-title", text: `Issue buffer of ${buf.milestone}` }),
-          h("div", { class: "score", text: `${buf.used} of ${plural(buf.capacity, "slot")} used (${buf.pct}% of the milestone reserved for issues)` }), meter) : null) : null,
+      scheduled.length ? listBlock("Scheduled issues", scheduled.map(([id, v]) => issueLi({ id, c: v.class, ...v })), "") : null,
       listBlock("Later milestones", later.map(({ m, left }) => h("li", { class: "has-btn" },
-        h("button", { type: "button", class: "row-btn", title: `Show ${m.id} on the board`, onclick: () => { selectMilestone(m.id, false); $("main").scrollIntoView({ block: "start" }); } },
+        h("button", { type: "button", class: "row-btn", title: `Show ${m.id} in construction`, onclick: () => openMilestone(m.id) },
           h("span", { class: "id", text: m.id }), h("span", { text: m.title || "" }), h("span", { class: "chip", text: plural(left, "task") })))),
-        "Nothing planned after this milestone."));
+        "Nothing planned after the current milestone."));
+  }
+  /** Shows a milestone in Construction, from anywhere on the board. */
+  function openMilestone(id) {
+    selected = id; expanded = new Set(); goalOpen = false; mobileCol = null;
+    setPhase("construction");
+    $("main").scrollIntoView({ block: "start" });
   }
 
   function renderInsights(m, curId) {
     if (view === "burndown") renderBurndown(m);
     else if (view === "velocity") renderVelocity(curId);
-    else if (view === "quality") renderDoD();
-    else if (view === "backlog") renderBacklog(curId);
+    else if (view === "gates") renderGates();
+  }
+
+  // ------------------------------------------------------------------ phases: conception, planning, stable (construction is the milestone view above)
+  /** One conception or planning step: state, why it is out of date, its files in .dev/, and the command that moves it on. */
+  function stepCard(x) {
+    const files = (data.artifacts || {})[x.key] || [];
+    const c = x.state === "review" ? STEP_REVIEW_CMD[x.key] : ["todo", "doing", "stale"].includes(x.state) ? STEP_CMD[x.key] : null;
+    return h("li", { class: `step-card s-${x.state}` },
+      h("div", { class: "step-top" }, h("span", { class: "step-mark", "aria-hidden": "true", text: STEP_MARK[x.state] }),
+        h("strong", { text: STEP_TITLE[x.key] || x.key }), h("span", { class: `chip step-st s-${x.state}`, text: STEP_WORD[x.state] })),
+      h("p", { class: "card-sub", text: STEP_ABOUT[x.key] || "" }),
+      x.note ? h("p", { class: "step-note", text: x.note }) : null,
+      files.length ? h("p", { class: "step-files", title: files.join("\n"), text: files.slice(0, 3).join(" · ") + (files.length > 3 ? ` +${files.length - 3}` : "") }) : null,
+      c ? h("div", { class: "step-act" }, cmd(c)) : null);
+  }
+  const phaseOf = (key) => data.cycle.phases.find((p) => p.key === key) || { steps: [] };
+
+  function renderConception() {
+    fill($("conc-steps"), (phaseOf("conception").steps || []).map(stepCard));
+    $("conc-rev-sub").textContent = `Cut-off ${data.quality.review_min_overall}`;
+    fill($("conc-reviews"), reviewList(["prd", "design"], "No reviews."));
+    const issues = Object.entries((data.backlog || {}).issues || {}).map(([id, v]) => ({ id, c: v.class, ...v }))
+      .filter((i) => i.type === "change" || i.class === "change");
+    const open = issues.filter((i) => !["closed", "done", "dropped"].includes(i.status));
+    fill($("conc-changes"), listBlock("Open", open.map(issueLi), "No scope change waiting.", true),
+      issues.length > open.length ? h("p", { class: "pending-line", text: `${issues.length - open.length} closed` }) : null);
+    const adrs = data.decisions || [];
+    $("conc-adr-sub").textContent = adrs.length ? `${plural(adrs.length, "decision")} from .dev/decisions.md, newest first` : "From .dev/decisions.md";
+    const adrLi = (d) => h("li", { class: /supersed/i.test(d.status || "") ? "muted" : null }, h("span", { class: "id", text: d.id }), h("span", { text: d.title }),
+      h("span", { class: "chip", text: d.status || "?" }), d.date ? h("span", { class: "sub", text: d.date }) : null);
+    const SHOWN = 6;
+    fill($("conc-adrs"), adrs.length ? [h("ul", { class: "list" }, adrs.slice(0, SHOWN).map(adrLi)),
+      adrs.length > SHOWN ? h("details", { class: "more-list" }, h("summary", { text: `Show ${adrs.length - SHOWN} older` }), h("ul", { class: "list" }, adrs.slice(SHOWN).map(adrLi))) : null]
+      : h("div", { class: "empty", text: "No decision recorded yet. The interview and architecture write them." }));
+  }
+
+  // the CSP forbids style attributes: the width goes through the CSSOM
+  const roadMeter = (x) => { const bar = h("span"); bar.style.width = `${x.total ? Math.round((x.done / x.total) * 100) : 0}%`; return h("span", { class: "road-meter", "aria-hidden": "true" }, bar); };
+  function renderPlanning() {
+    fill($("pl-step"), (phaseOf("planning").steps || []).map(stepCard));
+    fill($("pl-review"), reviewList(["plan"], ""));
+    renderBacklog(data.current_milestone);
+    const ms = data.milestones;
+    const closed = ms.filter((m) => m.gate === "passed" || m.gate === "skipped").length;
+    $("road-sub").textContent = ms.length ? `${closed} of ${plural(ms.length, "milestone")} closed. Open one to see it in construction.` : "";
+    fill($("roadmap"), ms.length ? ms.map((m) => {
+      const x = milestoneInfo(m);
+      const done = m.gate === "passed" || m.gate === "skipped";
+      return h("li", {}, h("button", { type: "button", class: `road-row${done ? " done" : ""}${m.id === data.current_milestone ? " cur" : ""}`, onclick: () => openMilestone(m.id) },
+        h("span", { class: done ? "tab-ok" : `tab-dot ${x.active ? "active" : m.gate}`, "aria-hidden": "true", text: done ? "✓" : null }),
+        h("strong", { class: "id", text: m.id }),
+        h("span", { class: "road-text" }, h("span", { class: "road-title", text: m.title || m.id }), m.goal ? h("span", { class: "road-goal", text: m.goal }) : null),
+        m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null,
+        h("span", { class: "road-count", text: `${x.done}/${x.total}` }),
+        roadMeter(x)));
+    }) : h("li", { class: "empty" }, "No milestones yet. They appear after ", cmd("/dev-kit:plan"), "."));
+  }
+
+  /** Construction › Next release: the closed milestones waiting for a release and what the release still needs. */
+  function renderTrain() {
+    const tr = data.cycle.release || {};
+    const waiting = tr.milestones || [];
+    $("train-card").hidden = !waiting.length;
+    if (!waiting.length) return;
+    const word = { done: "✓ done", todo: "○ to do", review: "◐ waiting for its review", "n/a": "– not needed" };
+    $("train-sub").textContent = tr.ready ? "Ready to cut" : `After ${(tr.waiting_for || []).join(", ") || "the open work"}`;
+    fill($("train"),
+      h("span", { class: "train-ms" }, waiting.map((id) => h("button", { type: "button", class: "chip train-chip", text: id, title: `Show ${id}`, onclick: () => openMilestone(id) }))),
+      tr.usability ? h("span", { class: `train-check s-${tr.usability}` }, `Usability ${word[tr.usability] || tr.usability}`) : null,
+      tr.docs ? h("span", { class: `train-check s-${tr.docs}` }, `Docs ${word[tr.docs] || tr.docs}`) : null,
+      tr.ready ? cmd("/dev-kit:release") : null);
+  }
+
+  function renderStable() {
+    const p = data.progress, c = data.costs, ms = data.milestones, rel = data.releases || [];
+    const closed = ms.filter((m) => m.gate === "passed" || m.gate === "skipped").length;
+    $("st-sum-sub").textContent = data.phase === "stable" ? "Stable: nothing open, everything released" : `Not stable yet: the project is in ${PHASE_NAME[data.phase]}`;
+    const fact = (label, value, extra) => h("div", { class: "fact" }, h("span", { class: "fact-label", text: label }), h("strong", { class: "fact-value", text: value }), extra || null);
+    fill($("st-summary"),
+      fact("Tasks done", `${p.done}/${p.total}`),
+      fact("Milestones closed", `${closed}/${ms.length}`),
+      fact("Releases", String(rel.length), rel.length ? h("span", { class: "card-sub", text: `last ${rel.at(-1).tag || rel.at(-1).version || ""}` }) : null),
+      c && (Number(c.usd) > 0 || Number(c.tokens) > 0) ? fact("Cost (estimate)", `US$ ${Number(c.usd || 0).toFixed(2)}`, h("span", { class: "card-sub", text: `${compact(c.tokens || 0)} tokens` }))
+        : fact("Cost", "not computed", h("span", { class: "fact-cmd" }, copyBtn("/dev-kit:costs"))));
+    // production
+    const pr = data.production, lc = data.lifecycle || {};
+    const when = { per_milestone: "after each milestone", on_release: "at each release", manual: "by hand", none: "no production environment" };
+    $("st-prod-sub").textContent = `Deploys ${when[lc.deploy_when] || lc.deploy_when || "?"}`;
+    if (!pr) fill($("st-prod"), h("div", { class: "empty", text: lc.deploy_when === "none" ? "This project has no production deploy." : "No production deploy recorded yet." }),
+      lc.deploy_when && lc.deploy_when !== "none" ? h("p", { class: "pending-line" }, "Deploy with ", cmd("/dev-kit:deploy")) : null);
+    else {
+      const cur = pr.current, last = pr.last;
+      fill($("st-prod"), h("ul", { class: "list" },
+        cur ? h("li", {}, h("span", { class: "id", text: (cur.sha || "").slice(0, 7) }), h("span", { text: cur.milestone ? `Running ${cur.milestone}` : "Running" }),
+          h("span", { class: "badge good", text: "✓ ok" }), h("span", { class: "sub", text: [cur.at && Number.isFinite(parseT(cur.at)) ? fmtDT(parseT(cur.at)) : null, cur.migration ? `migration ${cur.migration}` : null].filter(Boolean).join(" · ") })) : null,
+        last && last.status !== "ok" ? h("li", {}, h("span", { class: "id", text: (last.sha || "").slice(0, 7) }), h("span", { text: "Last attempt" }),
+          h("span", { class: "badge bad", text: stLabel(last.status) }), h("span", { class: "sub", text: last.at && Number.isFinite(parseT(last.at)) ? fmtDT(parseT(last.at)) : "" })) : null),
+      pr.drift ? h("p", { class: "pending-line", text: pr.drift }) : null);
+    }
+    // release checks: usability and docs reviews, and any other review the project recorded
+    const others = Object.keys(data.reviews).filter((k) => !OWN_REVIEWS.includes(k));
+    $("st-rev-sub").textContent = cutoffNote();
+    fill($("st-reviews"), reviewList(["ux", "docs", ...others], "No checks."));
+    fill($("st-releases"), rel.length ? h("ul", { class: "list" }, rel.slice().reverse().map((r) => h("li", {},
+      h("span", { class: "id", text: r.tag || r.version || "release" }), h("span", { text: r.hotfix ? `Hotfix ${r.hotfix}` : (r.milestones || []).join(", ") || "—" }),
+      h("span", { class: "chip", text: r.version || "" }), r.at && Number.isFinite(parseT(r.at)) ? h("span", { class: "sub", text: fmtDate(parseT(r.at)) }) : null)))
+      : h("div", { class: "empty", text: "No release yet. Closed milestones wait in Construction › Next release." }));
   }
 
   function tickAgents() {
@@ -1231,7 +1399,7 @@
   const doneOpen = new Set();  // plan columns whose done tasks are expanded, kept across live updates
   function renderPlan() {
     const box = $("planner");
-    if (view !== "plan" || !data || !data.ok) { box.hidden = true; return; }
+    if (!planShown() || !data || !data.ok) { box.hidden = true; return; }
     if (dragging) return;  // a live update in the middle of a drag would pull the card from under the pointer
     box.hidden = false;
     // the plan is rebuilt on every update: keep where the user had scrolled to
@@ -1304,8 +1472,17 @@
     box.querySelector(".plan-cols").scrollLeft = scrollX;
     box.querySelectorAll(".pcol-list[data-key]").forEach((l) => { if (scrollY[l.dataset.key]) l.scrollTop = scrollY[l.dataset.key]; });
   }
-  const VIEW_TITLE = { tasks: "Task board", plan: "Plan the milestones", quality: "Quality", burndown: "Burndown", velocity: "Velocity", backlog: "Backlog" };
+  const VIEW_TITLE = { tasks: "Task board", plan: "Plan the milestones", burndown: "Burndown", velocity: "Velocity", gates: "Milestone gates" };
   const viewsShown = () => VIEWS.filter((v) => v !== "plan" || actionsOn());
+  /** The plan view (drag, draft, send) lives in two places: its own card in Planning and the Plan tab of Construction. */
+  const planShown = () => actionsOn() && (shownPhase() === "planning" || (shownPhase() === "construction" && view === "plan"));
+  function placePlanner() {
+    const pl = $("planner");
+    const inPlanning = shownPhase() === "planning" && actionsOn();
+    $("plan-host-card").hidden = !inPlanning;
+    if (inPlanning) { if (pl.parentElement !== $("plan-host")) $("plan-host").append(pl); pl.setAttribute("aria-labelledby", "plan-host-h"); pl.removeAttribute("role"); }
+    else { if (pl.previousElementSibling !== $("view-tasks")) $("view-tasks").after(pl); pl.setAttribute("aria-labelledby", "tab-plan"); pl.setAttribute("role", "tabpanel"); }
+  }
   /** Tabs, panels, heading and layout for the current view (Plan only while the board takes requests). */
   function applyView() {
     if (!viewsShown().includes(view)) view = "tasks";
@@ -1319,13 +1496,13 @@
     INS.forEach((k) => { $(`ins-${k}`).hidden = k !== view; });
     $("board-card").dataset.view = view;
     $("board-card").classList.toggle("planning", view === "plan");
-    $("workspace").classList.toggle("planning", view === "plan");
+    $("workspace").classList.toggle("planning", planShown());
     $("board-h").textContent = VIEW_TITLE[view];
   }
   function setView(v, focus) {
     view = v; store.set(VIEW_KEY, v);
     applyView();
-    if (data && data.ok) {
+    if (data && data.ok && shownPhase() === "construction") {
       renderKanban(currentMilestone());
       renderPlan();
       renderInsights(currentMilestone(), currentId());
@@ -1352,10 +1529,16 @@
     banner.hidden = true;
     const curId = currentId();
     const m = data.milestones.find((x) => x.id === curId) || null;
+    const ph = shownPhase();
     keepFocus(() => {
-      applyView();
-      renderHeader(); renderTabs(); renderMilestone(m); renderImpediments(); renderStages(m); renderKanban(m); renderPlan();
-      renderRequests(); renderFeed(); renderInsights(m, curId);
+      // global: the phase tabs, Needs you, requests and activity; below, only the panel of the phase shown
+      PHASES.forEach((k) => { $(`phase-${k}`).hidden = k !== ph; });
+      renderImpediments(); renderHeader(); renderRequests(); renderFeed();
+      placePlanner(); applyView();
+      if (ph === "conception") renderConception();
+      else if (ph === "planning") { renderPlanning(); renderPlan(); }
+      else if (ph === "construction") { renderTrain(); renderTabs(); renderMilestone(m); renderStages(m); renderKanban(m); renderPlan(); renderInsights(m, curId); }
+      else renderStable();
     });
     updateAttention();
     $("main").setAttribute("aria-busy", "false");

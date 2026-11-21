@@ -262,6 +262,44 @@ def _read(path: Path) -> str:
         return ""
 
 
+ADR_HEAD = re.compile(r"^###\s+(ADR-\d{1,4})\s*[—–-]\s*(.+?)\s*$")
+ADR_META = re.compile(r"status:\s*([^·\n]+?)\s*(?:·|$)")
+ADR_DATE = re.compile(r"date:\s*(\d{4}-\d{2}-\d{2})")
+DECISIONS_SHOWN = 40
+
+
+def decisions_list(text: str) -> list[dict]:
+    """ADRs of decisions.md (id, title, status, date), newest first; the template's placeholder entry is skipped."""
+    out: list[dict] = []
+    for line in text.splitlines():
+        m = ADR_HEAD.match(line.strip())
+        if m:
+            if "{{" in m.group(2):
+                continue
+            out.append({"id": m.group(1), "title": m.group(2), "status": None, "date": None})
+        elif out and out[-1]["status"] is None and line.strip().startswith("- ") and "status:" in line:
+            st, dt = ADR_META.search(line), ADR_DATE.search(line)
+            out[-1]["status"] = st.group(1).strip() if st else None
+            out[-1]["date"] = dt.group(1) if dt else None
+    return list(reversed(out))[:DECISIONS_SHOWN]
+
+
+def production_info(store: "ds.Store") -> dict | None:
+    """What production runs (last ok deploy) and how far the checkout is ahead of it; None before any deploy."""
+    prod = (store.state.get("deploys") or {}).get("production") or {}
+    hist = [d for d in prod.get("history") or [] if isinstance(d, dict)]
+    cur = prod.get("current")
+    if not cur and not hist:
+        return None
+    try:
+        drift = ds.deploy_drift(store, "production")
+    except Exception:  # noqa: BLE001 - git may be missing; the board keeps rendering
+        drift = None
+    keep = ("sha", "milestone", "migration", "status", "at")
+    return {"current": {k: cur.get(k) for k in keep} if cur else None,
+            "last": {k: hist[-1].get(k) for k in keep} if hist else None, "drift": drift}
+
+
 def milestone_goals(plan: str) -> dict:
     """First paragraph after each '## Mn — title' heading of plan.md."""
     goals, cur, buf = {}, None, []
@@ -821,6 +859,12 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "questions": question_options(root, open_questions(_read(store.dev / "open-questions.md"))),
         "log": sorted(log_tail(_read(store.dev / "log.md")) + live_feed(events), key=lambda r: _ts(r.get("at")), reverse=True)[:LOG_TAIL],
         "costs": costs,
+        "decisions": decisions_list(_read(store.dev / "decisions.md")),
+        "releases": [{k: r.get(k) for k in ("version", "tag", "milestones", "at", "hotfix")}
+                     for r in s.get("releases") or [] if isinstance(r, dict)],
+        "production": production_info(store),
+        "artifacts": {step: [str(p.relative_to(root)) for p in ds.artifact_paths(store, art)]
+                      for step, art in ds.STEP_ARTIFACT.items()},
         "agents": agents, "agent_roles": AGENT_ROLES,
         "kit": KIT_VERSION,
         "board": {k: board.get(k) for k in ("pid", "port", "url", "started_at", "host", "exposed", "actions")} if board else None,

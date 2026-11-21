@@ -618,11 +618,23 @@ class BoardTest(unittest.TestCase):
         html = request(self.record()["port"], "GET", "/")[1].decode()
         for el in ('id="req-card"', 'id="view-switch"', 'id="planner"', 'id="issue-dialog"', 'id="toast"', 'id="cont-btn"'):
             self.assertIn(el, html)
-        # one work card: the board views and the insights are tabs of the same card
-        card = html[html.index('id="board-card"'):html.index('<aside class="side"')]
-        for el in ('id="tab-tasks"', 'id="tab-plan"', 'id="ins-quality"', 'id="ins-burndown"', 'id="ins-velocity"', 'id="ins-backlog"'):
+        # the lifecycle bar is the page's navigation: one panel per phase; Needs you, requests and activity stay outside them
+        self.assertIn('id="phases" role="tablist"', html)
+        for ph in ("conception", "planning", "construction", "stable"):
+            self.assertIn(f'id="phase-{ph}" role="tabpanel"', html)
+        panels = html[html.index('id="phase-conception"'):html.index('<aside class="side"')]
+        for el in ('id="needs"', 'id="req-card"', 'id="feed"'):
+            self.assertNotIn(el, panels)
+        # construction: one work card, the board views and the insights are tabs of it; quality and backlog went to their phases
+        card = html[html.index('id="board-card"'):html.index('id="phase-stable"')]
+        self.assertIn('id="phase-construction"', html[:html.index('id="board-card"')])
+        for el in ('id="tab-tasks"', 'id="tab-plan"', 'id="ins-burndown"', 'id="ins-velocity"', 'id="ins-gates"'):
             self.assertIn(el, card)
-        self.assertNotIn('class="card insights"', html)
+        for el in ('id="ins-quality"', 'id="ins-backlog"', 'class="card insights"'):
+            self.assertNotIn(el, html)
+        planning = html[html.index('id="phase-planning"'):html.index('id="phase-construction"')]
+        for el in ('id="roadmap"', 'id="product-backlog"', 'id="plan-host"'):
+            self.assertIn(el, planning)
         self.assertEqual(request(self.record()["port"], "GET", "/assets/favicon-alert.svg")[0], 200)  # the tab's "needs you" icon
 
     def test_state_endpoint_is_read_only_and_complete(self):
@@ -634,7 +646,8 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(code, 200)
         d = json.loads(body)
         for key in ("project", "phase", "step", "cycle", "progress", "milestones", "tasks", "next", "reviews", "quality",
-                    "backlog", "questions", "log", "current_milestone", "board", "kit"):
+                    "backlog", "questions", "log", "current_milestone", "board", "kit", "decisions", "releases", "production",
+                    "artifacts"):
             self.assertIn(key, d)
         self.assertRegex(d["kit"], r"^\d+\.\d+\.\d+")
         self.assertEqual(d["milestones"][0]["goal"], "Ship a deployable skeleton.")
@@ -645,7 +658,28 @@ class BoardTest(unittest.TestCase):
         self.assertEqual((d["phase"], d["step"]), ("conception", "interview"))  # no brief yet
         self.assertEqual([x["key"] for x in d["cycle"]["phases"][2]["steps"]], ["milestones", "release"])
         self.assertIsNone(d["milestones"][0]["deploy"])
+        self.assertEqual((d["releases"], d["production"]), ([], None))
+        self.assertEqual(set(d["artifacts"]), {"interview", "prd", "architecture", "ux", "ui", "plan"})
         self.assertEqual(state_file.read_bytes(), before)
+
+    def test_decisions_are_listed_newest_first_without_the_template_placeholder(self):
+        mod = self._mod()
+        text = ("### ADR-001 — {{first decision}}\n- date: {{date}} · status: accepted · source: interview\n"
+                "### ADR-001 — Use SQLite\n- date: 2026-01-02 · status: superseded by ADR-003 · source: interview\n"
+                "- category: library_choice\n### ADR-002 — Tokens in cookies (auto)\n- date: 2026-01-05 · status: accepted · source: auto\n"
+                "### ADR-003 — Use Postgres\n- status: accepted\n")
+        out = mod.decisions_list(text)
+        self.assertEqual([d["id"] for d in out], ["ADR-003", "ADR-002", "ADR-001"])
+        self.assertEqual(out[2], {"id": "ADR-001", "title": "Use SQLite", "status": "superseded by ADR-003", "date": "2026-01-02"})
+        self.assertEqual((out[0]["status"], out[0]["date"]), ("accepted", None))
+
+    def test_production_and_releases_reach_the_board(self):
+        mod = self._mod()
+        self.assertIsNone(mod.build_state(self.root)["production"])
+        self.ds("deploy", "production", "--sha", "a" * 40, "--status", "ok")
+        self.ds("deploy", "production", "--sha", "b" * 40, "--status", "failed")
+        d = mod.build_state(self.root)
+        self.assertEqual((d["production"]["current"]["sha"], d["production"]["last"]["status"]), ("a" * 40, "failed"))
 
     def test_milestone_deploy_is_the_latest_production_record_of_that_milestone(self):
         import importlib.util
