@@ -685,6 +685,36 @@ class BoardTest(unittest.TestCase):
         dw.submit(self.root, "release_decision", {"release": "R1", "decision": "approve"})
         self.assertIn("already queued", mod.release_decision_errors(self.root, {"release": "R1", "decision": "approve"})[0])
 
+    def test_markdown_documents_of_dev_only(self):
+        mod = self._mod()
+        dev = self.root / ".dev"
+        (dev / "prd.md").write_text("# PRD\n\n| AC | Text |\n|---|---|\n| AC-1 | x |\n", encoding="utf-8")
+        (dev / "qa" / "M1").mkdir(parents=True)
+        (dev / "qa" / "M1" / "report.md").write_text("# QA M1\n", encoding="utf-8")
+        (dev / "notes.txt").write_text("x", encoding="utf-8")
+        (self.root / "outside.md").write_text("secret", encoding="utf-8")
+        (dev / "link.md").symlink_to(self.root / "outside.md")
+        (dev / "run").mkdir(exist_ok=True)
+        (dev / "run" / "scratch.md").write_text("x", encoding="utf-8")
+        code, d = mod.doc_detail(self.root, "prd.md")
+        self.assertEqual((code, d["path"]), (200, "prd.md"))
+        self.assertIn("| AC-1 | x |", d["text"])
+        self.assertEqual(mod.doc_detail(self.root, ".dev/qa/M1/report.md")[1]["path"], "qa/M1/report.md")
+        for bad, want in (("../outside.md", 400), ("/etc/passwd", 400), ("link.md", 400), ("notes.txt", 400),
+                          ("missing.md", 404), ("qa/../../outside.md", 400), ("prd.md\x00", 400), ("", 400)):
+            self.assertEqual(mod.doc_detail(self.root, bad)[0], want, bad)
+        docs = mod.build_state(self.root)["docs"]
+        self.assertIn("prd.md", docs)
+        self.assertIn("qa/M1/report.md", docs)
+        self.assertNotIn("run/scratch.md", docs)
+        self.assertNotIn("link.md", docs)
+        # over HTTP, behind the same access check as /api/task
+        self.board("start", check=True)
+        port = self.record()["port"]
+        code, body = request(port, "GET", "/api/doc?path=qa%2FM1%2Freport.md")
+        self.assertEqual((code, json.loads(body)["text"]), (200, "# QA M1\n"))
+        self.assertEqual(request(port, "GET", "/api/doc?path=..%2Foutside.md")[0], 400)
+
     def test_decisions_are_listed_newest_first_without_the_template_placeholder(self):
         mod = self._mod()
         text = ("### ADR-001 — {{first decision}}\n- date: {{date}} · status: accepted · source: interview\n"

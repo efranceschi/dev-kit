@@ -17,6 +17,7 @@
   --accent-b: #22d3ee;
   --accent-text: #c4b5fd;
   --series-1: #3987e5;
+  --series-2: #d95926;
   --ideal: #898781;
   --good: #0ca30c;
   --good-text: #34d058;
@@ -49,6 +50,7 @@
     --border-strong: rgba(11, 11, 11, 0.16);
     --accent-text: #5b3bd1;
     --series-1: #2a78d6;
+    --series-2: #eb6834;
     --good-text: #006300;
     --critical-text: #b42525;
     --todo: #a3a29c;
@@ -74,6 +76,7 @@
   --border-strong: rgba(11, 11, 11, 0.16);
   --accent-text: #5b3bd1;
   --series-1: #2a78d6;
+  --series-2: #eb6834;
   --good-text: #006300;
   --critical-text: #b42525;
   --todo: #a3a29c;
@@ -881,3 +884,51 @@ body.compact .cons-nav .stage.here { flex-grow: 1.4; }
 @media (prefers-reduced-motion: no-preference) {
   .topbar, .phasebar, .cons-nav, .chev, .stage { transition: padding .15s ease, min-height .15s ease; }
 }
+
+/* ---------- velocity: hours and cost per milestone (2.2) */
+.chart .line-work { fill: none; stroke: var(--series-2); stroke-width: 2; stroke-dasharray: 6 4; stroke-linejoin: round; stroke-linecap: round; }
+.chart .marker.s2 { fill: var(--series-2); }
+.chart .spend { fill: var(--text-secondary); font-size: 10.5px; }
+.key-line.s2 { border-color: var(--series-2); border-top-style: dashed; }
+.tt-row .key-line.s2 { border-color: var(--series-2); }
+.chart-title { margin-top: 16px; }
+
+/* ---------- links to .dev documents, and the markdown drawer (2.2) */
+.doc-link { font: inherit; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: transparent; color: var(--accent-text); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.doc-link:hover { background: var(--surface-3); }
+.doc-link.id { font-family: var(--mono); font-weight: 600; color: var(--accent-text); border-color: transparent; padding: 0 4px; }
+.doc-link.id:hover { border-color: var(--border-strong); }
+.doc-ico { font-size: 11px; opacity: .8; }
+.doc-link.id .doc-ico { display: none; }
+.doc-off { font-size: 12px; color: var(--text-muted); }
+.doc-off.id { font-family: var(--mono); font-weight: 600; color: var(--text-secondary); }
+.step-files { display: flex; flex-wrap: wrap; gap: 6px; white-space: normal; }
+.dod-links { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: 6px; vertical-align: middle; }
+.doc-drawer { width: min(860px, 100vw); }
+.doc-headtext { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.doc-path { font-size: 12px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; }
+.md { font-size: 14px; line-height: 1.6; color: var(--text-primary); overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 4px; }
+.md .md-h { margin: 22px 0 8px; line-height: 1.3; scroll-margin-top: 80px; }
+.md h2.md-h { font-size: 20px; } .md h3.md-h { font-size: 16.5px; } .md h4.md-h { font-size: 14.5px; } .md h5.md-h, .md h6.md-h { font-size: 13px; color: var(--text-secondary); }
+.md p { margin: 8px 0; }
+.md .md-list { margin: 6px 0; padding-left: 22px; }
+.md .md-list li { margin: 3px 0; }
+.md .md-task { list-style: none; margin-left: -18px; }
+.md .md-box { margin-right: 6px; color: var(--text-secondary); }
+.md code { font-family: var(--mono); font-size: .88em; background: var(--surface-3); border-radius: 5px; padding: 1px 5px; }
+.md .md-pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; overflow: auto; margin: 10px 0; }
+.md .md-pre code { background: none; padding: 0; font-size: 12.5px; white-space: pre; }
+.md .md-quote { margin: 10px 0; padding: 2px 14px; border-left: 3px solid var(--border-strong); color: var(--text-secondary); }
+.md hr { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
+.md .md-table { overflow-x: auto; margin: 10px 0; }
+.md table { border-collapse: collapse; font-size: 13px; min-width: 60%; }
+.md th, .md td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; vertical-align: top; }
+.md th { background: var(--surface-2); font-weight: 650; }
+.md .md-center { text-align: center; } .md .md-right { text-align: right; }
+.md a { color: var(--accent-text); }
+.md .md-a { font: inherit; padding: 0; text-decoration: underline; }
+.md .md-a-off { text-decoration: underline dotted; color: var(--text-secondary); }
+.md [data-anchor] { scroll-margin-top: 80px; }
+.md .md-hit { background: color-mix(in srgb, var(--warning) 22%, transparent); border-radius: 6px; transition: background 1.2s ease; }

@@ -3,7 +3,7 @@
 
 Standard library only. Usage:
   python3 -I dev_cost.py --root DIR ingest [--transcripts DIR]
-  python3 -I dev_cost.py --root DIR report [--by stage|agent|model|session] [--all | --since YYYY-MM-DD] [--json] [--no-ingest]
+  python3 -I dev_cost.py --root DIR report [--by stage|agent|model|session|milestone] [--all | --since YYYY-MM-DD] [--json] [--no-ingest]
   python3 -I dev_cost.py --root DIR report --time [--all | --since D] [--json]   time per agent and skill, ledger reuse
   python3 -I dev_cost.py --root DIR export [--stamp YYYYMMDD-HHMMSS] [--all | --since D] [--no-ingest]
 
@@ -294,6 +294,89 @@ def attribute(usage: list[dict], events: list[dict]) -> list[dict]:
     return out
 
 
+# ------------------------------------------------------------------ milestones (the board's velocity)
+
+def milestone_windows(dev: Path) -> tuple[list[tuple], list[tuple]]:
+    """From state.json: (start, end, milestone) of every task that ran (end = done_at, or now while in progress), and
+    the QA window of every milestone (its last task done -> passed_at)."""
+    try:
+        st = json.loads((dev / "state.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], []
+    now = datetime.now(timezone.utc)
+    tasks, last_done = [], {}
+    for t in (st.get("tasks") or {}).values():
+        s, e, m = parse_ts(t.get("started_at")), parse_ts(t.get("done_at")), t.get("milestone")
+        if m and e and (m not in last_done or e > last_done[m]):
+            last_done[m] = e
+        if m and s and t.get("status") != "dropped":
+            tasks.append((s, e or now, m))
+    qa = []
+    for m, info in (st.get("milestones") or {}).items():
+        p = parse_ts(info.get("passed_at"))
+        if m in last_done:
+            qa.append((last_done[m], p or now, m))
+    return tasks, qa
+
+
+def tag_milestones(usage: list[dict], dev: Path) -> list[dict]:
+    """Each usage row gets the milestone it was spent on: the milestone of a task in progress at that moment (the
+    lowest-numbered one if several run), otherwise the milestone whose QA window holds it, otherwise none."""
+    tasks, qa = milestone_windows(dev)
+    num = lambda m: int(m[1:]) if re.fullmatch(r"M\d+", str(m)) else 10 ** 6  # noqa: E731
+    out = []
+    for r in usage:
+        ts = parse_ts(r.get("ts"))
+        m = None
+        if ts:
+            running = [w[2] for w in tasks if w[0] <= ts <= w[1]]
+            m = min(running, key=num) if running else next((w[2] for w in sorted(qa, key=lambda w: w[0]) if w[0] <= ts <= w[1]), None)
+        out.append({**r, "milestone": m})
+    return out
+
+
+def milestone_costs(dev: Path) -> dict:
+    """Cost and tokens per milestone over all of the project's usage, written to .dev/costs/milestones.json for the
+    board. Without transcripts, the tokens the skills reported per scope (agent_end), flagged partial."""
+    events, _ = tel.read_events(dev)
+    usage, _ = period_filter(attribute(load_usage(dev), events), events, "all", None, dev)
+    prices = load_prices(dev)
+    rows: dict[str, dict] = {}
+    for r in tag_milestones(usage, dev):
+        m = r.get("milestone")
+        if not m:
+            continue
+        row = rows.setdefault(m, {"usd": 0.0, "usd_complete": True, "tokens": 0, "requests": 0, "partial": False})
+        row["requests"] += 1
+        row["tokens"] += sum(int(r.get(f, 0)) for f in TOKEN_FIELDS)
+        c = cost_of(r, prices)
+        if c is None:
+            row["usd_complete"] = False
+        else:
+            row["usd"] += c
+    if not usage:
+        try:
+            st = json.loads((dev / "state.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            st = {}
+        ts = st.get("tasks") or {}
+        for e in events:
+            if e["event"] != "agent_end" or not e.get("tokens"):
+                continue
+            sc = str(e.get("scope") or "")
+            m = sc if re.fullmatch(r"M\d+", sc) else (ts.get(sc) or {}).get("milestone")
+            if m:
+                row = rows.setdefault(m, {"usd": 0.0, "usd_complete": False, "tokens": 0, "requests": 0, "partial": True})
+                row["requests"] += 1
+                row["tokens"] += int(e["tokens"])
+    for row in rows.values():
+        row["usd"] = round(row["usd"], 4)
+    out = {"at": tel.now(), "milestones": rows}
+    (dev / "costs").mkdir(parents=True, exist_ok=True)
+    (dev / "costs" / "milestones.json").write_text(json.dumps(out) + "\n", encoding="utf-8")
+    return out
+
+
 # ------------------------------------------------------------------ pricing and report
 
 def load_prices(dev: Path) -> dict:
@@ -378,6 +461,8 @@ def build_report(dev: Path, by: str, mode: str, since: str | None) -> dict:
     events, _ = tel.read_events(dev)
     usage = attribute(load_usage(dev), events)
     usage, period = period_filter(usage, events, mode, since, dev)
+    if by == "milestone":
+        usage = tag_milestones(usage, dev)
     prices = load_prices(dev)
     rows: dict[str, dict] = {}
     unknown: set[str] = set()
@@ -386,7 +471,8 @@ def build_report(dev: Path, by: str, mode: str, since: str | None) -> dict:
         key_, exact = price_key(str(r.get("model", "")), prices)
         if key_ and not exact:
             approx[str(r.get("model"))] = key_
-        key = {"stage": r["stage"], "agent": r.get("agent"), "model": r.get("model"), "session": r.get("session")}[by] or "other"
+        key = {"stage": r["stage"], "agent": r.get("agent"), "model": r.get("model"), "session": r.get("session"),
+               "milestone": r.get("milestone")}[by] or "other"
         row = rows.setdefault(key, {"key": key, "requests": 0, **{f: 0 for f in TOKEN_FIELDS}, "usd": 0.0, "usd_complete": True})
         row["requests"] += 1
         for f in TOKEN_FIELDS:
@@ -560,7 +646,7 @@ def main(argv: list[str] | None = None) -> int:
         g = s.add_mutually_exclusive_group(); g.add_argument("--all", action="store_true"); g.add_argument("--since")
         s.add_argument("--no-ingest", action="store_true"); s.add_argument("--transcripts")
         if name == "report":
-            s.add_argument("--by", choices=["stage", "agent", "model", "session"], default="stage")
+            s.add_argument("--by", choices=["stage", "agent", "model", "session", "milestone"], default="stage")
             s.add_argument("--json", action="store_true")
             s.add_argument("--time", action="store_true", help="time per agent and skill instead of cost")
         else:
@@ -572,10 +658,12 @@ def main(argv: list[str] | None = None) -> int:
         fail(f"no dev-kit state at {dev}", 2)
     if a.cmd == "ingest":
         res = ingest(dev, root, a.transcripts)
+        milestone_costs(dev)  # the board's velocity reads it
         print(json.dumps(res))
         return 0
     if not a.no_ingest:
         ingest(dev, root, a.transcripts)
+        milestone_costs(dev)
     mode = "all" if a.all else ("since" if a.since else "session")
     if a.cmd == "report" and a.time:
         rep = build_time_report(dev, mode, a.since)

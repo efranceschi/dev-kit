@@ -190,6 +190,12 @@
             <div role="tabpanel" id="ins-velocity" aria-labelledby="ins-tab-velocity" tabindex="0" hidden>
               <p class="card-sub">Tasks done per milestone</p>
               <div class="chart" id="velocity"></div>
+              <p class="card-sub chart-title">Hours per milestone · cost (or tokens) when measured</p>
+              <ul class="legend" aria-label="Legend">
+                <li><span class="key key-line s1" aria-hidden="true"></span>Elapsed (first task start → gate)</li>
+                <li><span class="key key-line s2" aria-hidden="true"></span>Working (time with a task in progress)</li>
+              </ul>
+              <div class="chart" id="velocity-hours"></div>
               <details class="table-view"><summary>Show as table</summary><div id="velocity-table"></div></details>
             </div>
           </section>
@@ -217,7 +223,7 @@
           <ol class="list req-list" id="req-list" aria-live="polite"></ol>
         </section>
         <section class="card feed-card" aria-labelledby="act-h">
-          <div class="card-head"><h2 id="act-h">Activity</h2><p class="card-sub" title="From .dev/log.md and the session log (skills and agents)">Latest first</p></div>
+          <div class="card-head"><h2 id="act-h">Activity</h2><p class="card-sub" title="From .dev/log.md and the session log (skills and agents)">Latest first</p><span id="log-link"></span></div>
           <ol class="feed" id="feed"></ol>
         </section>
       </aside>
@@ -249,6 +255,15 @@
   <dialog id="task-dialog" class="drawer" aria-labelledby="task-title">
     <div class="td-head"><h2 id="task-title"></h2><button type="button" class="btn" id="task-close" aria-label="Close details">Close</button></div>
     <div id="task-body" aria-live="polite"></div>
+  </dialog>
+
+  <dialog id="doc-dialog" class="drawer doc-drawer" aria-labelledby="doc-title">
+    <div class="td-head">
+      <button type="button" class="btn btn-sm" id="doc-back" aria-label="Back to the previous document" hidden>← Back</button>
+      <div class="doc-headtext"><h2 id="doc-title"></h2><span class="doc-path" id="doc-path"></span></div>
+      <button type="button" class="btn" id="doc-close" aria-label="Close the document">Close</button>
+    </div>
+    <article class="md" id="doc-body" aria-live="polite"></article>
   </dialog>
 
   <dialog id="stop-dialog" aria-labelledby="stop-h">

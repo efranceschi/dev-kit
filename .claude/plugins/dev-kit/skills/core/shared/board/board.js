@@ -463,8 +463,8 @@
           m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null));
       }));
     };
-    side("earlier", ms.slice(0, a), "earlier");
-    side("later", ms.slice(b), "later");
+    side("earlier", ms.slice(0, a).reverse(), "earlier");  // the lists read newest first, like every milestone list
+    side("later", ms.slice(b).reverse(), "later");
     $("tabs-back").hidden = !data.current_milestone || cur === data.current_milestone;
   }
   $("tabs-back").addEventListener("click", () => { selected = null; selectMilestone(null, true); });
@@ -679,19 +679,47 @@
       h("tbody", {}, rows.map(([t, v, e]) => h("tr", {}, h("td", { text: fmtDT(t) }), h("td", { text: String(v) }), h("td", { text: e }))))));
   }
 
-  // ------------------------------------------------------------------ velocity (one series: done per milestone)
+  // ------------------------------------------------------------------ velocity: tasks done per milestone, then its hours and cost
+  /** Hours a milestone took: elapsed (first task start -> gate, or now while open) and working (the union of the time
+   * its tasks were in progress, so parallel tasks do not count twice). null before any task started. */
+  function msTiming(m) {
+    const now = Date.now();
+    const iv = tasksOf(m).filter((t) => Number.isFinite(parseT(t.started_at))).map((t) => {
+      const s0 = parseT(t.started_at), e0 = parseT(t.done_at);
+      return [s0, Number.isFinite(e0) ? Math.max(s0, e0) : t.status === "in_progress" ? now : s0];
+    }).sort((a, b) => a[0] - b[0]);
+    if (!iv.length) return null;
+    let work = 0, [cs, ce] = iv[0];
+    for (const [s0, e0] of iv.slice(1)) { if (s0 <= ce) ce = Math.max(ce, e0); else { work += ce - cs; cs = s0; ce = e0; } }
+    work += ce - cs;
+    const closed = m.gate === "passed" || m.gate === "skipped";
+    const dones = tasksOf(m).map((t) => parseT(t.done_at)).filter(Number.isFinite);
+    const end = closed && Number.isFinite(parseT(m.passed_at)) ? parseT(m.passed_at) : closed && dones.length ? Math.max(...dones) : now;
+    return { elapsed: Math.max(0, end - iv[0][0]) / 36e5, work: work / 36e5, open: !closed };
+  }
+  const fmtH = (x) => (x == null ? "—" : x < 1 ? `${Math.max(1, Math.round(x * 60))} min` : x < 100 ? `${x.toFixed(1)} h` : `${Math.round(x)} h`);
+  /** Cost when it was measured, otherwise tokens when they were, otherwise null (dev_cost.py writes milestones.json). */
+  function msSpend(id) {
+    const c = (data.milestone_costs || {})[id];
+    if (!c) return null;
+    if (Number(c.usd) > 0) return { text: `US$ ${Number(c.usd).toFixed(2)}${c.usd_complete === false ? "+" : ""}`, title: c.usd_complete === false ? "Some requests had no price: at least this much" : "Estimated cost, API-equivalent" };
+    if (Number(c.tokens) > 0) return { text: `${compact(Number(c.tokens))} tok`, title: c.partial ? "Tokens reported by the skills (no transcripts): partial" : "Tokens used (no price for the model)" };
+    return null;
+  }
   function renderVelocity(cur) {
     const box = $("velocity");
     const rows = data.milestones.map((m) => {
       const ts = tasksOf(m);
-      return { id: m.id, title: m.title, done: ts.filter((t) => t.status === "done").length, total: ts.length };
+      return { id: m.id, title: m.title, done: ts.filter((t) => t.status === "done").length, total: ts.length, time: msTiming(m), spend: msSpend(m.id) };
     }).filter((r) => r.total);
     if (!rows.length) {
       fill(box, h("div", { class: "chart-empty", text: "Velocity appears once milestones have tasks." }));
+      fill($("velocity-hours"));
       fill($("velocity-table"));
       return;
     }
-    const W = Math.max(260, Math.round(box.clientWidth || 420)), H = 240, L = 30, R = 8, T = 22, B = 28;
+    // same margins as the hours chart below, so each milestone's bar sits right above its points
+    const W = Math.max(300, Math.round(box.clientWidth || 420)), H = 240, L = 44, R = 64, T = 22, B = 28;
     const max = Math.max(1, ...rows.map((r) => r.total));
     const y = (v) => T + (1 - v / max) * (H - T - B);
     const band = (W - L - R) / rows.length;
@@ -711,7 +739,7 @@
       const d = hgt > 0 ? `M${cx - bw / 2},${base}V${top + rad}Q${cx - bw / 2},${top} ${cx - bw / 2 + rad},${top}H${cx + bw / 2 - rad}Q${cx + bw / 2},${top} ${cx + bw / 2},${top + rad}V${base}Z` : "";
       const hit = s("rect", { class: "hit", x: cx - band / 2 + 2, y: T, width: band - 4, height: H - T - B, tabindex: "0",
         "aria-label": `${r.id}: ${r.done} of ${r.total} tasks done` });
-      const tipFn = (evt) => showTip(evt, `${r.id} · ${r.title || ""}`, [[`${r.done}`, `done of ${r.total}`, "s1"]]);
+      const tipFn = (evt) => showTip(evt, `${r.id} · ${r.title || ""}`, velTip(r));
       hit.addEventListener("pointermove", tipFn); hit.addEventListener("focus", tipFn);
       hit.addEventListener("pointerleave", hideTip); hit.addEventListener("blur", hideTip);
       svg.append(hit, s("path", { class: `bar${r.id === cur ? " current" : ""}`, d }));
@@ -719,8 +747,61 @@
       svg.append(s("text", { x: cx, y: H - 8, "text-anchor": "middle", text: r.id }));
     });
     fill(box, svg);
-    fill($("velocity-table"), h("table", {}, h("thead", {}, h("tr", {}, h("th", { text: "Milestone" }), h("th", { text: "Done" }), h("th", { text: "Total" }))),
-      h("tbody", {}, rows.map((r) => h("tr", {}, h("td", { text: `${r.id} ${r.title || ""}` }), h("td", { text: String(r.done) }), h("td", { text: String(r.total) }))))));
+    renderHours(rows, W);
+    // the table is a list: newest first (the charts keep time order)
+    fill($("velocity-table"), h("table", {}, h("thead", {}, h("tr", {}, ["Milestone", "Done", "Total", "Elapsed", "Working", "Cost or tokens"].map((x) => h("th", { text: x })))),
+      h("tbody", {}, rows.slice().reverse().map((r) => h("tr", {}, h("td", { text: `${r.id} ${r.title || ""}` }), h("td", { text: String(r.done) }), h("td", { text: String(r.total) }),
+        h("td", { text: r.time ? fmtH(r.time.elapsed) + (r.time.open ? " so far" : "") : "—" }), h("td", { text: r.time ? fmtH(r.time.work) : "—" }),
+        h("td", { text: r.spend ? r.spend.text : "not measured" }))))));
+  }
+  function velTip(r) {
+    const out = [[`${r.done}`, `done of ${r.total}`, "s1"]];
+    if (r.time) out.push([fmtH(r.time.elapsed), r.time.open ? "elapsed so far" : "elapsed", "s1"], [fmtH(r.time.work), "working", "s2"]);
+    if (r.spend) out.push([r.spend.text, r.spend.text.endsWith("tok") ? "tokens" : "cost"]);
+    return out;
+  }
+  /** Hours per milestone, same milestones and order as the bars above: one axis (hours), two lines - elapsed (solid)
+   * and working (dashed) - with markers, direct labels on the last point, and the cost or tokens under each label. */
+  function renderHours(rows, W) {
+    const box = $("velocity-hours");
+    const pts = rows.filter((r) => r.time);
+    if (!pts.length) { fill(box, h("div", { class: "chart-empty", text: "Hours appear once a task of a milestone has started." })); return; }
+    const H = 220, L = 44, R = 64, T = 16, B = 44;
+    const max = Math.max(0.5, ...pts.map((r) => Math.max(r.time.elapsed, r.time.work)));
+    const nice = (v) => { const p = 10 ** Math.floor(Math.log10(v)); return [1, 2, 2.5, 5, 10].map((k) => k * p).find((k) => k >= v); };
+    const step = nice(max / 4), top = step * Math.ceil(max / step);
+    const y = (v) => T + (1 - v / top) * (H - T - B);
+    const band = (W - L - R) / rows.length;
+    const cx = (i) => L + band * i + band / 2;
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Hours per milestone: " + pts.map((r) => `${r.id} elapsed ${fmtH(r.time.elapsed)}, working ${fmtH(r.time.work)}`).join("; ") });
+    const grid = s("g", { class: "grid" });
+    for (let v = 0; v <= top + 1e-9; v += step) grid.append(s("line", { x1: L, x2: W - R, y1: y(v), y2: y(v) }), s("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end", text: v ? fmtH(v).replace(" ", " ") : "0" }));
+    svg.append(grid, s("line", { class: "axis-line", x1: L, x2: W - R, y1: y(0), y2: y(0) }));
+    const series = [["elapsed", "line-actual", "marker"], ["work", "line-work", "marker s2"]];
+    series.forEach(([key, cls, mk]) => {
+      // a milestone without a started task breaks the line instead of dropping to zero
+      let d = "", pen = false;
+      rows.forEach((r, i) => { if (!r.time) { pen = false; return; } d += `${pen ? "L" : "M"}${cx(i).toFixed(1)},${y(r.time[key]).toFixed(1)}`; pen = true; });
+      svg.append(s("path", { class: cls, d }));
+      rows.forEach((r, i) => { if (r.time) svg.append(s("circle", { class: mk, cx: cx(i), cy: y(r.time[key]), r: 4 })); });
+    });
+    const lastI = rows.reduce((k, r, i) => (r.time ? i : k), -1);
+    const last = rows[lastI];
+    const ye = y(last.time.elapsed), yw = y(last.time.work);
+    const gap = Math.abs(ye - yw) < 14 ? (ye <= yw ? [-7, 7] : [7, -7]) : [0, 0];  // keep the two direct labels apart
+    svg.append(s("text", { class: "label-strong", x: cx(lastI) + 9, y: ye + 4 + gap[0], text: "elapsed" }),
+      s("text", { class: "label-strong", x: cx(lastI) + 9, y: yw + 4 + gap[1], text: "working" }));
+    rows.forEach((r, i) => {
+      svg.append(s("text", { x: cx(i), y: H - 24, "text-anchor": "middle", text: r.id }));
+      if (r.spend) svg.append(s("text", { class: "spend", x: cx(i), y: H - 8, "text-anchor": "middle", text: r.spend.text }));
+      const hit = s("rect", { class: "hit", x: cx(i) - band / 2 + 2, y: T, width: band - 4, height: H - T - B, tabindex: "0",
+        "aria-label": `${r.id}: ${r.time ? `elapsed ${fmtH(r.time.elapsed)}, working ${fmtH(r.time.work)}` : "not started"}${r.spend ? `, ${r.spend.text}` : ""}` });
+      const tipFn = (evt) => showTip(evt, `${r.id} · ${r.title || ""}`, velTip(r));
+      hit.addEventListener("pointermove", tipFn); hit.addEventListener("focus", tipFn);
+      hit.addEventListener("pointerleave", hideTip); hit.addEventListener("blur", hideTip);
+      svg.append(hit);
+    });
+    fill(box, svg);
   }
 
   // ------------------------------------------------------------------ needs you, activity
@@ -764,18 +845,18 @@
       waitingRel.length ? listBlock("Releases waiting for your approval", waitingRel.map((r) => h("li", {}, h("span", { class: "id", text: r.id }),
         h("span", { text: `${r.title} · ${plural(r.closed.length, "milestone")} closed` }),
         h("button", { type: "button", class: "link-btn", text: "Open", onclick: () => { selectRelease(r.id); setPhase("construction"); } }),
-        r.dossier ? h("span", { class: "sub" }, "Dossier: ", h("code", { text: r.dossier })) : null,
+        r.dossier ? h("span", { class: "sub" }, docLink(r.dossier, "Open the dossier")) : null,
         releaseDecision(r))), "", false, "construction") : null,
       stuck.length ? listBlock("QA rounds used up", stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }),
         h("span", { text: `${qaState(m).qa.runs - 1} fix rounds used of ${qaState(m).max} (${qaReason(qaState(m).qa, m) || "see the QA report"}). Keep fixing, accept with an ADR, or replan.` }),
         h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))), "", false, "construction") : null,
-      hot.length ? listBlock("Open hotfixes", hot.map((id) => h("li", {}, h("span", { class: "id", text: String(id) }),
+      hot.length ? listBlock("Open hotfixes", hot.map((id) => h("li", {}, issueId(id),
         h("span", { text: (data.tasks[id] || (b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))), "", false, "construction") : null,
       blocked.length ? listBlock("Blocked tasks", blocked.map(([id, t]) => h("li", { class: "has-btn" },
         h("button", { type: "button", class: "row-btn", "data-tid": id, "aria-haspopup": "dialog", onclick: () => openTask(id) },
           h("span", { class: "id", text: id }), h("span", { text: t.title }), h("span", { class: "chip", text: t.milestone }),
           h("span", { class: "sub bad", text: t.blocked_reason || "No reason recorded" })))), "", false, "construction") : null,
-      data.questions.length ? listBlock("Open questions", data.questions.map((q) => h("li", {}, h("span", { class: "id", text: q.id }), h("span", {}, linkify(q.question)),
+      data.questions.length ? listBlock("Open questions", data.questions.map((q) => h("li", {}, hasDoc("open-questions.md") ? docLink("open-questions.md", q.id, q.id, "id") : h("span", { class: "id", text: q.id }), h("span", {}, linkify(q.question)),
         h("span", { class: "q-tags" }, h("span", { class: "chip", text: q.by || "?" }), phaseTag(questionPhase(q))), q.assumption ? h("span", { class: "sub", text: `Assumed meanwhile: ${q.assumption}` }) : null,
         actionsOn() ? answerBox(q) : null)), "") : null,
       warns.length ? listBlock("Warnings", warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
@@ -932,7 +1013,8 @@
       return h("li", { class: `chev stage st-${x.state}${x.here ? " here" : ""}`, "aria-current": x.here ? "step" : null },
         h("div", { class: "stage-top" }, h("span", { class: "stage-ico", "aria-hidden": "true", text: STAGE_ICON[x.state] }),
           h("span", { class: "stage-name", text: x.name }), h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[x.state]}.` })),
-        x.note ? h("span", { class: "stage-note" }, x.note, x.cmd ? [" ", cmd(x.cmd)] : null) : null,
+        x.note ? h("span", { class: "stage-note" }, x.note, x.cmd ? [" ", cmd(x.cmd)] : null,
+          x.key === "qa" && hasDoc(`qa/${m.id}/report.md`) ? [" ", docLink(`qa/${m.id}/report.md`, "report")] : null) : null,
         x.trail && x.trail.length ? h("ol", { class: "qa-trail", "aria-label": "QA rounds" },
           x.trail.map((p, i) => h("li", { class: `qa-pill ${p.cls}`, title: p.title }, i ? h("span", { class: "qa-arrow", "aria-hidden": "true", text: "→" }) : null,
             h("span", { class: "qa-tag", text: p.text }), h("span", { class: "visually-hidden", text: `: ${p.title}.` })))) : null,
@@ -952,6 +1034,7 @@
   }
 
   function renderFeed() {
+    fill($("log-link"), hasDoc("log.md") ? docLink("log.md", "Full log") : null);
     fill($("feed"), data.log.length ? data.log.map((r) => {
       const t = parseT(r.at);
       return h("li", { class: r.kind === "live" ? "feed-live" : null }, h("time", { datetime: r.at, title: Number.isFinite(t) ? fmtDT(t) : r.at, text: Number.isFinite(t) ? agoShort(t) : r.at }),
@@ -963,7 +1046,7 @@
   }
 
   // ------------------------------------------------------------------ insights: quality (definition of done) and backlog
-  function dodRow(name, score, cut, verdict) {
+  function dodRow(name, score, cut, verdict, links) {
     const mm = h("div", { class: "meter" });
     const sp = h("span"); sp.style.width = `${score != null ? Math.min(100, score) : 0}%`;
     const c = h("span", { class: "cut", title: `cut-off ${cut}` }); c.style.left = `calc(${cut}% - 1px)`;
@@ -971,10 +1054,19 @@
     const ok = verdict === "pass" || verdict === "passed" || verdict === "skipped" || verdict === "n/a";
     const bad = verdict === "fail" || (score != null && score < cut && !ok);
     return h("div", { class: "dod-row" }, h("span", { class: "name" }, name, " ",
-      h("span", { class: `badge ${ok ? "good" : bad ? "bad" : "neutral"}`, text: ok ? `✓ ${verdict}` : bad ? "✕ below cut-off" : verdict || "pending" })),
+      h("span", { class: `badge ${ok ? "good" : bad ? "bad" : "neutral"}`, text: ok ? `✓ ${verdict}` : bad ? "✕ below cut-off" : verdict || "pending" }),
+      links && links.length ? h("span", { class: "dod-links" }, links) : null),
       h("span", { class: "score", text: score != null ? `${score} / ${cut}` : `— / ${cut}` }), mm);
   }
 
+  // the document a review judged, and the review's own report when there is one
+  const REVIEW_DOCS = { prd: ["prd.md"], design: ["design/ux-flows.md", "design/ui-spec.md"], plan: ["plan.md"], ux: [], docs: [] };
+  function reviewDocs(k) {
+    const links = (REVIEW_DOCS[k] || []).filter(hasDoc).map((p) => docLink(p, DOC_NAME[p] || p));
+    const report = k === "ux" ? "qa/ux/report.md" : `reviews/${k}/report.md`;
+    if (hasDoc(report)) links.push(docLink(report, "report"));
+    return links;
+  }
   /** Review rows (score against its cut-off) for the given review keys, then the ones not run yet. */
   function reviewList(keys, emptyText) {
     const q = data.quality;
@@ -983,7 +1075,7 @@
     const rows = [], pend = [];
     keys.forEach((k) => {
       const v = data.reviews[k] || {};
-      if (started(v)) rows.push(dodRow(rname(k), v.score ?? null, k === "ux" ? q.min_overall : q.review_min_overall, v.verdict));
+      if (started(v)) rows.push(dodRow(rname(k), v.score ?? null, k === "ux" ? q.min_overall : q.review_min_overall, v.verdict, reviewDocs(k)));
       else pend.push(rname(k));
     });
     return h("div", {}, rows.length ? h("div", { class: "list" }, rows) : null,
@@ -998,13 +1090,15 @@
     const q = data.quality;
     $("dod-sub").textContent = `Cut-off ${q.min_overall} overall · ${q.min_dimension} per dimension. Rows show the score against its cut-off mark.`;
     const gStarted = (m) => m.score != null || m.gate !== "pending";
-    const rows = data.milestones.filter(gStarted).map((m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? "fail" : m.gate)).reverse();
+    const rows = data.milestones.filter(gStarted).map((m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? "fail" : m.gate,
+      [`qa/${m.id}/report.md`, `qa/${m.id}/risk-report.md`].filter(hasDoc).map((p) => docLink(p, p.endsWith("risk-report.md") ? "risk report" : "report")))).reverse();
     const pending = data.milestones.filter((m) => !gStarted(m)).map((m) => m.id);
     fill($("dod"), rows.length ? h("div", { class: "list" }, rows) : !pending.length ? h("div", { class: "empty", text: "No milestones yet." }) : null,
       pending.length ? h("p", { class: "pending-line", text: `Not run yet: ${pending.join(", ")}` }) : null);
   }
 
-  const issueLi = (i) => h("li", {}, h("span", { class: "id", text: i.id }), h("span", { text: i.title || "" }),
+  const issueId = (id) => (hasDoc("issues.md") ? docLink("issues.md", String(id), String(id), "id") : h("span", { class: "id", text: String(id) }));
+  const issueLi = (i) => h("li", {}, issueId(i.id), h("span", { text: i.title || "" }),
     h("span", { class: `chip${i.c === "expedite" ? " lane-hotfix" : ""}`, text: i.c || i.status }),
     h("span", { class: "sub", text: [i.type, i.severity, i.origin === "baseline" ? "pre-existing" : null, i.scheduled_in ? `→ ${i.scheduled_in}` : null, i.c && i.status && i.c !== i.status ? i.status : null].filter(Boolean).join(" · ") }));
   /** Planning › Backlog: the issue queue by class of service, the issues already scheduled, and what later milestones hold. */
@@ -1021,7 +1115,7 @@
     fill($("product-backlog"),
       listBlock("Issue queue", queued.map(issueLi), "No issues waiting.", true),
       scheduled.length ? listBlock("Scheduled issues", scheduled.map(([id, v]) => issueLi({ id, c: v.class, ...v })), "") : null,
-      listBlock("Later milestones", later.map(({ m, left }) => h("li", { class: "has-btn" },
+      listBlock("Later milestones", later.slice().reverse().map(({ m, left }) => h("li", { class: "has-btn" },
         h("button", { type: "button", class: "row-btn", title: `Show ${m.id} in construction`, onclick: () => openMilestone(m.id) },
           h("span", { class: "id", text: m.id }), h("span", { text: m.title || "" }), h("span", { class: "chip", text: plural(left, "task") })))),
         "Nothing planned after the current milestone."));
@@ -1052,7 +1146,7 @@
         h("strong", { text: STEP_TITLE[x.key] || x.key }), h("span", { class: `chip step-st s-${x.state}`, text: STEP_WORD[x.state] })),
       h("p", { class: "card-sub", text: STEP_ABOUT[x.key] || "" }),
       x.note ? h("p", { class: "step-note", text: x.note }) : null,
-      files.length ? h("p", { class: "step-files", title: files.join("\n"), text: files.slice(0, 3).join(" · ") + (files.length > 3 ? ` +${files.length - 3}` : "") }) : null,
+      files.length ? h("p", { class: "step-files" }, files.map((f) => docLink(f, relDev(f)))) : null,
       c ? h("div", { class: "step-act" }, cmd(c)) : null);
   }
   const phaseOf = (key) => data.cycle.phases.find((p) => p.key === key) || { steps: [] };
@@ -1068,7 +1162,7 @@
       issues.length > open.length ? h("p", { class: "pending-line", text: `${issues.length - open.length} closed` }) : null);
     const adrs = data.decisions || [];
     $("conc-adr-sub").textContent = adrs.length ? `${plural(adrs.length, "decision")} from .dev/decisions.md, newest first` : "From .dev/decisions.md";
-    const adrLi = (d) => h("li", { class: /supersed/i.test(d.status || "") ? "muted" : null }, h("span", { class: "id", text: d.id }), h("span", { text: d.title }),
+    const adrLi = (d) => h("li", { class: /supersed/i.test(d.status || "") ? "muted" : null }, docLink("decisions.md", d.id, d.id, "id"), h("span", { text: d.title }),
       h("span", { class: "chip", text: d.status || "?" }), d.date ? h("span", { class: "sub", text: d.date }) : null);
     const SHOWN = 6;
     fill($("conc-adrs"), adrs.length ? [h("ul", { class: "list" }, adrs.slice(0, SHOWN).map(adrLi)),
@@ -1096,10 +1190,13 @@
         h("span", { class: "road-count", text: `${x.done}/${x.total}` }),
         roadMeter(x)));
     };
+    // lists show milestones newest first (the chevron strips and the charts keep time order)
     const rp = relPlan();
-    const byRel = rp.length ? rp.flatMap((r) => [h("li", { class: `road-rel s-${r.status}` }, h("strong", { text: r.id }), h("span", { text: r.title }),
-      h("span", { class: "chip", text: REL_WORD[r.status] })), ...ms.filter((m) => r.milestones.includes(m.id)).map(row)])
-      .concat(ms.filter((m) => !rp.some((r) => r.milestones.includes(m.id))).map(row)) : ms.map(row);
+    const newest = ms.slice().reverse();
+    const byRel = rp.length ? newest.filter((m) => !rp.some((r) => r.milestones.includes(m.id))).map(row)
+      .concat(rp.slice().reverse().flatMap((r) => [h("li", { class: `road-rel s-${r.status}` }, h("strong", { text: r.id }), h("span", { text: r.title }),
+        h("span", { class: "chip", text: REL_WORD[r.status] })), ...newest.filter((m) => r.milestones.includes(m.id)).map(row)]))
+      : newest.map(row);
     $("road-sub").textContent += rp.length ? ` ${plural(rp.length, "planned release")}: each waits for your approval before production.` : "";
     fill($("roadmap"), ms.length ? byRel : h("li", { class: "empty" }, "No milestones yet. They appear after ", cmd("/dev-kit:plan"), "."));
   }
@@ -1122,7 +1219,7 @@
           return h("button", { type: "button", class: `chip train-chip${ok ? " ok" : ""}`, text: `${ok ? "✓ " : ""}${id}`, title: `Show ${id}${m && m.title ? ` · ${m.title}` : ""}`, onclick: () => openMilestone(id) }); })),
         isNext && tr.usability && r.status === "ready_for_review" ? h("span", { class: `train-check s-${tr.usability}` }, `Usability ${word[tr.usability] || tr.usability}`) : null,
         isNext && tr.docs && r.status === "ready_for_review" ? h("span", { class: `train-check s-${tr.docs}` }, `Docs ${word[tr.docs] || tr.docs}`) : null,
-        r.dossier ? h("span", { class: "train-check" }, "Dossier ", h("code", { text: r.dossier })) : null,
+        r.dossier ? h("span", { class: "train-check" }, docLink(r.dossier, "Dossier")) : null,
         last ? h("span", { class: "train-check" }, `Last rejection → ${last.milestone}`) : null,
         r.status === "ready_for_review" ? cmd("/dev-kit:release") : null,
         r.status === "awaiting_approval" ? releaseDecision(r) : null);
@@ -1171,7 +1268,8 @@
     $("st-rev-sub").textContent = cutoffNote();
     fill($("st-reviews"), reviewList(["ux", "docs", ...others], "No checks."));
     fill($("st-releases"), rel.length ? h("ul", { class: "list" }, rel.slice().reverse().map((r) => h("li", {},
-      h("span", { class: "id", text: r.tag || r.version || "release" }), h("span", { text: (r.release ? `${r.release} · ` : "") + (r.hotfix ? `Hotfix ${r.hotfix}` : (r.milestones || []).join(", ") || "—") }),
+      hasDoc(`release-notes-${r.version}.md`) ? docLink(`release-notes-${r.version}.md`, r.tag || r.version, null, "id") : h("span", { class: "id", text: r.tag || r.version || "release" }),
+      h("span", { text: (r.release ? `${r.release} · ` : "") + (r.hotfix ? `Hotfix ${r.hotfix}` : (r.milestones || []).join(", ") || "—") }),
       h("span", { class: "chip", text: r.version || "" }), r.at && Number.isFinite(parseT(r.at)) ? h("span", { class: "sub", text: fmtDate(parseT(r.at)) }) : null)))
       : h("div", { class: "empty", text: "No release yet. Closed milestones wait in Construction › Next release." }));
   }
@@ -1558,7 +1656,7 @@
     const hasNew = draft.ops.some((o) => o.op === "new_milestone");
     const b = (data.backlog || {}).buffer;
     const cols = [column("queue", "Issue queue", "Expedite and change issues go through /dev-kit:issue.", model.queued)]
-      .concat(model.ms.map((m) => column(m.id, m.title || m.id, m.isNew ? "New in this draft" : b && b.milestone === m.id ? `Issue buffer ${b.used}/${b.capacity}` : null, model.cols[m.id] || [], null, m.isNew)));
+      .concat(model.ms.slice().reverse().map((m) => column(m.id, m.title || m.id, m.isNew ? "New in this draft" : b && b.milestone === m.id ? `Issue buffer ${b.used}/${b.capacity}` : null, model.cols[m.id] || [], null, m.isNew)));
     if (!hasNew) {
       const inp = h("input", { type: "text", id: "new-ms-title", maxlength: "80", placeholder: `Title of ${newNum}`, "aria-label": `Title of the new milestone ${newNum}` });
       inp.value = newMsTitle;
@@ -1665,6 +1763,8 @@
       firstRender = false;
       const tid = decodeURIComponent(location.hash.slice(1));
       if (TASK_RE.test(tid)) openTask(tid);
+      const dm = tid.match(DOC_HASH);
+      if (dm) openDoc(dm[1], dm[2]);
     }
   }
 
@@ -1682,6 +1782,7 @@
       render();
       tickUpdated();
       if (tdlg.open && tdCur) fetchTask(tdCur, true);
+      if (ddlg.open && docCur) fetchDoc(docCur, true);
     } catch (e) {
       setLive("off", "Offline");
     } finally {
@@ -1730,6 +1831,13 @@
   const taskRefs = (list) => (list.length ? h("ul", { class: "td-list plain" }, list.map((x) => h("li", {},
     h("button", { type: "button", class: "tid-btn", text: x.id, "aria-label": `Open ${x.id}`, onclick: () => openTask(x.id) }), ` ${x.title || ""} `,
     h("span", { class: `chip st-chip s-${x.status}`, text: stLabel(x.status) })))) : null);
+  /** A task's source as a link: a .dev markdown report (qa/M1/report.md#F-3), or the dossier of a rejected release. */
+  function sourceLink(src) {
+    const rel = String(src).match(/^release:(R\d{1,3})$/);
+    if (rel) return docLink(`releases/${rel[1]}/dossier.md`, `${rel[1]} rejected · dossier`);
+    const m = String(src).match(/^(?:\.dev\/)?([\w./-]+\.md)(?:#([\w-]+))?/);
+    return m && hasDoc(m[1]) ? docLink(m[1], src, m[2] || null) : String(src);
+  }
   function renderTask(d) {
     const body = $("task-body");
     if (!d.ok) { fill(body, h("p", { class: "card-sub", text: d.error === "unknown task" ? "This task no longer exists (a replan may have removed it)." : "Could not load the task." })); return; }
@@ -1744,7 +1852,7 @@
       d.blocked_reason ? h("div", { class: "reason td-sec", text: d.blocked_reason }) : null,
       section("Origin", d.issue ? h("p", {}, h("span", { class: "tid", text: d.issue.id }), ` ${d.issue.title || ""}`,
         h("span", { class: "card-sub", text: ` · ${[d.issue.type, d.issue.class, d.issue.severity, d.issue.status].filter(Boolean).join(" · ")}` }),
-        d.issue.note ? h("span", { class: "td-note", text: d.issue.note }) : null) : (d.source ? h("p", { text: d.source }) : null)),
+        d.issue.note ? h("span", { class: "td-note", text: d.issue.note }) : null) : (d.source ? h("p", {}, sourceLink(d.source)) : null)),
       section(`Acceptance criteria (${d.acceptance.length})`, d.acceptance.length ? h("ul", { class: "td-list" }, d.acceptance.map((a) =>
         h("li", {}, a.text, a.prd ? h("span", { class: "td-note", text: `PRD: ${a.prd}` }) : null))) : null),
       section("How to test", d.test_notes ? h("p", { text: d.test_notes }) : null),
@@ -1779,14 +1887,221 @@
   tdlg.addEventListener("close", () => {
     const back = tdOrigin && document.querySelector(`[data-tid="${tdOrigin}"]`);
     tdOrigin = tdCur = null;
-    if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+    if (TASK_RE.test(decodeURIComponent(location.hash.slice(1)))) history.replaceState(null, "", location.pathname + location.search);
     if (back) back.focus();
   });
   window.addEventListener("hashchange", () => {
     const tid = decodeURIComponent(location.hash.slice(1));
+    const dm = tid.match(DOC_HASH);
+    if (dm && (!docCur || docCur.path !== dm[1])) { openDoc(dm[1], dm[2]); return; }
     if (TASK_RE.test(tid) && tid !== tdCur) openTask(tid);
     else if (!tid && tdlg.open) tdlg.close();
+    else if (!tid && ddlg.open) ddlg.close();
   });
+
+  // ------------------------------------------------------------------ markdown documents of .dev/: a side drawer, linkable as #doc:<path>
+  // A small renderer that builds the DOM with h() (text through textContent, never innerHTML): headings with anchors,
+  // paragraphs, nested lists and checkboxes, tables, fenced code, quotes, rules, and inline code, bold, italic, links.
+  const ID_TOKEN = /^(ADR-\d{1,5}|Q-\d{1,5}|I-\d{1,5}|T-\d{1,5}|F-\d{1,5}|AC-\d{1,4}|M\d{1,3}|R\d{1,3})\b/;
+  const INLINE = /(`+)([\s\S]*?[^`])\1(?!`)|\*\*([^*]+?)\*\*|__([^_]+?)__|~~([^~]+?)~~|\*([^*\s](?:[^*]*?[^*\s])?)\*|(?<![\w])_([^_\s](?:[^_]*?[^_\s])?)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>/g;
+  let docCur = null;          // {path, anchor} of the document shown
+  /** A .dev-relative path for a link written inside a document (relative to that document), or null outside .dev. */
+  function devPath(href, base) {
+    const clean = href.split("#")[0];
+    if (!clean || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("/")) return null;
+    const parts = (base ? base.split("/").slice(0, -1) : []).concat(clean.replace(/^\.dev\//, "").split("/"));
+    const out = [];
+    for (const p of parts) { if (p === "..") { if (!out.length) return null; out.pop(); } else if (p && p !== ".") out.push(p); }
+    return out.join("/");
+  }
+  function mdLink(label, href, base) {
+    if (/^https?:\/\//i.test(href)) return h("a", { href, target: "_blank", rel: "noopener noreferrer" }, label);
+    if (href.startsWith("#")) return h("button", { type: "button", class: "link-btn md-a", onclick: () => scrollDoc(decodeURIComponent(href.slice(1))) }, label);
+    const p = devPath(href, base);
+    if (p && /\.md$/i.test(p) && (data.docs || []).includes(p)) {
+      const anchor = href.includes("#") ? decodeURIComponent(href.split("#")[1]) : null;
+      return h("button", { type: "button", class: "link-btn md-a", title: `.dev/${p}`, onclick: () => openDoc(p, anchor, "inner") }, label);
+    }
+    return h("span", { class: "md-a-off", title: href }, label);
+  }
+  function mdInline(text, base) {
+    const out = [];
+    let last = 0;
+    for (const m of String(text).matchAll(INLINE)) {
+      if (m.index > last) out.push(...linkify(text.slice(last, m.index)));
+      if (m[1]) out.push(h("code", { text: m[2] }));
+      else if (m[3] || m[4]) out.push(h("strong", {}, mdInline(m[3] || m[4], base)));
+      else if (m[5]) out.push(h("del", {}, mdInline(m[5], base)));
+      else if (m[6] || m[7]) out.push(h("em", {}, mdInline(m[6] || m[7], base)));
+      else if (m[8]) out.push(mdLink(mdInline(m[8], base), m[9], base));
+      else if (m[10]) out.push(mdLink(m[10], m[10], base));
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) out.push(...linkify(text.slice(last)));
+    return out;
+  }
+  const slug = (s) => "md-" + String(s).toLowerCase().replace(/[`*_~[\]()]/g, "").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 60);
+  const LIST_RE = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/;
+  const indentOf = (l) => l.match(/^\s*/)[0].replace(/\t/g, "    ").length;
+  const splitRow = (l) => l.trim().replace(/^\||\|$/g, "").split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
+  function mdList(lines, i, indent, base) {
+    const ordered = /^\s*\d/.test(lines[i]);
+    const list = h(ordered ? "ol" : "ul", { class: "md-list" });
+    let cur = null;
+    while (i < lines.length) {
+      const l = lines[i];
+      const m = l.match(LIST_RE);
+      if (!m) {
+        if (l.trim() && cur && indentOf(l) > indent) { cur.append(" ", ...mdInline(l.trim(), base)); i++; continue; }
+        break;
+      }
+      const ind = indentOf(m[1]);
+      if (ind < indent) break;
+      if (ind > indent) {
+        const [sub, j] = mdList(lines, i, ind, base);
+        (cur || list).append(sub);
+        i = j;
+        continue;
+      }
+      let body = m[3];
+      const cb = body.match(/^\[( |x|X)\]\s+(.*)$/);
+      if (cb) body = cb[2];
+      cur = h("li", { class: cb ? "md-task" : null },
+        cb ? h("span", { class: "md-box", "aria-hidden": "true", text: cb[1] === " " ? "☐" : "☑" }) : null,
+        cb ? h("span", { class: "visually-hidden", text: cb[1] === " " ? "to do: " : "done: " }) : null,
+        mdInline(body, base));
+      const id = body.match(ID_TOKEN);
+      if (id) cur.setAttribute("data-anchor", id[1]);
+      list.append(cur);
+      i++;
+    }
+    return [list, i];
+  }
+  function renderMarkdown(text, base) {
+    const lines = String(text).replace(/\r\n?/g, "\n").split("\n");
+    const out = [];
+    let i = 0;
+    const isBlock = (l) => /^\s*(#{1,6}\s|```|~~~|>|(\*{3,}|-{3,}|_{3,})\s*$)/.test(l) || LIST_RE.test(l);
+    if (lines[0] === "---") { const end = lines.indexOf("---", 1); if (end > 0) i = end + 1; }  // front matter
+    while (i < lines.length) {
+      const l = lines[i];
+      if (!l.trim()) { i++; continue; }
+      const fence = l.match(/^\s*(```+|~~~+)\s*([\w+-]*)/);
+      if (fence) {
+        const body = [];
+        i++;
+        while (i < lines.length && !lines[i].trim().startsWith(fence[1])) body.push(lines[i++]);
+        i++;
+        out.push(h("pre", { class: "md-pre" }, h("code", { text: body.join("\n"), "data-lang": fence[2] || null })));
+        continue;
+      }
+      const hd = l.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
+      if (hd) {
+        const id = hd[2].match(ID_TOKEN);
+        out.push(h(`h${Math.min(6, hd[1].length + 1)}`, { class: "md-h", id: slug(hd[2]), "data-anchor": id ? id[1] : null }, mdInline(hd[2], base)));
+        i++;
+        continue;
+      }
+      if (/^\s*(\*{3,}|-{3,}|_{3,})\s*$/.test(l)) { out.push(h("hr")); i++; continue; }
+      if (l.includes("|") && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[i + 1])) {
+        const head = splitRow(l);
+        const align = splitRow(lines[i + 1]).map((c) => (c.startsWith(":") && c.endsWith(":") ? "center" : c.endsWith(":") ? "right" : null));
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].includes("|") && lines[i].trim()) rows.push(splitRow(lines[i++]));
+        const cell = (tag, c, k) => { const el = h(tag, {}, mdInline(c, base)); if (align[k]) el.classList.add(`md-${align[k]}`); return el; };
+        out.push(h("div", { class: "md-table" }, h("table", {},
+          h("thead", {}, h("tr", {}, head.map((c, k) => cell("th", c, k)))),
+          h("tbody", {}, rows.map((r) => { const id = (r[0] || "").match(ID_TOKEN); return h("tr", { "data-anchor": id ? id[1] : null }, head.map((_, k) => cell("td", r[k] || "", k))); })))));
+        continue;
+      }
+      if (/^\s*>/.test(l)) {
+        const q = [];
+        while (i < lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/, ""));
+        out.push(h("blockquote", { class: "md-quote" }, renderMarkdown(q.join("\n"), base)));
+        continue;
+      }
+      if (LIST_RE.test(l)) {
+        const [list, j] = mdList(lines, i, indentOf(l), base);
+        out.push(list);
+        i = j;
+        continue;
+      }
+      const para = [l.trim()];
+      i++;
+      while (i < lines.length && lines[i].trim() && !isBlock(lines[i]) && !(lines[i].includes("|") && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1] || ""))) para.push(lines[i++].trim());
+      out.push(h("p", {}, mdInline(para.join(" "), base)));
+    }
+    return out;
+  }
+
+  const ddlg = $("doc-dialog");
+  const DOC_NAME = { "brief.md": "Brief", "prd.md": "PRD", "architecture.md": "Architecture", "design/ux-flows.md": "UX flows", "design/ui-spec.md": "UI spec",
+    "plan.md": "Plan", "decisions.md": "Decisions", "open-questions.md": "Open questions", "issues.md": "Issues", "log.md": "Log" };
+  let docStack = [];          // documents opened from inside the drawer: "Back" walks them
+  let docOrigin = null;       // element the drawer was opened from: focus returns there
+  const hasDoc = (p) => (data.docs || []).includes(p);
+  const relDev = (p) => String(p || "").replace(/^\.dev\//, "");
+  /** A button that opens a .dev markdown file in the drawer, or plain text when the file does not exist. */
+  function docLink(path, label, anchor, cls) {
+    const p = relDev(path);
+    if (!hasDoc(p)) return h("span", { class: `doc-off${cls ? ` ${cls}` : ""}`, title: `.dev/${p} does not exist yet`, text: label || p });
+    return h("button", { type: "button", class: `doc-link${cls ? ` ${cls}` : ""}`, "data-doc": p, title: `Open .dev/${p}${anchor ? ` at ${anchor}` : ""}`,
+      onclick: (e) => { e.stopPropagation(); openDoc(p, anchor); } }, h("span", { class: "doc-ico", "aria-hidden": "true", text: "▤" }), label || p);
+  }
+  function scrollDoc(anchor) {
+    if (!anchor) return;
+    const body = $("doc-body");
+    const el = body.querySelector(`[data-anchor="${CSS.escape(anchor)}"]`) || body.querySelector(`#${CSS.escape(slug(anchor))}`)
+      || body.querySelector(`#${CSS.escape(anchor)}`);
+    if (!el) return;
+    el.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    el.classList.add("md-hit");
+    setTimeout(() => el.classList.remove("md-hit"), 2200);
+  }
+  function renderDoc(d) {
+    const body = $("doc-body");
+    if (!d.ok) { fill(body, h("p", { class: "card-sub", text: d.error === "not found" ? "This document does not exist (any more)." : `Could not open it: ${d.error || "error"}.` })); return; }
+    fill(body, renderMarkdown(d.text, d.path), h("p", { class: "card-sub td-foot", text: `.dev/${d.path} · changed ${Number.isFinite(parseT(d.mtime)) ? fmtDT(parseT(d.mtime)) : d.mtime}` }));
+    if (!DOC_NAME[d.path]) { const h1 = body.querySelector(".md-h"); if (h1) $("doc-title").textContent = h1.textContent; }
+  }
+  async function fetchDoc(cur, quiet) {
+    try {
+      const r = await fetch(`/api/doc?path=${encodeURIComponent(cur.path)}`, { cache: "no-store" });
+      const d = await r.json();
+      if (docCur !== cur) return;
+      const keep = quiet ? ddlg.scrollTop : 0;
+      renderDoc(d);
+      if (quiet) ddlg.scrollTop = keep; else scrollDoc(cur.anchor);
+    } catch (e) { if (docCur === cur && !quiet) renderDoc({ ok: false, error: "network" }); }
+  }
+  /** mode: undefined opens from the page (a fresh history), "inner" from a link inside a document, "back" from Back. */
+  function openDoc(path, anchor, mode) {
+    if (tdlg.open) { tdOrigin = null; tdlg.close(); }
+    if (!ddlg.open) { docOrigin = document.activeElement; docStack = []; }
+    else if (mode === "inner" && docCur) docStack.push(docCur);
+    else if (!mode) docStack = [];
+    docCur = { path, anchor: anchor || null };
+    $("doc-title").textContent = DOC_NAME[path] || path.split("/").pop().replace(/\.md$/i, "");
+    fill($("doc-path"), h("code", { text: `.dev/${path}` }), copyBtn(`.dev/${path}`));
+    $("doc-back").hidden = !docStack.length;
+    fill($("doc-body"), h("p", { class: "card-sub", text: "Loading…" }));
+    if (!ddlg.open) (ddlg.showModal ? ddlg.showModal() : ddlg.setAttribute("open", ""));
+    ddlg.scrollTop = 0;
+    const hash = `#doc:${path}${anchor ? `:${anchor}` : ""}`;
+    if (location.hash !== hash) history.replaceState(null, "", hash);
+    fetchDoc(docCur, false);
+  }
+  $("doc-close").addEventListener("click", () => ddlg.close());
+  $("doc-back").addEventListener("click", () => { const prev = docStack.pop(); if (prev) openDoc(prev.path, prev.anchor, "back"); });
+  ddlg.addEventListener("click", (e) => { if (e.target === ddlg) ddlg.close(); });
+  ddlg.addEventListener("close", () => {
+    docCur = null; docStack = [];
+    if (location.hash.startsWith("#doc:")) history.replaceState(null, "", location.pathname + location.search);
+    if (docOrigin && docOrigin.isConnected) docOrigin.focus();
+    docOrigin = null;
+  });
+  const DOC_HASH = /^doc:([\w./-]+\.md)(?::([\w-]+))?$/i;
 
   // ------------------------------------------------------------------ stop server
   const dlg = $("stop-dialog");

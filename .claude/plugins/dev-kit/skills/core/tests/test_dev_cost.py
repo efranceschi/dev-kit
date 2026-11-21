@@ -185,5 +185,43 @@ class TestAttribution(Base):
         self.assertTrue(any(w.startswith("partial") for w in rep["warnings"]))
 
 
+class TestByMilestone(Base):
+    """Usage is spent on the milestone of the task in progress, or of its QA window (the board's velocity reads it)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        sp = self.root / ".dev" / "state.json"
+        st = json.loads(sp.read_text(encoding="utf-8"))
+        st["milestones"] = {"M1": {"title": "One", "gate": "passed", "passed_at": "2026-11-18T12:00:00+00:00"},
+                            "M2": {"title": "Two", "gate": "pending"}}
+        st["tasks"] = {
+            "T-001": {"title": "a", "milestone": "M1", "status": "done", "started_at": "2026-11-18T09:00:00+00:00", "done_at": "2026-11-18T10:00:00+00:00"},
+            "T-002": {"title": "b", "milestone": "M1", "status": "done", "started_at": "2026-11-18T09:30:00+00:00", "done_at": "2026-11-18T11:00:00+00:00"},
+            "T-003": {"title": "c", "milestone": "M2", "status": "in_progress", "started_at": "2026-11-18T13:00:00+00:00", "done_at": None},
+        }
+        sp.write_text(json.dumps(st), encoding="utf-8")
+
+    def test_rows_go_to_the_running_task_or_the_qa_window(self) -> None:
+        self.write_main(line("a", "claude-opus-5-5", "2026-11-18T09:45:00Z", out=100) +   # T-001 and T-002 run: M1
+                        line("b", "claude-opus-5-5", "2026-11-18T11:30:00Z", out=200) +   # QA window of M1
+                        line("c", "claude-opus-5-5", "2026-11-18T12:30:00Z", out=300) +   # between milestones: none
+                        line("d", "claude-opus-5-5", "2026-11-18T13:30:00Z", out=400))    # T-003 runs: M2
+        by = {r["key"]: r for r in self.report("--by", "milestone")["rows"]}
+        self.assertEqual((by["M1"]["output"], by["M2"]["output"], by["other"]["output"]), (300, 400, 300))
+        ms = json.loads((self.root / ".dev" / "costs" / "milestones.json").read_text(encoding="utf-8"))["milestones"]
+        self.assertEqual((ms["M1"]["tokens"], ms["M2"]["tokens"]), (300, 400))
+        self.assertGreater(ms["M1"]["usd"], 0)
+        self.assertFalse(ms["M1"]["partial"])
+        self.sh(COST, "ingest", "--transcripts", str(self.tdir))  # ingest refreshes it too
+        self.assertIn("M2", json.loads((self.root / ".dev" / "costs" / "milestones.json").read_text(encoding="utf-8"))["milestones"])
+
+    def test_without_transcripts_the_skill_tokens_per_scope(self) -> None:
+        self.sh(STATE, "event", "agent_end", "--set", "agent=implementer", "--set", "scope=T-003", "--set", "tokens=500")
+        self.sh(STATE, "event", "agent_end", "--set", "agent=code-reviewer", "--set", "scope=M1", "--set", "tokens=70")
+        self.sh(COST, "ingest", "--transcripts", str(self.tdir / "missing"))
+        ms = json.loads((self.root / ".dev" / "costs" / "milestones.json").read_text(encoding="utf-8"))["milestones"]
+        self.assertEqual((ms["M2"]["tokens"], ms["M1"]["tokens"], ms["M2"]["partial"], ms["M2"]["usd"]), (500, 70, True, 0.0))
+
+
 if __name__ == "__main__":
     unittest.main()

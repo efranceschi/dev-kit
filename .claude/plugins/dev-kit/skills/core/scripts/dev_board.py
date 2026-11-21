@@ -54,6 +54,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import webbrowser
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -84,7 +85,7 @@ def code_id() -> str:
 
 
 CODE_ID = code_id()
-WATCHED = ("state.json", "log.md", "open-questions.md", "costs/summary.json", "plan.md", "run/agents.jsonl",
+WATCHED = ("state.json", "log.md", "open-questions.md", "costs/summary.json", "costs/milestones.json", "plan.md", "run/agents.jsonl",
            "telemetry.jsonl", "run/inbox", "run/worker.json", "run/worker-mode.json", "run/approvals", "run/questions")
 REQ_PATH = re.compile(r"^/api/inbox/(R-\d{3,6})/cancel$")
 APPROVAL_PATH = re.compile(r"^/api/approvals/(A-[0-9a-f]{8,32})$")
@@ -456,6 +457,54 @@ def _commit_info(root: Path, sha: object) -> dict | None:
     files = [ln.strip() for ln in lines[1:] if ln.strip()]
     return {"sha": head[0], "author": head[1], "date": head[2], "subject": head[3],
             "files": files[:-1][:40], "summary": files[-1] if files else ""}
+
+
+DOC_MAX = 1_000_000          # bytes of one markdown file shown in the side panel
+DOCS_SHOWN = 300             # .md files listed in /api/state
+DOCS_SKIP = ("run", "costs")  # folders of .dev that hold no document
+
+
+def docs_list(root: Path) -> list[str]:
+    """The markdown files of .dev/ (paths relative to it), so the page links only documents that exist."""
+    dev = (root / ".dev").resolve()
+    out: list[str] = []
+    for p in sorted(dev.rglob("*.md")):
+        rel = p.relative_to(dev)
+        if rel.parts and rel.parts[0] in DOCS_SKIP or not p.is_file():
+            continue
+        try:
+            if not p.resolve().is_relative_to(dev):
+                continue  # a symlink pointing out of .dev
+        except OSError:
+            continue
+        out.append(rel.as_posix())
+        if len(out) >= DOCS_SHOWN:
+            break
+    return out
+
+
+def doc_detail(root: Path, rel: str) -> tuple[int, dict]:
+    """One markdown file of .dev/ for the side panel: read-only, never outside .dev, only .md, at most DOC_MAX bytes."""
+    if not rel or "\x00" in rel or rel.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", rel):
+        return 400, {"ok": False, "error": "bad path"}
+    rel = rel.removeprefix(".dev/")
+    dev = (root / ".dev").resolve()
+    try:
+        p = (dev / rel).resolve()
+    except (OSError, RuntimeError):
+        return 400, {"ok": False, "error": "bad path"}
+    if not p.is_relative_to(dev) or p == dev:
+        return 400, {"ok": False, "error": "outside .dev"}
+    if p.suffix.lower() != ".md":
+        return 400, {"ok": False, "error": "only markdown files"}
+    if not p.is_file():
+        return 404, {"ok": False, "error": "not found"}
+    size = p.stat().st_size
+    if size > DOC_MAX:
+        return 413, {"ok": False, "error": f"too large ({size} bytes)"}
+    text = p.read_text(encoding="utf-8", errors="replace")
+    return 200, {"ok": True, "path": p.relative_to(dev).as_posix(), "text": text,
+                 "mtime": datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).isoformat()}
 
 
 def task_detail(root: Path, tid: str) -> dict | None:
@@ -837,6 +886,10 @@ def build_state(root: Path, board: dict | None = None) -> dict:
             costs = json.loads(cs.read_text(encoding="utf-8")).get("total")
         except (OSError, json.JSONDecodeError):
             costs = None
+    try:  # cost and tokens per milestone (dev_cost.py ingest), for the velocity chart
+        ms_costs = json.loads((store.dev / "costs" / "milestones.json").read_text(encoding="utf-8")).get("milestones") or {}
+    except (OSError, json.JSONDecodeError, AttributeError):
+        ms_costs = {}
     return {
         "ok": True,
         "project": s.get("project") or root.name,
@@ -860,6 +913,9 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "log": sorted(log_tail(_read(store.dev / "log.md")) + live_feed(events), key=lambda r: _ts(r.get("at")), reverse=True)[:LOG_TAIL],
         "costs": costs,
         "decisions": decisions_list(_read(store.dev / "decisions.md")),
+        "docs": docs_list(root),
+        "milestone_costs": {m: {k: v.get(k) for k in ("usd", "usd_complete", "tokens", "partial")}
+                            for m, v in ms_costs.items() if isinstance(v, dict)},
         "releases": [{k: r.get(k) for k in ("version", "tag", "milestones", "at", "hotfix", "release")}
                      for r in s.get("releases") or [] if isinstance(r, dict)],
         "production": production_info(store),
@@ -1123,6 +1179,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"ok": False, "error": "bad task id"})
             d = task_detail(self.server.root, tid)
             return self._json(200 if d else 404, d or {"ok": False, "error": "unknown task"})
+        if path == "/api/doc":
+            q = self.path.partition("?")[2]
+            raw = next((v[5:] for v in q.split("&") if v.startswith("path=")), "")
+            code, d = doc_detail(self.server.root, urllib.parse.unquote(raw))
+            return self._json(code, d)
         if path == "/api/events":
             return self._events()
         name = STATIC.get(path)

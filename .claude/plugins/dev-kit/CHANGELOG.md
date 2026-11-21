@@ -2,6 +2,33 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.2.0 — 2026-11-21
+
+The board opens the project's documents in place, lists milestones newest first, and shows how long each milestone took and what it cost.
+
+### Added
+- Board: every card that points to a markdown file of `.dev/` opens it, formatted, in a side panel with the same layout as the task details. It is linkable as `#doc:<path>[:<anchor>]`, has Back for documents opened from inside it, and updates while it is open.
+  - Conception steps: their files (brief, PRD, architecture, UX flows, UI spec). Planning: `plan.md`.
+  - Review rows: the document reviewed and the review report. Gates rows and the QA & fixes stage: `qa/<M>/report.md` and the risk report.
+  - Decisions: `decisions.md` at the ADR. Issues and hotfixes: `issues.md` at the issue. Open questions: `open-questions.md` at the question.
+  - Release card and Needs you: the dossier. Stable › Releases: the release notes. Release checks: the usability and docs reports.
+  - Task details › Origin: the QA report, or the dossier of a rejected release. Activity: the full `log.md`.
+  - The renderer builds the page element by element (no HTML from the file is ever inserted). It handles headings, lists and checkboxes, tables, code, quotes, rules, inline code, bold, italic and links. Web links open in a new tab, and links to other `.dev` documents open in the panel.
+- `dev_board.py`:
+  - `GET /api/doc?path=` serves one `.md` file of `.dev/`, behind the same access check as the rest of the API. It refuses paths outside `.dev` (including through symlinks), other file types and files over 1 MB.
+  - `/api/state` gains `docs` (the `.md` files that exist, without `run/` and `costs/`) and `milestone_costs`.
+- Board › Velocity: a second chart under the bars, with the same milestones and the same one-axis rule as the dataviz guidance.
+  - Two lines: elapsed hours (first task start → gate, or so far) and working hours (time with a task in progress, parallel tasks counted once). The new series colour (`--series-2`, orange) was validated for colour-blind safety in light and dark.
+  - Under each milestone: its cost, or its tokens when no cost was measured.
+  - The tooltip and the table add both hours and the cost or tokens.
+- `dev_cost.py`:
+  - Each request is attributed to a milestone (the task in progress at that moment, or the milestone's QA window).
+  - `report --by milestone`.
+  - `ingest` writes `.dev/costs/milestones.json` over all of the project's usage. Without transcripts, it uses the tokens the skills reported per scope, flagged partial.
+
+### Changed
+- Board: milestone lists read newest first: roadmap (releases and their milestones), later milestones, the Plan view's columns, the earlier/later milestone popovers and the velocity table. The chevron strips and the charts keep time order.
+
 ## 2.1.2 — 2026-11-21
 
 ### Changed
