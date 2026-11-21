@@ -2972,17 +2972,52 @@ def lifecycle(store: Store) -> dict:
         return "upcoming" if p == "construction" and not ever_built else "done"
 
     closed = sum(1 for x in mlist if x["state"] in ("closed", "released"))
+    live = [x for x in mlist if x["total"]]
     phases = [
         {"key": "conception", "state": pstate("conception"), "reopened": bool(pending["conception"]) and ever_built,
          "steps": [steps[k] for k in CONCEPTION_STEPS]},
         {"key": "planning", "state": pstate("planning"), "reopened": bool(pending["planning"]) and ever_built,
          "steps": [steps[k] for k in PLANNING_STEPS]},
         {"key": "construction", "state": pstate("construction"), "reopened": False, "current_milestone": cur,
-         "milestones": mlist, "closed": closed, "queue": queue, "release": train},
+         "milestones": mlist, "closed": closed, "queue": queue, "release": train,
+         "steps": construction_steps(live, closed, open_ms, cur, train, queue, ever_built)},
         {"key": "stable", "state": pstate("stable"), "reopened": False},
     ]
     return {"phase": phase, "step": step, "reopened": phase in ("conception", "planning") and ever_built,
             "steps": steps, "phases": phases, "release": train, "queue": queue}
+
+
+def _ms_range(ids: list[str]) -> str:
+    """M1, M2, M3, M5 -> "M1–M3, M5": a short label however many milestones wait."""
+    nums = sorted(int(m[1:]) for m in ids)
+    runs: list[list[int]] = []
+    for n in nums:
+        if runs and n == runs[-1][-1] + 1:
+            runs[-1].append(n)
+        else:
+            runs.append([n])
+    return ", ".join(f"M{r[0]}" if len(r) == 1 else f"M{r[0]}–M{r[-1]}" for r in runs)
+
+
+def construction_steps(live: list[dict], closed: int, open_ms: list[str], cur: str | None, train: dict,
+                       queue: list[str], ever_built: bool) -> list[dict]:
+    """The two finite sub-stages of construction for the board: milestones and release, each with a short count;
+    milestone ids and the queue go only into the note (a tooltip), so the bar never grows with the project."""
+    ms_state = "doing" if open_ms else "done" if ever_built else "todo"
+    note = (f"{cur} in progress · " if open_ms and cur else "") + f"{closed} of {len(live)} closed"
+    if queue:
+        note += f" · {len(queue)} issue{'s' if len(queue) != 1 else ''} queued"
+    waiting = train["milestones"]
+    if waiting:
+        rel_state = "doing" if train["ready"] else "todo"
+        rel_note = f"{_ms_range(waiting)} waiting for the release" + ("" if train["ready"] else
+                                                                     f" · after {', '.join(train['waiting_for'])}")
+    else:
+        last = train["last"]
+        rel_state = "done" if last else "todo"
+        rel_note = (f"last: {last.get('tag') or last.get('version') or 'released'}" if last else "no release yet")
+    return [{"key": "milestones", "state": ms_state, "count": f"{closed}/{len(live)}" if live else None, "note": note},
+            {"key": "release", "state": rel_state, "count": str(len(waiting)) if waiting else None, "note": rel_note}]
 
 
 def phase_label(store: Store, lc: dict | None = None) -> str:

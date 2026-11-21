@@ -629,6 +629,7 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(d["lifecycle"], {"local_deploy": "off", "deploy_when": "none", "max_fix_rounds": 3})
         self.assertEqual([p["key"] for p in d["cycle"]["phases"]], ["conception", "planning", "construction", "stable"])
         self.assertEqual((d["phase"], d["step"]), ("conception", "interview"))  # no brief yet
+        self.assertEqual([x["key"] for x in d["cycle"]["phases"][2]["steps"]], ["milestones", "release"])
         self.assertIsNone(d["milestones"][0]["deploy"])
         self.assertEqual(state_file.read_bytes(), before)
 

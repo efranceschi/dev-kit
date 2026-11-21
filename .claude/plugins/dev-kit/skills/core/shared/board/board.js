@@ -13,7 +13,8 @@
   // project lifecycle (conventions.md §19): conception -> planning -> construction -> stable, as a cycle
   const PHASE_NAME = { conception: "Conception", planning: "Planning", construction: "Construction", stable: "Stable" };
   const PHASE_WORD = { done: "done", current: "current phase", active: "still running", upcoming: "not started" };
-  const STEP_NAME = { interview: "interview", prd: "PRD", architecture: "architecture", ux: "UX", ui: "UI", plan: "plan" };
+  const STEP_NAME = { interview: "interview", prd: "PRD", architecture: "architecture", ux: "UX", ui: "UI", plan: "plan",
+    milestones: "milestones", release: "release" };
   const STEP_WORD = { todo: "to do", doing: "in progress", stale: "out of date", review: "waiting for its review", done: "done", skipped: "skipped" };
   const STEP_MARK = { todo: "○", doing: "◐", stale: "↻", review: "◐", done: "✓", skipped: "–" };
 
@@ -243,36 +244,25 @@
     renderLifecycle();
   }
 
-  /** One line under each phase: its steps (conception, planning), the milestone and release train (construction). */
+  /** The finite sub-stages of a phase as pills (✓ ◐ ○ ↻), each with at most a short count; details in the tooltip. */
   function phaseDetail(p) {
-    if (p.steps) {
-      return h("span", { class: "lc-steps" }, p.steps.map((x) =>
-        h("span", { class: `lc-step s-${x.state}`, title: `${STEP_NAME[x.key]}: ${STEP_WORD[x.state]}${x.note ? ` (${x.note})` : ""}` },
-          h("span", { "aria-hidden": "true", text: STEP_MARK[x.state] }), ` ${STEP_NAME[x.key]}`,
-          h("span", { class: "visually-hidden", text: ` ${STEP_WORD[x.state]};` }))));
-    }
-    if (p.key === "construction") {
-      const bits = [];
-      const live = p.milestones.filter((m) => m.state !== "empty");
-      if (live.length) bits.push(`${p.current_milestone && p.state !== "done" ? `${p.current_milestone} · ` : ""}${p.closed} of ${live.length} closed`);
-      else if (p.state !== "upcoming") bits.push("no tasks planned");
-      const r = p.release;
-      if (r.milestones.length) bits.push(`next release: ${r.milestones.join(", ")}`);
-      else if (r.last) bits.push(`released ${r.last.tag || r.last.version || "before"}`);
-      if (p.queue.length) bits.push(plural(p.queue.length, "issue") + " queued");
-      return h("span", { class: "lc-note", text: bits.join(" · ") || "milestones M1, M2… after planning" });
-    }
-    return h("span", { class: "lc-note", text: p.state === "current" ? "nothing open, everything released" : "when nothing is open" });
+    if (!p.steps || !p.steps.length) return null;
+    return h("span", { class: "lc-steps" }, p.steps.map((x) =>
+      h("span", { class: `lc-step s-${x.state}`, title: `${STEP_NAME[x.key]}: ${STEP_WORD[x.state]}${x.note ? ` (${x.note})` : ""}` },
+        h("span", { "aria-hidden": "true", text: STEP_MARK[x.state] }), ` ${STEP_NAME[x.key]}`,
+        x.count ? h("span", { class: "lc-count", text: ` ${x.count}` }) : null,
+        h("span", { class: "visually-hidden", text: ` ${STEP_WORD[x.state]}${x.note ? `, ${x.note}` : ""};` }))));
   }
 
   function renderLifecycle() {
     const lc = data.cycle;
     const idx = lc.phases.findIndex((p) => p.key === data.phase);
     const cur = lc.phases[idx];
-    const step = data.step ? (STEP_NAME[data.step] || data.step) : "";
+    // the sub-stage in progress, never a milestone id: the bar names only finite stages and sub-stages
+    const sub = cur && cur.steps ? (cur.steps.find((x) => !["done", "skipped"].includes(x.state)) || null) : null;
+    const step = sub ? STEP_NAME[sub.key] : "";
     $("phase-step").textContent = `${PHASE_NAME[data.phase]}${step ? ` · ${step}` : ""}`
-      + (data.reopened ? " · reopened by a change, construction goes on" : "")
-      + (cur && cur.key === "construction" && lc.release.milestones.length && lc.release.ready ? " · release ready" : "");
+      + (data.reopened ? " · reopened by a change, construction goes on" : "");
     fill($("phases"), lc.phases.map((p, i) => {
       const here = i === idx;
       const st = p.state === "active" ? "current" : p.state === "current" ? "current" : p.state;
