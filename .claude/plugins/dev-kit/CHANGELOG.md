@@ -2,6 +2,18 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.5.0 — 2026-11-21
+
+### Added
+- Terminal status pane, a Claude Code function-hooks module (`hooks/status-pane.tsx`), for Claude Code builds that load them. In a dev-kit project it opens beside the chat (when the terminal has room) and stays up to date:
+  - the project, phase and step; the current milestone with a progress bar, done/total, gate and QA score
+  - the milestone's task cards grouped like the board's kanban: Running (with time since start), Blocked (with the reason), To do (the next task marked, with why) and Done (most recent first, short commit)
+  - Needs you: releases waiting for approval, hotfixes, open questions, blocked tasks
+  - issues scheduled in the milestone and open issues per class of service; the other milestones one line each; the next command
+  - keys: `m` current milestone or all of them, `d` show or hide done tasks, `r` refresh; `/dev-kit-pane` opens or closes it
+  - on the desktop app's widget, a one-line summary
+- It reads the state through `dev_state.py status --json` after each turn and every 5 s while open, only when `.dev/state.json` or `open-questions.md` changed. Optional: a Claude Code without function hooks ignores it and the existing hooks run as before.
+
 ## 2.4.0 — 2026-11-21
 
 ### Added
