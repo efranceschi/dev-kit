@@ -5,7 +5,7 @@ All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugi
 ## 2.2.2 — 2026-11-21
 
 ### Added
-- Board: the top bar always shows what Claude Code is running now, for example `/dev-kit:autopilot › /dev-kit:qa M12 · 3 agents · 2m`. It reads the open skill runs and the active agents. A click lists each skill (nested under the one that started it) with its time, and each agent with the task or QA gate it works on. With nothing running it says "Idle" and shows the next step.
+- Board: the top bar always shows what Claude Code is running now, for example `/dev-kit:autopilot › /dev-kit:qa M12` with its agent count and time. It reads the open skill runs and the active agents. A click lists each skill (nested under the one that started it) with its time, and each agent with the task or QA gate it works on. With nothing running it says "Idle" and shows the next step.
 
 ### Changed
 - Board: the gate badge says what the gate waits for. "Gate pending" is now "◌ Waiting for QA" once every task is done, with how to run it in the tooltip, and "Gate after the build" while tasks are open.
