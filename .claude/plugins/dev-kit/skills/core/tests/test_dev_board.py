@@ -90,6 +90,20 @@ def alive(pid: int) -> bool:
         return True
 
 
+class CodeIdTest(unittest.TestCase):
+    def test_code_id_covers_sibling_scripts(self):
+        import dev_board as db
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(db, "SCRIPTS", Path(d)), \
+                mock.patch.object(db, "ASSETS", Path(d) / "none"):
+            sib = Path(d) / "dev_worker.py"
+            sib.write_text("a = 1\n")
+            before = db.code_id()
+            self.assertEqual(before, db.code_id())
+            sib.write_text("a = 2\n")
+            self.assertNotEqual(before, db.code_id())
+
+
 class BoardTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -240,7 +254,7 @@ class BoardTest(unittest.TestCase):
         rec = dict(old, code="older-version")
         (self.root / ".dev" / "run" / "board.json").write_text(json.dumps(rec))
         r = self.board("start", check=True)
-        self.assertIn("another version of the kit", r.stdout)
+        self.assertIn("the kit was updated", r.stdout)
         self.assertIn("restarted:", r.stdout)
         new = self.record()
         self.assertNotEqual(new["pid"], old["pid"])

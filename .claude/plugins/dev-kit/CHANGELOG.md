@@ -2,6 +2,15 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 1.31.0 — 2026-11-20
+
+The board drains requests queued before it started and follows plugin updates.
+
+### Changed
+- `/dev-kit:board` runs `dev_worker.py list` after arming and invokes `/dev-kit:worker` at once when a request is pending or answered, instead of waiting for a notification.
+- Board: the code identity covers every script and the page assets, not only `dev_board.py`, so an update that changes a sibling module restarts the board on the next `/dev-kit:board`. The running server also checks it every 30 s and stops itself when the kit changed on disk.
+- `dev_worker.py watch`: when `plugin.json` changes, the listener prints `the kit was updated; run /dev-kit:board` and exits; the board skill then restarts it.
+
 ## 1.30.1 — 2026-11-20
 
 The board's lifecycle bar shows only finite stages and sub-stages.

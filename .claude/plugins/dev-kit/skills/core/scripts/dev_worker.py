@@ -440,6 +440,14 @@ def _mtime(path: Path) -> float:
         return 0.0
 
 
+def _kit_version() -> str:
+    pj = Path(__file__).resolve().parents[3] / ".claude-plugin" / "plugin.json"
+    try:
+        return str(json.loads(pj.read_text(encoding="utf-8")).get("version", "unknown"))
+    except (OSError, ValueError):
+        return "unknown"
+
+
 def armed(root: Path) -> dict | None:
     """The Claude Code process that listens for this project's requests, while it is alive."""
     a = _read(run_dir(root) / "worker-armed.json")
@@ -786,9 +794,14 @@ def watch(root: Path, poll: float = 2.0, once: bool = False, emit=None, grace: f
     sig: tuple | None = None
     nxt: dict | None = None
     wrote = False
+    kit = _kit_version()
     try:
         while True:
             t = time.monotonic()
+            if _kit_version() != kit:
+                if armed(root) and armed(root)["pid"] in parents:
+                    emit("dev-kit board: the kit was updated; run /dev-kit:board to restart the listener")
+                return 0  # this process runs the old code: a fresh /dev-kit:board starts the new one
             a = armed(root)
             if a and a["pid"] in parents:
                 if not wrote or t - beat >= WATCH_BEAT_S:
