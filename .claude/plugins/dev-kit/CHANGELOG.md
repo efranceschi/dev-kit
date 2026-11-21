@@ -2,6 +2,14 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.3.0 — 2026-11-21
+
+### Added
+- Board: release planning in the Plan view (Planning tab). When `plan.md` has planned releases, a "Releases" switch next to "Tasks and issues" shows one lane per release with its milestones as cards.
+  - Drag a milestone to another release (or use Move…), create the next release (`R<n>`), or remove an empty one. Nothing changes until you send the draft; it goes through the same worker as every plan draft.
+  - New plan operations `move_milestone`, `new_release` and `drop_release` in `dev_state.py plan-apply` and in the draft validation. They are checked together and applied all or nothing.
+  - Refused: milestones whose gate is not pending, with a task running, or in a release that is in review, approved or released; a release left with fewer than 2 or more than 5 milestones; a dependency that would end up in a later release; a first release in a plan that has none (group with `/dev-kit:plan`).
+
 ## 2.2.4 — 2026-11-21
 
 ### Changed

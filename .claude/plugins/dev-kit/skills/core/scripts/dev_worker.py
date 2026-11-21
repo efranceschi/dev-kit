@@ -98,6 +98,9 @@ PLAN_OPS = {
     "move_task": {"task": rf"^{TASK}$", "milestone": rf"^{MILESTONE}$"},
     "reorder": {"milestone": rf"^{MILESTONE}$"},
     "new_milestone": {"milestone": rf"^{MILESTONE}$"},
+    "move_milestone": {"milestone": rf"^{MILESTONE}$", "release": r"^R\d{1,3}$"},
+    "new_release": {"release": r"^R\d{1,3}$"},
+    "drop_release": {"release": r"^R\d{1,3}$"},
 }
 MAX_OPS = 100
 BIDI = re.compile("[\u200e\u200f\u202a-\u202e\u2066-\u2069]")  # direction overrides hide what text says
@@ -271,6 +274,8 @@ def _plan_ops(ops: object, errors: list[str]) -> list[dict]:
                 o["tasks"] = [_pattern(t, f"{where}: tasks", rf"^{TASK}$", errors) for t in ts]
         if kind == "new_milestone":
             o["title"] = clean(op.get("title"), f"{where}: title", 80, errors).replace("|", "/")
+        if kind == "new_release":
+            o["title"] = clean(op.get("title"), f"{where}: title", 80, errors, required=False).replace("|", "/")
         unknown = set(op) - {"op", "before", "force", "tasks", "title", *PLAN_OPS[kind]}
         if unknown:
             errors.append(f"{where}: unknown field {sorted(unknown)[0]}")

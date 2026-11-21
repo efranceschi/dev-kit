@@ -661,6 +661,82 @@ class TestPlannedReleases(Base):
         self.assertIn("T-004, T-005", out)
         self.assertEqual(self.state()["tasks"]["T-005"]["title"], "Second thing")
 
+    # ---- the board's release planning: move_milestone, new_release, drop_release (all or nothing)
+
+    FIVE = ("# Implementation plan — demo\n\n## R1 — First\n\n## M1 — One\n\n## M2 — Two\n\n## M3 — Three\n\n"
+            "## R2 — Second\n\n## M4 — Four\n\n## M5 — Five\n")
+
+    def five(self) -> None:
+        (self.root / ".dev" / "plan.md").write_text(self.FIVE, encoding="utf-8")
+        self.run_state("sync-plan")
+
+    def apply(self, ops, expect=0):
+        return self.run_state("plan-apply", "--ops", json.dumps(ops), expect=expect)
+
+    def groups(self) -> list:
+        return [(r["id"], r["milestones"]) for r in self.state()["release_plan"]]
+
+    def test_move_milestone_between_releases(self) -> None:
+        self.five()
+        self.apply([{"op": "move_milestone", "milestone": "M3", "release": "R2"}])
+        self.assertEqual(self.groups(), [("R1", ["M1", "M2"]), ("R2", ["M3", "M4", "M5"])])
+        self.assertEqual(self.state()["milestones"]["M3"]["release"], "R2")
+        text = (self.root / ".dev" / "plan.md").read_text()
+        self.assertLess(text.index("## R2"), text.index("## M3"))
+        self.assertLess(text.index("## M3"), text.index("## M4"))
+        self.assertEqual(self.run_state("sync-plan").stdout.count("outside any release"), 0)
+
+    def test_move_keeps_tasks_with_their_milestone(self) -> None:
+        (self.root / ".dev" / "plan.md").write_text(RPLAN.replace("## R2 — Payments", "## M4 — Extra\n\n## R2 — Payments\n\n## M5 — More\n"), encoding="utf-8")
+        self.run_state("sync-plan")
+        self.apply([{"op": "move_milestone", "milestone": "M4", "release": "R2"}])
+        s = self.state()
+        self.assertEqual(s["tasks"]["T-002"]["milestone"], "M2")
+        self.assertEqual(s["tasks"]["T-003"]["milestone"], "M3")
+        self.assertEqual([(r, sorted(ms)) for r, ms in self.groups()], [("R1", ["M1", "M2"]), ("R2", ["M3", "M4", "M5"])])
+
+    def test_release_size_is_checked_after_the_whole_draft(self) -> None:
+        self.five()
+        out = self.apply([{"op": "move_milestone", "milestone": "M1", "release": "R2"}, {"op": "move_milestone", "milestone": "M2", "release": "R2"}], 1).stdout
+        self.assertIn("R1 would hold 1 milestone;", out)
+        self.assertEqual(self.groups(), [("R1", ["M1", "M2", "M3"]), ("R2", ["M4", "M5"])])  # nothing changed
+        self.apply([{"op": "new_release", "release": "R3", "title": "Third"}, {"op": "move_milestone", "milestone": "M2", "release": "R3"},
+                    {"op": "move_milestone", "milestone": "M3", "release": "R3"}], 1)  # R1 would keep one milestone
+        self.apply([{"op": "new_release", "release": "R3"}, {"op": "move_milestone", "milestone": "M3", "release": "R3"},
+                    {"op": "move_milestone", "milestone": "M5", "release": "R3"}], 1)  # R2 would keep one milestone
+
+    def test_new_release_is_the_next_one_and_empty_ones_drop(self) -> None:
+        self.five()
+        self.assertIn("must be R3", self.apply([{"op": "new_release", "release": "R5"}], 1).stdout)
+        self.assertIn("would hold 0 milestones", self.apply([{"op": "new_release", "release": "R3"}], 1).stdout)
+        self.apply([{"op": "new_release", "release": "R3"}, {"op": "drop_release", "release": "R3"}])
+        self.assertEqual([g[0] for g in self.groups()], ["R1", "R2"])
+        self.assertIn("still holds M4, M5", self.apply([{"op": "drop_release", "release": "R2"}], 1).stdout)
+
+    def test_a_release_in_review_or_a_closed_milestone_does_not_move(self) -> None:
+        (self.root / ".dev" / "plan.md").write_text(RPLAN.replace("## R2 — Payments", "## M4 — Extra\n\n## R2 — Payments\n\n## M5 — More\n"), encoding="utf-8")
+        self.run_state("sync-plan")
+        self.close(("M1", ["T-001"]))
+        self.assertIn("gate of M1 is passed", self.apply([{"op": "move_milestone", "milestone": "M1", "release": "R2"}], 1).stdout)
+        self.close(("M2", ["T-002"]), ("M4", []))
+        self.assertEqual(self.rel("R1")["status"], "ready_for_review")
+        self.assertIn("R1 is ready for review", self.apply([{"op": "move_milestone", "milestone": "M3", "release": "R1"}], 1).stdout)
+
+    def test_a_dependency_may_not_end_up_in_a_later_release(self) -> None:
+        (self.root / ".dev" / "plan.md").write_text(RPLAN.replace("## R2 — Payments", "## M4 — Extra\n\n## R2 — Payments\n\n## M5 — More\n"), encoding="utf-8")
+        self.run_state("sync-plan")
+        # M2 (T-002) is a dependency of T-003 (M3, R2): moving M2 to R2 after... M2 < M3 by number, so it still ships first
+        self.apply([{"op": "move_milestone", "milestone": "M2", "release": "R2"}])
+        # moving M3 (needs T-002) back before M2's release is refused
+        out = self.apply([{"op": "move_milestone", "milestone": "M3", "release": "R1"}], 1).stdout
+        self.assertIn("T-003 depends on T-002", out)
+
+    def test_plan_without_releases_is_not_grouped_here(self) -> None:
+        (self.root / ".dev" / "plan.md").write_text(RPLAN.replace("## R1 — Sign-up journey\n", "").replace("## R2 — Payments\n", ""), encoding="utf-8")
+        self.run_state("sync-plan")
+        self.assertIn("no planned releases", self.apply([{"op": "new_release", "release": "R1"}], 1).stdout)
+
+
 class TestDetectStack(unittest.TestCase):
     def run_detect(self, root: Path) -> dict:
         proc = subprocess.run([sys.executable, "-I", str(DETECT), str(root)], capture_output=True, text=True)

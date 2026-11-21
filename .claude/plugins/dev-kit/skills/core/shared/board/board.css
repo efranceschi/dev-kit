@@ -714,6 +714,9 @@ dialog p { color: var(--text-secondary); }
 .pcol { flex: 0 0 248px; min-width: 0; scroll-snap-align: start; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 8px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; }
 .pcol.queue { position: sticky; left: 0; z-index: 2; scroll-snap-align: none; background: color-mix(in srgb, var(--accent-a) 6%, var(--surface-2)); box-shadow: 10px 0 14px -10px rgba(0,0,0,.55); }
 .pcol.new { border-color: color-mix(in srgb, var(--accent-b) 60%, transparent); }
+.plan-mode { display: flex; gap: 6px; }
+.plan-mode .btn[aria-pressed=true] { background: var(--surface-3); border-color: var(--accent-b); }
+.pcol.rel.locked { opacity: .75; }
 .pcol.add { border-style: dashed; border-color: var(--border-strong); background: transparent; }
 .pcol .col-head { min-width: 0; text-transform: none; letter-spacing: 0; font-size: 12.5px; }
 .pcol .col-head strong { flex: none; }

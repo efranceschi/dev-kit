@@ -95,12 +95,19 @@ class WorkerTest(unittest.TestCase):
         ops = [{"op": "move_task", "task": "T-003", "milestone": "M2", "before": "T-004"},
                {"op": "new_milestone", "milestone": "M4", "title": "Reports | exports"},
                {"op": "schedule_issue", "issue": "I-002", "milestone": "M4", "force": True},
-               {"op": "reorder", "milestone": "M2", "tasks": ["T-004", "T-003"]}]
+               {"op": "reorder", "milestone": "M2", "tasks": ["T-004", "T-003"]},
+               {"op": "new_release", "release": "R3", "title": "Third | one"},
+               {"op": "move_milestone", "milestone": "M4", "release": "R3"},
+               {"op": "drop_release", "release": "R4"}]
         out = dw.validate("plan_draft", {"ops": ops, "base": "2026-11-20T10:00:00Z"})
+        self.assertEqual(out["ops"][4], {"op": "new_release", "release": "R3", "title": "Third / one"})
+        self.assertEqual(out["ops"][5], {"op": "move_milestone", "milestone": "M4", "release": "R3"})
         self.assertEqual(out["ops"][1]["title"], "Reports / exports")
         self.assertTrue(out["ops"][2]["force"])
         for bad in ([], [{"op": "delete_task", "task": "T-001"}], [{"op": "move_task", "task": "T-1; x", "milestone": "M2"}],
-                    [{"op": "move_task", "task": "T-003", "milestone": "M2", "status": "done"}], [{}] * 101):
+                    [{"op": "move_task", "task": "T-003", "milestone": "M2", "status": "done"}], [{}] * 101,
+                    [{"op": "move_milestone", "milestone": "M2", "release": "1"}], [{"op": "new_release", "release": "R1; x"}],
+                    [{"op": "drop_release", "release": "R1", "milestone": "M1"}]):
             with self.assertRaises(dw.Invalid):
                 dw.validate("plan_draft", {"ops": bad})
 

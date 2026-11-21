@@ -1549,6 +1549,8 @@
   // ------------------------------------------------------------------ plan: drag tasks and issues between open milestones, add the next milestone, send the draft
   let draft = { ops: [], base: null, serverErrors: [], buffer: false };
   const MS_NUM = (id) => Number(String(id).slice(1));
+  const REL_OPS = ["move_milestone", "new_release", "drop_release"];
+  const RELEASE_SIZE = [2, 5];  // milestones per release (conventions.md §4); dev_state.py checks it again
   const cmpSeq = (a, b) => ((data.tasks[a].seq ?? 1e6) - (data.tasks[b].seq ?? 1e6)) || (Number(a.slice(2)) - Number(b.slice(2)));
   const movableTask = (t) => t && t.status === "todo" && t.lane !== "hotfix";
   const issueOf = (id) => ((data.backlog || {}).issues || {})[id];
@@ -1579,6 +1581,7 @@
     queued.forEach((c) => { where[c.id] = "queue"; });
     draft.ops.forEach((op, n) => {
       const at = `Change ${n + 1}`;
+      if (REL_OPS.includes(op.op)) return;  // release changes are replayed by relModel
       if (op.op === "new_milestone") { ms.push({ id: op.milestone, title: op.title, isNew: true }); cols[op.milestone] = []; return; }
       if (!cols[op.milestone]) { problems.push(`${at}: ${op.milestone} is no longer open`); return; }
       const id = op.op === "move_task" ? op.task : op.issue;
@@ -1622,6 +1625,9 @@
   }
   function describeOp(op) {
     if (op.op === "new_milestone") return `New milestone ${op.milestone} · ${op.title}`;
+    if (op.op === "move_milestone") return `${op.milestone} → ${op.release}`;
+    if (op.op === "new_release") return `New release ${op.release}${op.title ? ` · ${op.title}` : ""}`;
+    if (op.op === "drop_release") return `Remove release ${op.release}`;
     if (op.op === "move_task") return `${op.task} → ${op.milestone}${op.before ? ` (before ${op.before})` : ""}`;
     if (op.op === "schedule_issue") return `${op.issue} → ${op.milestone}${op.before ? ` (before ${op.before})` : ""}${op.force ? " · over the buffer" : ""}`;
     return op.op;
@@ -1690,6 +1696,101 @@
       moveCard(card, m, t ? t.dataset.id : null, model);
     });
   }
+  // ---- plan, releases mode: drag whole milestones between the planned releases (R1, R2, ...) of plan.md
+  let planMode = "tasks";
+  let newRelTitle = "";
+  const msTasks = (id) => Object.values(data.tasks).filter((t) => t.milestone === id && t.status !== "dropped");
+  /** The planned releases as the draft leaves them: each with its milestones in number order, and the problems found. */
+  function relModel() {
+    const rels = relPlan().map((r) => ({ id: r.id, title: r.title, status: r.status, ms: r.milestones.slice().sort((a, b) => MS_NUM(a) - MS_NUM(b)), isNew: false }));
+    const touched = new Set();
+    const problems = [];
+    draft.ops.filter((o) => REL_OPS.includes(o.op)).forEach((op, n) => {
+      if (op.op === "new_release") { rels.push({ id: op.release, title: op.title || "", status: "in_progress", ms: [], isNew: true }); touched.add(op.release); return; }
+      if (op.op === "drop_release") { const i = rels.findIndex((r) => r.id === op.release); if (i >= 0) rels.splice(i, 1); touched.delete(op.release); return; }
+      const from = rels.find((r) => r.ms.includes(op.milestone)), to = rels.find((r) => r.id === op.release);
+      const m = data.milestones.find((x) => x.id === op.milestone);
+      if (!from || !to || !m || m.gate !== "pending" || from.status !== "in_progress" || to.status !== "in_progress") {
+        problems.push(`${op.milestone} → ${op.release} no longer fits the plan; undo this change`);
+        return;
+      }
+      from.ms.splice(from.ms.indexOf(op.milestone), 1);
+      to.ms.push(op.milestone);
+      to.ms.sort((a, b) => MS_NUM(a) - MS_NUM(b));
+      touched.add(from.id); touched.add(to.id);
+    });
+    rels.filter((r) => touched.has(r.id) && (r.ms.length < RELEASE_SIZE[0] || r.ms.length > RELEASE_SIZE[1]))
+      .forEach((r) => problems.push(`${r.id} would hold ${plural(r.ms.length, "milestone")}; a release holds ${RELEASE_SIZE[0]} to ${RELEASE_SIZE[1]}`));
+    return { rels, problems };
+  }
+  const relLocked = (r) => r.status !== "in_progress";
+  function msCard(mid, rel, model) {
+    const m = data.milestones.find((x) => x.id === mid);
+    if (!m) return null;
+    const ts = msTasks(mid);
+    const running = ts.some((t) => t.status === "in_progress");
+    const movable = m.gate === "pending" && !relLocked(rel) && !running;
+    const why = m.gate !== "pending" ? `its gate is ${m.gate}` : relLocked(rel) ? `${rel.id} is ${REL_WORD[rel.status] || rel.status}` : running ? "a task is running" : "";
+    const targets = model.rels.filter((r) => r.id !== rel.id && !relLocked(r));
+    const sel = movable && targets.length ? h("select", { class: "move-sel", "aria-label": `Move ${mid} to another release`, id: `mv-${mid}` },
+      h("option", { value: "", text: "Move…" }), targets.map((r) => h("option", { value: r.id, text: `To ${r.id}` }))) : null;
+    if (sel) sel.addEventListener("change", () => {
+      const v = sel.value;
+      sel.value = "";
+      if (v) { addOp({ op: "move_milestone", milestone: mid, release: v }); toast(`${mid} → ${v}. Send the draft when it is ready.`); }
+      requestAnimationFrame(() => { const el = $(`mv-${mid}`); if (el) el.focus(); });
+    });
+    const el = h("li", { class: `pcard${movable ? " movable" : " locked"}${m.gate === "pending" ? "" : " s-done"}`, "data-id": mid, draggable: movable ? "true" : null,
+      title: movable ? "Drag to another release, or use Move…" : `Stays here: ${why}` },
+      h("div", { class: "tcard-top" }, h("span", { class: "tid", text: mid }),
+        h("span", { class: "chip", text: m.gate === "pending" ? plural(ts.length, "task") : `gate ${m.gate}` })),
+      h("div", { class: "tcard-title", text: m.title || mid, title: m.title || null }), sel);
+    if (movable) {
+      el.addEventListener("dragstart", (e) => { dragging = { kind: "ms", id: mid, from: rel.id }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", mid); el.classList.add("dragging"); });
+      el.addEventListener("dragend", () => { dragging = null; el.classList.remove("dragging"); });
+    }
+    return el;
+  }
+  function relDropZone(list, rel) {
+    if (relLocked(rel)) return;
+    const ok = () => dragging && dragging.kind === "ms" && dragging.from !== rel.id;
+    list.addEventListener("dragover", (e) => { if (!ok()) return; e.preventDefault(); list.classList.add("drop-on"); });
+    list.addEventListener("dragleave", (e) => { if (!list.contains(e.relatedTarget)) list.classList.remove("drop-on"); });
+    list.addEventListener("drop", (e) => {
+      e.preventDefault();
+      list.classList.remove("drop-on");
+      if (!ok()) return;
+      const card = dragging;
+      dragging = null;
+      addOp({ op: "move_milestone", milestone: card.id, release: rel.id });
+      toast(`${card.id} → ${rel.id}. Send the draft when it is ready.`);
+    });
+  }
+  /** The lanes of releases mode, and the one to create the next release. */
+  function relColumns() {
+    const model = relModel();
+    const lanes = model.rels.map((r) => {
+      const list = h("ol", { class: "pcol-list", "data-key": `rel-${r.id}`, "aria-label": `${r.id} ${r.title}, ${plural(r.ms.length, "milestone")}` }, r.ms.map((m) => msCard(m, r, model)).filter(Boolean));
+      if (!r.ms.length) list.append(h("li", { class: "col-empty", text: relLocked(r) ? "—" : "Drop milestones here" }));
+      relDropZone(list, r);
+      const canDrop = !relLocked(r) && !r.ms.length;
+      return h("section", { class: `pcol rel${r.isNew ? " new" : ""}${relLocked(r) ? " locked" : ""}`, "aria-label": `${r.id} ${r.title}` },
+        h("div", { class: "col-head" }, h("strong", { text: r.id }), r.title && r.title !== r.id ? h("span", { class: "pcol-title", text: r.title, title: r.title }) : null,
+          h("span", { class: "count", text: String(r.ms.length) })),
+        h("p", { class: "card-sub", text: r.isNew ? "New in this draft" : REL_WORD[r.status] || r.status }), list,
+        canDrop ? h("button", { type: "button", class: "link-btn", text: `Remove ${r.id}`, onclick: () => addOp({ op: "drop_release", release: r.id }) }) : null);
+    });
+    const next = `R${Math.max(0, ...model.rels.map((r) => Number(r.id.slice(1)))) + 1}`;
+    const inp = h("input", { type: "text", id: "new-rel-title", maxlength: "80", placeholder: `Title of ${next} (optional)`, "aria-label": `Title of the new release ${next}` });
+    inp.value = newRelTitle;
+    inp.addEventListener("input", () => { newRelTitle = inp.value; });
+    const add = () => { const v = inp.value.trim(); newRelTitle = ""; addOp({ op: "new_release", release: next, ...(v ? { title: v } : {}) }); toast(`${next} added to the draft: drag its milestones in.`); };
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } });
+    lanes.push(h("section", { class: "pcol add" }, h("div", { class: "col-head" }, h("strong", { text: `＋ ${next}` })),
+      h("p", { class: "card-sub", text: "The next release, after the others. Create it, then drag milestones into it. A release holds 2 to 5 milestones." }),
+      h("div", { class: "answer-free" }, inp, h("button", { type: "button", class: "btn btn-sm", text: "Add", onclick: add }))));
+    return { cols: lanes, problems: model.problems };
+  }
   let newMsTitle = "";
   const doneOpen = new Set();  // plan columns whose done tasks are expanded, kept across live updates
   function renderPlan() {
@@ -1725,9 +1826,12 @@
     const newNum = `M${Math.max(0, ...data.milestones.map((m) => MS_NUM(m.id)), ...draft.ops.filter((o) => o.op === "new_milestone").map((o) => MS_NUM(o.milestone))) + 1}`;
     const hasNew = draft.ops.some((o) => o.op === "new_milestone");
     const b = (data.backlog || {}).buffer;
-    const cols = [column("queue", "Issue queue", "Expedite and change issues go through /dev-kit:issue.", model.queued)]
+    const hasRels = relPlan().length > 0;
+    if (!hasRels) planMode = "tasks";
+    const rm = planMode === "releases" ? relColumns() : null;
+    const cols = rm ? rm.cols : [column("queue", "Issue queue", "Expedite and change issues go through /dev-kit:issue.", model.queued)]
       .concat(model.ms.slice().reverse().map((m) => column(m.id, m.title || m.id, m.isNew ? "New in this draft" : b && b.milestone === m.id ? `Issue buffer ${b.used}/${b.capacity}` : null, model.cols[m.id] || [], null, m.isNew)));
-    if (!hasNew) {
+    if (!hasNew && !rm) {
       const inp = h("input", { type: "text", id: "new-ms-title", maxlength: "80", placeholder: `Title of ${newNum}`, "aria-label": `Title of the new milestone ${newNum}` });
       inp.value = newMsTitle;
       inp.addEventListener("input", () => { newMsTitle = inp.value; });
@@ -1737,8 +1841,11 @@
         h("p", { class: "card-sub", text: "The next milestone, after the others. Name it, then drag cards into it." }),
         h("div", { class: "answer-free" }, inp, h("button", { type: "button", class: "btn btn-sm", text: "Add", onclick: add }))));
     }
-    const errors = model.problems.concat(draft.serverErrors);
-    const sendBtn = h("button", { type: "button", class: "btn btn-primary", id: "plan-send", disabled: !draft.ops.length || model.problems.length ? true : null, text: "Send to Claude Code",
+    const errors = model.problems.concat(relModel().problems, draft.serverErrors);
+    const modeBar = hasRels ? h("div", { class: "plan-mode", role: "group", "aria-label": "What to plan" },
+      [["tasks", "Tasks and issues"], ["releases", "Releases"]].map(([k, label]) => h("button", { type: "button", class: "btn btn-sm", "aria-pressed": String(planMode === k), text: label,
+        onclick: () => { planMode = k; renderPlan(); } }))) : null;
+    const sendBtn = h("button", { type: "button", class: "btn btn-primary", id: "plan-send", disabled: !draft.ops.length || errors.some((x) => !draft.serverErrors.includes(x)) ? true : null, text: "Send to Claude Code",
       onclick: async (e) => {
         e.currentTarget.disabled = true;
         const ops = draft.ops.map((o) => (o.op === "schedule_issue" && draft.buffer ? { ...o, force: true } : o));
@@ -1752,12 +1859,12 @@
         }
       } });
     const overBuffer = draft.serverErrors.some((x) => /issue buffer/.test(x));
-    fill(box,
+    fill(box, modeBar,
       h("div", { class: "plan-cols" }, cols),
       h("aside", { class: "plan-draft", "aria-label": "Draft of the plan" },
         h("div", { class: "list-title" }, "Draft", draft.ops.length ? h("span", { class: "chip", text: String(draft.ops.length) }) : null),
         draft.ops.length ? h("ol", { class: "td-list" }, draft.ops.map((o) => h("li", { text: describeOp(o) })))
-          : h("p", { class: "card-sub", text: "Drag tasks not started and open issues between open milestones, or use Move… on a card. Nothing changes until you send the draft; Claude Code applies it with /dev-kit:worker." }),
+          : h("p", { class: "card-sub", text: "Drag tasks not started and open issues between open milestones, or milestones between releases, or use Move… on a card. Nothing changes until you send the draft; Claude Code applies it with /dev-kit:worker." }),
         errors.length ? h("ul", { class: "td-list plan-errors", role: "alert" }, errors.map((x) => h("li", { text: x }))) : null,
         overBuffer ? h("button", { type: "button", class: "link-btn", text: "Go over the issue buffer and send again", onclick: () => { draft.buffer = true; draft.serverErrors = []; renderPlan(); $("plan-send").click(); } }) : null,
         h("div", { class: "plan-actions" },

@@ -3944,6 +3944,75 @@ class PlanDoc:
             at = (max(i for n, i in nums if n == max(n for n, _ in nums)) + 1) if nums else len(self.segs)
         self.segs.insert(at, {"kind": "text", "lines": [f"## {m} — {title}", ""]})
 
+    @staticmethod
+    def _first(s: dict) -> str:
+        return s["lines"][0] if s["lines"] else ""
+
+    def _is_top(self, s: dict) -> bool:
+        return s["kind"] == "text" and bool(TOP_HEADING_RE.match(self._first(s)))
+
+    def release_map(self) -> tuple[dict, list[str]]:
+        """({milestone: release or None}, release ids in plan order), read the way parse_plan reads them."""
+        rmap: dict = {}
+        rids: list[str] = []
+        cur: str | None = None
+        for s in self.segs:
+            if s["kind"] != "text":
+                continue
+            first = self._first(s)
+            r, m = RELEASE_RE.match(first), MILESTONE_RE.match(first)
+            if r:
+                cur = r.group(1)
+                rids.append(cur)
+            elif m:
+                rmap[m.group(1)] = cur
+            elif first.startswith("# "):
+                cur = None
+        return rmap, rids
+
+    def _block(self, m: str) -> tuple[int, int] | None:
+        """The segments of a milestone: its heading and the tasks below it, up to the next `#`/`##` heading."""
+        for i, s in enumerate(self.segs):
+            mm = MILESTONE_RE.match(self._first(s)) if s["kind"] == "text" else None
+            if mm and mm.group(1) == m:
+                j = i + 1
+                while j < len(self.segs) and not self._is_top(self.segs[j]):
+                    j += 1
+                return i, j
+        return None
+
+    def _release_at(self, rid: str) -> int | None:
+        return next((i for i, s in enumerate(self.segs) if s["kind"] == "text" and (r := RELEASE_RE.match(self._first(s))) and r.group(1) == rid), None)
+
+    def move_milestone(self, m: str, rid: str) -> None:
+        """Move a milestone with its tasks under release `rid`, in milestone-number order among the ones already there."""
+        i, j = self._block(m)  # type: ignore[misc]
+        blk = self.segs[i:j]
+        del self.segs[i:j]
+        pos = k = (self._release_at(rid) or 0) + 1
+        n = int(m[1:])
+        while k < len(self.segs):
+            s = self.segs[k]
+            if self._is_top(s):
+                mm = MILESTONE_RE.match(self._first(s))
+                if not mm:
+                    break
+                e = k + 1
+                while e < len(self.segs) and not self._is_top(self.segs[e]):
+                    e += 1
+                if int(mm.group(1)[1:]) < n:
+                    pos = e
+                k = e
+                continue
+            k += 1
+        self.segs[pos:pos] = blk
+
+    def add_release(self, rid: str, title: str) -> None:
+        self.segs.append({"kind": "text", "lines": [f"## {rid} — {title}" if title else f"## {rid}", ""]})
+
+    def drop_release(self, rid: str) -> None:
+        del self.segs[self._release_at(rid)]  # type: ignore[arg-type]
+
     def text(self) -> str:
         out: list[str] = []
         for s in self.segs:
@@ -3964,7 +4033,10 @@ def plan_edit(store: Store, ops: list[dict], text: str) -> tuple[str, list[str],
     errors: list[str] = []
     changes: list[str] = []
     moved: set[str] = set()
-    effects: dict = {"new_milestones": [], "scheduled": [], "moved": []}
+    effects: dict = {"new_milestones": [], "scheduled": [], "moved": [], "moved_milestones": [], "new_releases": [],
+                     "dropped_releases": []}
+    touched: set[str] = set()  # releases a change of this draft touched: their size is checked at the end
+    moved_ms: set[str] = set()
 
     def gate(m: str) -> str:
         return ms[m].get("gate", "pending") if m in ms else "missing"
@@ -3977,6 +4049,9 @@ def plan_edit(store: Store, ops: list[dict], text: str) -> tuple[str, list[str],
             errors.append(f"{where}: the gate of {m} is {gate(m)}; a closed milestone takes no change")
             return False
         return True
+
+    def rel_status(rid: str | None) -> str:
+        return "in_progress" if not rid or rid in effects["new_releases"] else release_status(store, rid)["status"]
 
     def before_ok(before: str | None, m: str, where: str, tid: str | None = None) -> bool:
         if not before:
@@ -4002,6 +4077,59 @@ def plan_edit(store: Store, ops: list[dict], text: str) -> tuple[str, list[str],
                 doc.add_milestone(m, title)
                 effects["new_milestones"].append(m)
                 changes.append(f"new milestone {m} — {title}")
+        elif kind == "move_milestone":
+            m, rid = op.get("milestone", ""), op.get("release", "")
+            rmap, rids = doc.release_map()
+            if not rids:
+                errors.append(f"{where}: the plan has no planned releases; group the milestones with /dev-kit:plan first")
+            elif rid not in rids:
+                errors.append(f"{where}: release {rid} does not exist")
+            elif open_m(m, where):
+                old = rmap.get(m)
+                busy = [t for t, v in ts.items() if v["milestone"] == m and v["status"] == "in_progress"]
+                if old == rid:
+                    errors.append(f"{where}: {m} is already in {rid}")
+                elif busy:
+                    errors.append(f"{where}: {busy[0]} of {m} is running; the milestone stays where it is")
+                elif rel_status(old) != "in_progress":
+                    errors.append(f"{where}: {old} is {rel_status(old).replace('_', ' ')}; its milestones stay where they are")
+                elif rel_status(rid) != "in_progress":
+                    errors.append(f"{where}: {rid} is {rel_status(rid).replace('_', ' ')}; it takes no new milestone")
+                else:
+                    doc.move_milestone(m, rid)
+                    ms[m]["release"] = rid
+                    moved_ms.add(m)
+                    touched.update(x for x in (old, rid) if x)
+                    effects["moved_milestones"].append((m, old, rid))
+                    changes.append(f"{m} {old or 'no release'} → {rid}")
+        elif kind == "new_release":
+            rid, title = op.get("release", ""), str(op.get("title") or "").strip()
+            _, rids = doc.release_map()
+            nxt = f"R{max([int(x[1:]) for x in rids] or [0]) + 1}"
+            if not rids:
+                errors.append(f"{where}: the plan has no planned releases; group the milestones with /dev-kit:plan first")
+            elif rid != nxt:
+                errors.append(f"{where}: the new release must be {nxt} (releases are never inserted or renumbered)")
+            else:
+                doc.add_release(rid, title)
+                effects["new_releases"].append(rid)
+                touched.add(rid)
+                changes.append(f"new release {rid}" + (f" — {title}" if title else ""))
+        elif kind == "drop_release":
+            rid = op.get("release", "")
+            rmap, rids = doc.release_map()
+            left = [x for x, r in rmap.items() if r == rid]
+            if rid not in rids:
+                errors.append(f"{where}: release {rid} does not exist")
+            elif left:
+                errors.append(f"{where}: {rid} still holds {', '.join(left)}; move them out first")
+            elif rel_status(rid) == "released":
+                errors.append(f"{where}: {rid} is released and stays in the plan")
+            else:
+                doc.drop_release(rid)
+                touched.discard(rid)
+                effects["dropped_releases"].append(rid)
+                changes.append(f"release {rid} removed")
         elif kind == "move_task":
             tid, m, before = op.get("task", ""), op.get("milestone", ""), op.get("before")
             t = ts.get(tid)
@@ -4072,16 +4200,25 @@ def plan_edit(store: Store, ops: list[dict], text: str) -> tuple[str, list[str],
         else:
             errors.append(f"{where}: unknown operation {kind}")
 
-    # a task never sits in an earlier milestone than a task it depends on (done dependencies do not count)
-    rank = {m: int(m[1:]) for m in ms}
+    # a release holds RELEASE_SIZE milestones: checked once the whole draft is in place
+    rmap, rids = doc.release_map()
+    for rid in sorted(touched):
+        n = sum(1 for r in rmap.values() if r == rid)
+        if rid in rids and not RELEASE_SIZE[0] <= n <= RELEASE_SIZE[1]:
+            errors.append(f"{rid} would hold {n} milestone{'s' if n != 1 else ''}; a release holds {RELEASE_SIZE[0]} to {RELEASE_SIZE[1]}")
+
+    # a task never sits in an earlier milestone (or release) than a task it depends on (done dependencies do not count)
+    ridx = {r: i for i, r in enumerate(rids)}
+    rank = {m: (ridx.get(rmap.get(m), len(rids)) if rids else 0, int(m[1:])) for m in ms}
+    moved |= {t for t, v in ts.items() if v["milestone"] in moved_ms and v["status"] not in FINISHED}
     for tid in sorted(moved):
         t = ts[tid]
         for d in sorted(set(t.get("deps", [])) | set(t.get("consumes") or [])):
             dt = ts.get(d)
-            if dt and dt["status"] != "done" and rank.get(dt["milestone"], 0) > rank[t["milestone"]]:
+            if dt and dt["status"] != "done" and rank.get(dt["milestone"], (0, 0)) > rank[t["milestone"]]:
                 errors.append(f"{tid} depends on {d}, which is in a later milestone ({dt['milestone']})")
         for x, xt in sorted(ts.items()):
-            if tid in (xt.get("deps") or []) and xt["status"] not in FINISHED and rank.get(xt["milestone"], 0) < rank[t["milestone"]]:
+            if tid in (xt.get("deps") or []) and xt["status"] not in FINISHED and rank.get(xt["milestone"], (0, 0)) < rank[t["milestone"]]:
                 errors.append(f"{x} depends on {tid}, which would come after it ({t['milestone']} after {xt['milestone']})")
     return doc.text(), changes, sorted(set(errors), key=errors.index), effects
 
