@@ -1835,10 +1835,14 @@
     const body = document.body;
     if (y > 64 && !body.classList.contains("compact")) body.classList.add("compact");
     else if (y < 16 && body.classList.contains("compact")) body.classList.remove("compact");
-    const bar = document.querySelector(".phasebar");
+    // each pinned strip sits under the one above it: top bar, then the lifecycle tabs, then construction's chevrons
+    const top = document.querySelector(".topbar"), bar = document.querySelector(".phasebar");
+    if (top) document.documentElement.style.setProperty("--topbar-h", `${top.offsetHeight}px`);
     if (bar) document.documentElement.style.setProperty("--phasebar-h", `${bar.offsetHeight}px`);
   }
   window.addEventListener("scroll", () => { if (!stickyRaf) stickyRaf = requestAnimationFrame(stickyLayout); }, { passive: true });
+  // the compact strips shrink with a short transition: measure again once it ends
+  document.addEventListener("transitionend", (e) => { if (e.target && e.target.classList && (e.target.classList.contains("topbar") || e.target.classList.contains("phasebar")) && !stickyRaf) stickyRaf = requestAnimationFrame(stickyLayout); });
 
   setInterval(tickUpdated, 1000);
   load();

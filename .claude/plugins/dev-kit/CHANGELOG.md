@@ -2,6 +2,11 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.1.1 — 2026-11-21
+
+### Fixed
+- Board: the top bar stays pinned again while scrolling. The lifecycle tabs were pinned at the very top and covered it. The three strips now stack: top bar, then the lifecycle tabs under it, then Construction's releases, milestones and stages. Once scrolled, the top bar also slims down (kicker and "updated" hidden, smaller project name).
+
 ## 2.1.0 — 2026-11-21
 
 Releases are planned, and approving them is the one human gate of construction. The plan groups milestones into releases (R1, R2…). Milestones still run on their own. When every milestone of a release is closed, `release` audits it, writes an approval dossier and waits. The user then approves it (production deploy, smoke, record) or rejects it with what must change, which becomes a fixes milestone inside the same release. On the board, the Plan view now lives only in Planning, and every chevron stays on screen while scrolling. "Release train" is no longer used anywhere: the term suggests a human-run train, and this kit has none.
