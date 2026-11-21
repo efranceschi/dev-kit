@@ -9,7 +9,14 @@ Subcommands
   strings       user-facing strings added since a commit (--since SHA [--worktree]), for the copy review
   contrast      WCAG contrast of the colour token pairs in ui-spec.md (--pairs fg/bg,… or automatic)
   lock          acquire | release | status NAME: one holder at a time for an exclusive resource (--holder --ttl --wait)
-  brief T       base prompt of an implementer for task T (languages, commands, verification rule, history)
+  brief T       base prompt of an implementer for task T (languages, commands, verification rule, history, tier, route)
+  tier T        risk tier of a task (rule from objective signals and the plan's risk fields) and its model/effort
+                route (dev_router.py); --json
+  set-risk T    set the risk fields of a task in plan.md and state (--risk --complexity --uncertainty --opportunity
+                --risk-reasons --tier --tier-reason); plan --annotate-risk uses it on tasks already planned
+  risk-profile M  risk profile of a milestone for the QA gate: max tier, high-risk tasks, seams, auditor models (--json)
+  risk-report M   predicted tier against what happened (findings, rounds, time, tokens) per task and per tier;
+                writes .dev/qa/M/risk-report.md (--all: every milestone; --json)
   next          print the next task to work on (fix tasks first, deps satisfied, gate respected); --batch N: tasks
                 that can run in parallel (no common files, one serialising file at most)
   start T       mark task in_progress
@@ -76,6 +83,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir; dev_telemetry lives next to us
 import dev_telemetry as tel  # noqa: E402
 import dev_ledger as led  # noqa: E402
+import dev_risk as risk  # noqa: E402
+import dev_router as router  # noqa: E402
 
 STATE_VERSION = 1
 # Project lifecycle (conventions.md §19): derived from the artifacts, reviews, milestones, issues and releases,
@@ -112,7 +121,12 @@ DEFAULT_AUTONOMY = {
     # Model/effort ladder for agents (conventions.md §9). mode: ask (confirm before each escalation) |
     # preapproved (escalate within the approved ladder without asking) | off (never escalate).
     # tiers: optional per-agent tier overrides, e.g. {"copy-reviewer": "balanced"}.
-    "model_policy": {"mode": "ask", "tiers": {}},
+    # risk_tiers: per-task tier from the risk rule (dev_risk.py): apply | suggest (shown, agent base used) | off.
+    # risk_weights: per-project weight overrides of the rule's signals, e.g. {"schema": 3}.
+    # router: model/effort router that learns from the project's runs (dev_router.py): mode apply | suggest | off,
+    # balance balanced | speed | cost | quality (or {"cost": 1, "time": 1, "quality": 2}), optional budget per milestone.
+    "model_policy": {"mode": "ask", "tiers": {}, "risk_tiers": "apply", "risk_weights": {},
+                     "router": {"mode": "apply", "balance": "balanced", "budget_usd_per_milestone": None}},
     # What to do at each pause point (conventions.md §10). Default: ask, i.e. the supervised behaviour.
     "pause_policy": {},
     "on_park": "stop_when_idle",
@@ -129,7 +143,7 @@ DEFAULT_AUTONOMY = {
     # session start (hook); notify = desktop notification at the end of the turn for gates, blocks and autopilot.
     "ui": {"offered": False, "spinner_tips": False, "statusline": False, "title": True, "notify": False},
     # Cheap checks at the end of each task (conventions.md §7): ui = copy and static a11y agents on tasks that touch
-    # UI files (haiku) | all = also on other tasks with user-facing strings | off = implementer self-check only.
+    # UI files (copy on sonnet, a11y on haiku) | all = also on other tasks with user-facing strings | off = implementer self-check only.
     "task_checks": "ui",
     # Incremental work (conventions.md §18): reuse verified units whose inputs did not change. spot_check_pct of the
     # reused units is re-verified each round; full_on_last_gate turns the cache off for the last milestone gate.
@@ -181,14 +195,42 @@ MODEL_POLICY_MODES = ("ask", "preapproved", "off")
 MODEL_TIERS = ("speed", "balanced", "quality")
 
 
+ROUTE_MODES = ("apply", "suggest", "off")
+BALANCES = ("balanced", "speed", "cost", "quality")
+
+
 def check_model_policy(mp: object) -> None:
     if not isinstance(mp, dict):
         fail("autonomy.model_policy must be an object like {\"mode\": \"ask\", \"tiers\": {}}")
+    extra = set(mp) - {"mode", "tiers", "risk_tiers", "risk_weights", "router"}
+    if extra:
+        fail(f"autonomy.model_policy has unknown keys: {', '.join(sorted(extra))}")
     if mp.get("mode", "ask") not in MODEL_POLICY_MODES:
         fail(f"autonomy.model_policy.mode must be one of {', '.join(MODEL_POLICY_MODES)}")
     tiers = mp.get("tiers", {})
     if not isinstance(tiers, dict) or any(v not in MODEL_TIERS for v in tiers.values()):
         fail(f"autonomy.model_policy.tiers must map agent names to one of {', '.join(MODEL_TIERS)}")
+    if mp.get("risk_tiers", "apply") not in ROUTE_MODES:
+        fail(f"autonomy.model_policy.risk_tiers must be one of {', '.join(ROUTE_MODES)}")
+    rw = mp.get("risk_weights", {})
+    if not isinstance(rw, dict) or any(k not in risk.RISK_WEIGHTS for k in rw) or \
+            any(not isinstance(v, int) or isinstance(v, bool) or not -5 <= v <= 6 for v in rw.values()):
+        fail(f"autonomy.model_policy.risk_weights must map signals ({', '.join(risk.RISK_WEIGHTS)}) to integers from -5 to 6")
+    for k in risk.FLOOR_SIGNALS:
+        if k in rw and rw[k] < 1:
+            fail(f"autonomy.model_policy.risk_weights.{k} is a floor signal and must stay at 1 or more")
+    r = mp.get("router", {})
+    if not isinstance(r, dict) or set(r) - {"mode", "balance", "budget_usd_per_milestone"}:
+        fail("autonomy.model_policy.router must be an object with mode, balance, budget_usd_per_milestone")
+    if r.get("mode", "apply") not in ROUTE_MODES:
+        fail(f"autonomy.model_policy.router.mode must be one of {', '.join(ROUTE_MODES)}")
+    b = r.get("balance", "balanced")
+    if not (b in BALANCES or (isinstance(b, dict) and set(b) <= {"cost", "time", "quality"} and
+                              all(isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 10 for v in b.values()))):
+        fail(f"autonomy.model_policy.router.balance must be one of {', '.join(BALANCES)} or {{cost, time, quality}} numbers 0-10")
+    bud = r.get("budget_usd_per_milestone")
+    if bud is not None and (not isinstance(bud, (int, float)) or isinstance(bud, bool) or bud <= 0):
+        fail("autonomy.model_policy.router.budget_usd_per_milestone must be a positive number or null")
 
 
 # Pause points and the actions each one accepts. The floors live here, not only in the interview:
@@ -600,12 +642,25 @@ def parse_plan(text: str) -> tuple[dict, dict]:
                 task["consumes"] = [d.strip() for d in re.split(r"[,\s]+", val) if d.strip()]
             elif key == "shared":
                 task["shared"] = val.strip().lower() not in ("", "no", "false", "0")
+            elif key in ("risk", "complexity", "uncertainty", "tier"):
+                if val.strip():
+                    task[key] = val.strip().lower()
+            elif key in ("risk_reasons", "tier_reason"):
+                if val.strip():
+                    task[key] = val.strip()
+            elif key == "opportunity":
+                ops = [o for o in risk.parse_opportunity(val) if o != "none"]
+                if ops:
+                    task["opportunity"] = ops
             else:
                 task.setdefault("extra", {})[key] = val
             continue
         s = SUBITEM_RE.match(raw)
         if s and cur_field == "contract":
             tasks[cur_t]["contract"] = "; ".join(x for x in (tasks[cur_t].get("contract") or "", s.group(1)) if x)
+            continue
+        if s and cur_field == "risk_reasons":
+            tasks[cur_t]["risk_reasons"] = "; ".join(x for x in (tasks[cur_t].get("risk_reasons") or "", s.group(1)) if x)
             continue
         if s and cur_field == "acceptance":
             tasks[cur_t]["acceptance"].append(s.group(1))
@@ -630,7 +685,18 @@ def task_block(tid: str, t: dict) -> str:
         lines.append(f"- source: {t['source']}")
     if t.get("lane"):
         lines.append(f"- lane: {t['lane']}")
+    lines += risk_lines(t)
     return "\n".join(lines) + "\n"
+
+
+def risk_lines(t: dict) -> list[str]:
+    out = []
+    for k in risk.RISK_FIELDS:
+        v = t.get(k)
+        if v in (None, "", []):
+            continue
+        out.append(f"- {k}: {', '.join(v) if isinstance(v, list) else v}")
+    return out
 
 
 def append_task_to_plan(plan_path: Path, milestone: str, m_title: str, tid: str, t: dict) -> None:
@@ -804,7 +870,7 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
             cur = store.tasks()[tid]
             for k in ("title", "milestone", "type", "deps", "acceptance", "test_notes", "files", "seq"):
                 cur[k] = t[k]
-            for k in ("contract", "consumes", "shared"):
+            for k in ("contract", "consumes", "shared") + risk.RISK_FIELDS:
                 if k in t:
                     cur[k] = t[k]
                 else:
@@ -816,7 +882,7 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
                 "status": "todo", "deps": t["deps"], "acceptance": t["acceptance"],
                 "test_notes": t["test_notes"], "files": t["files"], "commit": None,
                 "blocked_reason": None, "source": None, "started_at": None, "done_at": None, "seq": t["seq"],
-                **{k: t[k] for k in ("contract", "consumes", "shared") if k in t},
+                **{k: t[k] for k in ("contract", "consumes", "shared") + risk.RISK_FIELDS if k in t},
             }
             added_t += 1
     store.state["next_task_id"] = max_id + 1
@@ -835,6 +901,7 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
                 problems.append(f"{tid}: consumes {d} but does not depend on it (add it to deps)")
         if t["milestone"] not in store.milestones():
             problems.append(f"{tid}: milestone {t['milestone']} not declared")
+        problems += risk.check_risk_fields(tid, t)
     return tasks, (added_m, added_t, updated_t), problems
 
 
@@ -987,14 +1054,48 @@ def cmd_start(store: Store, a: argparse.Namespace) -> None:
     ok, why = store.gate_open_for(t["milestone"])
     if not ok and not a.force and t.get("lane") != "hotfix":
         fail(f"cannot start {a.task}: {why}")
+    r = safe_route(store, a.task)
     t["status"] = "in_progress"
     issue_sync(store, t)
     t["started_at"] = now()
     t["blocked_reason"] = None
+    if r:
+        t["tier"] = {"rule": r["tier"], "score": r["score"], "source": r["source"], "rule_arm": r["arm"],
+                     "arm": r["final_arm"], "routed": r["final_arm"] != r["arm"], "context": r["route"]["context"],
+                     "signals": sorted({s["signal"] for s in r["reasons"]}), "at": now()}
     store.save()
-    store.log(f"start {a.task} {t['title']}")
-    store.event("task", task=a.task, transition="start", type=t.get("type"), milestone=t.get("milestone"), parallel=bool(a.force and others))
-    print(f"{a.task} in_progress: {t['title']}")
+    store.log(f"start {a.task} {t['title']}" + (f" tier={r['tier']} arm={r['final_arm']}" if r else ""))
+    store.event("task", task=a.task, transition="start", type=t.get("type"), milestone=t.get("milestone"), parallel=bool(a.force and others),
+                tier=risk.tier_token(r["tier"]) if r else None, risk_score=r["score"] if r else None)
+    if r:
+        store.event("route", context=tel_ctx(r["route"]["context"]), rule_tier=risk.tier_token(r["tier"]),
+                    arm=r["final_arm"].replace("/", "."), reason_code=r["route"]["reason_code"], explore=bool(r["route"]["explore"]))
+    print(f"{a.task} in_progress: {t['title']}" + (f" · {r['final_model']} / {r['final_effort']} ({r['tier']})" if r else ""))
+
+
+def safe_route(store: Store, tid: str) -> dict | None:
+    """Rule tier + router route of a task; a failure in the router never blocks a state transition."""
+    try:
+        return router.route_task(store, tid)
+    except Exception as e:  # noqa: BLE001
+        print(f"note: router unavailable ({type(e).__name__}); the agent's base model applies", file=sys.stderr)
+        return None
+
+
+def safe_observe(store: Store, tid: str, outcome: str) -> None:
+    """Fast feedback loop of the router (dev_router.py observe); never blocks a state transition."""
+    if risk.model_policy(store.state)["router"].get("mode") == "off":
+        return
+    try:
+        r = router.observe(store, tid, outcome)
+        if r.get("bump") and outcome != "done":
+            print(f"router: {r['context']} failed twice in a row; one tier up for the rest of {r['bump']['milestone']}")
+    except Exception as e:  # noqa: BLE001
+        print(f"note: router observe skipped ({type(e).__name__})", file=sys.stderr)
+
+
+def tel_ctx(ctx: str) -> str:
+    return ctx.replace("+", "-plus")[:40]
 
 
 def cmd_done(store: Store, a: argparse.Namespace) -> None:
@@ -1022,6 +1123,7 @@ def cmd_done(store: Store, a: argparse.Namespace) -> None:
     store.save()
     store.log(f"done {a.task} commit={a.commit or '-'}")
     store.event("task", task=a.task, transition="done", type=t.get("type"), milestone=t.get("milestone"))
+    safe_observe(store, a.task, "done")
     m = t["milestone"]
     msg = f"{a.task} done"
     if t.get("lane") == "hotfix":
@@ -1038,9 +1140,11 @@ def cmd_block(store: Store, a: argparse.Namespace) -> None:
         fail(f"{a.task} is {t['status']}; cannot block")
     t["status"] = "blocked"
     t["blocked_reason"] = a.reason
+    t["blocked_count"] = int(t.get("blocked_count", 0) or 0) + 1
     store.save()
     store.log(f"block {a.task}: {a.reason}")
     store.event("task", task=a.task, transition="block", type=t.get("type"), milestone=t.get("milestone"))
+    safe_observe(store, a.task, "blocked")
     print(f"{a.task} blocked: {a.reason}")
     queue_notice(store, f"dev-kit · {a.task} blocked · {next_command(store)}")
 
@@ -1118,6 +1222,10 @@ def cmd_add_task(store: Store, a: argparse.Namespace) -> None:
     }
     if getattr(a, "lane", None):
         t["lane"] = a.lane
+    t.update(risk_args(a))
+    probs = risk.check_risk_fields(tid, t)
+    if probs:
+        fail("; ".join(probs))
     store.tasks()[tid] = t
     if issue is not None:
         link_task(store, a.issue, tid, a.milestone)
@@ -1188,6 +1296,7 @@ def cmd_fix_tasks(store: Store, a: argparse.Namespace) -> None:
                 store.log(f"reopen {tid}: {f['id']} still open after the fix (round {round_n})")
                 store.event("task", task=tid, transition="reopen", type=t.get("type"), milestone=t.get("milestone"))
             store.save()  # add_task below reloads the state from disk
+            safe_observe(store, tid, "blocked" if returns >= 2 else "reopened")
             continue
         old_t = store.tasks()[tid] if tid else None
         if (old_t and not f.get("previous") and not twins & existing and old_t["status"] == "done"
@@ -1215,6 +1324,8 @@ def cmd_fix_tasks(store: Store, a: argparse.Namespace) -> None:
         new_id = buf.getvalue().strip()
         if new_id in store.tasks():
             store.tasks()[new_id]["qa_round"] = round_n
+            if sev in ISSUE_SEVERITIES:
+                store.tasks()[new_id]["finding_severity"] = sev
             store.save()
         created.append(f"{new_id}={f['id']}")
         existing.add(anchor)
@@ -1325,7 +1436,22 @@ def cmd_gate(store: Store, a: argparse.Namespace) -> None:
         queue_notice(store, f"dev-kit · {a.milestone} gate {a.value}" + (f" ({a.score})" if a.score is not None else "")
                      + f" · {next_command(store)}")
     if a.value == "passed":
+        close_loop(store, a.milestone)
         print_tip(store, "gate_passed", a)
+
+
+def close_loop(store: Store, m: str) -> None:
+    """Slow feedback loop at a passed gate: the predicted × real report and dev_router.py learn (never fails the gate)."""
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            cmd_risk_report(store, argparse.Namespace(milestone=m, all=False, json=False))
+        print(buf.getvalue().strip())
+        if risk.model_policy(store.state)["router"].get("mode") != "off":
+            r = router.learn(store, m)
+            print(f"router learned {', '.join(r['milestones'])}: {r['records']} record(s)"
+                  + "".join(f"; weight {c['signal']} {c['from']:+d} -> {c['to']:+d}" for c in r["weight_changes"]))
+    except Exception as e:  # noqa: BLE001
+        print(f"note: risk report or router learn skipped ({type(e).__name__}: {e})", file=sys.stderr)
 
 
 def cmd_preview(store: Store, a: argparse.Namespace) -> None:
@@ -1900,7 +2026,155 @@ def cmd_brief(store: Store, a: argparse.Namespace) -> None:
     if hist:
         out += ["", f"Previous attempt ({hist.get('result')}, {hist.get('at')}): {hist.get('note') or '-'}"
                 + (f" · its work is on {hist['ref']}: start from it, do not redo what it finished" if hist.get("ref") else "")]
+    r = safe_route(store, a.task)
+    if r:
+        out += ["", risk.tier_line(r), router.route_line(r)]
     print("\n".join(out))
+
+
+def risk_args(a: argparse.Namespace) -> dict:
+    """Risk fields given on the command line (add-task, set-risk), normalised as parse_plan stores them."""
+    out: dict = {}
+    for k in ("risk", "complexity", "uncertainty", "tier"):
+        v = getattr(a, k, None)
+        if v not in (None, ""):
+            out[k] = v.strip().lower()
+    for k in ("risk_reasons", "tier_reason"):
+        v = getattr(a, k, None)
+        if v not in (None, ""):
+            out[k] = v.strip()
+    if getattr(a, "opportunity", None) not in (None, ""):
+        out["opportunity"] = [o for o in risk.parse_opportunity(a.opportunity) if o != "none"]
+    return out
+
+
+def cmd_tier(store: Store, a: argparse.Namespace) -> None:
+    """Risk tier of a task and its model/effort route (the orchestrator passes final_model and final_effort)."""
+    store.load()
+    store.task(a.task)
+    r = router.route_task(store, a.task)
+    if a.json:
+        print(json.dumps(r, indent=2, ensure_ascii=False))
+    else:
+        print(risk.tier_line(r))
+        print(router.route_line(r))
+
+
+def cmd_set_risk(store: Store, a: argparse.Namespace) -> None:
+    """Set or clear (value `-`) the risk fields of a planned task in plan.md and state together (conventions.md §4)."""
+    store.load()
+    t = store.task(a.task)
+    vals = risk_args(a)
+    clear = [k for k in risk.RISK_FIELDS if getattr(a, k, None) == "-"]
+    for k in clear:
+        vals.pop(k, None)
+    if not vals and not clear:
+        fail("nothing to set: pass --risk, --complexity, --uncertainty, --opportunity, --risk-reasons or --tier/--tier-reason")
+    new = {**t, **vals}
+    for k in clear:
+        new.pop(k, None)
+    probs = risk.check_risk_fields(a.task, new)
+    if probs:
+        fail("; ".join(probs))
+    plan = store.dev / "plan.md"
+    if plan.exists():
+        doc = PlanDoc(plan.read_text(encoding="utf-8"))
+        i = doc.find(a.task)
+        if i is None:
+            fail(f"{a.task} has no section in plan.md")
+        kept, skip = [], False  # a risk field goes with its sub-items (multi-line risk_reasons)
+        for ln in doc.segs[i]["lines"]:
+            m = FIELD_RE.match(ln)
+            if m:
+                skip = m.group(1) in risk.RISK_FIELDS
+            if not skip:
+                kept.append(ln)
+        doc.segs[i]["lines"] = kept + risk_lines(new)
+        plan.write_text(doc.text(), encoding="utf-8")
+    for k in risk.RISK_FIELDS:
+        if k in new:
+            t[k] = new[k]
+        else:
+            t.pop(k, None)
+    store.save()
+    store.log(f"set-risk {a.task} " + " ".join(f"{k}={v}" for k, v in vals.items()) + (f" cleared={','.join(clear)}" if clear else ""))
+    info = risk.task_tier(store, a.task)
+    print(f"{a.task}: " + risk.tier_line(info))
+
+
+def cmd_risk_profile(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    if a.milestone not in store.milestones():
+        fail(f"unknown milestone {a.milestone}")
+    prof = risk.risk_profile(store, a.milestone)
+    if a.json:
+        print(json.dumps(prof, indent=2))
+        return
+    flags = [k.replace("touches_", "") for k in ("touches_auth_send_secrets", "touches_schema", "touches_data_jobs_send") if prof[k]]
+    print(f"{a.milestone} risk profile: {prof['profile']} · max tier {prof['max_tier'] or '-'} · touches {', '.join(flags) or 'nothing risky'}")
+    if prof["high_risk_tasks"]:
+        print(f"  high-risk tasks: {', '.join(prof['high_risk_tasks'])}"
+              + (f" · seams: {', '.join(f'{x}→{y}' for x, y in prof['seams'])}" if prof["seams"] else ""))
+    print("  round-1 auditors: " + ", ".join(f"{k} {v}" for k, v in prof["auditors"].items()))
+
+
+def risk_report_md(store: Store, m: str, rows: list[dict], summ: dict) -> str:
+    mm = store.milestones().get(m, {})
+    retro = any(r["retro"] for r in rows)
+    out = [f"# Risk report — {m}", "",
+           f"> Predicted tier (dev_risk.py rule, router route) against what happened. Generated {today()} by `dev_state.py risk-report`.",
+           "> Findings are attributed by file (a finding belongs to every task whose files or commit contain its file).", ""]
+    if retro:
+        out += ["> predicted tier is retroactive (computed after the fact) for tasks started before the risk rule existed.", ""]
+    out += ["| task | tier (score) | arm | findings c/h/m/l | rounds | time | tokens | readings |", "|---|---|---|---|---|---|---|---|"]
+    for r in rows:
+        f = r["findings"]
+        out.append(f"| {r['task']} | {r['tier']} ({r['score']}){' retro' if r['retro'] else ''} | {r['arm'] or '-'}"
+                   f"{' routed' if r['routed'] else ''} | {f['critical']}/{f['high']}/{f['medium']}/{f['low']} | {r['rounds']} | "
+                   f"{str(round(r['duration_s'] / 60, 1)) + ' min' if r['duration_s'] else '-'} | {r['tokens'] or '-'} | "
+                   f"{', '.join(r['readings']) or '-'} |")
+    out += ["", "## Per tier", "", "| tier | tasks | escape rate | rounds per task | tokens | agent time |", "|---|---|---|---|---|---|"]
+    for tier, b in summ.items():
+        out.append(f"| {tier} | {b['tasks']} | {b['escape_rate']:.0%} | {b['rounds_per_task']} | {b['tokens']} | {round(b['duration_s'] / 60, 1)} min |")
+    agent_s = sum(r["duration_s"] for r in rows)
+    out += ["", f"QA rounds: {mm.get('qa_runs', 0)} · implementer agent time {round(agent_s / 60, 1)} min "
+            "(the rest of the milestone's wall time is platform time: tests, deploys, jobs, QA)", ""]
+    reads = sorted({x for r in rows for x in r["readings"]})
+    if reads:
+        out += ["## Readings", ""] + [f"- **{x}**: {risk.READING_TEXT[x]} ({', '.join(r['task'] for r in rows if x in r['readings'])})" for x in reads] + [""]
+    return "\n".join(out)
+
+
+def cmd_risk_report(store: Store, a: argparse.Namespace) -> None:
+    """Predicted tier × real outcome per task and per tier (conventions.md §9 "Calibration")."""
+    store.load()
+    try:
+        events, _ = tel.read_events(store.dev)
+    except Exception:  # noqa: BLE001
+        events = []
+    ms = store.milestone_order() if a.all else [a.milestone]
+    if not a.all and a.milestone not in store.milestones():
+        fail(f"unknown milestone {a.milestone} (or use --all)")
+    rows_all, by_m = [], {}
+    for m in ms:
+        rows = risk.risk_rows(store, m, events)
+        by_m[m] = rows
+        rows_all += rows
+    summ = risk.summarize_rows(rows_all)
+    if a.json:
+        print(json.dumps({"milestones": by_m, "per_tier": summ}, indent=2))
+        return
+    if a.all:
+        path = store.dev / "qa" / "risk-report.md"
+        text = "\n".join(risk_report_md(store, m, by_m[m], risk.summarize_rows(by_m[m])) for m in ms if by_m[m])
+    else:
+        path = store.dev / "qa" / a.milestone / "risk-report.md"
+        text = risk_report_md(store, a.milestone, rows_all, summ)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text + "\n", encoding="utf-8")
+    esc = sum(1 for r in rows_all if r["escape"])
+    print(f"risk report: {len(rows_all)} task(s), {esc} with a high finding; "
+          + ", ".join(f"{t} {b['tasks']} (escape {b['escape_rate']:.0%})" for t, b in summ.items()) + f" -> {path.relative_to(store.root)}")
 
 
 UI_FILE = re.compile(r"\.(tsx|jsx|vue|svelte|astro|html?|hbs|ejs|erb|jinja2?|j2|liquid|twig|php|po|pot|json|ya?ml|arb|strings|xliff)$")
@@ -2633,6 +2907,25 @@ def xref_report(store: Store) -> dict:
         for c in t.get("consumes") or []:
             if c in store.tasks() and not store.tasks()[c].get("contract"):
                 problems.append({"check": "contract_missing", "id": tid, "detail": f"consumes {c}, which declares no contract"})
+    notes: list[str] = []
+    pending = {k: v for k, v in tasks.items() if v.get("status") in ("todo", "blocked")}
+    for tid, t in pending.items():
+        if t.get("risk") not in ("low", "medium"):
+            continue
+        try:
+            info = risk.task_tier(store, tid)
+        except Exception:  # noqa: BLE001
+            continue
+        objective = [s for s in info["reasons"] if s["signal"] not in ("planner_high", "complex", "downgrade_ok")]
+        obj_score = sum(s["weight"] for s in objective)
+        objective_tier = risk.tier_of_score(obj_score)
+        if (t["risk"] == "low" and risk.TIERS.index(objective_tier) >= 2) or (t["risk"] == "medium" and objective_tier == "quality"):
+            problems.append({"check": "risk_disagrees", "id": tid,
+                             "detail": f"plan says risk {t['risk']} but objective signals give {objective_tier} "
+                                       f"({', '.join(s['signal'] for s in objective)})"})
+    without = [k for k, v in pending.items() if not risk.has_planner_fields(v)]
+    if without:
+        notes.append(f"{len(without)} pending task(s) without risk fields (run plan --annotate-risk to add them)")
     acn = lambda x: int(x.split("-")[1])  # noqa: E731
     if defined and tasks:
         for ac in sorted(defined - inactive - set(planned), key=acn):
@@ -2665,7 +2958,7 @@ def xref_report(store: Store) -> dict:
     counts: dict[str, int] = {}
     for x in problems:
         counts[x["check"]] = counts.get(x["check"], 0) + 1
-    return {"problems": problems, "counts": counts,
+    return {"problems": problems, "counts": counts, "notes": notes,
             "acs": {"defined": len(defined), "inactive": len(inactive), "planned": len(set(planned) & defined)}}
 
 
@@ -2679,6 +2972,8 @@ def cmd_xref(store: Store, a: argparse.Namespace) -> None:
         print(f"xref: {len(rep['problems'])} problem(s) · ACs {acs['planned']}/{acs['defined'] - acs['inactive']} planned")
         for x in rep["problems"]:
             print(f"  {x['check']}: {x['id']} - {x['detail']}")
+        for x in rep.get("notes") or []:
+            print(f"  note: {x}")
     if a.strict and rep["problems"]:
         sys.exit(1)
 
@@ -2796,7 +3091,10 @@ def store_autonomy_object(auto: dict, top: str, obj: dict) -> None:
         obj = {**DEFAULT_AUTONOMY["production"], **obj}
     elif top == "model_policy":
         check_model_policy(obj)
-        obj = {"mode": obj.get("mode", "ask"), "tiers": obj.get("tiers", {})}
+        dflt = DEFAULT_AUTONOMY["model_policy"]
+        obj = {"mode": obj.get("mode", "ask"), "tiers": obj.get("tiers", {}),
+               "risk_tiers": obj.get("risk_tiers", dflt["risk_tiers"]), "risk_weights": obj.get("risk_weights", {}),
+               "router": {**dflt["router"], **(obj.get("router") or {})}}
     elif top == "local_deploy":
         check_local_deploy(obj)
         obj = {**DEFAULT_AUTONOMY["local_deploy"], **obj}
@@ -3612,6 +3910,16 @@ def cmd_reorder(store: Store, a: argparse.Namespace) -> None:
 
 # --------------------------------------------------------------------------- cli
 
+def add_risk_flags(s: argparse.ArgumentParser, tier: bool) -> None:
+    s.add_argument("--risk", help="low | medium | high"); s.add_argument("--complexity", help="low | medium | high")
+    s.add_argument("--uncertainty", help="low | medium | high (new API, preview, spike)")
+    s.add_argument("--opportunity", help="downgrade-ok, parallel-safe, batchable, reuse:<module> (comma-separated)")
+    s.add_argument("--risk-reasons", dest="risk_reasons", help="why, separated by ;")
+    if tier:
+        s.add_argument("--tier", help="override: speed | balanced | balanced+ | quality (needs --tier-reason)")
+        s.add_argument("--tier-reason", dest="tier_reason")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="dev_state.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", help="project root (default: walk up from cwd to find .dev/state.json, else cwd)")
@@ -3625,6 +3933,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("sync-plan"); s.set_defaults(fn=cmd_sync_plan); s.add_argument("--plan")
 
     s = sub.add_parser("brief"); s.set_defaults(fn=cmd_brief); s.add_argument("task")
+    s = sub.add_parser("tier"); s.set_defaults(fn=cmd_tier); s.add_argument("task"); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("set-risk"); s.set_defaults(fn=cmd_set_risk); s.add_argument("task"); add_risk_flags(s, tier=True)
+    s = sub.add_parser("risk-profile"); s.set_defaults(fn=cmd_risk_profile); s.add_argument("milestone")
+    s.add_argument("--json", action="store_true")
+    s = sub.add_parser("risk-report"); s.set_defaults(fn=cmd_risk_report); s.add_argument("milestone", nargs="?")
+    s.add_argument("--all", action="store_true"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("strings"); s.set_defaults(fn=cmd_strings)
     s.add_argument("--since", required=True); s.add_argument("--worktree", action="store_true"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("contrast"); s.set_defaults(fn=cmd_contrast)
@@ -3648,7 +3962,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--title", required=True); s.add_argument("--type", default="feature")
     s.add_argument("--deps"); s.add_argument("--acceptance", action="append"); s.add_argument("--test-notes")
     s.add_argument("--files"); s.add_argument("--source"); s.add_argument("--issue"); s.add_argument("--lane")
-    s.add_argument("--force", action="store_true")
+    s.add_argument("--force", action="store_true"); add_risk_flags(s, tier=True)
 
     s = sub.add_parser("fix-tasks"); s.set_defaults(fn=cmd_fix_tasks)
     s.add_argument("--from", dest="src_file", required=True); s.add_argument("--milestone", required=True)

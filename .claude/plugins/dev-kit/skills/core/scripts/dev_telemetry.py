@@ -36,8 +36,10 @@ SCHEMA: dict[str, dict[str, str]] = {
     "session_start": {"trigger": "tok", "brownfield": "bool", "mode": "tok"},
     "skill_start": {"skill": "tok", "args_kind": "tok", "scope": "tok"},
     "skill_end": {"skill": "tok", "args_kind": "tok", "scope": "tok", "status": "tok"},
-    "agent_spawn": {"agent": "tok", "model": "tok", "effort": "tok", "slot": "num", "scope": "tok", "background": "bool"},
+    "agent_spawn": {"agent": "tok", "model": "tok", "effort": "tok", "slot": "num", "scope": "tok", "background": "bool",
+                    "tier": "tok", "risk_score": "num"},
     "agent_end": {"agent": "tok", "model": "tok", "effort": "tok", "slot": "num", "scope": "tok", "status": "tok",
+                  "tier": "tok", "risk_score": "num",
                   "tokens": "num", "tokens_in": "num", "tokens_out": "num", "cache_read": "num", "cache_write": "num",
                   "findings": "counts", "parsable": "bool"},
     "cost": {"usd": "num", "tokens": "num", "requests": "num", "period": "tok", "stages": "numdict"},
@@ -46,7 +48,9 @@ SCHEMA: dict[str, dict[str, str]] = {
               "converged": "bool", "conflicts": "num"},
     "gate": {"scope": "tok", "value": "tok", "score": "num", "forced": "bool", "force_source": "tok", "qa_runs": "num"},
     "review": {"scope": "tok", "value": "tok", "score": "num", "forced": "bool", "force_source": "tok"},
-    "task": {"task": "tok", "transition": "tok", "type": "tok", "milestone": "tok", "parallel": "bool"},
+    "task": {"task": "tok", "transition": "tok", "type": "tok", "milestone": "tok", "parallel": "bool",
+             "tier": "tok", "risk_score": "num"},
+    "route": {"context": "tok", "rule_tier": "tok", "arm": "tok", "reason_code": "tok", "explore": "bool", "agent": "tok"},
     "pause": {"point": "tok", "action": "tok", "outcome": "tok"},
     "escalation": {"agent": "tok", "from": "mtok", "to": "mtok", "consent": "tok"},
     "preview": {"scope": "tok", "mode": "tok", "status": "tok"},
@@ -377,7 +381,7 @@ def stage_of(e: dict) -> str | None:
         return scope_stage(e.get("scope"))
     if ev in ("agent_spawn", "agent_end"):
         return scope_stage(e.get("scope")) or AGENT_STAGE.get(e.get("agent", ""))
-    if ev == "task":
+    if ev in ("task", "route"):
         return "implement"
     if ev in ("preview", "deploy"):
         return "deploy"

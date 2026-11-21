@@ -23,6 +23,11 @@ The user never runs a script: this skill translates what they ask into the right
 | "never ask me about X", "always ask before deploying" | `autonomy.pause_policy.<point>` as `{"action": …, "limit": …}` | actions allowed per point in §10; `preauthorize` needs its limit (spend cap or `"unlimited"` only when the user says so, environments, targets) |
 | "stricter / looser gates", "premium quality" | `autonomy.quality` (`min_overall`, `review_min_overall`, `min_dimension`, `dimension_min.<dim>`) | presets `standard`, `premium`, `prototype` (`interview` block 8) |
 | "use a stronger model when it fails", "never escalate" | `autonomy.model_policy.mode` (`ask`, `preapproved`, `off`), `tiers` | §9 ladder |
+| "prioritise speed / cost / quality", "spend less on models" | `autonomy.model_policy.router.balance` (`balanced`, `speed`, `cost`, `quality`, or `{"cost": 1, "time": 1, "quality": 2}`) | §9 "Router": the weights of the expected cost; floors never move |
+| "do not adapt the models by itself", "only suggest" | `autonomy.model_policy.router.mode` (`apply`, `suggest`, `off`); forget what it learned: `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_router.py" --root "${CLAUDE_PROJECT_DIR}" reset` | `dev_router.py explain` shows what it learned and the savings |
+| "a budget per milestone" | `autonomy.model_policy.router.budget_usd_per_milestone` (US$, or `null`) | at 80% it favours cheaper arms, once spent the cheapest allowed one |
+| "one model for every task", "as before 1.32" | `autonomy.model_policy.risk_tiers` (`apply`, `suggest`, `off`) with `router.mode off` | `off` + `off` = the per-agent models of 1.31 |
+| "this signal is underrated (e.g. schema)" | `autonomy.model_policy.risk_weights` `{"schema": 3}` | §9 "Tier per task"; auth, external_send and schema stay ≥ 1 |
 | "more fix rounds", "stop reviews sooner" | `autonomy.max_fix_rounds_per_gate`, `autonomy.max_review_rounds` | 1–10 |
 | "do not reuse earlier audits", "check more of the reused work" | `autonomy.incremental.enabled`, `.spot_check_pct`, `.full_on_last_gate` | §18; reuse never closes findings, and release always audits everything |
 | "check each task more / less" | `autonomy.task_checks` (`ui`, `all`, `off`) | `off` keeps the implementer's self-check |

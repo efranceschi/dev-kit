@@ -355,12 +355,15 @@ class TestTransitions(Base):
 
     def test_model_policy_default_and_validation(self) -> None:
         s = self.state()
-        self.assertEqual(s["autonomy"]["model_policy"], {"mode": "ask", "tiers": {}})
+        self.assertEqual(s["autonomy"]["model_policy"],
+                         {"mode": "ask", "tiers": {}, "risk_tiers": "apply", "risk_weights": {},
+                          "router": {"mode": "apply", "balance": "balanced", "budget_usd_per_milestone": None}})
         self.assertIn("model_escalation", s["autonomy"]["always_ask"])
         self.run_state("set", "autonomy.model_policy", "preapproved")
         self.assertEqual(self.state()["autonomy"]["model_policy"]["mode"], "preapproved")
         self.run_state("set", "autonomy.model_policy", '{"mode": "off", "tiers": {"copy-reviewer": "balanced"}}')
         self.assertEqual(self.state()["autonomy"]["model_policy"]["tiers"], {"copy-reviewer": "balanced"})
+        self.assertEqual(self.state()["autonomy"]["model_policy"]["router"]["mode"], "apply")  # kept when the rest changes
         self.run_state("set", "autonomy.model_policy", "always", expect=1)
         self.run_state("set", "autonomy.model_policy", '{"tiers": {"x": "turbo"}}', expect=1)
 

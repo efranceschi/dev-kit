@@ -1,6 +1,8 @@
 {
   "about": "Short contextual tips (conventions.md §15). Each tip: id, context, en (≤140 chars), optional command, optional spinner (shown under the Claude Code spinner, written by dev_ui.py). English only: skills translate a tip into the user's language when they show it. dev_state.py tip <context> returns the least-shown one, each at most twice (autonomy.tips: on | off | always).",
   "tips": [
+    {"id": "risk-annotate", "context": "start", "command": "/dev-kit:plan --annotate-risk", "en": "Plan from before 1.32? Tiers use objective signals only; /dev-kit:plan --annotate-risk adds risk fields without replanning."},
+    {"id": "risk-report", "context": "gate_passed", "en": "Each passed gate writes .dev/qa/<M>/risk-report.md: predicted tier against findings and rounds, and the router learns from it."},
     {"id": "issue-standard", "context": "issue_created:standard", "command": "/dev-kit:backlog", "en": "Standard issues wait in the queue and enter the next milestone's buffer (20%). See the queue with /dev-kit:backlog."},
     {"id": "issue-intangible", "context": "issue_created:intangible", "en": "Small, low-risk items are handled in the cool-down between a gate and the next milestone (turn it on in the interview)."},
     {"id": "issue-expedite", "context": "issue_created:expedite", "en": "Hotfix: only for critical or high bugs in delivered work. One at a time; QA of that task only, then a patch version that deploys it once."},

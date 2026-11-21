@@ -18,13 +18,18 @@ How the plugin is built, tested and documented. Users do not need this page.
   skills/core/                   support skill, not invocable
     SKILL.md                     marker (disable-model-invocation: true, user-invocable: false)
     scripts/dev_state.py         state: init, sync-plan, next, start, done, block, unblock, drop, add-task, add-question,
-                                 fix-tasks, gate, review, artifact, stale, xref, tests, ledger, brief, lock, strings, contrast, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
+                                 fix-tasks, gate, review, artifact, stale, xref, tests, ledger, brief, tier, set-risk, risk-profile,
+                                 risk-report, lock, strings, contrast, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
                                  preview, deploy, cleanup, event, feedback, telemetry, tip, tips, notify,
                                  board plan edits (move-task, new-milestone, reorder, plan-apply), answer-question, release-record;
                                  lifecycle() derives the project phase (conventions §19) for status, next command,
                                  status line, banner and board: never stored except as a cache in state.json
     scripts/dev_worker.py        the board's request queue to Claude Code: validation, lifecycle, executor, modes, approvals,
                                  the listener (watch, arm) and continuous mode (continue-next)
+    scripts/dev_risk.py          risk tier of a task (signals, weights, floors) and risk profile of a milestone, predicted ×
+                                 real rows (imported by dev_state.py and dev_router.py; no command line)
+    scripts/dev_router.py        model/effort router with feedback loops over .dev/router.json: route, observe, learn, explain,
+                                 reset (conventions §9 "Router"); dev_state.py calls it on start, done, block, reopen and gate
     scripts/dev_score.py         0–100 score per dimension (low cap, dedupe, delta mode, legacy findings ignored)
     scripts/dev_ledger.py        work ledger: fingerprints of verified work, incremental plans, spot checks (conventions §18)
     scripts/dev_telemetry.py     allowlisted session log, stage grades (imported by the other scripts)
@@ -43,7 +48,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     shared/interview/ templates/ checklists/ prompts/   interview script, artifact templates, review checklists, output and isolation contracts
     tests/                       lint_suite.py, test_dev_state.py, test_dev_state_gaps.py, test_dev_board.py,
                                  test_dev_cost.py, test_dev_docs.py, test_dev_score.py, test_dev_ledger.py, test_dev_spec.py,
-                                 test_dev_ui.py, test_dev_worker.py
+                                 test_dev_ui.py, test_dev_worker.py, test_dev_router.py
 ```
 
 Requirements: Python 3.10+ (standard library only) on Linux or macOS. Process checks (`cleanup`, board liveness) read `/proc` and are best effort on macOS; the board server uses `fcntl` and does not run on native Windows (use WSL).

@@ -78,6 +78,8 @@ Short goal of the milestone (one paragraph).
 
 Optional fields: `contract:` (what other tasks consume from this one; one line or sub-items), `consumes: T-001` (tasks whose contract it uses; they must also be in `deps`), `shared: yes` (edits a file other tasks touch; runs alone in `--parallel`). `dev_state.py brief` gives a consumer the producer's contract, and `xref` reports a `consumes` without a contract.
 
+Risk fields (optional, §9 "Tier per task"): `risk`, `complexity`, `uncertainty` (`low | medium | high`), `risk_reasons` (one line, `;`-separated, or sub-items), `opportunity` (`none | downgrade-ok | parallel-safe | batchable | reuse:<module>`, comma-separated), and the override `tier: speed | balanced | balanced+ | quality` with a mandatory `tier_reason:`. Missing fields count as neutral, so plans without them keep working. They are set by `plan` (and on an existing plan by `plan --annotate-risk`, through `dev_state.py set-risk`), by `issue` through `add-task --risk … --opportunity …`, and never by hand in only one of `plan.md` and state.
+
 Rules: `type` ∈ `feature | fix | chore | test | docs`. `status` ∈ `todo | in_progress | done | blocked | dropped` (`dropped` = removed by a replan with `dev_state.py drop`; kept for history, never counted). `status` in plan.md is informative only; `state.json` wins on conflict. `deps` may be empty (`- deps:`). Tasks should be vertical slices completable in one sitting (roughly 30–90 minutes of work) with tests included.
 
 Order: inside a milestone, `next` takes ready tasks in the order of their sections in `plan.md` (after the cool-down lane and fix tasks); `sync-plan` records it as `seq`. Moving or reordering tasks goes through `dev_state.py move-task`, `reorder` or `plan-apply` (board drafts), which edit `plan.md` and state together, never through a hand edit of one of them.
@@ -117,7 +119,7 @@ Computed by `python3 -I "<KIT>/scripts/dev_score.py" score ...` from the auditor
 - **Low cap:** the low penalties of a dimension add up to at most `autonomy.quality.low_cap` (default 10), so a large artifact or a product with many screens is not failed by nits alone.
 - **Dedupe:** when several audits feed one dimension (e.g. usability split by persona), the same finding (same file and line, or same title and file) counts once, at its highest severity.
 - **Delta mode (round ≥ 2):** save the consolidated findings of each round (`.dev/qa/<M>/findings.json`, `.dev/reviews/<target>/findings.json`, `.dev/qa/ux/findings.json`; each finding keeps its `auditor`). In the next round give every re-run auditor the previous findings of its dimension and score with `dev_score.py score ... --previous <previous findings.json> --round <n>`. Previous findings stay scored until an auditor marks them `closed`; new critical/high/medium findings score; new low findings are recorded as deferred (listed in the report, not scored). This is what makes rounds converge: each round closes work instead of discovering a new layer of nits. Document reviews go further: from round 2 the reviewer gets the diff since the previous round and marks new findings `in_change`; findings below critical in untouched text are deferred, and a finding that reverses an earlier recommendation (`contradicts`) is capped at medium and settled by an ADR. `dev_score.py` reports `convergence` (blocking findings and the medium trend) so the review can stop when another round would not pay.
-- **Checks inside the task (`autonomy.task_checks`: `ui` default, `all`, `off`):** before each commit the implementer runs a self-check (AC ↔ test, copy and static accessibility on what it touched), and `implement` spawns `copy-reviewer` and `a11y-auditor` (static) on haiku for tasks that touch UI, writing to `.dev/qa/T-xxx/precheck/`. Their blocking findings are fixed in the task, so the milestone gate confirms quality instead of discovering it.
+- **Checks inside the task (`autonomy.task_checks`: `ui` default, `all`, `off`):** before each commit the implementer runs a self-check (AC ↔ test, copy and static accessibility on what it touched), and `implement` spawns `copy-reviewer` (sonnet) and `a11y-auditor` (static, haiku) for tasks that touch UI, writing to `.dev/qa/T-xxx/precheck/`. Their blocking findings are fixed in the task, so the milestone gate confirms quality instead of discovering it.
 - **Stale artifacts:** planning artifacts depend on each other (brief → prd → architecture → ux → ui; plan reads prd, architecture, ux and ui). Producing skills record what they were built from with `dev_state.py artifact mark <name>` after their self-check (`shared/prompts/self-check.md`); `dev_state.py stale` lists the artifacts whose sources changed since, and the passed reviews whose artifact changed. A review never runs while its artifact or an upstream is stale (`review` step 1), and `status --short` shows the stale ones. Once a task is done, a passed `plan` review is no longer compared with `plan.md` (dev_state.py itself appends fix and issue tasks to it); the `prd` and `design` reviews always are, so a scope change during construction reopens conception (§19).
 - Dimensions by auditor: code (code-reviewer), security (security-auditor), tests (test-auditor), spec (spec-tracer), ux (usability-auditor), a11y (a11y-auditor), visual (visual-reviewer), copy (copy-reviewer), performance (performance-auditor), data (data-reviewer), operations (ops-reviewer), dependencies (deps-auditor), docs (docs-reviewer), design (design-reviewer), requirements (requirements-reviewer, prd and plan).
 - Overall = weighted average of the dimensions that ran. Defaults: overall ≥ 85 for milestone gates, ≥ 80 for pre-implementation reviews, every dimension ≥ 70, with higher minimums for security (90), spec (85), tests (80), a11y (80).
@@ -136,8 +138,8 @@ Each agent declares its base `model` and `effort` in its frontmatter (round 1). 
 
 | tier | agents | why | round 1 |
 |---|---|---|---|
-| `speed` | copy-reviewer, deps-auditor, docs-reviewer | checkable output (tools, executed commands, style guide), low cost of a miss, `release` re-audits | haiku / medium |
-| `balanced` | code-reviewer, test-auditor, performance-auditor, a11y-auditor, usability-auditor, visual-reviewer, design-reviewer, ops-reviewer, data-reviewer, implementer | judgment backed by tools (axe, test suite, build, tests) | sonnet / medium |
+| `speed` | deps-auditor, docs-reviewer | checkable output (tools, executed commands), low cost of a miss, `release` re-audits | haiku / medium |
+| `balanced` | code-reviewer, test-auditor, performance-auditor, a11y-auditor, usability-auditor, visual-reviewer, design-reviewer, ops-reviewer, data-reviewer, copy-reviewer, implementer | judgment backed by tools (axe, test suite, build, tests); copy moved here in 1.32: on haiku it was the weakest dimension of every gate, and each extra round costs more than the price difference | sonnet / medium |
 | `quality` | security-auditor, spec-tracer, architect, requirements-reviewer | a miss is costly or propagates downstream; few calls | opus / high |
 
 `autonomy.model_policy.tiers` may override the tier of an agent; if absent in `state.json`, use `{"mode": "ask", "tiers": {}}`.
@@ -148,9 +150,50 @@ Escalation applies **only to the dimensions that failed** (re-run the failures, 
 |---|---|---|---|
 | `speed` | haiku / medium | sonnet / medium | sonnet / high |
 | `balanced` | sonnet / medium | sonnet / high | opus / high |
+| `balanced+` | sonnet / high | opus / medium | opus / high |
 | `quality` | opus / high | opus / xhigh | ask (rule below) |
 
-**Always pass them in the Agent call** (`model` alias and `effort`), from round 1: some hosts ignore an agent's frontmatter and run every agent on the orchestrator's model, which turns a haiku copy check into an opus one. The frontmatter is the documentation of row 1, not a guarantee. Log the model you asked for in `agent_spawn`. Effort is raised before the model, except in the `speed` tier, where the capability gap is real. Raising model or effort is a cost decision that belongs to the user:
+Round 1 of an implementer is the task's route (below), and round 1 of an auditor in `qa` is its route for the milestone's risk profile; the ladder continues from there. Raise **effort** when the problem is care (a missed case, a file not cross-checked, a missing test) and the **model** when it is understanding (wrong architecture, misread rule, platform detail): a medium model with high effort is cheaper than the large one at medium and solves most "lack of care" cases. `xhigh` is only ever an escalation; `max` is never used by default.
+
+### Tier per task (risk rule)
+`dev_risk.py` computes each task's tier before it starts, from objective signals and the plan's risk fields (§4), deterministically: the same plan gives the same tier, and the reasons are printed. Score = a base by type (feature, fix and chore +1; docs and test 0) plus the weights of the signals present:
+
+| signal | weight |
+|---|---|
+| `auth`: auth, permissions, guardrail or secrets paths or words | +3 (floor) |
+| `external_send`: e-mail, webhook, notification, payment, deploy or production | +3 (floor) |
+| `schema`: migration or schema change | +2 (floor) |
+| `new_api`: `uncertainty: high`, or preview, beta, spike, undocumented | +2 |
+| `integration`: 2+ tasks in `deps`/`consumes` | +2 |
+| `wide`: more than 10 files or more than 3 code areas (backend, sql, ui, infra) | +1 |
+| `failed_before`: blocked before or failed in the ledger | +2 |
+| `reopened_high`: reopened by a gate, or fixes a critical/high finding | +2 |
+| `planner_high` / `complex`: `risk: high` / `complexity: high` | +1 each |
+| `downgrade_ok`: `opportunity: downgrade-ok` | −2 |
+| `docs_tests_only`: type docs or test, or only docs, tests or copy files | −2 |
+
+| score | tier | implementer |
+|---|---|---|
+| ≤ 0 | `speed` | haiku / medium (a fix of a low finding: haiku / low) |
+| 1 to 3 | `balanced` | sonnet / medium |
+| 4 to 5 | `balanced+` | sonnet / high |
+| ≥ 6 | `quality` | opus / high |
+
+A task blocked or reopened before starts at least one tier above its previous attempt; a `tier:` override in the plan wins and its `tier_reason` is shown. `DS brief` and `DS tier T-xxx` print `Tier: quality (7) → opus / high: auth path +3, integrates T-101, T-118 +2, …` and the `Route:` line; `DS start` records the tier and the route in the task. Applying the planned route is not an escalation and needs no consent (the plan was reviewed); escalation after a failure follows the ladder above. `autonomy.model_policy.risk_tiers` is `apply` (default), `suggest` (shown, the agent's base model is used) or `off`; `risk_weights` overrides a weight per project (floor signals stay ≥ 1).
+
+### Router (feedback loop)
+`dev_router.py` starts from the rule's arm and learns, per context (`task:<tier>:<dominant area>:<type>`, `audit:<dimension>:<risky|data|plain>`), which model/effort is cheapest once rounds and escapes are priced in. Expected cost, in units of one QA round: `E = w_cost·(US$ + extra rounds·round US$)/round US$ + w_time·(time + extra rounds·round time)/round time + w_quality·(rounds + 3·escapes + failures)`, where extra rounds = rounds + 1.5·escapes and the round's time is measured in the project (`qa` runs). The weights come from `autonomy.model_policy.router.balance` (`balanced`, `speed`, `cost`, `quality`, or numbers).
+- An arm needs 3 runs in a context before it can replace the rule; a cheaper arm carries a pessimistic prior on escapes that fades with clean runs. Candidates are the rule's arm and one tier up or down, never more.
+- Fast loop (`DS done`, `block`, a reopen by `fix-tasks` call `dev_router.py observe` by themselves): two failures in a row raise the context one tier for the rest of the milestone; a routed downgrade that failed is recorded in `mistakes`, reverts the context to the rule and blocks downgrades for the next 5 tasks.
+- Slow loop (`DS gate M passed` runs `risk-report` and `dev_router.py learn M` by itself): records are rebuilt from findings, telemetry and ledger; a context whose rule arm keeps needing rounds goes one tier up; the rule's weights are adjusted within ±2 (a signal in ≥ 3 tasks with escape rate ≥ 50% goes up; a non-floor signal seen only in ≥ 3 clean quality tasks goes down). The first `learn` of a project with closed milestones backfills them (`--backfill`), with retroactive tiers.
+- Exploration is deterministic (every 4th run of a context whose rule arm had no round, escape or failure in 3+ runs tries one tier down) and never happens under a floor or a cooldown.
+- Floors: a task with an `auth`, `external_send` or `schema` signal is never routed below its rule tier; security-auditor never below sonnet / high; spec-tracer always opus / high; a plan override wins. `router.budget_usd_per_milestone` (optional) doubles the cost weight at 80% and picks the cheapest allowed arm once spent.
+- `autonomy.model_policy.router.mode`: `apply` (default), `suggest` (the route is shown, the rule applies) or `off`. `risk_tiers off` plus `router.mode off` restores the per-agent models of 1.31. `dev_router.py explain` shows contexts, offsets, mistakes, learned weights and savings against the rule; `dev_router.py reset` forgets.
+
+### Calibration (predicted × real)
+`DS risk-report M` (written to `.dev/qa/M/risk-report.md` at every passed gate) lists per task the tier, the arm, the findings attributed by file, rounds, time and tokens, and the readings: `loose_rule` (predicted low, high finding), `maybe_overpaid` (quality, no finding), `lacked_effort` (medium, 2+ rounds), `missed_opportunity` (small, single area, no finding); per tier it gives the escape rate and rounds per task. `--all` covers every milestone. Tasks started before 1.32 get a retroactive tier, marked as such.
+
+**Always pass them in the Agent call** (`model` alias and `effort`), from round 1 (for an implementer, the task's route; for an auditor, its route from `dev_router.py route --audit`): some hosts ignore an agent's frontmatter and run every agent on the orchestrator's model, which turns a haiku copy check into an opus one. The frontmatter is the documentation of row 1, not a guarantee. Log the model you asked for in `agent_spawn`. Effort is raised before the model, except in the `speed` tier, where the capability gap is real. Raising model or effort is a cost decision that belongs to the user:
 
 - `mode: ask` (default): before every escalation, ask with AskUserQuestion (see "Recommendation rule"); escalate only on yes.
 - `mode: preapproved`: escalate without asking, but only within this ladder; anything beyond it asks.
@@ -244,6 +287,7 @@ Every skill keeps a structured, high-level log of the session, for the user to f
   - `skill_start` when it begins (`skill`, `args_kind`) and `skill_end` when it ends (`skill`, `status`: ok | failed | parked | stopped, `duration_s`, `feedback`);
   - `agent_spawn` / `agent_end` around every agent (`agent`, `model`, `effort`, `slot`, `round`, `scope`; on end also `status`, `duration_s`, `tokens` when the tool reports usage, `findings` counts, `parsable`, and the agent's `kit_feedback` as `feedback`);
   - `pause` at every pause point (`point`, `action`, `outcome`) and `escalation` for every model/effort change (`agent`, `from`, `to`, `consent`);
+  - `agent_spawn` / `agent_end` of an implementer also carry the task's `tier` (`balanced-plus` for `balanced+`) and `risk_score`; `DS start` logs the `route` event (`context`, `rule_tier`, `arm`, `reason_code`, `explore`) by itself;
   - `error` with an enumerated `code` (`no_json`, `tests_failed`, `env_broken`, `hook_rejected`, `merge_conflict`, `port_in_use`, `timeout`, `other`).
 - **Feedback areas** (the `area` of every feedback item; anything else is rejected): `start`, `interview`, `prd`, `architecture`, `design`, `plan`, `implement`, `test`, `qa`, `usability`, `review`, `deploy`, `docs`, `release`, `issue`, `board`, `scoring`, `isolation`, `scripts`, `prompts`, `cost`, `autopilot`, `other`.
 - **Feedback** (`feedback` on `skill_end` and `agent_end`; `DS feedback --worked/--failed/--improve area:note` at the end of a run): what worked, what failed and what could be improved in the dev-kit, at most 3 items per list, each note ≤ 140 characters and about the kit, never about the project. `autopilot` writes a `session_feedback` when the run ends.

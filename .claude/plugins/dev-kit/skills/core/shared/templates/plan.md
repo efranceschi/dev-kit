@@ -36,6 +36,12 @@ Existing projects: no walking skeleton (scaffold, tooling and CI exist; skip T-0
 - contract: (optional) what other tasks consume from this one: table and columns, routes and fields, event names
 - consumes: (optional) T-001 (tasks whose contract this one uses; they must also be in deps)
 - shared: (optional) yes when the task edits a file other tasks touch (registry, schema, shared config): it runs alone
+- risk: medium            # low | medium | high (conventions.md §9 "Tier per task")
+- complexity: medium      # low | medium | high
+- uncertainty: low        # low | medium | high (new API, preview, spike)
+- risk_reasons: integrates T-001; first write to the orders table
+- opportunity: none       # or: downgrade-ok, parallel-safe, batchable, reuse:<module>
+- tier: (optional override) speed | balanced | balanced+ | quality, only with tier_reason: why the rule is not enough
 
 Task notes for accumulating files: a task writes its CHANGELOG entry to `changelog.d/T-xxx.md` (and setup notes to `docs/setup.d/T-xxx.md`) instead of editing `CHANGELOG.md` or `README.md`; `docs` and `release` merge the fragments. A milestone that reads a new external data source starts with a spike task that confirms the source's coverage assumption (see the PRD data ACs).
 
