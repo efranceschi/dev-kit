@@ -71,7 +71,19 @@ STATIC = {"/": "index.html", "/index.html": "index.html", "/assets/board.css": "
 DEFAULT_PORT = 8765
 # Identity of this code: a running server whose record carries another value was started by an older copy
 # of the kit (e.g. before a plugin update) and is restarted by `start` instead of reused.
-CODE_ID = hashlib.sha256(Path(__file__).resolve().read_bytes()).hexdigest()[:12]
+def code_id() -> str:
+    """Hash of every script and page asset the server runs, so a kit update that touches only a sibling module
+    or the front-end is noticed too."""
+    h = hashlib.sha256()
+    for f in sorted(SCRIPTS.glob("*.py")) + sorted(p for p in ASSETS.glob("*") if p.is_file()):
+        try:
+            h.update(f.name.encode() + b"\0" + f.read_bytes())
+        except OSError:
+            h.update(f.name.encode() + b"\0missing")
+    return h.hexdigest()[:12]
+
+
+CODE_ID = code_id()
 WATCHED = ("state.json", "log.md", "open-questions.md", "costs/summary.json", "plan.md", "run/agents.jsonl",
            "telemetry.jsonl", "run/inbox", "run/worker.json", "run/worker-mode.json", "run/approvals", "run/questions")
 REQ_PATH = re.compile(r"^/api/inbox/(R-\d{3,6})/cancel$")
@@ -1207,6 +1219,9 @@ def cmd_serve(root: Path, a: argparse.Namespace) -> int:
                 srv.stop()
             if read_record(root) is None or (read_record(root) or {}).get("pid") != os.getpid():
                 srv.stop()  # record removed or taken over: this server is no longer the board
+            elif code_id() != CODE_ID:
+                print("the kit was updated on disk: stopping; /dev-kit:board starts the new version", flush=True)
+                srv.stop()
     threading.Thread(target=watchdog, daemon=True).start()
     print(f"serving {url} on {host} for {root} (pid {os.getpid()})" + (" · exposed: access key required" if srv.exposed else ""), flush=True)
     try:
@@ -1237,7 +1252,7 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
         restarted = False
         why = None
         if rec and rec.get("code") != CODE_ID:
-            why = "the running board was started by another version of the kit"
+            why = "the kit was updated since the running board started"
         elif rec and a.host and rec.get("host", "127.0.0.1") != a.host:
             why = f"the running board listens on {rec.get('host', '127.0.0.1')}, not {a.host}"
         elif rec and a.actions and a.actions != "auto" and bool(rec.get("actions")) != (a.actions == "on"):

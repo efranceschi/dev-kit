@@ -316,6 +316,14 @@ class WorkerTest(unittest.TestCase):
         dw.heartbeat(self.root, "claude-1", os.getpid(), "idle")
         self.assertEqual(len(self.heard()), 1)
 
+    def test_watch_stops_when_the_kit_is_updated(self):
+        from unittest import mock
+        dw.arm(self.root, os.getppid())
+        said: list[str] = []
+        with mock.patch.object(dw, "_kit_version", side_effect=["1.0.0", "1.0.1"]):
+            self.assertEqual(dw.watch(self.root, once=True, emit=said.append, grace=0), 0)
+        self.assertEqual(said, ["dev-kit board: the kit was updated; run /dev-kit:board to restart the listener"])
+
     def test_watch_cli(self):
         dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
         self.assertEqual(self.cli("watch", "--once").stdout, "")
