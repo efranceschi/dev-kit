@@ -918,6 +918,10 @@ def build_state(root: Path, board: dict | None = None) -> dict:
                             for m, v in ms_costs.items() if isinstance(v, dict)},
         "releases": [{k: r.get(k) for k in ("version", "tag", "milestones", "at", "hotfix", "release")}
                      for r in s.get("releases") or [] if isinstance(r, dict)],
+        # every submission, approval and rejection of each planned release (cycle.releases carries only the last five)
+        "release_history": {rid: [{k: x.get(k) for k in ("event", "at", "dossier", "milestone", "tasks", "ref", "version") if k in x}
+                                  for x in (v.get("history") or []) if isinstance(x, dict)]
+                            for rid, v in (s.get("release_state") or {}).items() if isinstance(v, dict)},
         "production": production_info(store),
         "artifacts": {step: [str(p.relative_to(root)) for p in ds.artifact_paths(store, art)]
                       for step, art in ds.STEP_ARTIFACT.items()},

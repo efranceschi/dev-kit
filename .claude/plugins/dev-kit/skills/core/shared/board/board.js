@@ -11,13 +11,13 @@
     { key: "done", label: "Done", icon: "✓" },
   ];
   // project lifecycle (conventions.md §19): conception -> planning -> construction -> stable, as a cycle
-  const PHASE_NAME = { conception: "Conception", planning: "Planning", construction: "Construction", stable: "Stable" };
+  const PHASE_NAME = { conception: "Conception", planning: "Planning", construction: "Construction", stable: "Stable", releases: "Releases" };
   const PHASE_WORD = { done: "done", current: "current phase", active: "still running", upcoming: "not started" };
   const STEP_NAME = { interview: "interview", prd: "PRD", architecture: "architecture", ux: "UX", ui: "UI", plan: "plan",
     milestones: "milestones", release: "release" };
   const STEP_WORD = { todo: "to do", doing: "in progress", stale: "out of date", review: "waiting for its review", done: "done", skipped: "skipped" };
   const STEP_MARK = { todo: "○", doing: "◐", stale: "↻", review: "◐", done: "✓", skipped: "–" };
-  const PHASES = ["conception", "planning", "construction", "stable"];
+  const PHASES = ["conception", "planning", "construction", "stable"];  // the lifecycle phases; the Releases tab is a view next to them, not a phase
   const STEP_TITLE = { interview: "Interview", prd: "PRD", architecture: "Architecture", ux: "UX", ui: "UI", plan: "Plan" };
   const STEP_ABOUT = { interview: "Requirements interview, written to brief.md", prd: "Product requirements with numbered acceptance criteria",
     architecture: "Stack, data model, contracts and ADRs", ux: "Journeys, screens and every screen state", ui: "Design tokens, components and screen specs",
@@ -130,8 +130,11 @@
   const VIEW_KEY = "board-view-v2";
   // the phase shown: null follows the project's phase; a phase picked by the user stays until "Back to the current phase"
   const PHASE_KEY = "board-phase-v1";
-  let phasePick = PHASES.includes(store.get(PHASE_KEY, "")) ? store.get(PHASE_KEY, "") : null;
-  const shownPhase = () => (phasePick && PHASES.includes(phasePick) ? phasePick : (data && data.phase) || "conception");
+  const VIEW_TABS = [...PHASES, "releases"];
+  let phasePick = VIEW_TABS.includes(store.get(PHASE_KEY, "")) ? store.get(PHASE_KEY, "") : null;
+  /** The tabs: the four phases, and Releases once the plan has planned releases. */
+  const tabKeys = () => (relPlan().length ? VIEW_TABS : PHASES);
+  const shownPhase = () => (phasePick && tabKeys().includes(phasePick) ? phasePick : (data && data.phase) || "conception");
   let needsBy = {};          // items of "Needs you" per phase, shown on the phase tabs
   let view = VIEWS.includes(store.get(VIEW_KEY, "")) ? store.get(VIEW_KEY, "") : "tasks";
   let firstRender = true;
@@ -391,7 +394,21 @@
         h("span", { class: "rn-dot", "aria-hidden": "true" }), "running") : null,
       need ? h("span", { class: "lc-needs", title: `${plural(need, "item")} in Needs you`, text: String(need) }) : null,
       h("span", { class: "visually-hidden", text: `: ${PHASE_WORD[p.state]}${i === idx ? ", the project is here" : ""}${badge ? `, ${badge}` : ""}${need ? `, ${plural(need, "item")} need you` : ""}.` }));
-    }));
+    }), releasesTab());
+  }
+  /** The Releases tab: a view of the planned releases, not a lifecycle phase (the project's phase never says "releases"). */
+  function releasesTab() {
+    const rp = relPlan();
+    if (!rp.length) return null;
+    const sel = shownPhase() === "releases";
+    const out = rp.filter((r) => r.status === "released").length;
+    const need = needsBy.releases || 0;
+    return h("button", { type: "button", role: "tab", id: "ph-releases", "aria-controls": "phase-releases", "aria-selected": String(sel), tabindex: sel ? "0" : "-1",
+      class: `chev lc st-view${sel ? " here" : ""}`, title: `${plural(rp.length, "planned release")}, ${out} released`, onclick: () => setPhase("releases") },
+    h("span", { class: "chev-ico", "aria-hidden": "true", text: "◎" }),
+    h("span", { class: "lc-body" }, h("span", { class: "chev-name", text: PHASE_NAME.releases }), h("span", { class: "lc-badge", text: `${out}/${rp.length} released` })),
+    need ? h("span", { class: "lc-needs", title: `${plural(need, "release")} waiting for your approval`, text: String(need) }) : null,
+    h("span", { class: "visually-hidden", text: `: ${out} of ${rp.length} released${need ? `, ${plural(need, "release")} need you` : ""}.` }));
   }
   function setPhase(p, focus) {
     phasePick = data && p === data.phase ? null : p;   // picking the current phase goes back to following it
@@ -402,9 +419,10 @@
   $("phase-back").addEventListener("click", () => setPhase(data.phase, true));
   $("phases").addEventListener("keydown", (e) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !data || !data.ok) return;
-    let i = PHASES.indexOf(shownPhase());
-    i = e.key === "Home" ? 0 : e.key === "End" ? PHASES.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + PHASES.length) % PHASES.length;
-    setPhase(PHASES[i], true); e.preventDefault();
+    const keys = tabKeys();
+    let i = keys.indexOf(shownPhase());
+    i = e.key === "Home" ? 0 : e.key === "End" ? keys.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + keys.length) % keys.length;
+    setPhase(keys[i], true); e.preventDefault();
   });
 
   // ------------------------------------------------------------------ planned releases: construction shows one release and its milestones
@@ -455,6 +473,10 @@
       r.status === "awaiting_approval" ? h("span", { class: "tab-qa", text: "approve" }) : null,
       h("span", { class: "visually-hidden", text: `: ${REL_WORD[r.status]}` }));
     }));
+    fill($("rel-stages"), releaseStages(shown));
+  }
+  /** The five stages of a release (milestones, dossier, your approval, production, released), for Construction and the Releases tab. */
+  function releaseStages(shown) {
     const lc = data.lifecycle || {};
     const prodOn = lc.deploy_when && lc.deploy_when !== "none";
     const order = ["in_progress", "ready_for_review", "awaiting_approval", "deploying_prod", "released"];
@@ -471,12 +493,12 @@
         note ? h("span", { class: "stage-note" }, note, cmdText ? [" ", cmd(cmdText)] : null) : null);
     };
     const rej = (shown.history || []).filter((x) => x.event === "rejected").length;
-    fill($("rel-stages"),
+    return [
       stage(0, "Milestones", `${shown.closed.length}/${live} closed${rej ? ` · ${plural(rej, "rejection")}` : ""}`),
       stage(1, "Dossier", at === 1 ? "Audit and submit:" : shown.dossier ? "Submitted" : "", at === 1 ? "/dev-kit:release" : null),
       stage(2, "Your approval", at === 2 ? "Waiting for you" : at > 2 ? "Approved" : ""),
       stage(3, "Production", !prodOn ? "No production" : at === 3 ? "Deploy and smoke:" : "", at === 3 ? "/dev-kit:release" : null, !prodOn && at !== 3),
-      stage(4, "Released", at === 4 ? ((data.releases || []).filter((x) => x.release === shown.id).map((x) => x.tag || x.version).join(", ") || "Recorded") : ""));
+      stage(4, "Released", at === 4 ? ((data.releases || []).filter((x) => x.release === shown.id).map((x) => x.tag || x.version).join(", ") || "Recorded") : "")];
   }
   $("rel-tabs").addEventListener("keydown", (e) => {
     const rp = relPlan();
@@ -502,6 +524,141 @@
       h("span", { class: "answer-free" }, ta, h("button", { type: "button", class: "btn btn-sm btn-danger", id: `rej-send-${r.id}`, text: "Reject",
         onclick: (e) => { const v = ta.value.trim(); if (v) send({ decision: "reject", feedback: v }, e.currentTarget); else { ta.focus(); toast("Write what must change before rejecting.", true); } } })));
     return box;
+  }
+
+  // ------------------------------------------------------------------ Releases tab: a card per planned release and the page of the one picked
+  let relView = null;  // release picked in the Releases tab (null = the next one to ship)
+  const relPick = () => { const rp = relPlan(); return rp.find((r) => r.id === relView) || rp.find((r) => r.status !== "released") || rp[rp.length - 1] || null; };
+  function openRelease(id) {
+    relView = id;
+    setPhase("releases");
+    try { history.replaceState(null, "", `#release:${id}`); } catch (e) { /* the link is a convenience */ }
+    $("main").scrollIntoView({ block: "start" });
+  }
+  const relMs = (r) => r.milestones.map((id) => data.milestones.find((m) => m.id === id)).filter(Boolean);
+  const isClosed = (m) => m.gate === "passed" || m.gate === "skipped";
+  /** What a release adds up to, from the milestones it holds: progress, cost, time and pace. */
+  function relTotals(r) {
+    const ms = relMs(r);
+    const live = ms.filter((m) => tasksOf(m).length);
+    const ts = ms.flatMap(tasksOf).filter((t) => t.status !== "dropped");
+    const done = ts.filter((t) => t.status === "done").length;
+    const span = workSpan(ts);
+    let elapsed = null, work = null;
+    if (span) {
+      const allClosed = live.length > 0 && live.every(isClosed);
+      const ends = live.map((m) => parseT(m.passed_at)).concat(ts.map((t) => parseT(t.done_at))).filter(Number.isFinite);
+      const end = allClosed && ends.length ? Math.max(...ends) : span.now;
+      elapsed = Math.max(0, end - span.start) / 36e5;
+      work = span.work / 36e5;
+    }
+    // cost: dollars when every milestone has them, tokens otherwise; "+" says some part is missing
+    let usd = 0, tok = 0, any = false, complete = true;
+    r.milestones.forEach((id) => {
+      const c = (data.milestone_costs || {})[id];
+      if (!c) { if (tasksOf(data.milestones.find((m) => m.id === id)).length) complete = false; return; }
+      any = true;
+      usd += Number(c.usd) || 0;
+      tok += Number(c.tokens) || 0;
+      if (c.usd_complete === false || (!(Number(c.usd) > 0) && Number(c.tokens) > 0)) complete = false;
+    });
+    const spend = !any ? null : usd > 0 ? { text: `US$ ${usd.toFixed(2)}${complete ? "" : "+"}`, title: complete ? "Estimated cost, API-equivalent" : "At least this much: some work has no price yet" }
+      : tok > 0 ? { text: `${compact(tok)} tok`, title: "Tokens used (no price measured)" } : null;
+    const gates = live.filter(isClosed).length;
+    return { ms, live, ts, done, elapsed, work, spend, gates, pace: work && done ? done / work : null };
+  }
+  const bar = (done, total, label) => {
+    const mm = h("div", { class: "meter", role: "img", "aria-label": label });
+    const sp = h("span"); sp.style.width = `${total ? Math.round((100 * done) / total) : 0}%`;
+    mm.append(sp);
+    return mm;
+  };
+  function relCard(r, picked) {
+    const t = relTotals(r);
+    const fact = (label, value, title) => h("div", { class: "rel-fact", title: title || null }, h("span", { class: "fact-label", text: label }), h("strong", { text: value }));
+    const cr = data.cycle.release;
+    const ready = cr && cr.release === r.id ? cr : null;
+    const chk = (v) => (v === "done" || v === "n/a" ? "✓" : v === "review" ? "◐" : "○");
+    return h("button", { type: "button", class: `rel-card s-${r.status}${picked ? " here" : ""}`, "aria-pressed": String(picked), onclick: () => openRelease(r.id) },
+      h("div", { class: "rel-card-top" }, h("strong", { class: "id", text: r.id }), h("span", { class: "rel-card-title", text: r.title || r.id, title: r.title || null }),
+        h("span", { class: `chip rel-st-${r.status}`, text: REL_WORD[r.status] || r.status })),
+      bar(t.done, t.ts.length, `${t.done} of ${t.ts.length} tasks done`),
+      h("div", { class: "rel-facts" },
+        fact("Tasks", `${t.done}/${t.ts.length}`),
+        fact("Milestones", `${r.closed.length}/${t.live.length} closed`),
+        fact("QA gates", `${t.gates}/${t.live.length} passed`),
+        fact("Cost", t.spend ? t.spend.text : "—", t.spend && t.spend.title),
+        fact("Time", fmtH(t.work), t.elapsed != null ? `${fmtH(t.elapsed)} from the first task to ${r.status === "released" || r.status === "ready_for_review" ? "the last gate" : "now"}` : "No task started"),
+        fact("Pace", t.pace != null ? `${t.pace.toFixed(1)} tasks/h` : "—", "Tasks done per working hour, parallel work counted once")),
+      ready ? h("div", { class: "rel-ready" }, `${chk(ready.usability)} usability · ${chk(ready.docs)} docs`, ready.waiting_for && ready.waiting_for.length ? ` · building ${ready.waiting_for.join(", ")}` : "") : null,
+      r.status === "awaiting_approval" ? h("div", { class: "rel-ready bad", text: "Waiting for your approval" }) : null);
+  }
+  function renderReleasesTab() {
+    const rp = relPlan();
+    const sel = relPick();
+    $("rel-sum-sub").textContent = rp.length ? `${plural(rp.length, "planned release")} · ${rp.filter((r) => r.status === "released").length} released. Pick one for its page.` : "";
+    if (!rp.length) { fill($("rel-overview"), h("div", { class: "empty" }, "No planned releases. Group the milestones with ", cmd("/dev-kit:plan"), ".")); fill($("rel-page")); $("rel-pg-sub").textContent = ""; return; }
+    fill($("rel-overview"), rp.map((r) => relCard(r, r.id === sel.id)));
+    renderRelPage(sel);
+  }
+  function renderRelPage(r) {
+    const t = relTotals(r);
+    $("rel-pg-h").textContent = `${r.id} · ${r.title || r.id}`;
+    $("rel-pg-sub").textContent = REL_WORD[r.status] || r.status;
+    const ids = new Set(r.milestones);
+    const cut = (data.quality || {}).min_overall;
+    // milestones
+    const msRows = t.ms.map((m) => {
+      const x = milestoneInfo(m), tm = msTiming(m), sp = msSpend(m.id), q = qaState(m);
+      return h("li", { class: "has-btn" }, h("button", { type: "button", class: "row-btn", title: `Show ${m.id} in construction`, onclick: () => openMilestone(m.id) },
+        h("span", { class: "id", text: m.id }), h("span", { text: m.title || "" }),
+        h("span", { class: `chip${isClosed(m) ? " good" : ""}`, text: isClosed(m) ? `gate ${m.gate}${m.score != null ? ` · ${m.score}` : ""}` : q.running ? "QA running" : `${x.done}/${x.total} tasks` }),
+        q.qa.runs > 1 ? h("span", { class: "chip", text: plural(q.qa.runs - 1, "fix round") }) : null,
+        h("span", { class: "sub", text: [tm ? fmtH(tm.work) : null, sp ? sp.text : null].filter(Boolean).join(" · ") })));
+    });
+    // fixes and issues: rejection fixes, QA fixes, and issues scheduled in the release
+    const fixes = t.ts.filter((x) => x.type === "fix");
+    const issues = Object.entries(((data.backlog || {}).issues) || {}).filter(([, i]) => ids.has(i.scheduled_in)).map(([id, i]) => ({ id, ...i }));
+    const fixRows = fixes.map((x) => h("li", { class: "has-btn" }, h("button", { type: "button", class: "row-btn", "data-tid": x.id, onclick: () => openTask(x.id) },
+      h("span", { class: "id", text: x.id }), h("span", { text: x.title || "" }), h("span", { class: `chip st-chip s-${x.status}`, text: stLabel(x.status) }),
+      h("span", { class: "sub", text: [x.milestone, String(x.source || "").startsWith("release:") ? "from a rejection" : "from QA"].join(" · ") }))));
+    // what holds the release back
+    const blocked = t.ts.filter((x) => x.status === "blocked");
+    const stuck = t.ms.filter((m) => qaState(m).exhausted);
+    const hot = ((data.backlog || {}).hotfix_open || []);
+    const blockRows = blocked.map((x) => h("li", { class: "has-btn" }, h("button", { type: "button", class: "row-btn", "data-tid": x.id, onclick: () => openTask(x.id) },
+      h("span", { class: "id", text: x.id }), h("span", { text: x.title || "" }), h("span", { class: "chip", text: "blocked" }), h("span", { class: "sub", text: x.blocked_reason || "" }))))
+      .concat(stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }), h("span", { text: "QA rounds used up. Keep fixing, accept with an ADR, or replan." }), h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))))
+      .concat(hot.map((id) => h("li", {}, issueId(id), h("span", { text: (data.tasks[id] || ((data.backlog || {}).issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))));
+    // QA scores of the milestones that ran QA
+    const scores = t.ms.filter((m) => m.qa && m.qa.last).map((m) => dodRow(`${m.id} QA`, m.qa.last.overall, m.qa.last.cutoff != null ? m.qa.last.cutoff : cut != null ? cut : 80, m.qa.last.verdict,
+      hasDoc(`qa/${m.id}/report.md`) ? [docLink(`qa/${m.id}/report.md`, "Report")] : []));
+    // history of the gate: every submission, approval and rejection
+    const hist = ((data.release_history || {})[r.id] || []).slice().reverse();
+    const histRows = hist.map((x) => h("li", {}, h("span", { class: `chip${x.event === "rejected" ? " bad" : x.event === "approved" || x.event === "released" ? " good" : ""}`, text: x.event }),
+      h("span", { text: x.at ? fmtDT(parseT(x.at)) : "" }),
+      x.event === "rejected" && x.milestone ? h("span", { class: "sub", text: `fixes in ${x.milestone}${(x.tasks || []).length ? `: ${x.tasks.join(", ")}` : ""}` }) : null,
+      x.event === "submitted" && x.dossier ? h("span", { class: "sub" }, docLink(x.dossier, "Dossier")) : null,
+      x.event === "released" && x.version ? h("span", { class: "sub", text: x.version }) : null));
+    // documents of the release
+    const docs = [];
+    if (r.dossier) docs.push(h("li", {}, docLink(r.dossier, "Dossier")));
+    (data.releases || []).filter((x) => x.release === r.id).forEach((x) => {
+      const notes = `releases/release-notes-${x.version}.md`;
+      const alt = (data.docs || []).find((p) => p.endsWith(`release-notes-${x.version}.md`));
+      if (alt || hasDoc(notes)) docs.push(h("li", {}, docLink(alt || notes, `Release notes ${x.version}`)));
+    });
+    r.milestones.forEach((id) => { if (hasDoc(`qa/${id}/report.md`)) docs.push(h("li", {}, docLink(`qa/${id}/report.md`, `${id} QA report`))); });
+    fill($("rel-page"),
+      h("ol", { class: "chevrons stages rel-stages rel-page-stages", "aria-label": `Stages of ${r.id}` }, releaseStages(r)),
+      r.status === "awaiting_approval" ? h("div", { class: "rel-decision" }, r.dossier ? h("span", { class: "sub" }, docLink(r.dossier, "Open the dossier")) : null, releaseDecision(r)) : null,
+      h("div", { class: "cols-2 phase-row" },
+        h("div", {}, listBlock("Milestones", msRows, "No milestone yet.", true), listBlock("Holding the release back", blockRows, "Nothing blocks this release.", true)),
+        h("div", {}, listBlock("Fixes", fixRows, "No fix tasks.", true), listBlock("Issues scheduled in it", issues.map(issueLi), "No issue is scheduled in this release.", true))),
+      scores.length ? h("div", { class: "dod" }, h("div", { class: "list-title", text: "QA scores" }), scores) : null,
+      h("div", { class: "cols-2 phase-row" },
+        listBlock("Gate history", histRows, "Not submitted yet.", true),
+        listBlock("Documents", docs, "No document yet.", true)));
   }
   const currentMilestone = () => (data && data.milestones.find((x) => x.id === currentId())) || null;
   function selectMilestone(id, focusTab) {
@@ -776,9 +933,9 @@
   // ------------------------------------------------------------------ velocity: tasks done per milestone, then its hours and cost
   /** Hours a milestone took: elapsed (first task start -> gate, or now while open) and working (the union of the time
    * its tasks were in progress, so parallel tasks do not count twice). null before any task started. */
-  function msTiming(m) {
+  function workSpan(ts) {
     const now = Date.now();
-    const iv = tasksOf(m).filter((t) => Number.isFinite(parseT(t.started_at))).map((t) => {
+    const iv = ts.filter((t) => Number.isFinite(parseT(t.started_at))).map((t) => {
       const s0 = parseT(t.started_at), e0 = parseT(t.done_at);
       return [s0, Number.isFinite(e0) ? Math.max(s0, e0) : t.status === "in_progress" ? now : s0];
     }).sort((a, b) => a[0] - b[0]);
@@ -786,10 +943,16 @@
     let work = 0, [cs, ce] = iv[0];
     for (const [s0, e0] of iv.slice(1)) { if (s0 <= ce) ce = Math.max(ce, e0); else { work += ce - cs; cs = s0; ce = e0; } }
     work += ce - cs;
+    return { start: iv[0][0], work, now };
+  }
+  function msTiming(m) {
+    const span = workSpan(tasksOf(m));
+    if (!span) return null;
+    const { now, work } = span;
     const closed = m.gate === "passed" || m.gate === "skipped";
     const dones = tasksOf(m).map((t) => parseT(t.done_at)).filter(Number.isFinite);
     const end = closed && Number.isFinite(parseT(m.passed_at)) ? parseT(m.passed_at) : closed && dones.length ? Math.max(...dones) : now;
-    return { elapsed: Math.max(0, end - iv[0][0]) / 36e5, work: work / 36e5, open: !closed };
+    return { elapsed: Math.max(0, end - span.start) / 36e5, work: work / 36e5, open: !closed };
   }
   const fmtH = (x) => (x == null ? "—" : x < 1 ? `${Math.max(1, Math.round(x * 60))} min` : x < 100 ? `${x.toFixed(1)} h` : `${Math.round(x)} h`);
   /** Cost when it was measured, otherwise tokens when they were, otherwise null (dev_cost.py writes milestones.json). */
@@ -925,7 +1088,7 @@
     const waitingRel = relPlan().filter((r) => r.status === "awaiting_approval");
     const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length + waitingRel.length;
     // which phase each item belongs to: the tabs show the count, the rows a tag that opens the phase
-    needsBy = { conception: 0, planning: 0, construction: blocked.length + hot.length + stuck.length + waitingRel.length, stable: 0 };
+    needsBy = { conception: 0, planning: 0, construction: blocked.length + hot.length + stuck.length, stable: 0, releases: waitingRel.length };
     if (approvals.length) needsBy[data.phase] = (needsBy[data.phase] || 0) + approvals.length;
     data.questions.forEach((q) => { needsBy[questionPhase(q)] += 1; });
     // the strip exists only while something needs the user; warnings alone ride along but do not open it
@@ -938,9 +1101,9 @@
       approvals.length ? listBlock("Claude Code asks permission", approvals.map(approvalRow), "") : null,
       waitingRel.length ? listBlock("Releases waiting for your approval", waitingRel.map((r) => h("li", {}, h("span", { class: "id", text: r.id }),
         h("span", { text: `${r.title} · ${plural(r.closed.length, "milestone")} closed` }),
-        h("button", { type: "button", class: "link-btn", text: "Open", onclick: () => { selectRelease(r.id); setPhase("construction"); } }),
+        h("button", { type: "button", class: "link-btn", text: "Open", onclick: () => openRelease(r.id) }),
         r.dossier ? h("span", { class: "sub" }, docLink(r.dossier, "Open the dossier")) : null,
-        releaseDecision(r))), "", false, "construction") : null,
+        releaseDecision(r))), "", false, "releases") : null,
       stuck.length ? listBlock("QA rounds used up", stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }),
         h("span", { text: `${qaState(m).qa.runs - 1} fix rounds used of ${qaState(m).max} (${qaReason(qaState(m).qa, m) || "see the QA report"}). Keep fixing, accept with an ADR, or replan.` }),
         h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))), "", false, "construction") : null,
@@ -1925,12 +2088,13 @@
     const ph = shownPhase();
     keepFocus(() => {
       // global: the phase tabs, Needs you, requests and activity; below, only the panel of the phase shown
-      PHASES.forEach((k) => { $(`phase-${k}`).hidden = k !== ph; });
+      VIEW_TABS.forEach((k) => { $(`phase-${k}`).hidden = k !== ph; });
       renderImpediments(); renderHeader(); renderRequests(); renderFeed();
       placePlanner(); applyView();
       if (ph === "conception") renderConception();
       else if (ph === "planning") { renderPlanning(); renderPlan(); }
       else if (ph === "construction") { renderReleases(); renderTabs(); renderMilestone(m); renderStages(m); renderKanban(m); renderInsights(m, curId); }
+      else if (ph === "releases") renderReleasesTab();
       else renderStable();
     });
     updateAttention();
@@ -1943,6 +2107,8 @@
       if (TASK_RE.test(tid)) openTask(tid);
       const dm = tid.match(DOC_HASH);
       if (dm) openDoc(dm[1], dm[2]);
+      const rm = tid.match(REL_HASH);
+      if (rm && relPlan().some((r) => r.id === rm[1])) openRelease(rm[1]);
     }
   }
 
@@ -2072,6 +2238,8 @@
     const tid = decodeURIComponent(location.hash.slice(1));
     const dm = tid.match(DOC_HASH);
     if (dm && (!docCur || docCur.path !== dm[1])) { openDoc(dm[1], dm[2]); return; }
+    const rm = tid.match(REL_HASH);
+    if (rm && relPlan().some((r) => r.id === rm[1])) { openRelease(rm[1]); return; }
     if (TASK_RE.test(tid) && tid !== tdCur) openTask(tid);
     else if (!tid && tdlg.open) tdlg.close();
     else if (!tid && ddlg.open) ddlg.close();
@@ -2279,6 +2447,7 @@
     if (docOrigin && docOrigin.isConnected) docOrigin.focus();
     docOrigin = null;
   });
+  const REL_HASH = /^release:(R\d{1,3})$/;
   const DOC_HASH = /^doc:([\w./-]+\.md)(?::([\w-]+))?$/i;
 
   // ------------------------------------------------------------------ stop server

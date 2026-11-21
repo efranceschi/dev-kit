@@ -414,6 +414,8 @@ Test runs keep their own record (`dev_state.py tests record|lookup`, `qa` §2), 
 
 A product built by agents does not run in a straight line that ends: after the first conception it lives in a cycle of changes, construction and releases until it is stable. `dev_state.py` derives where the project is from what `.dev/` already holds (artifacts and `stale`, reviews, milestones and gates, issues, releases); no skill sets a phase, and `dev_state.py set phase` is refused.
 
+The board's **Releases** tab is a view of the planned releases, not a fifth phase: `lifecycle()` still returns only these four phases and the phase is never `releases`.
+
 | phase | steps inside it | done when |
 |---|---|---|
 | `conception` | `interview` (the brief; closed by `artifact mark brief`) → `prd` (+ review `prd`) → `architecture` → `ux` → `ui` (+ review `design`; `ux` and `ui` are `skipped` when review `design` is `n/a`) | every step's artifact exists, is not stale, and its review is `pass` or `n/a` |

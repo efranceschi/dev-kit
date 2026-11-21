@@ -974,3 +974,26 @@ body.compact .cons-nav .stage.here { flex-grow: 1.4; }
 .step-card .run-banner { margin: 0; }
 .stage.running { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--good) 70%, transparent); }
 @media (max-width: 700px) { .phase-chevrons .chev:not(.here) .lc-run { font-size: 0; padding: 4px; } }
+
+/* ---------- Releases tab: a card per planned release, and the page of the one picked */
+.chev.st-view:not(.here) { background: var(--surface-3); color: var(--text-secondary); }
+.chip.good { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good-text); }
+.chip.bad { background: color-mix(in srgb, var(--critical) 18%, transparent); color: var(--critical-text); }
+.rel-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.rel-card { text-align: left; font: inherit; color: inherit; cursor: pointer; background: var(--surface-2); border: 1px solid var(--border); border-left: 4px solid var(--todo); border-radius: 12px; padding: 10px 12px; display: grid; gap: 8px; min-width: 0; }
+.rel-card:hover { background: var(--surface-3); }
+.rel-card.here { border-color: var(--accent-b); box-shadow: 0 0 0 1px var(--accent-b) inset; }
+.rel-card.s-released { border-left-color: var(--good); }
+.rel-card.s-awaiting_approval { border-left-color: var(--critical); }
+.rel-card.s-in_progress, .rel-card.s-ready_for_review, .rel-card.s-deploying_prod { border-left-color: var(--warning); }
+.rel-card-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.rel-card-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.rel-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 10px; }
+.rel-fact { display: grid; gap: 1px; min-width: 0; font-size: 12.5px; }
+.rel-fact .fact-label { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; }
+.rel-fact strong { font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-ready { font-size: 12px; color: var(--text-secondary); }
+.rel-ready.bad { color: var(--critical-text); font-weight: 600; }
+.rel-page-stages { margin-bottom: 12px; }
+.rel-decision { display: grid; gap: 6px; margin-bottom: 12px; }
+#rel-page .cols-2 > div > div + div { margin-top: 14px; }

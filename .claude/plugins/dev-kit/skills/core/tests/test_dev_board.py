@@ -403,6 +403,20 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(post(port, "/api/inbox", good, tok)[0], 201)
         self.assertEqual((self.root / ".dev" / "state.json").read_bytes(), state)  # applied by Claude Code, not here
 
+    def test_release_history_is_complete(self):
+        state_file = self.root / ".dev" / "state.json"
+        st = json.loads(state_file.read_text())
+        st["release_state"] = {"R1": {"status": "awaiting_approval", "rounds": 3, "history": [
+            {"at": f"2026-11-0{n}T10:00:00Z", "event": "rejected" if n % 2 else "submitted", "milestone": f"M{n}", "tasks": ["T-001"], "feedback": "secret text"}
+            for n in range(1, 8)]}}
+        state_file.write_text(json.dumps(st))
+        self.board("start", check=True)
+        d = json.loads(request(self.record()["port"], "GET", "/api/state")[1])
+        hist = d["release_history"]["R1"]
+        self.assertEqual(len(hist), 7)  # cycle.releases keeps the last five; the Releases tab shows all
+        self.assertEqual(hist[0], {"event": "rejected", "at": "2026-11-01T10:00:00Z", "milestone": "M1", "tasks": ["T-001"]})
+        self.assertNotIn("feedback", hist[0])
+
     def test_release_plan_draft_is_checked_before_it_is_queued(self):
         self.board("start", check=True)
         port, tok = self.record()["port"], self.record()["token"]
@@ -651,6 +665,14 @@ class BoardTest(unittest.TestCase):
         for el in ('id="rel-tabs"', 'id="rel-stages"', 'id="tabs"', 'id="stages"'):
             self.assertIn(el, nav)
         self.assertEqual(request(self.record()["port"], "GET", "/assets/favicon-alert.svg")[0], 200)  # the tab's "needs you" icon
+        # Releases is a view next to the phases (2.4.0): its panel follows Stable and holds none of the construction ids
+        self.assertIn('id="phase-releases" role="tabpanel"', html)
+        self.assertGreater(html.index('id="phase-releases"'), html.index('id="phase-stable"'))
+        releases = html[html.index('id="phase-releases"'):html.index('<aside class="side"')]
+        for el in ('id="rel-overview"', 'id="rel-page"'):
+            self.assertIn(el, releases)
+        for el in ('id="board-card"', 'id="tabs"', 'id="stages"', 'id="rel-tabs"'):
+            self.assertNotIn(el, releases)
 
     def test_state_endpoint_is_read_only_and_complete(self):
         state_file = self.root / ".dev" / "state.json"
@@ -661,9 +683,10 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(code, 200)
         d = json.loads(body)
         for key in ("project", "phase", "step", "cycle", "progress", "milestones", "tasks", "next", "reviews", "quality",
-                    "backlog", "questions", "log", "current_milestone", "board", "kit", "decisions", "releases", "production",
+                    "backlog", "questions", "log", "current_milestone", "board", "kit", "decisions", "releases", "release_history", "production",
                     "artifacts"):
             self.assertIn(key, d)
+        self.assertEqual([p["key"] for p in d["cycle"]["phases"]], ["conception", "planning", "construction", "stable"])  # Releases is not a phase
         self.assertRegex(d["kit"], r"^\d+\.\d+\.\d+")
         self.assertEqual(d["milestones"][0]["goal"], "Ship a deployable skeleton.")
         self.assertEqual(d["tasks"]["T-001"]["status"], "in_progress")

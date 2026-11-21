@@ -2,6 +2,18 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.4.0 — 2026-11-21
+
+### Added
+- Board: a **Releases** tab, next to the four phases, once the plan has planned releases. It is a view, not a lifecycle phase: the project's phase never says "releases", and the tab keeps its own red count (releases waiting for your approval).
+  - One card per release: status, tasks, milestones closed, QA gates passed, cost, working time and pace (tasks per working hour, parallel work counted once), and for the next release its usability and docs checks.
+  - The page of the release picked (linkable as `#release:R2`): its stages, milestones with gate and score, fix tasks (from a rejection or from QA), issues scheduled in it, what holds it back (blocked tasks, QA rounds used up, hotfixes), QA scores against their cut-off, the full gate history (every submission, approval and rejection, with the fixes milestone it created), its documents, and Approve and Reject when it waits for you.
+  - Releases waiting for approval in Needs you open the new tab.
+- Board data: `release_history`, the full history of each release's gate (`cycle.releases` keeps the last five).
+
+### Changed
+- Board: the release stages are built by one function shared by Construction and the Releases tab.
+
 ## 2.3.0 — 2026-11-21
 
 ### Added
