@@ -86,7 +86,16 @@
     else if (x.running) b = h("span", { class: "badge warn" }, `◌ QA round ${x.round} running`);
     else if (x.exhausted) b = h("span", { class: "badge bad" }, `✕ ${x.qa.runs} QA rounds failed · needs your decision`);
     else if (x.qa.runs) b = h("span", { class: "badge bad" }, `✕ Round ${x.qa.runs} failed` + (why ? ` · ${why.length > 44 ? why.slice(0, 43) + "…" : why}` : ""));
-    else b = h("span", { class: "badge warn" }, "◌ Gate pending");
+    else if (x.ts.length && !x.buildOpen.length) {
+      // every task is done and no QA round ran yet: say what the gate waits for, not just "pending"
+      b = h("span", { class: "badge warn" }, "◌ Waiting for QA");
+      b.title = `All tasks of ${m.id} are done; the QA gate has not run yet. It runs with /dev-kit:qa ${m.id} (▶ on the board queues it; autopilot or /dev-kit:worker runs it). ${title}`;
+      return b;
+    } else {
+      b = h("span", { class: "badge neutral" }, "Gate after the build");
+      b.title = `The QA gate runs once every task of ${m.id} is done. ${title}`;
+      return b;
+    }
     b.title = title;
     return b;
   }
@@ -215,6 +224,7 @@
     pops.push({ btn, pop, close });
   }
   popover($("menu-btn"), $("menu-pop"));
+  popover($("run-btn"), $("run-pop"));
   popover($("tabs-earlier"), $("tabs-earlier-pop"));
   popover($("tabs-later"), $("tabs-later-pop"));
   document.addEventListener("click", (e) => pops.forEach((p) => { if (!p.pop.hidden && !p.pop.contains(e.target) && !p.btn.contains(e.target)) p.close(); }));
@@ -250,8 +260,42 @@
   });
 
   // ------------------------------------------------------------------ header
+  // ------------------------------------------------------------------ what Claude Code runs now: skills (outermost first) and agents
+  const skillRuns = () => ((data && data.agents && data.agents.runs) || []);
+  const runCmd = (r) => `/dev-kit:${r.skill}${r.scope ? ` ${r.scope}` : ""}`;
+  const since = (t) => h("span", { class: "agent-time", "data-start": t, text: dur((Date.now() - parseT(t)) / 1000) });
+  function renderRunning() {
+    const runs = skillRuns(), ags = activeAgents();
+    const btn = $("run-btn");
+    const nx = data.next && data.next.command;
+    if (!runs.length && !ags.length) {
+      btn.className = "run-now idle";
+      fill(btn, h("span", { class: "rn-dot", "aria-hidden": "true" }), "Idle");
+      btn.setAttribute("aria-label", "Nothing is running now");
+      fill($("run-pop"), h("p", { class: "pop-title", text: "Nothing is running now" }),
+        nx ? h("p", { class: "pop-note top" }, "Next step: ", cmd(nx)) : null,
+        h("p", { class: "pop-note", text: "Skills and agents show here while Claude Code runs them (from the session log)." }));
+      return;
+    }
+    const chain = runs.slice(-2).map(runCmd);
+    btn.className = "run-now on";
+    fill(btn, h("span", { class: "rn-dot", "aria-hidden": "true" }), h("span", { class: "rn-label", text: chain.length ? chain.join(" › ") : "agents" }),
+      ags.length ? h("span", { class: "rn-count", text: plural(ags.length, "agent") }) : null,
+      runs.length ? since(runs[0].started_at) : null);
+    btn.setAttribute("aria-label", `Running now: ${runs.map(runCmd).join(", ") || "agents"}${ags.length ? `, ${plural(ags.length, "agent")}` : ""}. Show details`);
+    fill($("run-pop"), h("p", { class: "pop-title", text: "Running now" }),
+      runs.length ? h("ol", { class: "rn-list" }, runs.map((r, i) => h("li", { class: i ? "nested" : null },
+        h("code", { text: runCmd(r) }), h("span", { class: "card-sub" }, " for ", since(r.started_at))))) : null,
+      ags.length ? [h("p", { class: "pop-title", text: plural(ags.length, "agent") }), h("ul", { class: "rn-list" }, ags.map((a) => h("li", {},
+        h("span", { class: "agent-chip" }, agentBits(a, true)),
+        a.node ? (TASK_RE.test(a.node) ? h("button", { type: "button", class: "tid-btn", text: a.node, onclick: () => openTask(a.node) })
+          : h("span", { class: "chip", text: a.node.replace("GATE:", "QA ") })) : h("span", { class: "card-sub", text: "not linked" }))))] : null,
+      h("p", { class: "pop-note", text: "From the session log: a skill shows from its start until it ends." }));
+  }
+
   function renderHeader() {
     $("project").textContent = data.project;
+    renderRunning();
     $("kit-ver").textContent = data.kit && data.kit !== "unknown" ? `v${data.kit}` : "";
     $("bf-mode").textContent = data.brownfield ? `existing project · ${data.brownfield.mode || "feature"} · since ${data.brownfield.baseline_ref || "baseline"}` : "";
     renderLifecycle();
@@ -510,7 +554,7 @@
     const sched = m ? Object.entries(b.issues || {}).filter(([, v]) => v.scheduled_in === m.id && ["scheduled", "in_progress"].includes(v.status)) : [];
     fill($("ms-facts"),
       buf || sched.length ? h("span", { title: [buf ? `${buf.pct}% of the milestone reserved for issues` : null, sched.length ? `Scheduled here: ${sched.map(([id, v]) => `${id} ${v.title || ""}`).join("; ")}` : null].filter(Boolean).join("\n"),
-        text: [buf ? `Issue buffer ${buf.used}/${buf.capacity}` : null, sched.length ? plural(sched.length, "issue") : null].filter(Boolean).join(" · ") }) : null,
+        text: [buf ? (buf.capacity ? `Issue buffer ${buf.used}/${buf.capacity}` : `${plural(buf.used, "issue task")}`) : null, sched.length ? plural(sched.length, "issue") : null].filter(Boolean).join(" · ") }) : null,
       gateBadge(m));
   }
   $("goal-more").addEventListener("click", () => { goalOpen = !goalOpen; renderMilestone(currentMilestone()); });
@@ -958,6 +1002,7 @@
       qaNote = x.qa.runs > x.max ? `${x.qa.runs - 1} fix rounds used of ${x.max}: needs your decision`
         : `${plural(x.fixBlocked.length, "fix", "fixes")} did not hold twice: needs your decision`;
     } else if (x.fixActive.length) { qaStateName = "current"; qaNote = `Fixing round ${x.qa.runs}: ${x.fixes.length - x.fixOpen.length}/${x.fixes.length} done · ${qaReason(x.qa, m)}`; }
+    else if (skillRuns().some((r) => r.skill === "autopilot")) { qaStateName = "current"; qaNote = `${x.qa.runs ? "Fixes" : "Tasks"} done; autopilot runs QA round ${x.round} next`; }
     else if (x.qa.runs) { qaStateName = "current"; qaNote = `Fixes done; round ${x.round} not started. Run`; qaCmdShown = qaCmd; }
     else { qaStateName = "current"; qaNote = "Tasks done; round 1 not started. Run"; qaCmdShown = qaCmd; }
     st.push({ key: "qa", name: "QA & fixes", tasks: x.fixes, agents: x.agents, state: qaStateName, note: qaNote, cmd: qaCmdShown,
@@ -1343,10 +1388,12 @@
   }
   const REQ_WORD = { pending: "waiting", running: "running", needs_input: "needs your answer", done: "done", failed: "failed", cancelled: "cancelled", stale: "stopped" };
   function execLabel(ex) {
-    if (!ex.online) return ["off", "Claude Code: not running"];
+    const runs = skillRuns();
+    if (!ex.online && !runs.length) return ["off", "Claude Code: not running"];
     if (ex.paused) return ["paused", "Claude Code: paused"];
     if (ex.state === "running") return ["on", `Claude Code: working${ex.item ? ` on ${ex.item}` : ""}`];
     if (ex.listening) return ["on", "Claude Code: listening"];
+    if (runs.length) return ["on", `Claude Code: running ${runCmd(runs[runs.length - 1])}; requests wait for it`];
     return ["idle", "Claude Code: open, not listening"];
   }
   function renderRequests() {

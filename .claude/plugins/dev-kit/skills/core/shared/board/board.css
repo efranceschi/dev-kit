@@ -943,3 +943,21 @@ body.compact .cons-nav .stage.here { flex-grow: 1.4; }
 .md .md-a-off { text-decoration: underline dotted; color: var(--text-secondary); }
 .md [data-anchor] { scroll-margin-top: 80px; }
 .md .md-hit { background: color-mix(in srgb, var(--warning) 22%, transparent); border-radius: 6px; transition: background 1.2s ease; }
+
+/* ---------- what runs now, in the top bar (2.2.2) */
+.run-now { font: inherit; font-size: 12.5px; display: inline-flex; align-items: center; gap: 8px; max-width: min(46vw, 560px); padding: 4px 12px; min-height: 30px;
+  border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
+.run-now.on { color: var(--text-primary); border-color: color-mix(in srgb, var(--accent-a) 60%, var(--border-strong)); background: color-mix(in srgb, var(--accent-a) 14%, var(--surface-2)); }
+.run-now .rn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex: none; }
+.run-now.on .rn-dot { background: var(--good); animation: agent-pulse 1.6s ease-in-out infinite; }
+.run-now .rn-label { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.run-now .rn-count { color: var(--text-secondary); }
+.run-now .agent-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.run-pop { min-width: 300px; max-width: min(520px, 92vw); }
+.rn-list { list-style: none; margin: 4px 0 8px; padding: 0; display: grid; gap: 6px; font-size: 12.5px; }
+.rn-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rn-list li.nested { padding-left: 14px; }
+.rn-list li.nested::before { content: "↳"; color: var(--text-muted); }
+@media (max-width: 700px) {
+  .run-now .rn-label, .run-now .rn-count { display: none; }
+}
