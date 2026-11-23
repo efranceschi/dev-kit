@@ -1,6 +1,6 @@
 # Getting started
 
-Your first project with the dev-kit, step by step. Inside Claude Code, `/dev-kit:help` answers any "how do I…?" at any time.
+Your first project with the dev-kit, step by step. Inside Claude Code, `/dev-kit:help` answers any "how do I…?" at any time. The whole flow on one page: the [flow diagram](dev-kit-flow.svg).
 
 ## 1. Install
 
@@ -31,7 +31,9 @@ Answers that matter most later:
 /dev-kit:autopilot --until plan
 ```
 
-This finishes **conception** (PRD, architecture, UX/UI specs, each reviewed) and **planning** (the plan, reviewed), then stops. Read `.dev/prd.md` and `.dev/plan.md`; mistakes are cheapest here. To change something: `/dev-kit:prd <change>` or `/dev-kit:plan replan`.
+This finishes **conception** (PRD, architecture, UX/UI specs, each reviewed) and **planning** (the plan, reviewed), then stops. Mistakes are cheapest here, so the kit asks you twice: after the PRD review (**Confirm PRD**) and after the plan review (**Confirm plan**). Open `/dev-kit:board`: **Needs you** shows a summary of the document (the PRD's personas, stories and acceptance criteria; the plan's releases, milestones with their `exit_check` and task counts) and a link that opens it whole. **Confirm**, or **Ask for changes** in your own words: the document is revised, reviewed again and comes back to you. Nothing is built before the plan is confirmed.
+
+![The board's Planning tab: the plan, its review, the issue queue and the roadmap by release](images/board-planning.png)
 
 ## 4. Build
 
@@ -39,7 +41,7 @@ This finishes **conception** (PRD, architecture, UX/UI specs, each reviewed) and
 /dev-kit:autopilot
 ```
 
-Now the project is in **construction**. It implements each milestone test-first (one commit per task), runs the quality gate (`qa`), fixes what failed and moves to the next milestone. Building and QA belong to each milestone, so the project phase stays `construction` the whole time; `/dev-kit:status` says which milestone (`construction · M2`). Prefer to drive it yourself? After each document, its review: `/dev-kit:prd` → `/dev-kit:review prd` → `/dev-kit:architecture` → `/dev-kit:ux` → `/dev-kit:ui` → `/dev-kit:review design` → `/dev-kit:plan` → `/dev-kit:review plan`; then `/dev-kit:implement --milestone M1` and `/dev-kit:qa M1`. `release` checks that every review passed.
+Now the project is in **construction**. It implements each milestone test-first (one commit per task), runs the quality gate (`qa`), fixes what failed and moves to the next milestone. A gate passes only with the hard floor met (build, tests, no secrets), the milestone's `exit_check` passing and every scored dimension at or above the cut-off. Questions that need you show up on the board with a recommended answer; what you ask there is run by the board's own worker, so you do not need a Claude Code session open. Building and QA belong to each milestone, so the project phase stays `construction` the whole time; `/dev-kit:status` says which milestone (`construction · M2`). Prefer to drive it yourself? After each document, its review: `/dev-kit:prd` → `/dev-kit:review prd` → `/dev-kit:architecture` → `/dev-kit:ux` → `/dev-kit:ui` → `/dev-kit:review design` → `/dev-kit:plan` → `/dev-kit:review plan`; then `/dev-kit:implement --milestone M1` and `/dev-kit:qa M1`. `release` checks that every review passed.
 
 ## Already have a project?
 
@@ -58,16 +60,27 @@ Nothing in your code, docs or history is changed by the onboarding. From then on
 | You want | Run |
 |---|---|
 | where the project stands (lifecycle phase and step, next release) | `/dev-kit:status` |
-| a live board in the browser (or on your phone) | `/dev-kit:board` (`--host 0.0.0.0` to share it) |
+| a live board in the browser (or on your phone), with a forecast to finish | `/dev-kit:board` (`--host 0.0.0.0` to share it) |
+| change autonomy, cut-offs, flags, the health check | `/dev-kit:settings` |
 | what is pending and what to do next | `/dev-kit:backlog` |
 | report a bug or an idea | `/dev-kit:issue "what happens"` |
 | how much it cost | `/dev-kit:costs` |
 | an evaluation of the session | `/dev-kit:feedback` |
 | help with anything | `/dev-kit:help <question>` |
 
+The board shows the project's language (English or Portuguese for now, else your browser's); its menu switches it.
+
+![The board in Portuguese](images/board-pt-br.png)
+
 ## 6. Release, and keep the product evolving
 
-Each closed milestone waits for the **next release**. A release ships them between milestones: the usability audit (apps with a UI), the project docs and their review, then `/dev-kit:release` (`--dry-run` first), which tags the version and records it. `autopilot` runs this for you at the end of the planned milestones when your brief asks for releases. If production deploys are configured, `/dev-kit:deploy` installs each approved milestone or the release.
+The plan groups milestones into **releases** (R1, R2…). When every milestone of a release has passed its gate, `/dev-kit:release` runs the usability audit (apps with a UI), the docs and their review and the release audit, then writes the **release review** (`.dev/releases/R<n>/review.md`: what is in it, scores, risks, how to roll back) and waits for **your approval** on the board or in `/dev-kit:release`. Approve, and it deploys to production when configured, runs the smoke check, tags and records the version. Reject with what must change, and that becomes a fixes milestone in the same release; no milestone of the next release starts before. `autopilot` drives all of this for you up to your approval.
+
+![The board's Releases tab: R1 released, R2 in progress with its stages](images/board-releases.png)
+
+**Production before the release** (optional). With `production.when = per_milestone_flagged` and release flags on (`/dev-kit:settings`), each milestone goes to production as soon as its gate passes, behind its release's flag (`release_R2`), off; the flag is turned on only after you approve the release, and a chore to remove it is planned in the next release. A **production health check** (`production.health`: a command or a URL, with an interval) runs while the board is open, or with `/dev-kit:deploy --health`; a failure opens one urgent (expedite) issue and shows in Needs you. `/dev-kit:deploy --rollback R2` turns the flag off again.
+
+![The board's Stable tab: production, the health check and the release flags](images/board-stable.png)
 
 With no milestone open, no issue queued and everything released, the project is **stable**. That is a resting point, not an end:
 

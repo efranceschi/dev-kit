@@ -2,6 +2,38 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.0.0 — 2026-11-23
+
+dev-kit 3.0: every release planned and approved by you, milestones that end on an executable exit check, quality gates with a deterministic floor, your confirmation of the PRD and the plan, a board that forecasts, speaks your language and runs its own worker, deploys separated from releases by flags, and a production health check. The alpha line (3.0.0-alpha.1 to alpha.8, below) holds the details; this entry closes it with the documentation.
+
+### Breaking
+- **Every release is planned and approved** (item 5, conventions §19). The plan groups milestones under `## R<n>`; `release-record` needs `--release R<n>` after `release-decide --approve` (only `--hotfix T-nnn` goes without); `--milestones` is gone. There is no "next release" cut between milestones any more.
+- **The gate needs the exit check** (item 7, §4, §7). Once a plan uses `exit_check` (every plan written by 3.0, or an older one after `plan --annotate-exit`), `sync-plan` refuses a new milestone without one and `gate <M> passed` refuses anything but `exit: pass`, besides the hard floor and, when CI is detected, a green run.
+- **New fixes milestone ids** (item 9, §3): a rejected release gets `M<k>.<i>` (`M5.1`) right after its last milestone, titled `R<n> · Fixes <i>` (was `M<last+1>`).
+- **Board requests are `P-nnn`** (item 15): `R<n>` now always means a release. QA rounds read "Round 1", "Round 2".
+- The release dossier is now the **release review** (`releases/R<n>/review.md`, `release-submit --review`, state key `review_doc`), and the board starts a headless worker itself when no session listens (`autonomy.board_executor`, on by default).
+
+### Added
+- Documentation for 3.0: a quickstart (`GET_STARTED.md`) and getting-started guide that walk through checkpoints, releases, release flags and the health check, with screenshots of the real board fed by a fictional project (`docs/demo/build_demo.py` builds it through the kit's own commands; `docs/demo/capture.js` captures it with Playwright); `concepts.md` covers the release review, checkpoints, hard floor and exit check, release flags and production health (§21), the board's worker, forecast and language.
+- `docs/dev-kit-flow.svg`: the whole flow as a hand-written vector diagram (viewBox only, text as text, a dark variant), replacing the Graphviz `.dot` and `.png`.
+- Recipe "Deploy each milestone before its release (release flags)"; glossary entries release review, release flag, production health check, exit check, hard floor, checkpoint and forecast; the recipe "Ship a version" is now "Ship a release".
+
+### Fixed
+- Board text found untranslated in the screenshots now goes through the catalogs ("running", the gate and building labels, health details, document panel lines), and the board's text lint also catches a lone word left in an element.
+- Board layout: Needs you lists wrap side by side, release stages and cards no longer stretch, and a milestone's goal on the board leaves out its plan fields (`exit_check:`, `size_reason:`).
+
+### Tests
+- `test_v3_docs.py`: the flow diagram is a true vector covering the whole flow, every image the docs embed exists, and the demo project still builds with releases, flags and health.
+
+### Migration
+Automatic, on the first command after updating (tested on projects written by 2.6.1, `test_v3_migration.py`):
+- The first read of a 2.x `state.json` copies it and `plan.md` to `.dev/backup/`; the state moves to version 2 on the next write, and a `dossier` key becomes `review_doc`.
+- The next `sync-plan` (any skill that syncs the plan runs it) puts the milestones already released under `## R0 — Released before 3.0`, keeping every version and tag, groups the rest into `R1`, records ADR-001 (auto), and marks the plan review stale.
+- Request files named `R-nnn` are read as `P-nnn`; fixes milestones that already exist keep their ids.
+- `.dev/.gitignore` gets its managed block; your own rules stay.
+
+What is left to you: review the release grouping with `/dev-kit:review plan` and confirm the plan on the board; add `exit_check` to the open milestones with `/dev-kit:plan --annotate-exit` when you want the gate to require it; and, with CI in the project, record a green run at the gate (`DS ci check <M>`) or turn `autonomy.ci.required` off.
+
 ## 3.0.0-alpha.8 — 2026-11-23
 
 Cross-cutting changes of the 3.0 specification.

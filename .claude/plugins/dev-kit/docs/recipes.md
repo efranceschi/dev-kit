@@ -61,6 +61,14 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 1. Answer the production questions in the interview (method, host, when, smoke checks, prerequisites)
 2. /dev-kit:deploy --check to see the drift
 3. /dev-kit:deploy M3 or let autopilot deploy per milestone
+4. /dev-kit:deploy --health to check production now (the board checks it on schedule while it is open)
+
+## Deploy each milestone before its release (release flags)
+
+1. /dev-kit:settings: turn on release flags with your flag provider, and set production to per_milestone_flagged
+2. /dev-kit:plan (or replan): every task of a release gets flag: release_R<n>, created off by sync-plan
+3. each milestone goes to production when its gate passes, with the flag still off
+4. approve the release: the flag is turned on, and a chore to remove it is planned in the next release; /dev-kit:deploy --rollback R2 turns it off again
 
 ## Resume after a crash or a reboot
 
@@ -96,12 +104,12 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 2. on the board: Run next to a command, New issue, answer a question in Needs you, Plan to drag tasks and issues between milestones (or milestones between releases) and Send, or Go on by itself
 3. each request starts in the listening session by itself; questions come back to the board with answers to pick. With no session listening, the board starts a headless Claude Code session for them by itself
 
-## Ship a version
+## Ship a release
 
-1. Release between milestones: /dev-kit:status (or the board) shows the next release, the closed milestones not released yet
-2. /dev-kit:usability for apps with a UI, then /dev-kit:docs all and /dev-kit:review docs
-3. /dev-kit:release --dry-run to see the checklist and the version it would use
-4. /dev-kit:release (tags and records the release; pushes and deploys only as the brief allows)
+1. When every milestone of a planned release has passed its gate, /dev-kit:status (or the board) shows the release ready
+2. /dev-kit:release --dry-run to see the checklist and the version it would use
+3. /dev-kit:release runs usability (UI apps), docs and the release audit, writes releases/R<n>/review.md and waits for you
+4. Approve on the board (Needs you) or with /dev-kit:release: production deploy, smoke, tag; or reject with what must change (a fixes milestone in the same release)
 
 ## Check that the app is usable and accessible
 

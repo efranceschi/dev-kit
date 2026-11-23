@@ -350,6 +350,8 @@ def milestone_goals(plan: str) -> dict:
                 goals[cur] = " ".join(buf)
             cur, buf = None, []
         elif cur:
+            if h and ds.MS_FIELD_RE.match(h):
+                continue  # exit_check / size_reason are fields of the milestone, not its goal
             if h:
                 buf.append(h)
             elif buf:

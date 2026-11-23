@@ -37,11 +37,12 @@ Step by step: [getting started](docs/getting-started.md).
 | build it step by step | `/dev-kit:prd` → `review prd` → `architecture` → `ux` → `ui` → `review design` → `plan` → `review plan` → `implement` → `qa` |
 | see where things stand | `/dev-kit:status` |
 | watch it live in the browser | `/dev-kit:board` (`/dev-kit:board stop` to stop) |
-| drive it from the board | buttons on `/dev-kit:board`, then `/dev-kit:worker` runs the requests |
+| drive it from the board | buttons on `/dev-kit:board`: the board's own worker runs the requests (or `/dev-kit:worker` in a session) |
 | report a bug or ask for an improvement | `/dev-kit:issue "what happens"` |
 | see everything pending | `/dev-kit:backlog` |
 | put it in production | `/dev-kit:deploy` |
-| ship the closed milestones (the next release) | `/dev-kit:release` |
+| submit a finished release for your approval | `/dev-kit:release` |
+| change autonomy, release flags, health check | `/dev-kit:settings` |
 | know how much it cost | `/dev-kit:costs` |
 | review the session or send feedback to the author | `/dev-kit:feedback` |
 | run it overnight | [recipe](docs/recipes.md#let-it-run-overnight) |
@@ -55,12 +56,14 @@ All 25 skills by category, with arguments and examples: [skills](docs/skills.md)
 </p>
 
 - **The lifecycle is a cycle**, derived from `.dev/` and never set by hand: a scope change reopens conception and planning while the milestone in construction keeps going; `/dev-kit:status` shows the phase and step (`construction · M3`).
-- **Milestones** M1, M2… are the cadence of construction; each ends with a scored quality gate (0–100 per dimension, cut-off set in the interview). Building and QA belong to the milestone, not to the project phase.
+- **Milestones** M1, M2… are the cadence of construction; each ends with a quality gate: a hard floor (build, tests, secrets), its `exit_check` and a score of 0–100 per dimension against the cut-off set in the interview. Building and QA belong to the milestone, not to the project phase.
+- **Releases** R1, R2… group milestones; each is audited, gets a release review and waits for your approval before production. With release flags, milestones can reach production earlier behind the release's flag.
+- **You confirm** the PRD and the plan at checkpoints on the board, and approve each release; everything else runs on its own.
 - **Autonomy** is yours to set: supervised (asks at each decision point, always with a recommendation) or unattended (parks what needs you and keeps going).
 - **Bugs and ideas** found at any time enter by class of service without renumbering milestones.
 - Every question comes with a recommended option; short tips (`💡`) explain each mechanism the first times it matters.
 
-Full picture: [concepts](docs/concepts.md) and the [flow diagram](docs/dev-kit-flow.png).
+Full picture: [concepts](docs/concepts.md) and the [flow diagram](docs/dev-kit-flow.svg) (a vector image: zoom in as much as you like).
 
 ## Documentation
 

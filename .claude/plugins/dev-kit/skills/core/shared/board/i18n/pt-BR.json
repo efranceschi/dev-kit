@@ -782,7 +782,16 @@
     "{n} in a row": "{n} seguidas",
     "{v} · last: {detail}": "{v} · última: {detail}",
     "✓ healthy": "✓ saudável",
-    "✕ failing": "✕ falhando"
+    "✕ failing": "✕ falhando",
+    " and {v}": " e {v}",
+    " for ": " há ",
+    " · building {v}": " · construindo {v}",
+    ".dev/{p} does not exist yet": ".dev/{p} ainda não existe",
+    ".dev/{p} · changed {v}": ".dev/{p} · alterado em {v}",
+    "gate {gate}{v}": "gate {gate}{v}",
+    "pending": "pendente",
+    "{v} below {min}": "{v} abaixo de {min}",
+    "{v} for {d}": "{v} há {d}"
   },
   "plurals": {
     "agent": {

@@ -49,6 +49,7 @@
   const PHASE_WORD = tmap({ done: N_("done"), current: N_("current phase"), active: N_("still running"), upcoming: N_("not started") });
   const STEP_NAME = tmap({ interview: N_("interview"), prd: N_("PRD"), architecture: N_("architecture"), ux: N_("UX"), ui: N_("UI"), plan: N_("plan"),
     milestones: N_("milestones"), release: N_("release") });
+  const GATE_WORD = tmap({ passed: N_("passed"), skipped: N_("skipped"), pending: N_("pending") });
   const STEP_WORD = tmap({ todo: N_("to do"), doing: N_("in progress"), stale: N_("out of date"), review: N_("waiting for its review"), checkpoint: N_("waiting for your confirmation"), done: N_("done"), skipped: N_("skipped") });
   const STEP_MARK = { todo: "○", doing: "◐", stale: "↻", review: "◐", checkpoint: "◐", done: "✓", skipped: "–" };
   const PHASES = ["conception", "planning", "construction", "stable"];  // the lifecycle phases; the Releases tab is a view next to them, not a phase
@@ -386,7 +387,7 @@
     btn.setAttribute("aria-label", tr("Running now: {v}{v2}. Show details", { v: runs.map(runCmd).join(", ") || tr("agents"), v2: ags.length ? `, ${plural(ags.length, "agent")}` : "" }));
     fill($("run-pop"), h("p", { class: "pop-title", text: tr("Running now") }),
       runs.length ? h("ol", { class: "rn-list" }, runs.map((r, i) => h("li", { class: i ? "nested" : null },
-        h("code", { text: runCmd(r) }), h("span", { class: "card-sub" }, " for ", since(r.started_at))))) : null,
+        h("code", { text: runCmd(r) }), h("span", { class: "card-sub" }, tr(" for "), since(r.started_at))))) : null,
       ags.length ? [h("p", { class: "pop-title", text: plural(ags.length, "agent") }), h("ul", { class: "rn-list" }, ags.map((a) => h("li", {},
         h("span", { class: "agent-chip" }, agentBits(a, true)),
         a.node ? (TASK_RE.test(a.node) ? h("button", { type: "button", class: "tid-btn", text: a.node, onclick: () => openTask(a.node) })
@@ -444,7 +445,7 @@
           i === idx ? h("span", { class: "lc-tag now-tag", text: tr("now") }) : null),
         badge ? h("span", { class: "lc-badge", text: badge }) : null),
       phaseRunning(p.key) ? h("span", { class: "lc-run", title: tr("Running now in {v}: {v2}", { v: PHASE_NAME[p.key], v2: skillRuns().filter((r) => (runPlace(r) || [])[0] === p.key).map(runCmd).join(", ") }) },
-        h("span", { class: "rn-dot", "aria-hidden": "true" }), "running") : null,
+        h("span", { class: "rn-dot", "aria-hidden": "true" }), tr("running")) : null,
       need ? h("span", { class: "lc-needs", title: tr("{v} in Needs you", { v: plural(need, "item") }), text: String(need) }) : null,
       h("span", { class: "visually-hidden", text: `: ${PHASE_WORD[p.state]}${i === idx ? tr(", the project is here") : ""}${badge ? `, ${badge}` : ""}${need ? tr(", {v} need you", { v: plural(need, "item") }) : ""}.` }));
     }), releasesTab());
@@ -542,7 +543,7 @@
       const run = releasing && at === i && !na;
       return h("li", { class: `chev stage st-${state}${at === i && !na ? " here" : ""}${run ? " running" : ""}`, "aria-current": at === i ? "step" : null },
         h("div", { class: "stage-top" }, h("span", { class: "stage-ico", "aria-hidden": "true", text: STAGE_ICON[state] }), h("span", { class: "stage-name", text: name }),
-          run ? h("span", { class: "lc-run" }, h("span", { class: "rn-dot", "aria-hidden": "true" }), "running") : null,
+          run ? h("span", { class: "lc-run" }, h("span", { class: "rn-dot", "aria-hidden": "true" }), tr("running")) : null,
           h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[state]}.` })),
         note ? h("span", { class: "stage-note" }, note, cmdText ? [" ", cmd(cmdText)] : null) : null);
     };
@@ -644,7 +645,7 @@
         fact(tr("Cost"), t.spend ? t.spend.text : "—", t.spend && t.spend.title),
         fact(tr("Time"), fmtH(t.work), t.elapsed != null ? tr("{v} from the first task to {v2}", { v: fmtH(t.elapsed), v2: r.status === "released" || r.status === "ready_for_review" ? tr("the last gate") : "now" }) : tr("No task started")),
         fact(tr("Pace"), t.pace != null ? tr("{v} tasks/h", { v: t.pace.toFixed(1) }) : "—", tr("Tasks done per working hour, parallel work counted once"))),
-      ready ? h("div", { class: "rel-ready" }, tr("{u} usability · {d} docs", { u: chk(ready.usability), d: chk(ready.docs) }), ready.waiting_for && ready.waiting_for.length ? ` · building ${ready.waiting_for.join(", ")}` : "") : null,
+      ready ? h("div", { class: "rel-ready" }, tr("{u} usability · {d} docs", { u: chk(ready.usability), d: chk(ready.docs) }), ready.waiting_for && ready.waiting_for.length ? tr(" · building {v}", { v: ready.waiting_for.join(", ") }) : "") : null,
       r.status === "awaiting_approval" ? h("div", { class: "rel-ready bad", text: tr("Waiting for your approval") }) : null,
       fcFor("releases", "release", r.id) ? h("div", { class: "rel-ready fc" }, `${r.id}: `, forecastChip(fcFor("releases", "release", r.id))) : null);
   }
@@ -667,7 +668,7 @@
       const x = milestoneInfo(m), tm = msTiming(m), sp = msSpend(m.id), q = qaState(m);
       return h("li", { class: "has-btn" }, h("button", { type: "button", class: "row-btn", title: tr("Show {id} in construction", { id: m.id }), onclick: () => openMilestone(m.id) },
         h("span", { class: "id", text: m.id }), h("span", { text: m.title || "" }),
-        h("span", { class: `chip${isClosed(m) ? " good" : ""}`, text: isClosed(m) ? `gate ${m.gate}${m.score != null ? ` · ${m.score}` : ""}` : q.running ? tr("QA running") : tr("{done}/{total} tasks", { done: x.done, total: x.total }) }),
+        h("span", { class: `chip${isClosed(m) ? " good" : ""}`, text: isClosed(m) ? tr("gate {gate}{v}", { gate: GATE_WORD[m.gate] || m.gate, v: m.score != null ? ` · ${m.score}` : "" }) : q.running ? tr("QA running") : tr("{done}/{total} tasks", { done: x.done, total: x.total }) }),
         q.qa.runs > 1 ? h("span", { class: "chip", text: plural(q.qa.runs - 1, "fix round") }) : null,
         h("span", { class: "sub", text: [tm ? fmtH(tm.work) : null, sp ? sp.text : null].filter(Boolean).join(" · ") })));
     });
@@ -803,7 +804,7 @@
     $("ms-pct").title = m ? tr("{v}% of the milestone: tasks {pct}% (70% of the bar), QA {v2}% (30%)", { v: Math.round(prog.total * 100), pct, v2: Math.round(prog.qa * 100) }) : "";
     const next = st.slice(hereIdx + 1).find((x) => x.state !== "na");
     $("ms-caption").textContent = m && ts.length && counts.done === ts.length && !closedNow
-      ? tr("All tasks done; the milestone closes after {v}{v2}.", { v: hereIdx >= 0 ? (live[hereIdx].key === "qa" ? tr("the QA gate") : live[hereIdx].name.toLowerCase()) : tr("its gate"), v2: next && next.key !== "close" ? ` and ${next.name.toLowerCase()}` : "" }) : "";
+      ? tr("All tasks done; the milestone closes after {v}{v2}.", { v: hereIdx >= 0 ? (live[hereIdx].key === "qa" ? tr("the QA gate") : live[hereIdx].name.toLowerCase()) : tr("its gate"), v2: next && next.key !== "close" ? tr(" and {v}", { v: next.name.toLowerCase() }) : "" }) : "";
     const order = ["done", "in_progress", "blocked", "todo"];
     const label = (k) => STATUS.find((x) => x.key === k).label;
     const tot = Math.max(1, ts.length);
@@ -1394,7 +1395,7 @@
     const parts = [];
     if (below.length) {
       const mins = new Set(below.map((d) => d.min));
-      parts.push(mins.size === 1 ? `${below.map((d) => `${d.dimension} ${d.score}`).join(", ")} below ${below[0].min}`
+      parts.push(mins.size === 1 ? tr("{v} below {min}", { v: below.map((d) => `${d.dimension} ${d.score}`).join(", "), min: below[0].min })
         : below.map((d) => `${d.dimension} ${d.score} < ${d.min}`).join(", "));
     }
     if (last.blockers) parts.push(plural(last.blockers, "blocking finding"));
@@ -1522,7 +1523,7 @@
       const isRun = x.running || (x.key === "qa" && qaState(m).running);
       return h("li", { class: `chev stage st-${x.state}${x.here ? " here" : ""}${isRun ? " running" : ""}`, "aria-current": x.here ? "step" : null },
         h("div", { class: "stage-top" }, h("span", { class: "stage-ico", "aria-hidden": "true", text: STAGE_ICON[x.state] }),
-          h("span", { class: "stage-name", text: x.name }), isRun ? h("span", { class: "lc-run" }, h("span", { class: "rn-dot", "aria-hidden": "true" }), "running") : null,
+          h("span", { class: "stage-name", text: x.name }), isRun ? h("span", { class: "lc-run" }, h("span", { class: "rn-dot", "aria-hidden": "true" }), tr("running")) : null,
           h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[x.state]}${isRun ? tr(", running now") : ""}.` })),
         x.note ? h("span", { class: "stage-note" }, x.note, x.cmd ? [" ", cmd(x.cmd)] : null,
           x.key === "qa" && hasDoc(`qa/${m.id}/report.md`) ? [" ", docLink(`qa/${m.id}/report.md`, "report")] : null) : null,
@@ -1866,7 +1867,7 @@
     if (!fl.length) return null;
     const word = tmap({ on: N_("on"), off: N_("off"), removed: N_("removed") });
     return h("div", { class: "hc" }, h("div", { class: "list-title" }, tr("Release flags")),
-      h("ul", { class: "list" }, fl.map((f) => h("li", {}, h("span", { class: "id", text: f.release }), h("code", { text: f.name }),
+      h("ul", { class: "list" }, fl.map((f) => h("li", {}, h("span", { class: "id", text: f.release }), h("span", {}, h("code", { text: f.name })),
         h("span", { class: `badge ${f.state === "on" ? "good" : ""}`, text: word[f.state] || f.state }),
         f.cleanup_task && f.cleanup_task !== "pending" ? h("span", { class: "sub", text: tr("removal: {id}", { id: f.cleanup_task }) }) : null))));
   }
@@ -2540,8 +2541,8 @@
     const runs = skillRuns(), parts = [];
     const orch = runs.find((r) => ["autopilot", "worker"].includes(r.skill));
     const work = [...runs].reverse().find((r) => !["autopilot", "worker", "board"].includes(r.skill));
-    if (orch) parts.push(`${orch.skill} for ${dur((Date.now() - parseT(orch.started_at)) / 1000)}`);
-    if (work) parts.push(`${actionLabel(runCmd(work)).replace(/^Run /, "")} for ${dur((Date.now() - parseT(work.started_at)) / 1000)}`);
+    if (orch) parts.push(tr("{v} for {d}", { v: orch.skill, d: dur((Date.now() - parseT(orch.started_at)) / 1000) }));
+    if (work) parts.push(tr("{v} for {d}", { v: actionLabel(runCmd(work)).replace(/^Run /, ""), d: dur((Date.now() - parseT(work.started_at)) / 1000) }));
     const last = Math.max(0, ...[...(data.log || []), ...(data.feed || [])].map((r) => parseT(r.at)).filter(Number.isFinite));
     if (last) parts.push(tr("last event {v}", { v: ago(last) }));
     $("updated").textContent = parts.join(" · ");
@@ -2801,7 +2802,7 @@
   /** A button that opens a .dev markdown file in the drawer, or plain text when the file does not exist. */
   function docLink(path, label, anchor, cls) {
     const p = relDev(path);
-    if (!hasDoc(p)) return h("span", { class: `doc-off${cls ? ` ${cls}` : ""}`, title: `.dev/${p} does not exist yet`, text: label || p });
+    if (!hasDoc(p)) return h("span", { class: `doc-off${cls ? ` ${cls}` : ""}`, title: tr(".dev/{p} does not exist yet", { p }), text: label || p });
     return h("button", { type: "button", class: `doc-link${cls ? ` ${cls}` : ""}`, "data-doc": p, title: tr("Open .dev/{p}{v}", { p, v: anchor ? ` at ${anchor}` : "" }),
       onclick: (e) => { e.stopPropagation(); openDoc(p, anchor); } }, h("span", { class: "doc-ico", "aria-hidden": "true", text: "▤" }), label || p);
   }
@@ -2818,7 +2819,7 @@
   function renderDoc(d) {
     const body = $("doc-body");
     if (!d.ok) { fill(body, h("p", { class: "card-sub", text: d.error === "not found" /* i18n-ok: server code */ ? tr("This document does not exist (any more).") : tr("Could not open it: {v}.", { v: d.error || "error" }) })); return; }
-    fill(body, renderMarkdown(d.text, d.path), h("p", { class: "card-sub td-foot", text: `.dev/${d.path} · changed ${Number.isFinite(parseT(d.mtime)) ? fmtDT(parseT(d.mtime)) : d.mtime}` }));
+    fill(body, renderMarkdown(d.text, d.path), h("p", { class: "card-sub td-foot", text: tr(".dev/{p} · changed {v}", { p: d.path, v: Number.isFinite(parseT(d.mtime)) ? fmtDT(parseT(d.mtime)) : d.mtime }) }));
     if (!DOC_NAME[d.path]) { const h1 = body.querySelector(".md-h"); if (h1) $("doc-title").textContent = h1.textContent; }
   }
   async function fetchDoc(cur, quiet) {

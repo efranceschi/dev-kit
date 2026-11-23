@@ -1082,7 +1082,26 @@
       "steps": [
         "Answer the production questions in the interview (method, host, when, smoke checks, prerequisites)",
         "/dev-kit:deploy --check to see the drift",
-        "/dev-kit:deploy M3 or let autopilot deploy per milestone"
+        "/dev-kit:deploy M3 or let autopilot deploy per milestone",
+        "/dev-kit:deploy --health to check production now (the board checks it on schedule while it is open)"
+      ]
+    },
+    {
+      "id": "release-flags",
+      "title": "Deploy each milestone before its release (release flags)",
+      "topics": [
+        "flag",
+        "feature flag",
+        "release flag",
+        "deploy without release",
+        "rollback",
+        "per_milestone_flagged"
+      ],
+      "steps": [
+        "/dev-kit:settings: turn on release flags with your flag provider, and set production to per_milestone_flagged",
+        "/dev-kit:plan (or replan): every task of a release gets flag: release_R<n>, created off by sync-plan",
+        "each milestone goes to production when its gate passes, with the flag still off",
+        "approve the release: the flag is turned on, and a chore to remove it is planned in the next release; /dev-kit:deploy --rollback R2 turns it off again"
       ]
     },
     {
@@ -1192,19 +1211,21 @@
     },
     {
       "id": "release",
-      "title": "Ship a version",
+      "title": "Ship a release",
       "topics": [
         "release",
         "ship",
         "version",
         "tag",
-        "publish"
+        "publish",
+        "approve",
+        "release review"
       ],
       "steps": [
-        "Release between milestones: /dev-kit:status (or the board) shows the next release, the closed milestones not released yet",
-        "/dev-kit:usability for apps with a UI, then /dev-kit:docs all and /dev-kit:review docs",
+        "When every milestone of a planned release has passed its gate, /dev-kit:status (or the board) shows the release ready",
         "/dev-kit:release --dry-run to see the checklist and the version it would use",
-        "/dev-kit:release (tags and records the release; pushes and deploys only as the brief allows)"
+        "/dev-kit:release runs usability (UI apps), docs and the release audit, writes releases/R<n>/review.md and waits for you",
+        "Approve on the board (Needs you) or with /dev-kit:release: production deploy, smoke, tag; or reject with what must change (a fixes milestone in the same release)"
       ]
     },
     {
@@ -1240,7 +1261,7 @@
     },
     {
       "term": "next release",
-      "definition": "The milestones closed since the last release, or the first planned release not released yet. A release ships them between milestones, after usability (UI apps) and docs; release records it, and nothing waits any more."
+      "definition": "The first planned release not released yet; when all its milestones have passed their gates, release audits it and writes its release review for your approval. Releases cut before 3.0 are kept under R0."
     },
     {
       "term": "planned release",
@@ -1251,8 +1272,24 @@
       "definition": "The one human gate of construction: when every milestone of a planned release is closed, release writes its release review and waits; you approve (production deploy, smoke, record) or reject with what must change (a fixes milestone in the same release)."
     },
     {
+      "term": "release review",
+      "definition": "The document release writes for a release waiting for your approval (releases/R<n>/review.md): what it delivers against the PRD, milestones, confirmations, how to try it, quality and security, verified facts, risks, and your decision."
+    },
+    {
+      "term": "release flag",
+      "definition": "A flag named release_R<n> that keeps a release's code switched off in production until you approve the release (autonomy.release_flags, production.when per_milestone_flagged); removed by a chore in the next release."
+    },
+    {
+      "term": "production health check",
+      "definition": "production.health: a command or URL checked every interval_min by prod-check (on the board while it is open); a failure opens one expedite issue."
+    },
+    {
       "term": "stable",
       "definition": "Lifecycle phase with nothing open: no milestone in progress, no queued issue, everything built is released. The next issue or change starts the cycle again."
+    },
+    {
+      "term": "checkpoint",
+      "definition": "Confirm PRD and Confirm plan: after a passed review, you confirm the document on the board or ask for changes; no milestone starts before the plan is confirmed."
     },
     {
       "term": "milestone",
@@ -1261,6 +1298,14 @@
     {
       "term": "gate",
       "definition": "The quality check at the end of a milestone (qa): passes only with no critical/high findings and every score above its cut-off."
+    },
+    {
+      "term": "exit check",
+      "definition": "The exit_check of a milestone in plan.md: a test, a command or acceptance criteria that must pass at its gate (pass or fail, never a score)."
+    },
+    {
+      "term": "hard floor",
+      "definition": "What every milestone gate needs before any score counts: the build passes, the test suite passes and no secret is in the diff."
     },
     {
       "term": "cut-off",
@@ -1421,6 +1466,10 @@
     {
       "term": "access link",
       "definition": "The private URL printed by /dev-kit:board --host 0.0.0.0; other devices open the shared board only through it."
+    },
+    {
+      "term": "forecast",
+      "definition": "The board's estimate of when the open work finishes (probable and late dates) and what it costs, from the pace and cost of the milestones done."
     },
     {
       "term": "expedite",

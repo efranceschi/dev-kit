@@ -630,6 +630,7 @@ TECH = re.compile(r"^\s*/(dev-kit|api|assets)[:/]|^[a-z0-9_-]+$|^(?=\S*-)[a-z0-9
                   r"^[a-z_-]+:[a-z_-]*$|^[A-Z][a-z]+[A-Z]\w*$|^[#.\[](?! )|^(GATE|M|T|I|Q|P|R|F)[:-]?$|^\s*$|"
                   r"^(Escape|Enter|Home|End|Tab|Content-Type|X-Board-Token)$|^\(prefers-|^M[\d$ ,]|^\.dev/$")
 VISIBLE_AT = re.compile(r'(?<![\w"-])(text|title|placeholder|"aria-label")\s*:\s*$|textContent\s*=\s*$|\btoast\(\s*$|\bfill\([^()]*,\s*$')
+TECH_WORDS = {"min", "pid", "sha"}  # units and ids that read the same in every language
 SYMBOL = re.compile(r"^[^A-Za-z]*$|^(M|T|R|I|Q|P|F|ADR)-?[\d.]*$")
 
 
@@ -654,7 +655,11 @@ def _lint_js(src: str, start_marker: str = "  const SVGNS") -> list[str]:
         line = src[src.rfind("\n", 0, at) + 1:src.find("\n", at)].strip()
         if "i18n-ok" in line:
             continue
-        if TEXTY.search(text) and not TECH.search(text.strip()):
+        child = re.search(r"\b\w+\(\{[^{}]*\}\)\s*,\s*$|\}\s*\)?\s*,\s*$", before) and re.search(r"\bh\(", src[max(0, at - 400):at])
+        words = re.findall(r"(?<![\w/.#:=?\[-])[a-z]{3,}(?![\w/.(=:-])", text) if "${" in raw or child else []
+        if words and not in_class and not re.search(r"[/#\[=]|^\s*[.:]", text) and not TECH_WORDS.issuperset(words):
+            probs.append(f"{src.count(chr(10), 0, at) + 1}: {raw[:70]} (word: {words[0]})")
+        elif TEXTY.search(text) and not TECH.search(text.strip()):
             probs.append(f"{src.count(chr(10), 0, at) + 1}: {raw[:70]}")
         elif before and VISIBLE_AT.search(before) and re.search(r"[A-Za-z]", text) and not SYMBOL.match(text.strip()) \
                 and not re.match(r"^[#.\[]|^\s*/(dev-kit|api)[:/]", text.strip()) \
@@ -721,6 +726,15 @@ PH = re.compile(r"\{(\w+)\}")
 
 
 class TestBoardText(unittest.TestCase):
+    def test_the_lint_catches_single_words(self) -> None:
+        src = ("  const SVGNS = 1;\n  const a = h(\"span\", {}, h(\"i\", {}), \"running\");\n  const b = `${x} for ${y}`;\n"
+               "  const c = `gate ${m.gate}`;\n  const d = `/api/x/${id}/cancel`;\n  const e = h(\"span\", { class: `chip ${x}` });\n")
+        self.assertEqual([p.split(" (")[0] for p in lint_js(src)], ['2: "running"', "3: `${x} for ${y}`", "4: `gate ${m.gate}`"])
+
+    def test_milestone_goal_leaves_out_its_fields(self) -> None:
+        import dev_board
+        self.assertEqual(dev_board.milestone_goals("## M1 — A\nGoal one.\n- exit_check: cmd: x\n\n### T-001 x\n"), {"M1": "Goal one."})
+
     def test_board_js_has_no_visible_text_outside_the_catalog(self) -> None:
         self.assertEqual(lint_js((BOARD / "board.js").read_text(encoding="utf-8")), [])
 

@@ -1,6 +1,10 @@
 # Get started with dev-kit
 
-The minimum you need to build your first project. Install the plugin first (see the [README](README.md#install)).
+The quickstart: the minimum you need to build your first project, and what you will see along the way. Install the plugin first (see the [README](README.md#install)).
+
+<p align="center">
+  <img src=".claude/plugins/dev-kit/docs/dev-kit-flow.svg" alt="The dev-kit flow. Conception: interview, PRD, review, your confirmation of the PRD, architecture, UX and UI when there is an interface, design review. Planning: the plan groups milestones into releases, each milestone with an exit check, then the plan review, your confirmation and sync-plan. Milestones, on their own: pull issues, implement, QA, gate (hard floor, exit check, cut-offs); a failed gate creates fix tasks, a passed one goes to smoke and deploy. Releases: usability and docs, release audit, release review, your approval, production with the flag on, released; a rejection becomes a fixes milestone in the same release. Stable: the production health check runs and each issue is classified as expedite, standard or a scope change, which return to construction or conception." width="900">
+</p>
 
 ## 1. Open a folder in Claude Code
 
@@ -27,7 +31,11 @@ Describe your idea in one sentence, or run `/dev-kit:start` with no text. The ki
 /dev-kit:autopilot --until plan
 ```
 
-This writes and reviews the PRD, architecture, UX/UI design and implementation plan, all in `.dev/`. Read `.dev/prd.md` and `.dev/plan.md` and correct anything you disagree with before any code exists.
+This writes and reviews the PRD, architecture, UX/UI design and implementation plan, all in `.dev/`. After the PRD review and again after the plan review, the kit stops at a **checkpoint**: open the board (`/dev-kit:board`), read the summary in **Needs you** (the link opens the whole document) and **Confirm**, or **Ask for changes** in your own words. Nothing is built before you confirm the plan.
+
+<p align="center">
+  <img src=".claude/plugins/dev-kit/docs/images/board-planning.png" alt="The board's Planning tab: the plan and its passed review, the issue queue, the later milestones and the roadmap grouped by release" width="900">
+</p>
 
 ## 4. Build
 
@@ -35,11 +43,21 @@ This writes and reviews the PRD, architecture, UX/UI design and implementation p
 /dev-kit:autopilot
 ```
 
-The kit implements the plan milestone by milestone, with tests, and runs a quality gate at the end of each one. It pauses only for decisions that need you.
+The kit implements the plan milestone by milestone, with tests, and runs a quality gate at the end of each one: a hard floor (build, tests, no secrets), the milestone's `exit_check` and a score per dimension. It pauses only for decisions that need you; questions show up in **Needs you** with a recommended answer. You can close Claude Code: what you ask on the board is run by the board's own worker.
 
 ## 5. Release, then keep evolving
 
-The plan groups milestones into **planned releases** (R1, R2…). When every milestone of a release is closed, `/dev-kit:release` audits it, writes a release review and waits for your approval: approve on the board (Needs you) or by running `/dev-kit:release` again, or reject with what must change, which becomes a fixes milestone of the same release. Without planned releases, closed milestones wait for the **next release** (`/dev-kit:status` and the board show it). Between milestones, `/dev-kit:release` ships them, after the usability audit (apps with a UI) and the docs; `autopilot` does it for you when your brief asks for releases. With nothing open and everything released, the project is **stable**.
+The plan groups milestones into **planned releases** (R1, R2…). When every milestone of a release is closed, `/dev-kit:release` runs the usability audit (apps with a UI), the docs and the release audit, writes the **release review** (`.dev/releases/R<n>/review.md`) and waits for your approval: approve on the board (Needs you) or by running `/dev-kit:release` again, or reject with what must change, which becomes a fixes milestone of the same release. With nothing open and everything released, the project is **stable**.
+
+<p align="center">
+  <img src=".claude/plugins/dev-kit/docs/images/board-releases.png" alt="The board's Releases tab: R1 released, R2 in progress with its forecast, R3 to do, and the page of R2 with its stages milestones, release review, your approval, production and released" width="900">
+</p>
+
+If you want each milestone in production as soon as it passes its gate, turn on **release flags** in `/dev-kit:settings`: the new code goes out behind the release's flag, off, and the flag is turned on only after you approve the release. A **production health check** (a command or a URL) runs on a schedule; a failure opens an urgent issue and shows in Needs you.
+
+<p align="center">
+  <img src=".claude/plugins/dev-kit/docs/images/board-stable.png" alt="The board's Stable tab: project totals, production with the health check and its recent results, the release flags (R1 on, R2 off) and the release checks" width="900">
+</p>
 
 From there the product keeps living: `/dev-kit:issue "what happens"` sends a bug or improvement straight to construction (a new task in a milestone), while a scope change reopens conception and planning, only for what changed, and the milestone being built keeps going. The phase you see (`conception · prd`, `construction · M3`, `stable`) is worked out from `.dev/`, so it always matches the work.
 
@@ -54,7 +72,8 @@ From there the product keeps living: `/dev-kit:issue "what happens"` sends a bug
 | report a bug or ask for a change | `/dev-kit:issue "what happens"` |
 | see everything still pending | `/dev-kit:backlog` |
 | put an approved milestone in production | `/dev-kit:deploy` |
-| ship the closed milestones as a version | `/dev-kit:release` |
+| submit a finished release for approval | `/dev-kit:release` |
+| change autonomy, flags, the board language | `/dev-kit:settings` |
 | see how much it cost | `/dev-kit:costs` |
 | get an evaluation of the session | `/dev-kit:feedback` |
 
@@ -62,6 +81,12 @@ From there the product keeps living: `/dev-kit:issue "what happens"` sends a bug
 
 - **Everything is a file.** Specs, plan, state and logs live in `.dev/`; never edit `.dev/state.json` by hand.
 - **You can go step by step** instead of autopilot: `prd`, `review prd`, `architecture`, `ux`, `ui`, `review design`, `plan`, `review plan`, `implement`, `qa`, in that order (each review scores the document; `release` requires them). `/dev-kit:status --next` (or `/dev-kit:help`) names the step the project is at.
+- **The board speaks your language.** It shows the project's language (English or Portuguese for now), else your browser's; the menu switches it, and the choice is kept in that browser.
+
+<p align="center">
+  <img src=".claude/plugins/dev-kit/docs/images/board-pt-br.png" alt="The same board in Portuguese" width="900">
+</p>
+
 - **Stuck or lost?** Run `/dev-kit:help`, or see [troubleshooting](.claude/plugins/dev-kit/docs/troubleshooting.md).
 
 Next: the longer [getting-started guide](.claude/plugins/dev-kit/docs/getting-started.md) and the [recipes](.claude/plugins/dev-kit/docs/recipes.md).
