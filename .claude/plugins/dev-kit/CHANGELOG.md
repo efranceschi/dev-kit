@@ -2,6 +2,11 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.0.0-alpha.5 — 2026-11-23
+
+### Fixed
+- The 2.6.1 migration fixtures now carry their board requests in a fresh clone (`.dev/run/` is kept as `run-fixture/`, since git ignores `run/`), so `test_v3_migration.py` passes outside the machine that built them.
+
 ## 3.0.0-alpha.4 — 2026-11-23
 
 Third phase of 3.0 (flow): one release model, every release planned and approved; QA rounds and milestone builds in a child session with a clean context; work that goes on while a person decides; and the migration of 2.x projects.

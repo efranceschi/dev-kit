@@ -1,0 +1,10 @@
+{
+ "id": "R-001",
+ "ts": "2026-11-23T19:56:35Z",
+ "action": "issue_new",
+ "args": {
+  "title": "Search is slow",
+  "type": "bug"
+ },
+ "by": "board"
+}

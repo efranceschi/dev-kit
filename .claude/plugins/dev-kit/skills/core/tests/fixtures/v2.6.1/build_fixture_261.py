@@ -1,6 +1,8 @@
 """Build realistic dev-kit 2.6.1 projects with the 2.6.1 scripts (the 3.0 migration fixtures of test_v3_migration.py).
 usage: python3 -I build_fixture_261.py <2.6.1 kit>/skills/core/scripts/dev_state.py OUTDIR
-Get the 2.6.1 kit with: git archive 2f52a93 .claude/plugins/dev-kit | tar -x -C /tmp/k261"""
+Get the 2.6.1 kit with: git archive 2f52a93 .claude/plugins/dev-kit | tar -x -C /tmp/k261
+Copy each project's .dev/ here without its .git, *.lock and state.json.bak, with .dev/run/ renamed .dev/run-fixture/
+(git ignores run/; the test renames it back)."""
 import json, os, subprocess, sys, shutil
 from pathlib import Path
 K, OUT = sys.argv[1], Path(sys.argv[2])

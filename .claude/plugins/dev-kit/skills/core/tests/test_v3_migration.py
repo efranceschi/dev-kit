@@ -34,6 +34,8 @@ class Base(unittest.TestCase):
         self.root = Path(self.tmp.name) / self.fixture
         shutil.copytree(FIXTURES / self.fixture, self.root)
         self.dev = self.root / ".dev"
+        if (self.dev / "run-fixture").is_dir():  # .dev/run/ is ignored by git, so the fixture keeps it under another name
+            (self.dev / "run-fixture").rename(self.dev / "run")
         self.env = {k: v for k, v in os.environ.items() if k not in ("DEV_KIT_NOW", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID",
                                                                       "DEV_KIT_PARENT_SESSION")}
 
