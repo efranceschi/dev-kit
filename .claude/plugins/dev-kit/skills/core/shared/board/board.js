@@ -1180,11 +1180,12 @@
     const cneeds = allNeeds.filter((x) => x.kind === "checkpoint");
     const dneeds = allNeeds.filter((x) => x.kind === "debt_over_cap");
     const lneeds = allNeeds.filter((x) => x.kind === "lesson");
-    const qneeds = allNeeds.filter((x) => !["checkpoint", "debt_over_cap", "lesson"].includes(x.kind));
+    const hneeds = allNeeds.filter((x) => x.kind === "prod_health");
+    const qneeds = allNeeds.filter((x) => !["checkpoint", "debt_over_cap", "lesson", "prod_health"].includes(x.kind));
     const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length + waitingRel.length + allNeeds.length;
     // which phase each item belongs to: the tabs show the count, the rows a tag that opens the phase
     const cpPrd = cneeds.filter((x) => x.target === "prd").length;
-    needsBy = { conception: cpPrd, planning: qneeds.length + cneeds.length - cpPrd, construction: blocked.length + hot.length + stuck.length + dneeds.length, stable: 0, releases: waitingRel.length };
+    needsBy = { conception: cpPrd, planning: qneeds.length + cneeds.length - cpPrd, construction: blocked.length + hot.length + stuck.length + dneeds.length, stable: hneeds.length, releases: waitingRel.length };
     if (approvals.length) needsBy[data.phase] = (needsBy[data.phase] || 0) + approvals.length;
     data.questions.forEach((q) => { needsBy[questionPhase(q)] += 1; });
     // the strip exists only while something needs the user; warnings alone ride along but do not open it
@@ -1195,6 +1196,7 @@
     if (!n) { fill($("impediments")); return; }
     fill($("impediments"),
       approvals.length ? listBlock(tr("Claude Code asks permission"), approvals.map(approvalRow), "") : null,
+      hneeds.length ? listBlock(tr("Production is failing its health check"), hneeds.map(healthRow), "", false, "stable") : null,
       waitingRel.length ? listBlock(tr("Releases waiting for your approval"), waitingRel.map((r) => h("li", {}, h("span", { class: "id", text: r.id }),
         h("span", { text: tr("{title} · {v} closed", { title: r.title, v: plural(r.closed.length, "milestone") }) }),
         h("button", { type: "button", class: "link-btn", text: tr("Open"), onclick: () => openRelease(r.id) }),
@@ -1326,6 +1328,15 @@
   }
   /** Needs you › the issue queue (conventions §15): above the limit, or an issue waiting too long. Every action is a
    * plan draft the user sends; nothing changes the plan by itself. */
+  /** A failing production health check: its expedite issue, how many checks failed, and the way to a hotfix. */
+  function healthRow(x) {
+    const fix = x.tasks && x.tasks.length ? `/dev-kit:implement ${x.tasks[x.tasks.length - 1]}` : `/dev-kit:issue ${x.issue}`;
+    return h("li", {}, h("span", { class: "id", text: x.issue }),
+      h("span", { text: tr("{v} · last: {detail}", { v: plural(x.failures, "failed check"), detail: x.detail || "?" }) }),
+      h("span", { class: "chip lane-hotfix", text: tr("expedite") }),
+      h("span", { class: "sub", text: x.target || "" }),
+      actionsOn() ? runBtn(fix, true) : cmd(fix));
+  }
   function queueNeedRow(x) {
     const acts = actionsOn();
     if (x.kind === "queue_over_limit") {
@@ -1425,7 +1436,7 @@
     const x = qaState(m);
     const passed = x.passed;
     const smokeOn = lc.local_deploy && lc.local_deploy !== "off";
-    const deployOn = lc.deploy_when === "per_milestone";
+    const deployOn = ["per_milestone", "per_milestone_flagged"].includes(lc.deploy_when);
     const dep = m.deploy;
     const st = [];
     st.push({ key: "plan", name: tr("Plan"), state: ts.length ? "done" : "current",
@@ -1810,7 +1821,7 @@
     fillRunSlot("run-releases", "releases");
     // production
     const pr = data.production, lc = data.lifecycle || {};
-    const when = { per_milestone: tr("after each milestone"), on_release: tr("at each release"), manual: tr("by hand"), none: tr("no production environment") };
+    const when = { per_milestone: tr("after each milestone"), per_milestone_flagged: tr("after each milestone, behind the release flag"), on_release: tr("at each release"), manual: tr("by hand"), none: tr("no production environment") };
     $("st-prod-sub").textContent = tr("Deploys {v}", { v: when[lc.deploy_when] || lc.deploy_when || "?" });
     if (!pr) fill($("st-prod"), h("div", { class: "empty", text: lc.deploy_when === "none" ? tr("This project has no production deploy.") : tr("No production deploy recorded yet.") }),
       lc.deploy_when && lc.deploy_when !== "none" ? h("p", { class: "pending-line" }, tr("Deploy with "), cmd("/dev-kit:deploy")) : null);
@@ -1823,6 +1834,7 @@
           h("span", { class: "badge bad", text: stLabel(last.status) }), h("span", { class: "sub", text: last.at && Number.isFinite(parseT(last.at)) ? fmtDT(parseT(last.at)) : "" })) : null),
       pr.drift ? h("p", { class: "pending-line", text: pr.drift }) : null);
     }
+    $("st-prod").append(...[healthBlock(), flagsBlock()].filter(Boolean));
     // release checks: usability and docs reviews, and any other review the project recorded
     const others = Object.keys(data.reviews).filter((k) => !OWN_REVIEWS.includes(k));
     $("st-rev-sub").textContent = cutoffNote();
@@ -1832,6 +1844,31 @@
       h("span", { text: (r.release ? `${r.release} · ` : "") + (r.hotfix ? tr("Hotfix {hotfix}", { hotfix: r.hotfix }) : (r.milestones || []).join(", ") || "—") }),
       h("span", { class: "chip", text: r.version || "" }), r.at && Number.isFinite(parseT(r.at)) ? h("span", { class: "sub", text: fmtDate(parseT(r.at)) }) : null)))
       : h("div", { class: "empty", text: tr("No release yet. Closed milestones wait for the next release (the Construction tab counts them).") }));
+  }
+
+  /** The production health check (autonomy.production.health): the last result and the short history as dots. */
+  function healthBlock() {
+    const hc = data.prod_health;
+    if (!hc) return null;
+    const last = hc.last;
+    const dots = h("span", { class: "hc-dots", "aria-hidden": "true" }, (hc.history || []).map((c) =>
+      h("span", { class: `hc-dot ${c.ok ? "ok" : "bad"}`, title: `${c.at && Number.isFinite(parseT(c.at)) ? fmtDT(parseT(c.at)) : ""} · ${c.detail || ""}` })));
+    return h("div", { class: "hc", id: "st-health" },
+      h("div", { class: "list-title" }, tr("Health check"), h("span", { class: "sub", text: tr("every {n} min · {target}", { n: hc.interval_min, target: hc.target }) })),
+      last ? h("p", {}, h("span", { class: `badge ${last.ok ? "good" : "bad"}`, text: last.ok ? tr("✓ healthy") : tr("✕ failing") }), " ",
+        h("span", { class: "sub", text: [last.at && Number.isFinite(parseT(last.at)) ? fmtDT(parseT(last.at)) : null, last.detail,
+          hc.streak > 1 ? tr("{n} in a row", { n: hc.streak }) : null, last.issue ? last.issue : null].filter(Boolean).join(" · ") }), " ", dots)
+        : h("p", { class: "pending-line" }, tr("Not run yet: the board runs it while it is open, or run "), cmd("/dev-kit:deploy --health")));
+  }
+  /** Release flags (autonomy.release_flags): which release is switched on in production. */
+  function flagsBlock() {
+    const fl = data.flags || [];
+    if (!fl.length) return null;
+    const word = tmap({ on: N_("on"), off: N_("off"), removed: N_("removed") });
+    return h("div", { class: "hc" }, h("div", { class: "list-title" }, tr("Release flags")),
+      h("ul", { class: "list" }, fl.map((f) => h("li", {}, h("span", { class: "id", text: f.release }), h("code", { text: f.name }),
+        h("span", { class: `badge ${f.state === "on" ? "good" : ""}`, text: word[f.state] || f.state }),
+        f.cleanup_task && f.cleanup_task !== "pending" ? h("span", { class: "sub", text: tr("removal: {id}", { id: f.cleanup_task }) }) : null))));
   }
 
   function tickAgents() {

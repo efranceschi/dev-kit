@@ -2,6 +2,21 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.0.0-alpha.7 — 2026-11-23
+
+Fifth phase of 3.0 (operations, item 12): release flags separate the deploy from the release, and production health becomes feedback instead of silence.
+
+### Added
+- **Release flags** (`autonomy.release_flags` `{"enabled": false, "provider": null}`, conventions §12). `architecture` records the mechanism (env var, config file, flag service) and turns them on; `sync-plan` creates `release_R<n>` (off) for every release not released and warns about a `feature` task of R<n> without `flag: release_R<n>` (new task field, §4); `plan` writes the field and `code-reviewer` checks that the new behaviour runs only with the flag on.
+- `production.when` `per_milestone_flagged` (needs release flags): each milestone goes to production after its gate with its release's flag off; `DS deploy` records the flag's state with the deploy and refuses a flag turned on before its release is approved.
+- `DS flag list [--json]` and `DS flag set release_R<n> on|off|removed [--rollback] [--note]`. Approving a flagged release prints the switch to make; `release` turns the flag on in production, runs the smoke checks, then records `flag set … on` and the release. `deploy --rollback R<n>` turns it off without a redeploy (`--rollback` in its history).
+- Once a flagged release is recorded, a `chore` task "Remove flag release_R<n>" goes into the first open milestone of the next release (`source: flag:release_R<n>`); with no next release yet, the next `sync-plan` adds it.
+- **Production health check** (`autonomy.production.health` `{"command" | "url", "interval_min": 15}`): `DS prod-check [--json] [--due]` runs it (a command exits 0, a URL answers 2xx/3xx) and keeps the last 30 results in `.dev/run/prod-health.json`. A failure opens one `expedite` issue per check (later failures update it: count, last result) and a Needs-you item until the issue is closed. The board's server runs it while it is up, `deploy --health` runs it and offers a scheduled task, and the Stable phase shows the last check, a short history and the release flags.
+- Telemetry events `flag` and `prod_check`.
+
+### Tests
+- `test_v3_ops.py`: the acceptance criteria of item 12 (M3 deployed with `release_R2` off, approval turns it on, rollback turns it off; two failed checks make a single expedite issue), plus the removal task, the health history and interval, and the board's Stable phase rendered.
+
 ## 3.0.0-alpha.6 — 2026-11-23
 
 Fourth phase of 3.0 (board): a delivery forecast, a way out of every item of Needs you, a cleaner board, the board in the user's language, and the worker inside the board, so a click never waits for a manual step.

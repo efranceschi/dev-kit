@@ -1012,3 +1012,10 @@ body.compact .cons-nav .stage.here { flex-grow: 1.4; }
 .qa-sect .list-title { margin-bottom: 6px; }
 .qa-fixes { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
 .qa-fix-col { display: grid; gap: 4px; align-content: start; }
+
+/* production health check and release flags (Stable) */
+.hc { margin-top: 12px; }
+.hc .list-title .sub { margin-left: 8px; font-weight: normal; }
+.hc-dots { display: inline-flex; gap: 3px; vertical-align: middle; }
+.hc-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
+.hc-dot.bad { background: var(--critical); }

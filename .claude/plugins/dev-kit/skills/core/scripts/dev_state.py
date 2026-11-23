@@ -40,6 +40,9 @@ Subcommands
   unblock T     blocked -> todo
   drop T        drop a task removed by a replan (--reason); it no longer counts for milestones or release
   task-decide T unblock|skip|drop|run [--note] [--request P-nnn]: Needs-you decision on a blocked task or a hotfix
+  flag list|set release_R<n> on|off [--rollback]: release flags (autonomy.release_flags, §12)
+  prod-check    run the production health check once (--due: only when its interval passed); a failure opens an
+                expedite issue (one per check) and a Needs-you item
   qa-decide M continue|accept|replan [--rounds N] [--note] [--request P-nnn]: QA rounds used up
   add-task      create a task in state and plan.md
   fix-tasks     one fix task per blocking finding of a findings file (--from --milestone; idempotent)
@@ -178,6 +181,11 @@ DEFAULT_AUTONOMY = {
     # the board's server starts a headless worker session itself (`claude -p "/dev-kit:worker"`) when a request waits
     # and no session takes requests (§17); permission_mode is passed to it, timeout_min ends a run that hangs
     "board_executor": {"auto": True, "permission_mode": "default", "timeout_min": 180},
+    # feature flags per planned release (conventions.md §12): off by default; when on, every release R<n> has the
+    # flag release_R<n>, its feature tasks wrap the new behaviour in it, approved milestones go to production with the
+    # flag off (production.when per_milestone_flagged), and approving the release turns it on. provider = how the
+    # project switches a flag (env var, config file, a flag service), recorded by architecture
+    "release_flags": {"enabled": False, "provider": None},
     # CI as the source of truth for the gate's deterministic signals (conventions.md §7): provider auto (GitHub when
     # .github/workflows exists, GitLab when .gitlab-ci.yml exists) | github | gitlab | none; required = the gate needs
     # a green run on the round's commit; timeout_min = wait before the ci_timeout pause.
@@ -319,7 +327,8 @@ UNATTENDED_PAUSE_POLICY = {
 
 
 LOCAL_DEPLOY_MODES = ("off", "keep_running", "smoke")
-PRODUCTION_WHEN = ("none", "per_milestone", "on_release", "manual")
+PRODUCTION_WHEN = ("none", "per_milestone", "per_milestone_flagged", "on_release", "manual")
+HEALTH_DEFAULTS = {"command": None, "url": None, "interval_min": 15}
 
 
 def check_production(pr: object) -> None:
@@ -330,6 +339,15 @@ def check_production(pr: object) -> None:
             fail(f"autonomy.production.{k} must be a list")
     if pr.get("when", "none") != "none" and not pr.get("method"):
         fail("autonomy.production needs a method (install script, systemd, compose, paas...) when deploys are enabled")
+    hc = pr.get("health")
+    if hc is not None:
+        if (not isinstance(hc, dict) or set(hc) - set(HEALTH_DEFAULTS)
+                or not all(isinstance(hc.get(k), (str, type(None))) for k in ("command", "url"))
+                or (hc.get("url") and not re.match(r"^https?://", hc["url"]))
+                or not isinstance(hc.get("interval_min", 15), int) or isinstance(hc.get("interval_min", 15), bool)
+                or not 1 <= hc.get("interval_min", 15) <= 1440):
+            fail('autonomy.production.health must be {"command": "<shell command>" | null, "url": "https://..." | null, '
+                 '"interval_min": 1-1440}')
 
 
 def check_commit_style(cs: object) -> None:
@@ -475,6 +493,13 @@ def check_autonomy_field(field: str, val: object) -> object:
                 or not isinstance(val.get("releases_ahead", 1), int) or isinstance(val.get("releases_ahead", 1), bool)
                 or not 0 <= val.get("releases_ahead", 1) <= 3 or not isinstance(val.get("milestone_overlap", True), bool)):
             fail('autonomy.pipeline must be {"releases_ahead": 0-3, "milestone_overlap": true | false}')
+    elif field == "release_flags":
+        if (not isinstance(val, dict) or set(val) - {"enabled", "provider"} or not isinstance(val.get("enabled", False), bool)
+                or not isinstance(val.get("provider"), (str, type(None)))):
+            fail('autonomy.release_flags must be {"enabled": true | false, "provider": "<how a flag is switched>"}')
+        if val.get("enabled") and not (val.get("provider") or "").strip():
+            fail("autonomy.release_flags needs a provider when enabled (env var, config file, flag service...): "
+                 "/dev-kit:architecture records it")
     elif field == "board_executor":
         modes = ("default", "acceptEdits", "plan", "auto", "bypassPermissions", "dontAsk")
         if (not isinstance(val, dict) or set(val) - {"auto", "permission_mode", "timeout_min"}
@@ -1050,6 +1075,9 @@ def parse_plan(text: str) -> tuple[dict, dict]:
                 task["consumes"] = [d.strip() for d in re.split(r"[,\s]+", val) if d.strip()]
             elif key == "shared":
                 task["shared"] = val.strip().lower() not in ("", "no", "false", "0")
+            elif key == "flag":
+                if val.strip():
+                    task["flag"] = val.strip()  # the release flag that wraps the new behaviour (§12)
             elif key == "dep_reasons":
                 if val.strip():
                     task["dep_reasons"] = val.strip()  # why each dependency is needed, `T-nnn=<text>; T-mmm=<text>`, §4
@@ -1177,6 +1205,8 @@ def task_block(tid: str, t: dict) -> str:
     lines.append("- files: " + ", ".join(t.get("files", [])))
     if t.get("dep_reasons"):
         lines.append(f"- dep_reasons: {t['dep_reasons']}")
+    if t.get("flag"):
+        lines.append(f"- flag: {t['flag']}")
     if t.get("source"):
         lines.append(f"- source: {t['source']}")
     if t.get("lane"):
@@ -1452,7 +1482,7 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
             cur = store.tasks()[tid]
             for k in ("title", "milestone", "type", "deps", "acceptance", "test_notes", "files", "seq"):
                 cur[k] = t[k]
-            for k in ("contract", "consumes", "shared", "dep_reasons") + risk.RISK_FIELDS:
+            for k in ("contract", "consumes", "shared", "dep_reasons", "flag") + risk.RISK_FIELDS:
                 if k in t:
                     cur[k] = t[k]
                 else:
@@ -1464,7 +1494,7 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
                 "status": "todo", "deps": t["deps"], "acceptance": t["acceptance"],
                 "test_notes": t["test_notes"], "files": t["files"], "commit": None,
                 "blocked_reason": None, "source": None, "started_at": None, "done_at": None, "seq": t["seq"],
-                **{k: t[k] for k in ("contract", "consumes", "shared", "dep_reasons") + risk.RISK_FIELDS if k in t},
+                **{k: t[k] for k in ("contract", "consumes", "shared", "dep_reasons", "flag") + risk.RISK_FIELDS if k in t},
             }
             added_t += 1
     store.state["next_task_id"] = max_id + 1
@@ -1487,6 +1517,7 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
         if t["milestone"] not in store.milestones():
             problems.append(f"{tid}: milestone {t['milestone']} not declared")
         problems += risk.check_risk_fields(tid, t)
+    problems += flag_problems(store)
     return tasks, (added_m, added_t, updated_t), rel_problems + exit_problems + problems + size_problems(store, milestones)
 
 
@@ -1560,6 +1591,15 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
         tasks, (added_m, added_t, updated_t), problems = sync_plan_text(store, text)
     except ValueError as e:
         fail(str(e))
+    made = ensure_flags(store)
+    if made:
+        notices.append("release flags created (off): " + ", ".join(made))
+    for name, f in sorted((store.state.get("flags") or {}).items()):
+        if f.get("cleanup_task") == "pending":
+            f.pop("cleanup_task")
+            tid = flag_cleanup_task(store, f["release"])
+            if tid:
+                notices.append(f"{tid}: Remove flag {name} (its release is out)")
     store.save()
     record_baseline(store, tasks)
     store.log(f"sync-plan +{added_m} milestones, +{added_t} tasks, ~{updated_t} updated")
@@ -4600,13 +4640,20 @@ def cmd_deploy(store: Store, a: argparse.Namespace) -> None:
                   "after the whole fix round (conventions §12)", file=sys.stderr)
     d = store.state.setdefault("deploys", {}).setdefault(a.env, {"history": []})
     rec = {"sha": a.sha, "milestone": a.milestone, "migration": a.migration, "status": a.status, "at": now()}
+    pw = ((store.state.get("autonomy") or {}).get("production") or {}).get("when")
+    rid = release_of(store, a.milestone) if a.milestone else None
+    f = (store.state.get("flags") or {}).get(flag_name(rid)) if rid else None
+    if f and a.env == "production":
+        rec["flag"] = {"name": flag_name(rid), "state": f["state"]}  # what users see of it: nothing while it is off
+        if pw == "per_milestone_flagged" and f["state"] == "on" and release_status(store, rid)["status"] not in ("deploying_prod", "released"):
+            fail(f"{flag_name(rid)} is on before {rid} is approved; turn it off first (DS flag set {flag_name(rid)} off)")
     d["history"] = (d.get("history") or [])[-19:] + [rec]
     if a.status == "ok":
         d["current"] = rec
     store.save()
     store.log(f"deploy {a.env} {a.status} {a.sha[:7]}" + (f" migr={a.migration}" if a.migration else ""))
     store.event("deploy", scope=a.milestone or "other", env=tel.scope_token(a.env), status=a.status)
-    print(f"deploy {a.env}: {a.status} ({a.sha[:7]})")
+    print(f"deploy {a.env}: {a.status} ({a.sha[:7]})" + (f" · {rec['flag']['name']} {rec['flag']['state']}" if rec.get("flag") else ""))
 
 
 def deploy_drift(store: Store, env: str, head_migration: str | None = None) -> str | None:
@@ -5435,8 +5482,9 @@ def checkpoint_needs(store: Store) -> list[dict]:
 
 
 def all_needs(store: Store) -> list[dict]:
-    """Needs-you items the state derives (checkpoints, deferred debt, proposed lessons, the issue queue), in that order."""
-    return checkpoint_needs(store) + debt_needs(store) + lesson_needs(store) + queue_needs(store)
+    """Needs-you items the state derives (production health, checkpoints, deferred debt, proposed lessons, the issue
+    queue), in that order."""
+    return health_needs(store) + checkpoint_needs(store) + debt_needs(store) + lesson_needs(store) + queue_needs(store)
 
 
 def lesson_needs(store: Store) -> list[dict]:
@@ -5542,7 +5590,7 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
             node[parts[-1]] = parsed
             store_autonomy_object(auto, top, merged)
         elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy", "ui", "queue", "milestone_size", "ci", "pipeline",
-                     "board_executor"):
+                     "board_executor", "release_flags"):
             if top == "board_executor" and not isinstance(parsed, dict):
                 if val not in ("on", "off", "true", "false", "yes", "no"):
                     fail('autonomy.board_executor must be on | off or {"auto": true, "permission_mode": "default", "timeout_min": 180}')
@@ -5567,6 +5615,11 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
         store.state.setdefault("stack", {})[key.split(".", 1)[1]] = val
     else:
         fail("key must be language | project | autonomy.<field> | stack.<field>")
+    if ((store.state.get("autonomy") or {}).get("production") or {}).get("when") == "per_milestone_flagged" \
+            and not flags_cfg(store)["enabled"]:
+        fail("production.when per_milestone_flagged needs autonomy.release_flags enabled (with its provider) first")
+    if key == "autonomy.release_flags" and flags_cfg(store)["enabled"]:
+        ensure_flags(store)
     store.save()
     store.log(f"set {key}={val}")
     if key.startswith("autonomy."):
@@ -5591,7 +5644,7 @@ def store_autonomy_object(auto: dict, top: str, obj: dict) -> None:
         obj = {**DEFAULT_AUTONOMY["local_deploy"], **obj}
     elif top in ("cooldown", "quality"):
         check_autonomy_field(top, obj)
-    elif top in ("queue", "milestone_size", "ci", "pipeline", "board_executor"):
+    elif top in ("queue", "milestone_size", "ci", "pipeline", "board_executor", "release_flags"):
         obj = {**DEFAULT_AUTONOMY[top], **obj}
         check_autonomy_field(top, obj)
     elif top == "ui":
@@ -6142,7 +6195,12 @@ def cmd_release_decide(store: Store, a: argparse.Namespace) -> None:
         store.save()
         store.log(f"release {a.release} approved" + (f" ({ref})" if ref else ""))
         store.event("release_gate", scope=a.release, transition="approve")
-        print(f"{a.release}: approved · next: production deploy, smoke and release-record (/dev-kit:release)")
+        fc = flags_cfg(store)
+        if fc["enabled"] and flag_name(a.release) in (store.state.get("flags") or {}):
+            print(f"{a.release}: approved · next: turn {flag_name(a.release)} on in production ({fc['provider']}), run the "
+                  f"smoke checks, then DS flag set {flag_name(a.release)} on and release-record (/dev-kit:release)")
+        else:
+            print(f"{a.release}: approved · next: production deploy, smoke and release-record (/dev-kit:release)")
         return
     if not feedback:
         fail("a rejection needs feedback: at least one --feedback item (each becomes a fix task)")
@@ -6240,12 +6298,252 @@ def cmd_release_record(store: Store, a: argparse.Namespace) -> None:
         g = release_gate(store, rid)
         g.update(status="released")
         g.setdefault("history", []).append({"at": now(), "event": "released", "version": a.version})
+        f = (store.state.get("flags") or {}).get(flag_name(rid))
+        if f and f.get("state") != "on":
+            print(f"warning: {flag_name(rid)} is {f.get('state')}: the release is recorded with its behaviour switched off "
+                  f"(DS flag set {flag_name(rid)} on once it is on in production)", file=sys.stderr)
+        cleanup = flag_cleanup_task(store, rid) if f else None
     if a.hotfix:
         rel["hotfix"] = a.hotfix
     store.state.setdefault("releases", []).append(rel)
     store.save()
     store.log(f"release {rel['version']} ({rel['tag']}): {', '.join(names) or 'hotfix ' + str(a.hotfix)}")
     print(f"release {rel['version']} recorded ({rel['tag']}): {', '.join(names) or 'hotfix ' + a.hotfix} · phase {phase_label(store)}")
+    if rid and (store.state.get("flags") or {}).get(flag_name(rid)):
+        ct = store.state["flags"][flag_name(rid)].get("cleanup_task")
+        print(f"{ct}: Remove flag {flag_name(rid)}" if ct and ct != "pending"
+              else f"Remove flag {flag_name(rid)}: added to the next release once it is planned")
+
+
+# --------------------------------------------------------------------------- release flags (conventions.md §12)
+def flags_cfg(store: Store) -> dict:
+    return {**DEFAULT_AUTONOMY["release_flags"], **((store.state.get("autonomy") or {}).get("release_flags") or {})}
+
+
+def flag_name(rid: str) -> str:
+    return f"release_{rid}"
+
+
+def ensure_flags(store: Store) -> list[str]:
+    """With release flags on, every planned release not released yet has its flag, created off."""
+    if not flags_cfg(store)["enabled"]:
+        return []
+    reg = store.state.setdefault("flags", {})
+    made = []
+    for r in store.state.get("release_plan") or []:
+        name = flag_name(r["id"])
+        if name not in reg and release_status(store, r["id"])["status"] != "released":
+            reg[name] = {"release": r["id"], "state": "off", "created_at": now(), "history": []}
+            made.append(name)
+    return made
+
+
+def flag_problems(store: Store) -> list[str]:
+    """Feature tasks of a release that do not wrap their behaviour in its flag (warnings of sync-plan)."""
+    if not flags_cfg(store)["enabled"]:
+        return []
+    out = []
+    for tid, t in store.tasks().items():
+        rid = release_of(store, t["milestone"])
+        if not rid or t.get("type") != "feature" or t.get("status") in FINISHED or t.get("lane") == "hotfix":
+            continue
+        if t.get("flag") != flag_name(rid):
+            out.append(f"{tid}: feature task of {rid} without `flag: {flag_name(rid)}` (release flags are on, §12)"
+                       if not t.get("flag") else f"{tid}: flag {t['flag']} is not the flag of its release ({flag_name(rid)})")
+    return out
+
+
+def cmd_flag(store: Store, a: argparse.Namespace) -> None:
+    """list [--json] | set NAME on|off [--rollback] [--note]: what is switched where. The switch itself is done by
+    `release` (on, after the approval) and `deploy --rollback R<n>` (off) with the project's provider; this records it."""
+    store.load()
+    reg = store.state.setdefault("flags", {})
+    if a.action == "list":
+        rows = [{"name": k, **{x: v.get(x) for x in ("release", "state", "created_at", "removed_at")},
+                 "last": (v.get("history") or [None])[-1]} for k, v in sorted(reg.items())]
+        if a.json:
+            print(json.dumps({"config": flags_cfg(store), "flags": rows}, indent=2))
+        else:
+            print("\n".join(f"{r['name']}: {r['state']} ({r['release']})" for r in rows) or "no release flags")
+        return
+    if not a.name or a.value not in ("on", "off", "removed"):
+        fail("usage: flag set release_R<n> on|off|removed [--rollback] [--note]")
+    f = reg.get(a.name)
+    if f is None:
+        fail(f"unknown flag {a.name}" + (f"; flags: {', '.join(sorted(reg))}" if reg else " (release flags are off)"))
+    if a.value == "on":
+        st = release_status(store, f["release"])["status"]
+        if st not in ("deploying_prod", "released"):
+            fail(f"{a.name} turns on only after {f['release']} is approved (it is {st.replace('_', ' ')}): "
+                 f"release-decide {f['release']} --approve")
+    event = "rollback" if a.rollback else a.value
+    f["state"] = a.value
+    if a.value == "removed":
+        f["removed_at"] = now()
+    f.setdefault("history", []).append({"at": now(), "event": event, **({"note": a.note[:200]} if a.note else {})})
+    store.save()
+    store.log(f"flag {a.name} {event}" + (f": {a.note}" if a.note else ""))
+    store.event("flag", scope=f["release"], transition=event)
+    print(f"{a.name}: {f['state']}" + (" (rolled back)" if a.rollback else ""))
+
+
+def flag_cleanup_task(store: Store, rid: str) -> str | None:
+    """After a flagged release ships, the chore that removes its flag goes to the first open milestone of the next
+    release (§12). None (and a pending mark) when no later release is planned yet: sync-plan adds it then."""
+    name = flag_name(rid)
+    f = (store.state.get("flags") or {}).get(name)
+    if not f or f.get("cleanup_task"):
+        return None
+    rels = [r["id"] for r in store.state.get("release_plan") or []]
+    later = rels[rels.index(rid) + 1:] if rid in rels else []
+    target = next((m for r in later for m in next(x for x in store.state["release_plan"] if x["id"] == r)["milestones"]
+                   if store.milestones().get(m, {}).get("gate", "pending") == "pending"), None)
+    plan_path = store.dev / "plan.md"
+    if target is None or not plan_path.exists():
+        f["cleanup_task"] = "pending"
+        return None
+    doc = PlanDoc(store.read_text(plan_path))
+    if not doc.has_milestone(target):
+        f["cleanup_task"] = "pending"
+        return None
+    n = int(store.state.get("next_task_id", 1))
+    while f"T-{n:03d}" in store.tasks():
+        n += 1
+    tid = f"T-{n:03d}"
+    block = task_block(tid, {"title": f"Remove flag {name}", "type": "chore", "deps": [],
+                             "acceptance": [f"{name} and the code paths for its off state are gone; the suite passes"],
+                             "test_notes": f"{rid} is released with {name} on: delete the flag and its old branch.", "files": []})
+    doc.put({"kind": "task", "id": tid, "lines": block.rstrip("\n").splitlines()}, target)
+    text = doc.text()
+    try:
+        sync_plan_text(store, text)
+    except ValueError:
+        f["cleanup_task"] = "pending"
+        return None
+    store.tasks()[tid]["source"] = f"flag:{name}"
+    store.stage(plan_path, text)
+    f["cleanup_task"] = tid
+    return tid
+
+
+# --------------------------------------------------------------------------- production health (conventions.md §12)
+HEALTH_FILE = "prod-health.json"
+HEALTH_KEEP = 30
+
+
+def health_cfg(store: Store) -> dict | None:
+    pr = (store.state.get("autonomy") or {}).get("production") or {}
+    hc = {**HEALTH_DEFAULTS, **(pr.get("health") or {})}
+    return hc if (hc.get("command") or hc.get("url")) else None
+
+
+def health_log(root: Path) -> dict:
+    try:
+        d = json.loads((root / ".dev" / "run" / HEALTH_FILE).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def run_health(root: Path, hc: dict) -> dict:
+    """One health check: the command (exit 0) or the URL (a 2xx/3xx answer), with a time limit."""
+    t0 = time.monotonic()
+    if hc.get("command"):
+        target = hc["command"]
+        try:
+            p = subprocess.run(hc["command"], shell=True, cwd=root, capture_output=True, text=True, timeout=120)
+            out = (p.stderr or p.stdout or "").strip()[-200:]
+            ok, detail = p.returncode == 0, f"exit {p.returncode}" + (f": {out}" if out and p.returncode else "")
+        except subprocess.TimeoutExpired:
+            ok, detail = False, "timed out after 120 s"
+    else:
+        import urllib.request
+        import urllib.error
+        target = hc["url"]
+        try:
+            with urllib.request.urlopen(urllib.request.Request(hc["url"], headers={"User-Agent": "dev-kit-health"}), timeout=20) as r:
+                ok, detail = 200 <= r.status < 400, f"HTTP {r.status}"
+        except urllib.error.HTTPError as e:
+            ok, detail = False, f"HTTP {e.code}"
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            ok, detail = False, str(getattr(e, "reason", e))[:200]
+    return {"at": now(), "ok": ok, "target": target[:200], "detail": detail.strip()[:240], "duration_s": round(time.monotonic() - t0, 2)}
+
+
+def health_issue(store: Store, res: dict) -> tuple[str, bool]:
+    """A failed check opens one expedite issue per check; while it is open, the next failures update it."""
+    key = hashlib.sha1(res["target"].encode()).hexdigest()[:10]
+    for iid, i in issues(store).items():
+        if i.get("health_check") == key and i["status"] not in ("done", "wontfix", "duplicate"):
+            i["failures"] = int(i.get("failures") or 1) + 1
+            i["last_failed_at"], i["last_detail"] = res["at"], res["detail"]
+            write_issues_md(store)
+            return iid, False
+    iid = new_issue_id(store)
+    issues(store)[iid] = {
+        "title": f"Production health check failing: {res['target'][:80]}", "type": "bug", "class": "expedite",
+        "severity": "high", "effort": None, "status": "open", "affects": [],
+        "acceptance": [f"the production health check passes ({res['target'][:120]})"], "origin": "deploy", "tasks": [],
+        "scheduled_in": None, "duplicate_of": None, "created_at": now(), "closed_at": None, "note": res["detail"],
+        "closed_milestones_at_creation": closed_count(store), "health_check": key, "failures": 1,
+        "last_failed_at": res["at"], "last_detail": res["detail"]}
+    write_issues_md(store)
+    return iid, True
+
+
+def cmd_prod_check(store: Store, a: argparse.Namespace) -> None:
+    """Run the production health check (autonomy.production.health) once and record it in .dev/run/prod-health.json;
+    a failure opens (or updates) an expedite issue and shows in Needs you. The board's server runs it every
+    interval_min while it is up; `deploy` can offer a scheduled task."""
+    store.load()
+    hc = health_cfg(store)
+    if hc is None:
+        fail('no production health check: set autonomy.production.health {"command": "..."} or {"url": "https://..."}')
+    if a.due:
+        last = (health_log(store.root).get("checks") or [None])[-1]
+        at = datetime.fromisoformat(str(last["at"]).replace("Z", "+00:00")) if last else None
+        if at and (_clock() - at).total_seconds() < hc["interval_min"] * 60:
+            print("prod-check: not due")
+            return
+    res = run_health(store.root, hc)  # outside the state lock: a slow check never holds other commands
+    with store.transaction():
+        log = health_log(store.root)
+        checks = (log.get("checks") or [])[-(HEALTH_KEEP - 1):] + [res]
+        issue, created = (None, False)
+        if not res["ok"]:
+            issue, created = health_issue(store, res)
+            res["issue"] = issue
+            store.save()
+        streak = 0
+        for c in reversed(checks):
+            if c["ok"] != res["ok"]:
+                break
+            streak += 1
+        out = {"checks": checks, "last": res, "streak": streak}
+        store.stage(store.dev / "run" / HEALTH_FILE, json.dumps(out, indent=2) + "\n")
+        store.save()
+        store.event("prod_check", status="ok" if res["ok"] else "failed")
+        if not res["ok"]:
+            store.log(f"prod-check failed ({res['detail']}): {issue}" + (" opened" if created else " updated"))
+            if created:
+                queue_notice(store, f"dev-kit: production health check failing ({issue})")
+    if a.json:
+        print(json.dumps(out, indent=2))
+    else:
+        print(f"prod-check: {'ok' if res['ok'] else 'FAILED'} · {res['detail']}"
+              + (f" · {issue} {'opened' if created else 'updated'} (expedite)" if issue else ""))
+    if not res["ok"]:
+        sys.exit(1)
+
+
+def health_needs(store: Store) -> list[dict]:
+    """Needs you: the last health check failed and its issue is still open."""
+    last = health_log(store.root).get("last") or {}
+    i = issues(store).get(last.get("issue") or "")
+    if last.get("ok") is not False or not i or i["status"] in ("done", "wontfix", "duplicate"):
+        return []
+    return [{"kind": "prod_health", "issue": last["issue"], "failures": i.get("failures", 1), "since": i.get("created_at"),
+             "detail": last.get("detail"), "target": last.get("target"), "tasks": i.get("tasks") or []}]
 
 
 def queue_notice(store: Store, text: str) -> None:
@@ -7133,6 +7431,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("deploy"); s.set_defaults(fn=cmd_deploy)
     s.add_argument("env", nargs="?", default="production"); s.add_argument("--sha", required=True); s.add_argument("--status", required=True)
     s.add_argument("--milestone"); s.add_argument("--migration")
+    s = sub.add_parser("flag"); s.set_defaults(fn=cmd_flag)
+    s.add_argument("action", choices=("list", "set")); s.add_argument("name", nargs="?"); s.add_argument("value", nargs="?")
+    s.add_argument("--rollback", action="store_true", help="the switch off is a rollback (deploy --rollback R<n>)")
+    s.add_argument("--note"); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("prod-check"); s.set_defaults(fn=cmd_prod_check)
+    s.add_argument("--json", action="store_true"); s.add_argument("--due", action="store_true", help="only when interval_min has passed")
     s = sub.add_parser("preview"); s.set_defaults(fn=cmd_preview)
     s.add_argument("milestone"); s.add_argument("--url"); s.add_argument("--sha"); s.add_argument("--pid", type=int)
     s.add_argument("--stopped", action="store_true")
@@ -7168,7 +7472,7 @@ MUTATING = frozenset({
     cmd_new_milestone, cmd_reorder, cmd_gate, cmd_review, cmd_artifact, cmd_release_submit, cmd_release_decide,
     cmd_release_record, cmd_set, cmd_deploy, cmd_preview, cmd_add_issue, cmd_issue, cmd_pull_issues, cmd_cooldown,
     cmd_freeze, cmd_hard_floor, cmd_ci, cmd_debt, cmd_checkpoint, cmd_slot, cmd_challenge, cmd_fact, cmd_lesson, cmd_pipeline,
-    cmd_qa_decide, cmd_task_decide,
+    cmd_qa_decide, cmd_task_decide, cmd_flag,
 })
 
 

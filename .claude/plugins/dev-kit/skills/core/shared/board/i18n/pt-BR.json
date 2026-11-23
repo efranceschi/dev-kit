@@ -767,7 +767,22 @@
     "✓ ok": "✓ ok",
     "✕ below cut-off": "✕ abaixo da nota de corte",
     "＋ New issue": "＋ Nova issue",
-    "🔒 Frozen for QA — adding needs your confirmation": "🔒 Congelado para QA — adicionar precisa da sua confirmação"
+    "🔒 Frozen for QA — adding needs your confirmation": "🔒 Congelado para QA — adicionar precisa da sua confirmação",
+    "Health check": "Verificação de saúde",
+    "Not run yet: the board runs it while it is open, or run ": "Ainda não rodou: o board a executa enquanto estiver aberto, ou rode ",
+    "Production is failing its health check": "A produção está falhando na verificação de saúde",
+    "Release flags": "Flags de release",
+    "after each milestone, behind the release flag": "após cada milestone, atrás da flag da release",
+    "every {n} min · {target}": "a cada {n} min · {target}",
+    "expedite": "expedite",
+    "off": "desligada",
+    "on": "ligada",
+    "removal: {id}": "remoção: {id}",
+    "removed": "removida",
+    "{n} in a row": "{n} seguidas",
+    "{v} · last: {detail}": "{v} · última: {detail}",
+    "✓ healthy": "✓ saudável",
+    "✕ failing": "✕ falhando"
   },
   "plurals": {
     "agent": {
@@ -857,6 +872,10 @@
     "task": {
       "one": "{n} tarefa",
       "other": "{n} tarefas"
+    },
+    "failed check": {
+      "one": "{n} verificação falhou",
+      "other": "{n} verificações falharam"
     }
   }
 }

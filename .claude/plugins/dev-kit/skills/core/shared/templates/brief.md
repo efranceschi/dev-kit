@@ -70,7 +70,7 @@
 
 ## Block 10 — Delivery
 - **Definition of done for v1:**
-- **Production:** method · host · when (per_milestone | on_release | manual | none) · smoke checks · prerequisites
+- **Production:** method · host · when (per_milestone | per_milestone_flagged | on_release | manual | none) · smoke checks · prerequisites
 - **Local deploy per milestone:** keep_running | smoke | off (inferred) · port · notify
 - **Versioning, changelog, documentation expected:**
 - **Handover / maintenance:**

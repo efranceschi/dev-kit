@@ -756,6 +756,14 @@
         {
           "arg": "--dry-run",
           "meaning": "preflight and the method's own dry-run; nothing installed or recorded"
+        },
+        {
+          "arg": "--health",
+          "meaning": "run the production health check now, and offer to schedule it"
+        },
+        {
+          "arg": "--rollback R2",
+          "meaning": "turn the release flag of R2 off in production (release flags on)"
         }
       ],
       "examples": [
@@ -764,11 +772,15 @@
           "what": "is production up to date?"
         },
         {
+          "command": "/dev-kit:deploy --health",
+          "what": "is production healthy?"
+        },
+        {
           "command": "/dev-kit:deploy M4",
           "what": "deploy M4"
         }
       ],
-      "produces": "deploy record shown by status",
+      "produces": "deploy record shown by status; the health check result (.dev/run/prod-health.json) and, on failure, one expedite issue",
       "related": [
         "release",
         "status"

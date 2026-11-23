@@ -767,7 +767,22 @@
     "✓ ok": "✓ ok",
     "✕ below cut-off": "✕ below cut-off",
     "＋ New issue": "＋ New issue",
-    "🔒 Frozen for QA — adding needs your confirmation": "🔒 Frozen for QA — adding needs your confirmation"
+    "🔒 Frozen for QA — adding needs your confirmation": "🔒 Frozen for QA — adding needs your confirmation",
+    "Health check": "Health check",
+    "Not run yet: the board runs it while it is open, or run ": "Not run yet: the board runs it while it is open, or run ",
+    "Production is failing its health check": "Production is failing its health check",
+    "Release flags": "Release flags",
+    "after each milestone, behind the release flag": "after each milestone, behind the release flag",
+    "every {n} min · {target}": "every {n} min · {target}",
+    "expedite": "expedite",
+    "off": "off",
+    "on": "on",
+    "removal: {id}": "removal: {id}",
+    "removed": "removed",
+    "{n} in a row": "{n} in a row",
+    "{v} · last: {detail}": "{v} · last: {detail}",
+    "✓ healthy": "✓ healthy",
+    "✕ failing": "✕ failing"
   },
   "plurals": {
     "agent": {
@@ -857,6 +872,10 @@
     "task": {
       "one": "{n} task",
       "other": "{n} tasks"
+    },
+    "failed check": {
+      "one": "{n} failed check",
+      "other": "{n} failed checks"
     }
   }
 }

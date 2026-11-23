@@ -317,9 +317,21 @@ def production_info(store: "ds.Store") -> dict | None:
         drift = ds.deploy_drift(store, "production")
     except Exception:  # noqa: BLE001 - git may be missing; the board keeps rendering
         drift = None
-    keep = ("sha", "milestone", "migration", "status", "at")
+    keep = ("sha", "milestone", "migration", "status", "at", "flag")
     return {"current": {k: cur.get(k) for k in keep} if cur else None,
             "last": {k: hist[-1].get(k) for k in keep} if hist else None, "drift": drift}
+
+
+def prod_health(store: "ds.Store") -> dict | None:
+    """The production health check for the Stable phase: its config, the last result and a short history."""
+    hc = ds.health_cfg(store)
+    if hc is None:
+        return None
+    log = ds.health_log(store.root)
+    checks = [c for c in log.get("checks") or [] if isinstance(c, dict)]
+    return {"target": hc.get("command") or hc.get("url"), "interval_min": hc["interval_min"],
+            "last": checks[-1] if checks else None, "streak": log.get("streak", 0),
+            "history": [{k: c.get(k) for k in ("at", "ok", "detail", "issue")} for c in checks[-12:]]}
 
 
 def milestone_goals(plan: str) -> dict:
@@ -1017,6 +1029,9 @@ def build_state(root: Path, board: dict | None = None) -> dict:
                                   for x in (v.get("history") or []) if isinstance(x, dict)]
                             for rid, v in (s.get("release_state") or {}).items() if isinstance(v, dict)},
         "production": production_info(store),
+        "prod_health": _safe(lambda: prod_health(store)),
+        "flags": [{"name": k, **{x: v.get(x) for x in ("release", "state", "cleanup_task")}}
+                  for k, v in sorted((s.get("flags") or {}).items()) if isinstance(v, dict)],
         "artifacts": {step: [str(p.relative_to(root)) for p in ds.artifact_paths(store, art)]
                       for step, art in ds.STEP_ARTIFACT.items()},
         "agents": agents, "agent_roles": AGENT_ROLES,
@@ -1460,6 +1475,18 @@ def cmd_serve(root: Path, a: argparse.Namespace) -> int:
         # a run in progress is left to finish its request: it writes only through dev_state and dev_worker
     if auto:
         threading.Thread(target=executor_loop, daemon=True).start()
+
+    def health_loop():  # the production health check (autonomy.production.health) runs while the board is up
+        while not srv.stopping.wait(60):
+            try:
+                st = ds.Store(root)
+                st.load()
+                if ds.health_cfg(st) is not None:
+                    subprocess.run([sys.executable, "-I", str(SCRIPTS / "dev_state.py"), "--root", str(root), "prod-check", "--due"],
+                                   capture_output=True, timeout=300, cwd=root)
+            except Exception as e:  # noqa: BLE001 - the server keeps serving
+                print(f"prod-check: {e}", flush=True)
+    threading.Thread(target=health_loop, daemon=True).start()
     print(f"serving {url} on {host} for {root} (pid {os.getpid()})" + (" · exposed: access key required" if srv.exposed else ""), flush=True)
     try:
         srv.serve_forever(poll_interval=0.5)

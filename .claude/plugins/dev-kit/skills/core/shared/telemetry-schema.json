@@ -228,6 +228,13 @@
       "total": "num",
       "medium": "num"
     },
+    "flag": {
+      "scope": "tok",
+      "transition": "tok"
+    },
+    "prod_check": {
+      "status": "tok"
+    },
     "qa_decision": {
       "scope": "tok",
       "decision": "tok",

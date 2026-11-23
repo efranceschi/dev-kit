@@ -528,20 +528,23 @@ Production deploy of an approved milestone or release: preflight, backup, dry-ru
 
 **When:** After a gate when the project deploys per milestone, at release, or to check how far production is behind.
 
-**Usage:** `/dev-kit:deploy [M3 | --check | --dry-run]`
+**Usage:** `/dev-kit:deploy [M3 | --check | --dry-run | --health | --rollback R2]`
 
 | Argument | Meaning |
 |---|---|
 | `M3` | deploy a milestone |
 | `--check` | only show the drift |
 | `--dry-run` | preflight and the method's own dry-run; nothing installed or recorded |
+| `--health` | run the production health check now, and offer to schedule it |
+| `--rollback R2` | turn the release flag of R2 off in production (release flags on) |
 
 **Examples:**
 
 - `/dev-kit:deploy --check`: is production up to date?
+- `/dev-kit:deploy --health`: is production healthy?
 - `/dev-kit:deploy M4`: deploy M4
 
-**Produces:** deploy record shown by status
+**Produces:** deploy record shown by status; the health check result (.dev/run/prod-health.json) and, on failure, one expedite issue
 
 **Related:** [`release`](#release), [`status`](#status)
 
