@@ -15,8 +15,8 @@
   const PHASE_WORD = { done: "done", current: "current phase", active: "still running", upcoming: "not started" };
   const STEP_NAME = { interview: "interview", prd: "PRD", architecture: "architecture", ux: "UX", ui: "UI", plan: "plan",
     milestones: "milestones", release: "release" };
-  const STEP_WORD = { todo: "to do", doing: "in progress", stale: "out of date", review: "waiting for its review", done: "done", skipped: "skipped" };
-  const STEP_MARK = { todo: "○", doing: "◐", stale: "↻", review: "◐", done: "✓", skipped: "–" };
+  const STEP_WORD = { todo: "to do", doing: "in progress", stale: "out of date", review: "waiting for its review", checkpoint: "waiting for your confirmation", done: "done", skipped: "skipped" };
+  const STEP_MARK = { todo: "○", doing: "◐", stale: "↻", review: "◐", checkpoint: "◐", done: "✓", skipped: "–" };
   const PHASES = ["conception", "planning", "construction", "stable"];  // the lifecycle phases; the Releases tab is a view next to them, not a phase
   const STEP_TITLE = { interview: "Interview", prd: "PRD", architecture: "Architecture", ux: "UX", ui: "UI", plan: "Plan" };
   const STEP_ABOUT = { interview: "Requirements interview, written to brief.md", prd: "Product requirements with numbered acceptance criteria",
@@ -1086,10 +1086,14 @@
     const stuck = data.milestones.filter((m) => qaState(m).exhausted && !qaState(m).fixBlocked.length);
     const approvals = actionsOn() ? inbox().approvals : [];
     const waitingRel = relPlan().filter((r) => r.status === "awaiting_approval");
-    const qneeds = b.needs || [];
-    const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length + waitingRel.length + qneeds.length;
+    const allNeeds = b.needs || [];
+    const cneeds = allNeeds.filter((x) => x.kind === "checkpoint");
+    const dneeds = allNeeds.filter((x) => x.kind === "debt_over_cap");
+    const qneeds = allNeeds.filter((x) => x.kind !== "checkpoint" && x.kind !== "debt_over_cap");
+    const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length + waitingRel.length + allNeeds.length;
     // which phase each item belongs to: the tabs show the count, the rows a tag that opens the phase
-    needsBy = { conception: 0, planning: qneeds.length, construction: blocked.length + hot.length + stuck.length, stable: 0, releases: waitingRel.length };
+    const cpPrd = cneeds.filter((x) => x.target === "prd").length;
+    needsBy = { conception: cpPrd, planning: qneeds.length + cneeds.length - cpPrd, construction: blocked.length + hot.length + stuck.length + dneeds.length, stable: 0, releases: waitingRel.length };
     if (approvals.length) needsBy[data.phase] = (needsBy[data.phase] || 0) + approvals.length;
     data.questions.forEach((q) => { needsBy[questionPhase(q)] += 1; });
     // the strip exists only while something needs the user; warnings alone ride along but do not open it
@@ -1108,6 +1112,8 @@
       stuck.length ? listBlock("QA rounds used up", stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }),
         h("span", { text: `${qaState(m).qa.runs - 1} fix rounds used of ${qaState(m).max} (${qaReason(qaState(m).qa, m) || "see the QA report"}). Keep fixing, accept with an ADR, or replan.` }),
         h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))), "", false, "construction") : null,
+      cneeds.length ? listBlock("Confirm before building", cneeds.map(checkpointRow), "", false, cpPrd ? "conception" : "planning") : null,
+      dneeds.length ? listBlock("Deferred debt above the cap", dneeds.map(debtRow), "", false, "construction") : null,
       qneeds.length ? listBlock("Issue queue", qneeds.map(queueNeedRow), "", false, "planning") : null,
       hot.length ? listBlock("Open hotfixes", hot.map((id) => h("li", {}, issueId(id),
         h("span", { text: (data.tasks[id] || (b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))), "", false, "construction") : null,
@@ -1121,6 +1127,39 @@
       warns.length ? listBlock("Warnings", warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
       actionsOn() && data.questions.length ? h("p", { class: "needs-hint" }, "Answer here: Claude Code records the answer and continues what was waiting on it.") : null,
       data.questions.length || blocked.length ? h("p", { class: "needs-hint" }, actionsOn() ? "Or go through all of them with " : "Answer in Claude Code with ", cmd("/dev-kit:interview --gaps")) : null);
+  }
+  /** Needs you › Confirm PRD / Confirm plan (conventions §19): the document opens formatted in the side drawer; Confirm,
+   * or ask for changes with what must change (the skill revises, a new review and a new checkpoint follow). */
+  const adjustDrafts = {};
+  function checkpointRow(x) {
+    const doc = hasDoc(x.doc) ? docLink(x.doc, `Open ${x.doc}`) : h("span", { class: "sub", text: x.doc });
+    const head = [h("span", { class: "id", text: x.target === "prd" ? "PRD" : "Plan" }),
+      h("span", { text: `${x.title}${x.round > 1 ? ` · round ${x.round}` : ""}: the review passed; nothing ${x.target === "prd" ? "after the PRD" : "new is built"} until you confirm.` }),
+      h("span", { class: "sub" }, doc)];
+    const summary = x.summary ? h("div", { class: "sub cp-summary" }, linkify(x.summary)) : null;
+    if (!actionsOn()) return h("li", {}, ...head, summary, h("span", { class: "sub" }, "Confirm in Claude Code with ", cmd(`/dev-kit:review ${x.target}`)));
+    const sent = inbox().open.find((r) => r.action === "checkpoint" && r.args && r.args.target === x.target);
+    if (sent) return h("li", {}, ...head, summary, h("div", { class: "sub answer-sent", text: `Sent (${sent.id}): ${sent.args.decision}. Claude Code records it.` }));
+    const ta = h("textarea", { maxlength: "4000", rows: "3", class: "answer-input", "aria-label": `What must change in the ${x.target}`, placeholder: "What must change (Claude revises it and asks again)" });
+    ta.value = adjustDrafts[x.target] || "";
+    ta.addEventListener("input", () => { adjustDrafts[x.target] = ta.value; });
+    const send = async (args, el) => { el.disabled = true; try { await queue("checkpoint", { target: x.target, ...args }); delete adjustDrafts[x.target]; } catch (e) { el.disabled = false; } };
+    return h("li", {}, ...head, summary, h("div", { class: "sub answer", role: "group", "aria-label": x.title },
+      h("button", { type: "button", class: "btn btn-sm btn-primary", text: "Confirm", onclick: (e) => send({ decision: "confirm" }, e.currentTarget) }),
+      h("span", { class: "answer-free" }, ta, h("button", { type: "button", class: "btn btn-sm", text: "Ask for changes",
+        onclick: (e) => { const v = ta.value.trim(); if (v) send({ decision: "adjust", feedback: v }, e.currentTarget); else { ta.focus(); toast("Write what must change first.", true); } } }))));
+  }
+  /** Needs you › deferred debt above the cap (conventions §7): promote to issues, accept with an ADR, or the next cool-down. */
+  function debtRow(x) {
+    const head = [h("span", { class: "id", text: "!" }), h("span", { text: `${x.total} deferred findings open (cap ${x.cap_total}) · ${x.medium} medium (cap ${x.cap_medium}).` })];
+    if (!actionsOn()) return h("li", {}, ...head, h("span", { class: "sub" }, "Decide in Claude Code with ", cmd("/dev-kit:backlog")));
+    const sent = inbox().open.find((r) => r.action === "debt_decision");
+    if (sent) return h("li", {}, ...head, h("div", { class: "sub answer-sent", text: `Sent (${sent.id}): ${sent.args.decision}.` }));
+    const send = (decision, what) => queue("debt_decision", { decision }).then(() => toast(what)).catch(() => {});
+    return h("li", {}, ...head, h("span", { class: "q-tags" },
+      h("button", { type: "button", class: "btn btn-sm", text: "Promote to issues", title: "Choose which findings become standard issues", onclick: () => send("promote", "Claude Code lists the findings to promote.") }),
+      h("button", { type: "button", class: "btn btn-sm", text: "Accept formally", title: "An ADR lists the accepted findings", onclick: () => send("accept", "Claude Code records the ADR.") }),
+      h("button", { type: "button", class: "btn btn-sm", text: "Use the next cool-down", title: "Cool-down is turned on for the next milestone with these items", onclick: () => send("cooldown", "Cool-down turned on for the next milestone.") })));
   }
   /** Needs you › the issue queue (conventions §15): above the limit, or an issue waiting too long. Every action is a
    * plan draft the user sends; nothing changes the plan by itself. */
@@ -1373,6 +1412,7 @@
   const cutoffNote = () => `Cut-off: reviews ${data.quality.review_min_overall} · usability ${data.quality.min_overall}. Rows show the score against its cut-off mark.`;
 
   /** Construction › Gates: the QA gate of every milestone that ran one. */
+  const debtLine = (d) => `Deferred debt: ${d.total} open (cap ${d.cap_total ?? "off"}) · ${d.medium} medium (cap ${d.cap_medium ?? "off"})${d.over ? " · above the cap" : ""}`;
   function renderGates() {
     const q = data.quality;
     $("dod-sub").textContent = `Cut-off ${q.min_overall} overall · ${q.min_dimension} per dimension. Rows show the score against its cut-off mark.`;
@@ -1380,8 +1420,10 @@
     const rows = data.milestones.filter(gStarted).map((m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? "fail" : m.gate,
       [`qa/${m.id}/report.md`, `qa/${m.id}/risk-report.md`].filter(hasDoc).map((p) => docLink(p, p.endsWith("risk-report.md") ? "risk report" : "report")))).reverse();
     const pending = data.milestones.filter((m) => !gStarted(m)).map((m) => m.id);
+    const debt = (data.backlog || {}).debt;
     fill($("dod"), rows.length ? h("div", { class: "list" }, rows) : !pending.length ? h("div", { class: "empty", text: "No milestones yet." }) : null,
-      pending.length ? h("p", { class: "pending-line", text: `Not run yet: ${pending.join(", ")}` }) : null);
+      pending.length ? h("p", { class: "pending-line", text: `Not run yet: ${pending.join(", ")}` }) : null,
+      debt && debt.total ? h("p", { class: `pending-line${debt.over ? " bad" : ""}`, text: debtLine(debt) }) : null);
   }
 
   const issueId = (id) => (hasDoc("issues.md") ? docLink("issues.md", String(id), String(id), "id") : h("span", { class: "id", text: String(id) }));
@@ -1499,6 +1541,7 @@
     fill($("st-summary"),
       fact("Tasks done", `${p.done}/${p.total}`),
       fact("Milestones closed", `${closed}/${ms.length}`),
+      (data.backlog || {}).debt ? fact("Deferred debt", String(data.backlog.debt.total), h("span", { class: "card-sub", text: debtLine(data.backlog.debt) })) : null,
       fact("Releases", String(rel.length), rel.length ? h("span", { class: "card-sub", text: `last ${rel.at(-1).tag || rel.at(-1).version || ""}` }) : null),
       c && (Number(c.usd) > 0 || Number(c.tokens) > 0) ? fact("Cost (estimate)", `US$ ${Number(c.usd || 0).toFixed(2)}`, h("span", { class: "card-sub", text: `${compact(c.tokens || 0)} tokens` }))
         : fact("Cost", "not computed", h("span", { class: "fact-cmd" }, copyBtn("/dev-kit:costs"))));
@@ -1596,6 +1639,8 @@
     if (x.action === "answer_question") return `Answer to ${a.question}: ${a.option || a.answer || ""}`;
     if (x.action === "plan_draft") return `Plan draft · ${plural((a.ops || []).length, "change")}`;
     if (x.action === "release_decision") return `${a.decision === "approve" ? "Approve" : "Reject"} ${a.release}`;
+    if (x.action === "checkpoint") return `${a.decision === "confirm" ? "Confirm" : "Ask for changes in"} ${a.target === "prd" ? "the PRD" : "the plan"}`;
+    if (x.action === "debt_decision") return `Deferred debt: ${a.decision}`;
     return x.action;
   }
   const REQ_WORD = { pending: "waiting", running: "running", needs_input: "needs your answer", done: "done", failed: "failed", cancelled: "cancelled", stale: "stopped" };

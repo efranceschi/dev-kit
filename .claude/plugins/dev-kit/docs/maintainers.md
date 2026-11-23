@@ -22,7 +22,7 @@ How the plugin is built, tested and documented. Users do not need this page.
   skills/core/                   support skill, not invocable
     SKILL.md                     marker (disable-model-invocation: true, user-invocable: false)
     scripts/dev_state.py         state: init, sync-plan, next, start, done, block, unblock, drop, add-task, add-question,
-                                 fix-tasks, freeze, gate, review, artifact, stale, xref, tests, ledger, brief, tier, set-risk, risk-profile,
+                                 fix-tasks, freeze, affected, hard-floor, ci, debt, gate, review, checkpoint, artifact, stale, xref, tests, ledger, brief, tier, set-risk, risk-profile,
                                  risk-report, lock, strings, contrast, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
                                  preview, deploy, cleanup, event, feedback, telemetry, tip, tips, notify,
                                  board plan edits (move-task, new-milestone, reorder, plan-apply), answer-question, release-record;
@@ -53,7 +53,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     tests/                       lint_suite.py, test_dev_state.py, test_dev_state_gaps.py, test_dev_board.py,
                                  test_dev_cost.py, test_dev_docs.py, test_dev_score.py, test_dev_ledger.py, test_dev_spec.py,
                                  test_dev_ui.py, test_dev_worker.py, test_dev_router.py,
-                                 test_v3_foundation.py (3.0 acceptance criteria)
+                                 test_v3_foundation.py, test_v3_quality.py (3.0 acceptance criteria, one file per phase)
 ```
 
 Requirements: Python 3.10+ (standard library only) on Linux or macOS. Process checks (`cleanup`, board liveness) read `/proc` and are best effort on macOS; the board server uses `fcntl` and does not run on native Windows (use WSL).

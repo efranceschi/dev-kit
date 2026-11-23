@@ -310,6 +310,7 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
     problems: list[str] = []
     marks: dict[str, dict[str, str]] = {}  # dimension -> previous id -> closed|open
     legacy: list[dict] = []
+    exits: list[dict] = []
     for path in inputs:
         try:
             data, _ = read_result(path)
@@ -340,6 +341,16 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
             else:
                 entry["findings"].append({**f, "_auditor": auditor, "_src": str(path)})
         entry["stats"] = data.get("stats", {})
+        ec = data.get("exit_check")
+        if ec is not None:  # the milestone's exit check, run by spec-tracer: pass or fail, never a partial score
+            if not isinstance(ec, dict) or ec.get("result") not in ("pass", "fail"):
+                problems.append(f"{path.name}: exit_check must be {{\"result\": \"pass\"|\"fail\", \"checks\": [...]}}")
+                exit_res = {"result": "fail", "checks": [], "invalid": True}
+            else:
+                checks = [c for c in ec.get("checks") or [] if isinstance(c, dict)]
+                bad = ec["result"] == "fail" or any(c.get("result") != "pass" for c in checks)
+                exit_res = {"result": "fail" if bad else "pass", "checks": checks}
+            exits.append(exit_res)
         for pv in data.get("previous") or []:
             if isinstance(pv, dict) and pv.get("id"):
                 state = str(pv.get("state", "open")).lower()
@@ -419,6 +430,13 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
     cut = quality["review_min_overall"] if kind == "review" else quality["min_overall"]
     if overall < cut:
         reasons.append(f"overall {overall} < {cut}")
+    exit_res = None
+    if exits:
+        exit_res = {"result": "fail" if any(e["result"] == "fail" for e in exits) else "pass",
+                    "checks": [c for e in exits for c in e["checks"]]}
+        if exit_res["result"] == "fail":
+            failed = [str(c.get("check")) for c in exit_res["checks"] if c.get("result") != "pass"]
+            reasons.append("exit_check failed" + (f": {', '.join(failed)}" if failed else ""))
     reasons += problems
     if not dims:
         reasons.append("no valid auditor results")
@@ -439,6 +457,7 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
         "scope": scope, "kind": kind, "overall": overall, "cutoff": cut,
         "dimensions": dims, "blockers": blockers, "problems": problems,
         "verdict": "pass" if not reasons else "fail", "reasons": reasons,
+        **({"exit": exit_res} if exit_res is not None else {}),
         **({"delta": delta} if delta is not None else {}),
         **({"convergence": convergence} if convergence is not None else {}),
         **({"conflicts": conflicts} if conflicts else {}),
@@ -466,6 +485,10 @@ def render(res: dict) -> str:
         lines.append(f"conflict: {c['dimension']} {c['id']} contradicts {c['contradicts']} (capped at medium; settle with an ADR)")
     if res.get("legacy"):
         lines.append(f"legacy: {len(res['legacy'])} pre-existing finding(s) not scored (register them as issues)")
+    if res.get("exit"):
+        ex = res["exit"]
+        lines.append(f"exit check: {ex['result'].upper()}" + "".join(f"\n  {'ok ' if c.get('result') == 'pass' else 'FAIL'} {c.get('check')}"
+                                                             + (f" ({c['detail']})" if c.get("detail") else "") for c in ex["checks"]))
     for r in res["reasons"]:
         lines.append(f"  - {r}")
     for b in res["blockers"][:15]:

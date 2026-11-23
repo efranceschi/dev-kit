@@ -21,7 +21,8 @@ Subcommands
                 that can run in parallel (no common files, one serialising file at most)
   start T       mark task in_progress
   done T        mark task done (optionally --commit SHA)
-  block T       mark task blocked (--reason)
+  block T       mark task blocked (--reason; --blocked-by I-nnn pauses it until the replan of that scope change)
+  affected      pending tasks whose acceptance cites changed ACs (--acs AC-4,AC-7 [--json]), conventions §15
   unblock T     blocked -> todo
   drop T        drop a task removed by a replan (--reason); it no longer counts for milestones or release
   add-task      create a task in state and plan.md
@@ -34,7 +35,11 @@ Subcommands
   reorder M T…  new order of tasks not started inside a milestone (the order `next` follows)
   plan-apply    apply a plan draft from the board (--draft P-nnn, or --ops JSON): all its changes or none
                 (--dry-run shows them)
-  gate M        set milestone gate: passed | pending | skipped (passed needs --score >= cut-off)
+  gate M        set milestone gate: passed | pending | skipped (passed needs --score >= cut-off, the hard floor,
+                a green CI when required and, with an exit_check, `exit: pass` in scores.json; conventions §7)
+  hard-floor M  record the round's deterministic checks (--from JSON): each failure becomes a hard_floor:<check> fix
+  ci ACTION M   check | record (--sha --status success|failure|pending|none [--url]) | status: CI as the gate's verdict
+  debt ACTION   status [--json] | decide promote|accept|cooldown [--request P-nnn]: deferred debt above the cap
   artifact mark NAME  record that an artifact (brief|prd|architecture|ux|ui|plan|all) is up to date with its upstream
   stale         artifacts whose upstream changed since they were marked, and passed reviews now out of date
   ledger        work ledger (conventions §18): plan | record (files of an audit dimension), sections |
@@ -42,7 +47,10 @@ Subcommands
   tests         record | lookup: test results per commit (.dev/run/test-runs.jsonl) so a green suite is not re-run
                 on unchanged code (--kind unit|integration|e2e|all, --paths); lookup exits 3 when nothing is reusable
   xref          cross-document checks: ACs without tasks, unknown ACs, unspecified screens, unknown ADRs and deps
-  review NAME   record a review (prd|design|plan|docs...): pass | fail | pending (pass needs --score >= cut-off)
+  review NAME   record a review (prd|design|plan|docs...): pass | fail | pending (pass needs --score >= cut-off);
+                a passed prd or plan review opens its checkpoint
+  checkpoint ACTION TARGET  status | confirm | adjust --feedback | summary --text, for prd or plan ([--request
+                P-nnn] reads the decision made on the board), conventions §19
   event TYPE    append an allowlisted event to .dev/telemetry.jsonl (--set k=v, --json)
   feedback      brief feedback about the dev-kit (--worked/--failed/--improve area:note)
   telemetry     summary | report | export [--all | --since D] [--json] [--out FILE] [--events]: session log, per-stage grades, export
@@ -144,6 +152,13 @@ DEFAULT_AUTONOMY = {
     # plan's remaining tasks, Needs you offers a milestone of the queue; an issue left unscheduled for
     # `aging_milestones` closed milestones asks for a decision; every milestone keeps at least `buffer_floor` slots.
     "queue": {"limit": 15, "limit_pct_remaining": 50, "aging_milestones": 3, "buffer_floor": 1},
+    # Milestone size (conventions.md §4): planned tasks + buffer slots + cool-down; outside the range sync-plan warns
+    # unless the milestone states a `size_reason:`.
+    "milestone_size": {"min": 5, "max": 12},
+    # CI as the source of truth for the gate's deterministic signals (conventions.md §7): provider auto (GitHub when
+    # .github/workflows exists, GitLab when .gitlab-ci.yml exists) | github | gitlab | none; required = the gate needs
+    # a green run on the round's commit; timeout_min = wait before the ci_timeout pause.
+    "ci": {"provider": "auto", "required": True, "timeout_min": 30},
     # Contextual tips (shared/tips.json): on (each tip at most twice) | off | always.
     "tips": "on",
     # Claude Code interface (conventions.md §15): offered = start already asked once; spinner_tips and statusline are
@@ -174,6 +189,10 @@ DEFAULT_AUTONOMY = {
             "visual": 6, "copy": 3, "performance": 6, "data": 4, "operations": 3,
             "dependencies": 2, "docs": 5, "design": 10, "requirements": 10,
         },
+        # Deterministic floor of every gate (conventions.md §7): tests, lint, typecheck, deps, secrets, a11y.
+        "hard_floor": {"enabled": True},
+        # Deferred findings still open across milestones, past which a gate close asks the user (Needs you).
+        "deferred_cap": {"total": 20, "medium": 10},
     },
 }
 
@@ -254,6 +273,7 @@ PAUSE_ACTIONS = {
     "dirty_tree": ("ask", "auto_recommend"),
     "blocked_env": ("ask", "park"),
     "production_deploy": ("ask", "preauthorize", "park"),
+    "ci_timeout": ("ask", "park"),
 }
 LIMIT_KEYS = {"paid_services": "max_monthly", "delete_data": "environments", "public_exposure": "targets",
               "production_deploy": "targets"}
@@ -271,6 +291,7 @@ UNATTENDED_PAUSE_POLICY = {
     "dirty_tree": {"action": "auto_recommend"},
     "blocked_env": {"action": "park"},
     "production_deploy": {"action": "park"},
+    "ci_timeout": {"action": "park"},
 }
 
 
@@ -421,6 +442,16 @@ def check_autonomy_field(field: str, val: object) -> object:
         check_local_deploy(val)
     elif field == "queue":
         check_queue(val)
+    elif field == "milestone_size":
+        if (not isinstance(val, dict) or set(val) - {"min", "max"}
+                or not all(isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 200 for v in val.values())
+                or val.get("min", 5) > val.get("max", 12)):
+            fail("autonomy.milestone_size must be {\"min\": 5, \"max\": 12} (integers, min <= max)")
+    elif field == "ci":
+        if (not isinstance(val, dict) or set(val) - {"provider", "required", "timeout_min"}
+                or val.get("provider", "auto") not in CI_PROVIDERS or not isinstance(val.get("required", True), bool)
+                or not isinstance(val.get("timeout_min", 30), int) or not 1 <= val.get("timeout_min", 30) <= 600):
+            fail(f"autonomy.ci must be {{\"provider\": {' | '.join(CI_PROVIDERS)}, \"required\": true, \"timeout_min\": 30}}")
     elif field == "cooldown":
         if not isinstance(val, dict) or not isinstance(val.get("enabled", False), bool) or not isinstance(val.get("max_tasks", 5), int):
             fail('autonomy.cooldown must be on | off or {"enabled": true, "max_tasks": 5}')
@@ -430,6 +461,13 @@ def check_autonomy_field(field: str, val: object) -> object:
     elif field == "quality":
         if not isinstance(val, dict):
             fail("autonomy.quality must be an object")
+        hf = val.get("hard_floor", {})
+        if not isinstance(hf, dict) or set(hf) - {"enabled"} or not isinstance(hf.get("enabled", True), bool):
+            fail('autonomy.quality.hard_floor must be {"enabled": true}')
+        dc = val.get("deferred_cap", {})
+        if (not isinstance(dc, dict) or set(dc) - {"total", "medium"}
+                or not all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 1000 for v in dc.values())):
+            fail('autonomy.quality.deferred_cap must be {"total": 20, "medium": 10} (0 turns a cap off)')
     elif field == "ui":
         if not isinstance(val, dict) or set(val) - set(UI_KEYS) or not all(isinstance(v, bool) for v in val.values()):
             fail(f"autonomy.ui must be an object with true/false values for {', '.join(UI_KEYS)}")
@@ -437,6 +475,7 @@ def check_autonomy_field(field: str, val: object) -> object:
     return val
 
 
+CI_PROVIDERS = ("auto", "github", "gitlab", "none")
 QUEUE_LIMITS = {"limit": (1, 500), "limit_pct_remaining": (1, 1000), "aging_milestones": (1, 50), "buffer_floor": (0, 20)}
 
 
@@ -495,6 +534,41 @@ RELEASE_SIZE = (2, 5)  # milestones per release the planner aims for (§4 groupi
 TASK_RE = re.compile(r"^###\s+(T-\d{3,})\s+(.*?)\s*$")
 FIELD_RE = re.compile(r"^-\s+([a-z_]+):\s*(.*?)\s*$")
 SUBITEM_RE = re.compile(r"^\s{2,}-\s+(.*?)\s*$")
+# milestone fields, between the `## Mn` heading and its first task (conventions.md §4)
+MS_FIELD_RE = re.compile(r"^\s*(?:[-*]\s+)?\**(exit_check|size_reason)\**\s*:\s*(.*?)\s*$")
+EXIT_KINDS = ("e2e", "cmd", "acs")
+# milestones that need no exit_check of their own: release fixes (M<k>.<i>) and maintenance/issue milestones
+EXIT_EXEMPT_TITLE = re.compile(r"\b(maintenance|fixes|issues|cool-?down)\b", re.I)
+
+
+def parse_exit_check(val: str) -> dict:
+    """`e2e: checkout.spec; cmd: npm run smoke; acs: AC-1, AC-2` -> {"e2e": [...], "cmd": [...], "acs": [...]}.
+    `acs: tasks` means the milestone inherits its tasks' ACs. Raises ValueError on an unknown kind or no check."""
+    out: dict = {}
+    for part in re.split(r";\s*(?=(?:e2e|cmd|acs)\s*:)", val.strip()):
+        if not part.strip():
+            continue
+        k, sep, v = part.partition(":")
+        k = k.strip().lower()
+        if not sep or k not in EXIT_KINDS or not v.strip():
+            raise ValueError(f"exit_check part {part.strip()!r} must be one of e2e: <test>, cmd: <command>, acs: AC-n, AC-m")
+        if k == "acs":
+            out.setdefault("acs", []).extend(x.strip() for x in v.split(",") if x.strip())
+        else:
+            out.setdefault(k, []).append(v.strip())
+    if not out:
+        raise ValueError("exit_check is empty")
+    return out
+
+
+def exit_exempt(m: str, title: str) -> bool:
+    return "." in m or bool(EXIT_EXEMPT_TITLE.search(title or ""))
+
+
+def explicit_exit(ms: dict) -> bool:
+    """The milestone declares a check of its own (not only `acs: tasks`): the gate then needs `exit: pass`."""
+    ec = ms.get("exit_check") or {}
+    return bool(ec.get("e2e") or ec.get("cmd") or [a for a in ec.get("acs") or [] if a.lower() != "tasks"])
 
 
 # --------------------------------------------------------------------------- helpers
@@ -834,7 +908,7 @@ class Store:
         return [t for t, v in self.tasks().items() if v["status"] == "in_progress"]
 
     def milestone_done(self, m: str) -> bool:
-        ts = [v for v in self.tasks().values() if v["milestone"] == m and v["status"] != "dropped"]
+        ts = gate_tasks(self, m)
         return bool(ts) and all(v["status"] == "done" for v in ts)
 
     def gate_open_for(self, m: str) -> tuple[bool, str]:
@@ -888,6 +962,17 @@ def parse_plan(text: str) -> tuple[dict, dict]:
             cur_m, cur_t, cur_field = m.group(1), None, None
             milestones[cur_m] = {"title": m.group(2) or cur_m, "release": cur_r}
             continue
+        if cur_m is not None and cur_t is None:
+            mf = MS_FIELD_RE.match(line)
+            if mf:
+                if mf.group(1) == "exit_check":
+                    try:
+                        milestones[cur_m]["exit_check"] = parse_exit_check(mf.group(2))
+                    except ValueError as e:
+                        raise ValueError(f"{cur_m}: {e}") from None
+                elif mf.group(2):
+                    milestones[cur_m]["size_reason"] = mf.group(2)
+                continue
         t = TASK_RE.match(line)
         if t:
             if cur_m is None:
@@ -1255,12 +1340,30 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
     milestones, tasks = parse_plan(text)
     rplan, rel_problems = plan_releases(text, milestones)
     added_m = added_t = updated_t = 0
+    # exit_check (§4): required on a new milestone of a plan that already uses it (a 3.0 plan); a milestone without
+    # one in an older plan only warns, and its gate does not ask for `exit: pass` until it is annotated
+    v3 = bool(store.state.get("exit_checks")) or any(i.get("exit_check") for i in milestones.values())
+    exit_problems = []
+    for m, info in milestones.items():
+        if info.get("exit_check") or exit_exempt(m, info["title"]):
+            continue
+        if v3 and m not in store.milestones():
+            raise ValueError(f"{m} has no exit_check: add `exit_check: e2e: <test>; cmd: <command>; acs: AC-n` "
+                             "below its goal (conventions.md §4)")
+        exit_problems.append(f"{m}: no exit_check; its gate checks only the tasks (/dev-kit:plan --annotate-exit proposes one)")
+    if v3:
+        store.state["exit_checks"] = True
     for m, info in milestones.items():
         if m not in store.milestones():
             store.milestones()[m] = {"title": info["title"], "gate": "pending", "qa_runs": 0}
             added_m += 1
         else:
             store.milestones()[m]["title"] = info["title"]
+        for k in ("exit_check", "size_reason"):
+            if info.get(k):
+                store.milestones()[m][k] = info[k]
+            else:
+                store.milestones()[m].pop(k, None)
         if info.get("release"):
             store.milestones()[m]["release"] = info["release"]
         else:
@@ -1312,7 +1415,36 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
         if t["milestone"] not in store.milestones():
             problems.append(f"{tid}: milestone {t['milestone']} not declared")
         problems += risk.check_risk_fields(tid, t)
-    return tasks, (added_m, added_t, updated_t), rel_problems + problems
+    return tasks, (added_m, added_t, updated_t), rel_problems + exit_problems + problems + size_problems(store, milestones)
+
+
+def milestone_size_cfg(state: dict) -> dict:
+    return {**DEFAULT_AUTONOMY["milestone_size"], **((state.get("autonomy") or {}).get("milestone_size") or {})}
+
+
+def milestone_load(store: Store, m: str) -> dict:
+    """Size of a milestone as §4 counts it: planned tasks + the buffer slots it reserves + the cool-down tasks."""
+    planned = sum(1 for v in store.tasks().values() if v["milestone"] == m and v.get("status") != "dropped"
+                  and not str(v.get("source") or "").startswith(("issue:", "qa/", "hard_floor:")))
+    buf = buffer_info(store, m)["capacity"] if planned else 0
+    cd = {**DEFAULT_AUTONOMY["cooldown"], **(store.state.get("autonomy", {}).get("cooldown") or {})}
+    cool = int(cd.get("max_tasks") or 0) if cd.get("enabled") and m != (store.milestone_order() or [None])[0] else 0
+    return {"planned": planned, "buffer": buf, "cooldown": cool, "total": planned + buf + cool}
+
+
+def size_problems(store: Store, milestones: dict) -> list[str]:
+    """Milestones outside autonomy.milestone_size with no `size_reason:` (a warning, never a refusal)."""
+    cfg = milestone_size_cfg(store.state)
+    out = []
+    for m, info in milestones.items():
+        if info.get("size_reason") or exit_exempt(m, info["title"]):
+            continue
+        ld = milestone_load(store, m)
+        if ld["planned"] and not cfg["min"] <= ld["total"] <= cfg["max"]:
+            parts = f"{ld['planned']} planned + {ld['buffer']} buffer" + (f" + {ld['cooldown']} cool-down" if ld["cooldown"] else "")
+            out.append(f"{m}: size {ld['total']} ({parts}) is outside {cfg['min']}-{cfg['max']}; split or merge it, "
+                       "or add `size_reason: <why>` below its heading")
+    return out
 
 
 def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
@@ -1362,6 +1494,8 @@ def pick_next(store: Store, milestone: str | None) -> tuple[str | None, str]:
         ok, why = store.gate_open_for(m)
         if not ok:
             return None, why
+        if checkpoint_pending(store, "plan") and not any(v["milestone"] == m and v["status"] in ("done", "in_progress") for v in ts.values()):
+            return None, f"{m} waits for the plan's confirmation (Needs you › Confirm plan, §19)"
         ready = [
             t for t, v in pending.items()
             if v["status"] == "todo" and all(ts.get(d, {}).get("status") == "done" for d in v["deps"])
@@ -1472,6 +1606,9 @@ def cmd_start(store: Store, a: argparse.Namespace) -> None:
     ok, why = store.gate_open_for(t["milestone"])
     if not ok and not a.force and t.get("lane") != "hotfix":
         fail(f"cannot start {a.task}: {why}")
+    if (checkpoint_pending(store, "plan") and t.get("lane") != "hotfix" and not any(
+            v["milestone"] == t["milestone"] and v["status"] in ("done", "in_progress") for v in store.tasks().values())):
+        fail(f"cannot start {a.task}: {t['milestone']} waits for the plan's confirmation (Needs you › Confirm plan, §19)")
     r = safe_route(store, a.task)
     t["status"] = "in_progress"
     issue_sync(store, t)
@@ -1558,6 +1695,14 @@ def cmd_block(store: Store, a: argparse.Namespace) -> None:
     t = store.task(a.task)
     if t["status"] in FINISHED:
         fail(f"{a.task} is {t['status']}; cannot block")
+    if a.blocked_by:
+        if a.blocked_by not in (store.state.get("issues") or {}):
+            fail(f"unknown issue {a.blocked_by}")
+        t["blocked_by"] = a.blocked_by  # paused until the replan of that scope change (§15)
+    if not a.reason:
+        if not a.blocked_by:
+            fail("block needs --reason")
+        a.reason = f"waiting for the replan of {a.blocked_by}"
     t["status"] = "blocked"
     t["blocked_reason"] = a.reason
     t["blocked_count"] = int(t.get("blocked_count", 0) or 0) + 1
@@ -1569,6 +1714,46 @@ def cmd_block(store: Store, a: argparse.Namespace) -> None:
     queue_notice(store, f"dev-kit · {a.task} blocked · {next_command(store)}")
 
 
+def gate_tasks(store: "Store", m: str) -> list[dict]:
+    """Tasks that count for a milestone's completion: not dropped, and in a frozen milestone not paused by a scope
+    change (blocked_by an issue) until the replan decides (§15)."""
+    fz = frozen(store, m)
+    return [v for v in store.tasks().values() if v["milestone"] == m and v["status"] != "dropped"
+            and not (fz and v["status"] == "blocked" and v.get("blocked_by"))]
+
+
+def affected_tasks(store: Store, acs: list[str]) -> list[dict]:
+    """Pending tasks whose acceptance cites one of these ACs: what a scope change reaches now (§15)."""
+    want = {x.strip().upper() for x in acs if x.strip()}
+    out = []
+    for tid, v in sorted(store.tasks().items(), key=lambda kv: int(kv[0][2:])):
+        if v["status"] not in ("todo", "in_progress", "blocked"):
+            continue
+        cited = set(re.findall(r"\bAC-\d+\b", " ".join(map(str, v.get("acceptance") or [])) + " " + str(v.get("title") or ""), re.I))
+        hit = sorted({c.upper() for c in cited} & want, key=lambda c: int(c.split("-")[1]))
+        if hit:
+            out.append({"task": tid, "title": v["title"], "status": v["status"], "milestone": v["milestone"], "acs": hit,
+                        "frozen": frozen(store, v["milestone"])})
+    return out
+
+
+def cmd_affected(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    acs = [x for x in re.split(r"[,\s]+", a.acs or "") if x]
+    if not acs or not all(re.fullmatch(r"AC-\d+", x, re.I) for x in acs):
+        fail("--acs needs AC ids, e.g. AC-4,AC-7")
+    rows = affected_tasks(store, acs)
+    if a.json:
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        print("no pending task cites " + ", ".join(acs))
+        return
+    for r in rows:
+        print(f"{r['task']} {r['status']} {r['milestone']}{' (frozen)' if r['frozen'] else ''} · {', '.join(r['acs'])} · {r['title']}")
+    print(f"{len(rows)} task(s): pause them until the replan (recommended: `block T-nnn --blocked-by I-nnn`) or continue")
+
+
 def cmd_unblock(store: Store, a: argparse.Namespace) -> None:
     store.load()
     t = store.task(a.task)
@@ -1576,6 +1761,7 @@ def cmd_unblock(store: Store, a: argparse.Namespace) -> None:
         fail(f"{a.task} is {t['status']}, not blocked")
     t["status"] = "todo"
     t["blocked_reason"] = None
+    t.pop("blocked_by", None)
     store.save()
     store.log(f"unblock {a.task}")
     store.event("task", task=a.task, transition="unblock", type=t.get("type"), milestone=t.get("milestone"))
@@ -1593,6 +1779,7 @@ def cmd_drop(store: Store, a: argparse.Namespace) -> None:
         return
     t["status"] = "dropped"
     t["blocked_reason"] = None
+    t.pop("blocked_by", None)
     t["dropped_reason"] = a.reason
     t["dropped_at"] = now()
     issue_sync(store, t)
@@ -1863,6 +2050,301 @@ def quality_cfg(store: Store) -> dict:
     return q
 
 
+# ---------------------------------------------------------------- hard floor, CI, exit check, debt (conventions.md §7)
+HARD_FLOOR_CHECKS = ("tests", "lint", "typecheck", "deps", "secrets", "a11y")
+FLOOR_STATUSES = ("pass", "fail", "n/a")
+NEVER_FORCED = ("secrets",)  # with deps when the finding is critical
+
+
+def hard_floor_on(store: Store) -> bool:
+    return bool(quality_cfg(store).get("hard_floor", {}).get("enabled", True))
+
+
+def cmd_hard_floor(store: Store, a: argparse.Namespace) -> None:
+    """Record the deterministic checks of a round (§7): `{"tests": {"status": "pass"}, "deps": {"status": "fail",
+    "severity": "high", "detail": "lodash CVE-…"}, "a11y": {"status": "n/a", "reason": "no UI"}}`. Each failure
+    becomes one fix task with source hard_floor:<check> (one per check, reused while open)."""
+    store.load()
+    ms = store.milestones().get(a.milestone)
+    if ms is None:
+        fail(f"unknown milestone {a.milestone}")
+    try:
+        raw = json.loads(Path(a.from_file).read_text(encoding="utf-8") if a.from_file != "-" else sys.stdin.read())
+    except (OSError, json.JSONDecodeError) as e:
+        fail(f"cannot read the hard floor results: {e}")
+    checks = raw.get("checks", raw) if isinstance(raw, dict) else None
+    if not isinstance(checks, dict) or not checks:
+        fail(f"hard floor results must be an object of checks ({', '.join(HARD_FLOOR_CHECKS)})")
+    out: dict = {}
+    for name, c in checks.items():
+        if name not in HARD_FLOOR_CHECKS:
+            fail(f"unknown hard floor check {name!r}; one of {', '.join(HARD_FLOOR_CHECKS)}")
+        c = {"status": c} if isinstance(c, str) else c
+        if not isinstance(c, dict) or c.get("status") not in FLOOR_STATUSES:
+            fail(f"{name}: status must be one of {', '.join(FLOOR_STATUSES)}")
+        if c["status"] == "n/a" and not str(c.get("reason") or "").strip():
+            fail(f"{name}: n/a needs a reason (the tool is missing, no UI…)")
+        sev = str(c.get("severity") or "").lower() or None
+        if sev and sev not in ("critical", "high", "medium", "low"):
+            fail(f"{name}: severity must be critical, high, medium or low")
+        out[name] = {k: v for k, v in {"status": c["status"], "severity": sev, "detail": str(c.get("detail") or "")[:300] or None,
+                                       "reason": str(c.get("reason") or "")[:300] or None, "tool": c.get("tool")}.items() if v}
+    created, reused = [], []
+    for name, c in out.items():
+        if c["status"] != "fail":
+            continue
+        src = f"hard_floor:{name}"
+        tid = next((k for k, v in store.tasks().items() if v.get("milestone") == a.milestone and v.get("source") == src
+                    and v.get("status") not in FINISHED), None)
+        if tid:
+            reused.append(tid)
+            c["task"] = tid
+            continue
+        tid = store.new_task_id()
+        t = {"title": f"Hard floor: {name} fails" + (f" ({c['detail'][:80]})" if c.get("detail") else ""), "milestone": a.milestone,
+             "type": "fix", "status": "todo", "deps": [], "acceptance": [f"{name} passes in the round's deterministic checks"],
+             "test_notes": f"re-run the {name} check; it must pass", "files": [], "commit": None, "blocked_reason": None,
+             "source": src, "started_at": None, "done_at": None}
+        store.tasks()[tid] = t
+        append_task_to_plan(store, store.dev / "plan.md", a.milestone, ms["title"], tid, t)
+        created.append(tid)
+        c["task"] = tid
+    ms["hard_floor"] = {"at": now(), "checks": out}
+    store.save()
+    fails = [n for n, c in out.items() if c["status"] == "fail"]
+    store.log(f"hard-floor {a.milestone}: " + (", ".join(f"{n} fail" for n in fails) or "all pass"))
+    store.event("hard_floor", scope=a.milestone, failed=len(fails), checks=len(out))
+    for n, c in out.items():
+        print(f"{n}: {c['status']}" + (f" ({c.get('severity')})" if c.get("severity") else "")
+              + (f" · {c.get('reason') or c.get('detail')}" if c.get("reason") or c.get("detail") else "")
+              + (f" -> {c['task']}" if c.get("task") else ""))
+    for n in ("tests", "lint"):
+        if out.get(n, {}).get("status") == "n/a":
+            print(f"finding: no {n} in the project is a high finding (record it in the round, §7)")
+    print(f"{a.milestone} hard floor: " + (f"{len(fails)} failing ({', '.join(fails)}); the gate cannot pass" if fails else "pass"))
+
+
+def floor_problems(ms: dict) -> list[tuple[str, bool]]:
+    """(problem, may be forced) for the recorded hard floor of a milestone."""
+    out = []
+    for n, c in ((ms.get("hard_floor") or {}).get("checks") or {}).items():
+        if c.get("status") == "fail":
+            hard = n in NEVER_FORCED or (n == "deps" and c.get("severity") == "critical")
+            out.append((f"hard floor: {n} fails" + (f" ({c['severity']})" if c.get("severity") else "")
+                        + (f" -> {c['task']}" if c.get("task") else ""), not hard))
+    return out
+
+
+def ci_provider(store: Store) -> str:
+    cfg = {**DEFAULT_AUTONOMY["ci"], **(store.state.get("autonomy", {}).get("ci") or {})}
+    p = cfg["provider"]
+    if p != "auto":
+        return p
+    wf = store.root / ".github" / "workflows"
+    if wf.is_dir() and any(wf.glob("*.y*ml")):
+        return "github"
+    if (store.root / ".gitlab-ci.yml").exists():
+        return "gitlab"
+    return "none"
+
+
+def ci_cfg(store: Store) -> dict:
+    return {**DEFAULT_AUTONOMY["ci"], **(store.state.get("autonomy", {}).get("ci") or {})}
+
+
+CI_STATUSES = ("success", "failure", "pending", "none")
+
+
+def _gh_status(store: Store, sha: str) -> tuple[str | None, str | None]:
+    """Aggregate GitHub Actions runs of one commit: failure if any failed, pending if any is not finished."""
+    try:
+        r = subprocess.run(["gh", "run", "list", "--commit", sha, "--json", "status,conclusion,url"], cwd=store.root,
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    if r.returncode != 0:
+        return None, None
+    try:
+        runs = json.loads(r.stdout or "[]")
+    except json.JSONDecodeError:
+        return None, None
+    if not runs:
+        return "none", None
+    if any(x.get("conclusion") in ("failure", "cancelled", "timed_out", "startup_failure") for x in runs):
+        return "failure", next((x.get("url") for x in runs if x.get("conclusion") not in ("success", "skipped", "neutral")), None)
+    if any(x.get("status") != "completed" for x in runs):
+        return "pending", runs[0].get("url")
+    return "success", runs[0].get("url")
+
+
+def record_ci(store: Store, m: str, sha: str, status: str, url: str | None) -> dict:
+    ms = store.milestones()[m]
+    prev = ms.get("ci") or {}
+    since = prev.get("since") if prev.get("sha") == sha and prev.get("status") == "pending" else None
+    rec = {"provider": ci_provider(store), "sha": sha, "status": status, "at": now(), **({"url": url} if url else {})}
+    if status == "pending":
+        rec["since"] = since or now()
+    ms["ci"] = rec
+    return rec
+
+
+def cmd_ci(store: Store, a: argparse.Namespace) -> None:
+    """CI as the verdict of the gate's deterministic signals (§7). `check` asks the provider (gh for GitHub) about the
+    round's commit and records the status; `record` stores a status read elsewhere; `status` prints what is recorded."""
+    store.load()
+    if a.milestone not in store.milestones():
+        fail(f"unknown milestone {a.milestone}")
+    ms = store.milestones()[a.milestone]
+    prov, cfg = ci_provider(store), ci_cfg(store)
+    if a.action == "status":
+        rec = ms.get("ci") or {}
+        print(f"ci provider {prov} · required {str(cfg['required']).lower()} · " + (f"{a.milestone} {rec.get('status')} at {rec.get('sha', '?')[:12]}" if rec else "nothing recorded"))
+        return
+    sha = a.sha or _git(store, "rev-parse", "HEAD")
+    if not sha:
+        fail("no commit: pass --sha")
+    if a.action == "record":
+        if a.status not in CI_STATUSES:
+            fail(f"--status must be one of {', '.join(CI_STATUSES)}")
+        status, url = a.status, a.url
+    else:
+        if prov == "none":
+            print("ci: none (no CI detected" + (", autonomy.ci.required is on: ask the user once and record an ADR)" if cfg["required"] else ")"))
+            return
+        if prov != "github":
+            fail(f"ci check reads GitHub only; read the {prov} pipeline of {sha[:12]} and run `ci record {a.milestone} --sha {sha} --status <s>`")
+        status, url = _gh_status(store, sha)
+        if status is None:
+            fail(f"gh could not read the runs of {sha[:12]}; read them another way and run `ci record {a.milestone} --sha {sha} --status <s>`")
+    rec = record_ci(store, a.milestone, sha, status, url)
+    store.save()
+    store.log(f"ci {a.milestone} {status} at {sha[:12]}")
+    store.event("ci", scope=a.milestone, status=status, provider=prov)
+    print(f"{a.milestone} ci {status} at {sha[:12]}" + (f" · {url}" if url else ""))
+    if status == "pending":
+        waited = _secs_between(rec["since"], now()) or 0
+        if waited >= int(cfg["timeout_min"]) * 60:
+            print(f"ci_timeout: pending for {waited // 60} min (limit {cfg['timeout_min']}); pause point ci_timeout "
+                  f"({pause_action(store.state, 'ci_timeout')})")
+        else:
+            print(f"ci pending: check again (timeout in {max(0, int(cfg['timeout_min']) * 60 - waited) // 60} min)")
+
+
+def ci_problems(store: Store, ms: dict) -> list[tuple[str, bool]]:
+    cfg = ci_cfg(store)
+    prov = ci_provider(store)
+    if not cfg["required"] or prov == "none":
+        return []
+    rec = ms.get("ci") or {}
+    if rec.get("status") == "success":
+        return []
+    if not rec:
+        return [(f"ci: no {prov} result recorded for the round's commit (run `ci check <M>`)", True)]
+    return [(f"ci: {prov} is {rec['status']} at {str(rec.get('sha'))[:12]} (the CI verdict wins over local runs)", True)]
+
+
+def exit_result(store: Store, m: str, scores: str | None) -> dict | None:
+    path = Path(scores) if scores else store.dev / "qa" / m / "scores.json"
+    if not path.is_absolute():
+        path = store.root / path
+    try:
+        return (json.loads(path.read_text(encoding="utf-8")) or {}).get("exit")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return None
+
+
+def gate_problems(store: Store, m: str, a: argparse.Namespace) -> list[tuple[str, bool]]:
+    """What stops a gate from passing besides the score: the hard floor, CI and the exit check (§7)."""
+    ms = store.milestones()[m]
+    out: list[tuple[str, bool]] = []
+    if hard_floor_on(store):
+        if ms.get("hard_floor"):
+            out += floor_problems(ms)
+        elif store.state.get("exit_checks"):
+            out.append((f"hard floor: no deterministic checks recorded for {m} (run `hard-floor {m} --from <json>`)", True))
+    out += ci_problems(store, ms)
+    if explicit_exit(ms):
+        ex = exit_result(store, m, a.scores)
+        if not ex:
+            out.append((f"exit_check: no result in scores.json (spec-tracer runs {m}'s exit_check)", True))
+        elif ex.get("result") != "pass":
+            failed = [c.get("check") for c in ex.get("checks") or [] if c.get("result") != "pass"]
+            out.append(("exit_check failed" + (f": {', '.join(map(str, failed))}" if failed else ""), True))
+    return out
+
+
+def debt_counts(store: Store) -> dict:
+    seen, total, medium = set(), 0, 0
+    for f in deferred_findings(store):
+        key = (f.get("scope"), f.get("id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        total += 1
+        medium += f.get("severity") == "medium"
+    cap = quality_cfg(store).get("deferred_cap") or {}
+    over = (bool(cap.get("total")) and total > cap["total"]) or (bool(cap.get("medium")) and medium > cap["medium"])
+    return {"total": total, "medium": medium, "cap_total": cap.get("total"), "cap_medium": cap.get("medium"), "over": over}
+
+
+def debt_needs(store: Store) -> list[dict]:
+    """The Needs-you item for deferred debt above the cap (§7), raised at a gate close until the user decides."""
+    al = store.state.get("debt_alert")
+    if not al or al.get("decided_at"):
+        return []
+    d = debt_counts(store)
+    if not d["over"]:
+        return []
+    return [{"kind": "debt_over_cap", "total": d["total"], "medium": d["medium"], "cap_total": d["cap_total"],
+             "cap_medium": d["cap_medium"], "since": al.get("at"), "milestone": al.get("milestone"),
+             "text": f"Deferred debt above the cap: {d['total']} open (cap {d['cap_total']}), {d['medium']} medium (cap {d['cap_medium']})",
+             "actions": ["promote", "accept", "cooldown"]}]
+
+
+def check_debt(store: Store, m: str) -> dict | None:
+    d = debt_counts(store)
+    al = store.state.get("debt_alert")
+    if d["over"] and (not al or al.get("decided_at")) and (not al or d["total"] > int(al.get("total_at_decision") or 0)):
+        store.state["debt_alert"] = {"at": now(), "milestone": m, "total": d["total"], "medium": d["medium"]}
+        return d
+    return None
+
+
+def cmd_debt(store: Store, a: argparse.Namespace) -> None:
+    """Deferred debt (§7). status: the counts and the cap. decide promote|accept|cooldown: the user's decision on the
+    Needs-you item (promote = the chosen findings become standard issues, through the issue skill; accept = an ADR
+    lists them; cooldown = cool-down is turned on for the next milestone with these items)."""
+    store.load()
+    d = debt_counts(store)
+    if a.action == "status":
+        if a.json:
+            print(json.dumps({**d, "needs": debt_needs(store)}, indent=2))
+        else:
+            print(f"deferred debt: {d['total']} open (cap {d['cap_total']}) · {d['medium']} medium (cap {d['cap_medium']})"
+                  + (" · above the cap" if d["over"] else ""))
+        return
+    decision, ref = a.decision, None
+    if a.request:
+        import dev_worker as dw
+        x = dw.item(store.root, a.request)
+        if x is None or x.get("action") != "debt_decision":
+            fail(f"{a.request} is not a debt decision from the board")
+        decision, ref = x["args"]["decision"], a.request
+    if decision not in ("promote", "accept", "cooldown"):
+        fail("decide needs promote, accept or cooldown (or --request P-nnn)")
+    al = store.state.setdefault("debt_alert", {"at": now(), "milestone": None, "total": d["total"], "medium": d["medium"]})
+    al.update(decided_at=now(), decision=decision, total_at_decision=d["total"], **({"request": ref} if ref else {}))
+    if decision == "cooldown":
+        auto = store.state.setdefault("autonomy", _copy(DEFAULT_AUTONOMY))
+        auto["cooldown"] = {**DEFAULT_AUTONOMY["cooldown"], **(auto.get("cooldown") or {}), "enabled": True}
+    store.save()
+    store.log(f"debt decide {decision}" + (f" ({ref})" if ref else ""))
+    store.event("debt", transition=decision, total=d["total"], medium=d["medium"])
+    print({"promote": "debt: promote the chosen deferred findings with /dev-kit:issue --from <F-id> <M> (class standard)",
+           "accept": "debt: accepted; record an ADR listing the open deferred findings (DS deferred lists them)",
+           "cooldown": "debt: cool-down is on; after the next gate `cooldown <M>` takes these items into the next milestone"}[decision])
+
+
 def cmd_gate(store: Store, a: argparse.Namespace) -> None:
     store.load()
     if a.milestone not in store.milestones():
@@ -1878,6 +2360,12 @@ def cmd_gate(store: Store, a: argparse.Namespace) -> None:
             fail(f"score {a.score} is below the cut-off {minimum}; fix findings and re-run qa (or --force with a recorded decision)")
         if a.force and (a.note or "").startswith("policy:"):
             check_policy_force(store, "gate", a.milestone, a.scores)
+        probs = gate_problems(store, a.milestone, a)
+        hard = [p for p, ok in probs if not ok]
+        if hard:
+            fail(f"gate {a.milestone} cannot pass, not even with --force: " + "; ".join(hard))
+        if probs and not a.force:
+            fail(f"gate {a.milestone} cannot pass: " + "; ".join(p for p, _ in probs) + " (whatever the score; --force only with a recorded decision)")
         m["passed_at"] = now()
     m["gate"] = a.value
     if a.score is not None:
@@ -1900,6 +2388,7 @@ def cmd_gate(store: Store, a: argparse.Namespace) -> None:
                                        f"keep fixing, accept with an ADR, or replan")
                 exhausted.append(tid)
     flow = write_flow(store, a.milestone) if a.value == "passed" else None
+    debt = check_debt(store, a.milestone) if a.value == "passed" or a.count_run else None
     store.save()
     for tid in exhausted:
         store.log(f"block {tid}: {store.tasks()[tid]['blocked_reason']}")
@@ -1913,6 +2402,10 @@ def cmd_gate(store: Store, a: argparse.Namespace) -> None:
     print(f"{a.milestone} gate: {a.value}" + (f" (score {a.score})" if a.score is not None else ""))
     if exhausted:
         print(f"{a.milestone}: {m['qa_runs'] - 1} fix rounds used of {max_rounds} (rounds_exhausted); blocked {', '.join(exhausted)}")
+    if debt:
+        store.event("debt", transition="over_cap", total=debt["total"], medium=debt["medium"])
+        print(f"debt_over_cap: {debt['total']} deferred findings open (cap {debt['cap_total']}), {debt['medium']} medium "
+              f"(cap {debt['cap_medium']}); Needs you: promote to issues, accept with an ADR, or use the next cool-down")
     if a.value == "passed" or a.count_run:
         queue_notice(store, f"dev-kit · {a.milestone} gate {a.value}" + (f" ({a.score})" if a.score is not None else "")
                      + f" · {next_command(store)}")
@@ -3318,7 +3811,9 @@ def backlog_data(store: Store) -> dict:
         "tasks": pending, "open_questions": count_open_questions(store),
         "deferred_findings": deferred_findings(store), "deploy": deploy,
         "leftover_processes": len(leftover_pids(store)), "warnings": warnings,
-        "needs": queue_needs(store), "parked": [k for k, v in iss.items() if v["status"] == "parked"],
+        "needs": all_needs(store), "parked": [k for k, v in iss.items() if v["status"] == "parked"],
+        "debt": debt_counts(store),
+        "paused": {k: v["blocked_by"] for k, v in store.tasks().items() if v.get("status") == "blocked" and v.get("blocked_by")},
     }
 
 
@@ -3695,12 +4190,120 @@ def cmd_review(store: Store, a: argparse.Namespace) -> None:
     if a.count_run:
         r["rounds"] = int(r.get("rounds", 0)) + 1
     r["at"] = now()
+    cp = open_checkpoint(store, a.name) if a.value == "pass" and a.name in CHECKPOINT_TARGETS else None
     store.save()
+    if cp:
+        store.event("checkpoint", target=a.name, transition="open", round=cp.get("round"))
     store.event("review", scope=tel.scope_token(a.name), value="na" if a.value == "n/a" else a.value, score=a.score, round=r.get("rounds", 0),
                 forced=bool(a.force and a.value == "pass"),
                 force_source=("policy" if (a.note or "").startswith("policy:") else "user") if a.force and a.value == "pass" else None)
     store.log(f"review {a.name} {a.value}" + (f" score={a.score}" if a.score is not None else ""))
     print(f"review {a.name}: {a.value}" + (f" (score {a.score})" if a.score is not None else "") + f" · rounds {r['rounds']}")
+    if cp:
+        print(f"checkpoint {a.name}: waiting for the user's confirmation ({CHECKPOINT_TITLE[a.name]}: board Needs you, or "
+              f"`checkpoint confirm {a.name}` after the user says so); " + ("no milestone that has not started begins before it"
+                                                                           if a.name == "plan" else "architecture waits for it"))
+        queue_notice(store, f"dev-kit: {CHECKPOINT_TITLE[a.name]} waits for you")
+    if a.value == "pass" and a.name == "plan":
+        paused = sorted((k for k, v in store.tasks().items() if v.get("status") == "blocked" and v.get("blocked_by")), key=lambda k: int(k[2:]))
+        if paused:
+            print("paused by a scope change: " + ", ".join(f"{k} ({store.tasks()[k]['blocked_by']})" for k in paused)
+                  + "; the replan resolves each one: `unblock T-nnn` (still valid) or `drop T-nnn --reason`")
+
+
+# ---------------------------------------------------------------- human checkpoints on the PRD and the plan (§19)
+CHECKPOINT_TARGETS = ("prd", "plan")
+CHECKPOINT_TITLE = {"prd": "Confirm PRD", "plan": "Confirm plan"}
+CHECKPOINT_DOC = {"prd": "prd.md", "plan": "plan.md"}
+
+
+def checkpoints(store: Store) -> dict:
+    return store.state.setdefault("checkpoints", {})
+
+
+def open_checkpoint(store: Store, target: str) -> dict | None:
+    """A passed review of the PRD or the plan opens its checkpoint, unless the same version was already confirmed."""
+    ver = artifact_hash(store, target)
+    cp = checkpoints(store).get(target)
+    if cp and cp.get("status") == "confirmed" and cp.get("version") == ver:
+        return None
+    rnd = int((cp or {}).get("round") or 0) + 1
+    hist = (cp or {}).get("history") or []
+    checkpoints(store)[target] = {"status": "pending", "version": ver, "created_at": now(), "round": rnd, "history": hist}
+    return checkpoints(store)[target]
+
+
+def checkpoint_pending(store: Store, target: str) -> bool:
+    return ((store.state.get("checkpoints") or {}).get(target) or {}).get("status") in ("pending", "adjust")
+
+
+def checkpoint_needs(store: Store) -> list[dict]:
+    out = []
+    for t in CHECKPOINT_TARGETS:
+        cp = (store.state.get("checkpoints") or {}).get(t) or {}
+        if cp.get("status") == "pending":
+            out.append({"kind": "checkpoint", "target": t, "title": CHECKPOINT_TITLE[t], "doc": CHECKPOINT_DOC[t],
+                        "summary": cp.get("summary"), "version": cp.get("version"), "since": cp.get("created_at"),
+                        "round": cp.get("round"), "actions": ["confirm", "adjust"]})
+    return out
+
+
+def all_needs(store: Store) -> list[dict]:
+    """Needs-you items the state derives (checkpoints, deferred debt, the issue queue), in that order."""
+    return checkpoint_needs(store) + debt_needs(store) + queue_needs(store)
+
+
+def cmd_checkpoint(store: Store, a: argparse.Namespace) -> None:
+    """The user's confirmation of the PRD or the plan (§19). confirm | adjust --feedback (or --request P-nnn, the
+    decision made on the board) | summary --text (what the board shows) | status."""
+    store.load()
+    if a.target not in CHECKPOINT_TARGETS:
+        fail(f"checkpoint target must be {' or '.join(CHECKPOINT_TARGETS)}")
+    cp = checkpoints(store).get(a.target)
+    if a.action == "status":
+        print(f"checkpoint {a.target}: " + ((cp or {}).get("status") or "none (no passed review since 3.0)")
+              + (f" · version {cp.get('version')}" if cp and cp.get("version") else "")
+              + (f" · confirmed {cp.get('confirmed_at')} by {cp.get('by')}" if cp and cp.get("status") == "confirmed" else ""))
+        return
+    if not cp:
+        fail(f"no checkpoint for {a.target}: it opens when review {a.target} passes")
+    if a.action == "summary":
+        if not (a.text or "").strip():
+            fail("summary needs --text")
+        cp["summary"] = a.text.strip()[:4000]
+        store.save()
+        print(f"checkpoint {a.target}: summary recorded")
+        return
+    decision, feedback, by = a.action, (a.feedback or "").strip(), a.by or "user"
+    if a.request:
+        import dev_worker as dw
+        x = dw.item(store.root, a.request)
+        if x is None or x.get("action") != "checkpoint" or (x.get("args") or {}).get("target") != a.target:
+            fail(f"{a.request} is not a checkpoint decision on {a.target} from the board")
+        decision = "confirm" if x["args"]["decision"] == "confirm" else "adjust"
+        if decision != a.action:
+            fail(f"{a.request} asks to {x['args']['decision']}, not {a.action}")
+        feedback, by = str(x["args"].get("feedback") or "").strip(), "board"
+    if cp.get("status") != "pending":
+        fail(f"checkpoint {a.target} is {cp.get('status')}, not waiting for a decision")
+    if decision == "adjust" and not feedback:
+        fail("adjust needs --feedback: what must change")
+    entry = {"at": now(), "decision": decision, "by": by, "version": cp.get("version"),
+             **({"feedback": feedback[:4000]} if feedback else {}), **({"request": a.request} if a.request else {})}
+    cp.setdefault("history", []).append(entry)
+    if decision == "confirm":
+        cp.update(status="confirmed", confirmed_at=now(), by=by)
+        cp.pop("feedback", None)
+    else:
+        cp.update(status="adjust", feedback=feedback[:4000], adjusted_at=now())
+    store.save()
+    store.log(f"checkpoint {a.target} {decision} by {by}" + (f" ({a.request})" if a.request else ""))
+    store.event("checkpoint", target=a.target, transition=decision, round=cp.get("round"))
+    if decision == "confirm":
+        print(f"checkpoint {a.target}: confirmed by {by} (version {cp.get('version')})")
+    else:
+        print(f"checkpoint {a.target}: changes asked; run /dev-kit:{a.target} with the feedback, then review {a.target} again "
+              f"(a new checkpoint follows)")
 
 
 def cmd_set(store: Store, a: argparse.Namespace) -> None:
@@ -3743,11 +4346,13 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
                     fail(f"autonomy.{field}: {part} is not an object")
             node[parts[-1]] = parsed
             store_autonomy_object(auto, top, merged)
-        elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy", "ui", "queue"):
+        elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy", "ui", "queue", "milestone_size", "ci"):
             if top == "local_deploy" and not isinstance(parsed, dict):
                 parsed = {"mode": val}
             elif top == "model_policy" and not isinstance(parsed, dict):
                 parsed = {"mode": val}
+            elif top == "ci" and not isinstance(parsed, dict):
+                parsed = {"provider": val}
             elif top == "cooldown" and not isinstance(parsed, dict):
                 if val not in ("on", "off", "true", "false", "yes", "no"):
                     fail('autonomy.cooldown must be on | off or {"enabled": true, "max_tasks": 5}')
@@ -3786,9 +4391,9 @@ def store_autonomy_object(auto: dict, top: str, obj: dict) -> None:
         obj = {**DEFAULT_AUTONOMY["local_deploy"], **obj}
     elif top in ("cooldown", "quality"):
         check_autonomy_field(top, obj)
-    elif top == "queue":
-        check_queue(obj)
-        obj = {**DEFAULT_AUTONOMY["queue"], **obj}
+    elif top in ("queue", "milestone_size", "ci"):
+        obj = {**DEFAULT_AUTONOMY[top], **obj}
+        check_autonomy_field(top, obj)
     elif top == "ui":
         obj = check_autonomy_field(top, obj)
     auto[top] = obj
@@ -3881,6 +4486,11 @@ def lifecycle_steps(store: Store, rep: dict) -> dict:
         elif rname and (r.get("verdict") not in ("pass", "n/a") or rname in outdated):
             st = "review"
             note = f"review {rname} " + ("outdated" if rname in outdated else (r.get("verdict") or "not run"))
+        elif step in CHECKPOINT_TARGETS and checkpoint_pending(store, step):
+            cp = (store.state.get("checkpoints") or {})[step]
+            st = "checkpoint"
+            note = (f"changes asked: {cp.get('feedback')}" if cp.get("status") == "adjust"
+                    else f"waiting for your confirmation ({CHECKPOINT_TITLE[step]})")
         else:
             st = "done"
         out[step] = {"key": step, "state": st, "note": note}
@@ -4090,13 +4700,15 @@ def next_command(store: Store) -> str:
         step = lc["step"]
         if lc["steps"][step]["state"] == "review":
             return f"/dev-kit:review {STEP_REVIEW[step]}"
+        if lc["steps"][step]["state"] == "checkpoint":  # pending: review asks the user; adjust: the skill revises
+            return f"/dev-kit:review {step}" if checkpoints(store)[step]["status"] == "pending" else f"/dev-kit:{step}"
         return f"/dev-kit:{step}"
     if lc["phase"] == "stable":
         return "/dev-kit:backlog"
     if store.in_progress():
         return "/dev-kit:implement"
     for m in store.milestone_order():
-        live = [v for v in ts.values() if v["milestone"] == m and v["status"] != "dropped"]
+        live = gate_tasks(store, m)
         if live and store.milestones()[m].get("gate", "pending") == "pending":
             if all(v["status"] == "done" for v in live):
                 return f"/dev-kit:qa {m}"
@@ -4323,6 +4935,7 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
         out["next_command"] = next_command(store)
         out["open_questions"] = count_open_questions(store)
         out["queue_needs"] = queue_needs(store)
+        out["needs"] = all_needs(store)
         out["stale"] = stale_report(store)
         lc = lifecycle(store)
         out["phase"], out["step"], out["reopened"] = lc["phase"], lc["step"], lc["reopened"]
@@ -4404,6 +5017,11 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
                       f"with {len(n['issues'])} of them (board: Needs you › Plan the queue milestone)")
             else:
                 print(f"Needs you: {n['issue']} waited {n['milestones']} closed milestones · schedule it next, park it or wontfix")
+    for n in checkpoint_needs(store) + debt_needs(store):
+        if n["kind"] == "checkpoint":
+            print(f"Needs you: {n['title']} (review {n['target']} passed) · board: Needs you › {n['title']}, or say so here")
+        else:
+            print(f"Needs you: {n['text']} · promote to issues, accept with an ADR, or use the next cool-down")
     cs = store.dev / "costs" / "summary.json"
     if cs.exists():
         try:
@@ -5013,7 +5631,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("start"); s.set_defaults(fn=cmd_start); s.add_argument("task"); s.add_argument("--force", action="store_true")
     s = sub.add_parser("done"); s.set_defaults(fn=cmd_done); s.add_argument("task"); s.add_argument("--commit"); s.add_argument("--force", action="store_true")
-    s = sub.add_parser("block"); s.set_defaults(fn=cmd_block); s.add_argument("task"); s.add_argument("--reason", required=True)
+    s = sub.add_parser("block"); s.set_defaults(fn=cmd_block); s.add_argument("task"); s.add_argument("--reason")
+    s.add_argument("--blocked-by", help="I-nnn: paused until the replan of this scope change")
     s = sub.add_parser("unblock"); s.set_defaults(fn=cmd_unblock); s.add_argument("task")
     s = sub.add_parser("drop"); s.set_defaults(fn=cmd_drop); s.add_argument("task"); s.add_argument("--reason", required=True)
 
@@ -5025,6 +5644,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--force", action="store_true"); add_risk_flags(s, tier=True)
     s.add_argument("--confirm-frozen", action="store_true", help="add to a milestone frozen for QA (it re-enters the next round)")
     s = sub.add_parser("freeze"); s.set_defaults(fn=cmd_freeze); s.add_argument("milestone")
+    s = sub.add_parser("affected"); s.set_defaults(fn=cmd_affected); s.add_argument("--acs", required=True); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("hard-floor"); s.set_defaults(fn=cmd_hard_floor); s.add_argument("milestone")
+    s.add_argument("--from", dest="from_file", required=True, help="JSON file of the checks (- for stdin)")
+    s = sub.add_parser("ci"); s.set_defaults(fn=cmd_ci); s.add_argument("action", choices=["check", "record", "status"])
+    s.add_argument("milestone"); s.add_argument("--sha"); s.add_argument("--status"); s.add_argument("--url")
+    s = sub.add_parser("debt"); s.set_defaults(fn=cmd_debt); s.add_argument("action", choices=["status", "decide"])
+    s.add_argument("decision", nargs="?"); s.add_argument("--request"); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("checkpoint"); s.set_defaults(fn=cmd_checkpoint)
+    s.add_argument("action", choices=["status", "confirm", "adjust", "summary"]); s.add_argument("target")
+    s.add_argument("--feedback"); s.add_argument("--text"); s.add_argument("--by"); s.add_argument("--request")
 
     s = sub.add_parser("fix-tasks"); s.set_defaults(fn=cmd_fix_tasks)
     s.add_argument("--from", dest="src_file", required=True); s.add_argument("--milestone", required=True)
@@ -5136,7 +5765,7 @@ MUTATING = frozenset({
     cmd_add_task, cmd_fix_tasks, cmd_add_question, cmd_answer_question, cmd_plan_apply, cmd_move_task,
     cmd_new_milestone, cmd_reorder, cmd_gate, cmd_review, cmd_artifact, cmd_release_submit, cmd_release_decide,
     cmd_release_record, cmd_set, cmd_deploy, cmd_preview, cmd_add_issue, cmd_issue, cmd_pull_issues, cmd_cooldown,
-    cmd_freeze,
+    cmd_freeze, cmd_hard_floor, cmd_ci, cmd_debt, cmd_checkpoint,
 })
 
 

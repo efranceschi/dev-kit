@@ -19,6 +19,8 @@ Two modes. Findings use `category: requirements` (PRD) or `category: planning` (
 - **Testability**: each task has `test_notes` naming layers; each AC has a place where it will be proven.
 - **Feasibility**: files listed exist in the architecture layout; needed credentials/services are available or flagged as `always_ask`.
 - **Risk first**: the riskiest integration or unknown is scheduled early with a spike or thin slice. Late risk → `medium`.
+- **Exit check**: every milestone (except release fixes and maintenance milestones) has an `exit_check:` (`e2e:`, `cmd:`, `acs:`; `shared/conventions.md` §4) that verifies its stated goal; one missing → `high`; one that checks something other than the goal (a unit test of one function for "a user can pay", ACs that do not cover the goal) → `medium`, quoting the goal and the check.
+- **Milestone size**: planned tasks + buffer slots + cool-down within `autonomy.milestone_size` (default 5–12); outside it with no `size_reason:` below the heading → `medium`.
 - **Releases** (when the plan has `## R<n>` headings; `shared/conventions.md` §4):
   - *Complete journey*: each release can be validated end to end by its user; a release that ships only infrastructure or one layer (a database without the interface or API that uses it) → `high`.
   - *Risk ends a release*: a critical delivery (payments, authentication, sensitive data, destructive migration) is the last milestone of its release, so a person reviews it before anything is built on top; otherwise → `medium`.

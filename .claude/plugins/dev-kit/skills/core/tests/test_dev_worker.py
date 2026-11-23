@@ -354,9 +354,9 @@ class WorkerTest(unittest.TestCase):
             "- acceptance:\n  - AC-2: b\n- test_notes: t\n- files: b.py\n", encoding="utf-8")
         for f in ("brief.md", "prd.md", "architecture.md"):
             (self.root / ".dev" / f).write_text(f"# {f}\n", encoding="utf-8")
-        for args in (["artifact", "mark", "all"], ["review", "prd", "pass", "--score", "90"],
+        for args in (["artifact", "mark", "all"], ["review", "prd", "pass", "--score", "90"], ["checkpoint", "confirm", "prd"],
                      ["review", "design", "n/a", "--note", "no UI"], ["sync-plan"], ["artifact", "mark", "plan"],
-                     ["review", "plan", "pass", "--score", "90"]):
+                     ["review", "plan", "pass", "--score", "90"], ["checkpoint", "confirm", "plan"]):
             subprocess.run(state + args, check=True, capture_output=True)
         return lambda *a: subprocess.run(state + list(a), check=True, capture_output=True, text=True)
 

@@ -93,6 +93,7 @@ class Base(unittest.TestCase):
         self.run_state("artifact", "mark", "brief")
         self.run_state("artifact", "mark", "prd")
         self.run_state("review", "prd", "pass", "--score", "90")
+        self.run_state("checkpoint", "confirm", "prd")
         self.run_state("artifact", "mark", "architecture")
         if ui:
             (dev / "design").mkdir(exist_ok=True)
@@ -105,6 +106,7 @@ class Base(unittest.TestCase):
             self.run_state("review", "design", "n/a", "--note", "no UI")
         self.run_state("artifact", "mark", "plan")
         self.run_state("review", "plan", "pass", "--score", "90")
+        self.run_state("checkpoint", "confirm", "plan")
 
     def lifecycle(self) -> dict:
         return json.loads(self.run_state("status", "--json").stdout)
@@ -398,6 +400,7 @@ class TestLifecycle(Base):
         self.run_state("artifact", "mark", "prd")
         self.assertEqual(nxt(), "/dev-kit:review prd")
         self.run_state("review", "prd", "pass", "--score", "90")
+        self.run_state("checkpoint", "confirm", "prd")
         self.assertEqual(nxt(), "/dev-kit:architecture")
         ph = self.phases()
         self.assertEqual([ph[k]["state"] for k in ("conception", "planning", "construction", "stable")],
@@ -437,6 +440,7 @@ class TestLifecycle(Base):
         self.assertEqual(ph["construction"]["state"], "active")
         self.assertEqual(self.run_state("status", "--next").stdout.strip(), "/dev-kit:review prd")
         self.run_state("review", "prd", "pass", "--score", "90")
+        self.run_state("checkpoint", "confirm", "prd")
         self.assertEqual(self.lifecycle()["step"], "architecture")  # stale: prd changed
         self.run_state("artifact", "mark", "all")
         self.assertEqual(self.lifecycle()["phase"], "construction")  # plan reviews are not re-checked once built
@@ -1306,6 +1310,7 @@ class TestFeedbackReport(Base):
         for i, sc in enumerate([40, 45, 50]):
             self.run_state("review", "prd", "fail", "--score", str(sc), "--count-run")
         self.run_state("review", "prd", "pass", "--score", "52", "--force", "--count-run")
+        self.run_state("checkpoint", "confirm", "prd")
         st = self.stage(self.report(), "prd")
         # 4 rounds: 3 extra rounds (-30) plus 1 beyond the limit of 3 (-10); forced by the user (-25)
         self.assertEqual(st["score"], 35)

@@ -13,9 +13,14 @@
 Must-have ACs not complete: none (otherwise the release is not submitted).
 
 ## Milestones
-| Milestone | Gate | Score | Rounds | Report |
-|---|---|---|---|---|
-| M1 | passed | 91 | 1 | .dev/qa/M1/report.md |
+| Milestone | Gate | Score | Rounds | Exit check | Report |
+|---|---|---|---|---|---|
+| M1 | passed | 91 | 1 | e2e: signup.spec · pass | .dev/qa/M1/report.md |
+
+The exit check of each milestone with its result comes from `.dev/qa/<M>/scores.json` → `exit`; the hard floor (tests, lint, type-check, dependencies, secrets, a11y) and the CI run come from `dev_state.py status --json` → `milestones.<M>.hard_floor` and `.ci`.
+
+## Confirmations
+PRD and plan versions the user confirmed before building (`status --json` → `checkpoints`): who, when, the version, and any changes asked on the way.
 
 ## Try it
 Preview / staging link or local run command (from the local preview of conventions.md §11 when there is one), and the screenshots or videos of the main flows (`.dev/qa/ux/` or the release audit), each with the flow it shows.

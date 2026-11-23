@@ -2,6 +2,30 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.0.0-alpha.2 — 2026-11-23
+
+Second phase of 3.0 (quality and process gates): an executable exit check, a deterministic floor with CI as the verdict, a cap on deferred debt, the user's confirmation of the PRD and the plan, scope changes that reach the milestone being built, and a size range for milestones.
+
+### Breaking
+- `review prd pass` and `review plan pass` open a checkpoint (**Confirm PRD**, **Confirm plan**); with the plan's pending, `next` and `start` refuse every milestone that has not started, and the lifecycle holds architecture until the PRD is confirmed (conventions §19). Confirm with `DS checkpoint confirm <prd|plan>`, the board's Needs you, or the review skill's question.
+- In a plan that uses `exit_check` (a 3.0 plan), `sync-plan` refuses a new milestone without one, and `gate <M> passed` refuses unless `scores.json` → `exit` is `pass` (conventions §4, §7).
+- `gate <M> passed` refuses a failing hard floor and, when CI is detected and `autonomy.ci.required` (default), anything but a green CI run, whatever the score. `--force` never passes a failing secrets check or a critical dependency.
+
+### Added
+- Exit check (item 7): milestone field `exit_check: e2e: <test>; cmd: <command>; acs: AC-n` (release fixes and maintenance milestones exempt). The qa baseline runs it, `spec-tracer` checks it and reports `exit_check`, `dev_score.py` adds the `exit` dimension (pass or fail, never partial) and fails the verdict on it. `plan --annotate-exit` proposes it for older plans; the plan review rates a missing one `high` and one that does not verify the goal `medium`; the release dossier lists each milestone's check and result.
+- Hard floor (item 10, `autonomy.quality.hard_floor`, on): `DS hard-floor <M> --from <json>` records tests, lint, type-check, dependency scan, secret scan and axe; each failure becomes one `hard_floor:<check>` fix task (reused while open); `n/a` needs a reason; no tests or no lint is a high finding.
+- CI as the verdict (item 10, `autonomy.ci = {provider: auto, required: true, timeout_min: 30}`): `DS ci check <M>` (GitHub through `gh`), `ci record <M> --sha --status`, `ci status`; new pause point `ci_timeout` (park in `unattended`).
+- Deferred debt cap (item 10, `autonomy.quality.deferred_cap = {total: 20, medium: 10}`): checked at every gate close; above it Needs you shows **Deferred debt above the cap** with Promote to issues, Accept formally (ADR) and Use the next cool-down (`DS debt status|decide`, board request `debt_decision`). The board shows the total on the gates tab and in Stable.
+- Checkpoints (item 11): `DS checkpoint status|confirm|adjust|summary <prd|plan>` with who, when, version and feedback in `checkpoints`; board Needs you **Confirm** / **Ask for changes** with a link that opens the document formatted (`#doc:prd.md`, `#doc:plan.md`) and the review's summary; board request `checkpoint`; continuous mode stops on a pending checkpoint; autopilot parks it in `unattended`.
+- Scope change reaches the current milestone (item 8): `DS affected --acs AC-4,AC-7 [--json]` lists the pending tasks that cite them; `issue` offers to pause them (`block T-nnn --blocked-by I-nnn`, uncommitted work to `dev-kit/paused/T-nnn` first); paused tasks do not count for a frozen milestone's gate; a passed `review plan` lists them for the replan to `unblock` or `drop`; `backlog --json` → `paused`.
+- Milestone size (item 1b, `autonomy.milestone_size = {min: 5, max: 12}`): `sync-plan` warns when planned tasks + buffer slots + cool-down fall outside it and the milestone has no `size_reason:`; the plan review rates it `medium`.
+- Telemetry events `hard_floor`, `ci`, `debt`, `checkpoint`.
+
+### Migration
+- Plans without `exit_check` keep working: `sync-plan` warns and the gate does not ask for `exit: pass` until `plan --annotate-exit` adds it. Their gates also do not require a recorded hard floor (a failing one recorded still blocks).
+- Projects whose PRD and plan were reviewed before this version have no checkpoint and are not held; the next passed review opens one.
+- A project with `.github/workflows` or `.gitlab-ci.yml` now needs a green CI result at the gate: run `DS ci check <M>`, or `DS set autonomy.ci.required false` / `autonomy.ci.provider none`.
+
 ## 3.0.0-alpha.1 — 2026-11-23
 
 First phase of 3.0 (foundation: data and cheap rules). The 3.0 line is delivered phase by phase; 3.0.0 closes it.

@@ -67,6 +67,7 @@ class Base(unittest.TestCase):
                 (dev / f"{f}.md").write_text(f"# {f}\n", encoding="utf-8")
                 self.ds("artifact", "mark", f)
             self.ds("review", "prd", "pass", "--score", "90")
+            self.ds("checkpoint", "confirm", "prd")
             self.ds("review", "design", "n/a", "--note", "no UI")
         if plan:
             (dev / "plan.md").write_text(PLAN, encoding="utf-8")
@@ -74,6 +75,7 @@ class Base(unittest.TestCase):
             if phase == "construction":
                 self.ds("artifact", "mark", "plan")
                 self.ds("review", "plan", "pass", "--score", "90")
+                self.ds("checkpoint", "confirm", "plan")
 
     def state(self) -> dict:
         return json.loads((self.root / ".dev" / "state.json").read_text(encoding="utf-8"))
@@ -147,7 +149,7 @@ class TestStatusLineAndHooks(Base):
         payload = json.dumps({"workspace": {"current_dir": str(self.root)}})
         self.assertEqual(self.run_py(LINE, stdin=payload).stdout, "")  # not a dev-kit project
         self.init()
-        self.ds("review", "plan", "pass", "--score", "90")
+        self.ds("review", "plan", "pass", "--score", "90")  # same version as init(): no new checkpoint
         self.ds("start", "T-001")
         line = self.run_py(LINE, stdin=payload).stdout.strip()
         self.assertEqual(line, "dev-kit · construction · M1 0/1 · ▶ T-001 · next /dev-kit:implement")
@@ -187,6 +189,7 @@ class TestNextCommand(Base):
         (self.root / ".dev" / "prd.md").write_text("# PRD\n", encoding="utf-8")
         self.assertEqual(self.next(), "/dev-kit:review prd")
         self.ds("review", "prd", "pass", "--score", "90")
+        self.ds("checkpoint", "confirm", "prd")
         self.assertEqual(self.next(), "/dev-kit:architecture")
         (self.root / ".dev" / "architecture.md").write_text("# Architecture\n", encoding="utf-8")
         self.assertEqual(self.next(), "/dev-kit:ux")
@@ -196,6 +199,7 @@ class TestNextCommand(Base):
         self.ds("sync-plan")
         self.assertEqual(self.next(), "/dev-kit:review plan")
         self.ds("review", "plan", "pass", "--score", "90")
+        self.ds("checkpoint", "confirm", "plan")
         self.assertEqual(self.next(), "/dev-kit:implement")
         self.ds("start", "T-001")
         self.ds("done", "T-001")

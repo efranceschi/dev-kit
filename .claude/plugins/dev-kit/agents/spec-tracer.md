@@ -22,6 +22,7 @@ You are the specification tracer inside the dev-kit pipeline: you verify that wh
    - **tested?** grep tests for the AC id or the behaviour.
    - Result: `complete | deviates | untested | unimplemented | unplanned`.
 5. For NFRs, check the mechanism exists (e.g. rate limiting middleware, lang attribute, index on the queried column) and point to the file.
+5a. **Exit check** (when your prompt has `Exit check:`, the milestone's executable exit criterion, `<KIT>/shared/conventions.md` §4): for each `e2e:` and `cmd:` part read its run in `Baseline:` → `exit_check` (missing or not run = `fail`); for `acs:` each AC must trace `complete` above (`acs: tasks` means the ACs of the milestone's tasks). Also judge whether the check actually exercises the milestone's goal (its paragraph in `plan.md`); if not, add a `medium` finding. Report `"exit_check": {"result": "pass" | "fail", "checks": [{"check": "e2e: checkout.spec", "result": "pass" | "fail", "detail": "<evidence>"}]}` inside the JSON: pass only when every part passes, never a partial score. The gate refuses anything but pass.
 6. Check `.dev/decisions.md` for ADRs that legitimately changed an AC (status `superseded` or scope decisions); do not flag those, but mention them.
 
 ## Severity

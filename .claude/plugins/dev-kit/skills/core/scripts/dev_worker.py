@@ -323,10 +323,28 @@ def validate(action: object, args: object) -> dict:
         out["feedback"] = clean(args.get("feedback"), "feedback", 4000, errors, required=False, multiline=True)
         if out["decision"] == "reject" and not out["feedback"]:
             errors.append("a rejection needs feedback: what must change, one item per line")
+    elif action == "checkpoint":
+        # the user's confirmation of the PRD or the plan (conventions.md §19)
+        out["target"] = args.get("target")
+        if out["target"] not in ("prd", "plan"):
+            errors.append("target must be prd or plan")
+        out["decision"] = args.get("decision")
+        if out["decision"] not in ("confirm", "adjust"):
+            errors.append("decision must be confirm or adjust")
+        out["feedback"] = clean(args.get("feedback"), "feedback", 4000, errors, required=False, multiline=True)
+        if out["decision"] == "adjust" and not out["feedback"]:
+            errors.append("asking for changes needs feedback: what must change")
+    elif action == "debt_decision":
+        # deferred debt above the cap (conventions.md §7): promote to issues, accept with an ADR, or the next cool-down
+        out["decision"] = args.get("decision")
+        if out["decision"] not in ("promote", "accept", "cooldown"):
+            errors.append("decision must be promote, accept or cooldown")
+        out["note"] = clean(args.get("note"), "note", 2000, errors, required=False, multiline=True)
     else:
-        raise Invalid(["action must be one of run, issue_new, answer_question, plan_draft, release_decision"])
+        raise Invalid(["action must be one of run, issue_new, answer_question, plan_draft, release_decision, checkpoint, debt_decision"])
     allowed = {"run": {"command"}, "issue_new": {"title", "type", "note"}, "answer_question": {"question", "option", "answer"},
-               "plan_draft": {"ops", "base"}, "release_decision": {"release", "decision", "feedback"}}[action]  # type: ignore[index]
+               "plan_draft": {"ops", "base"}, "release_decision": {"release", "decision", "feedback"},
+               "checkpoint": {"target", "decision", "feedback"}, "debt_decision": {"decision", "note"}}[action]  # type: ignore[index]
     extra = set(args) - allowed
     if extra:
         errors.append(f"unknown field {sorted(extra)[0]}")
@@ -742,9 +760,9 @@ def continue_next(root: Path) -> tuple[dict | None, str]:
     """Continuous mode: queue the project's next step when the mode is on, nothing is queued and nothing needs the
     user. Returns (request, "") or (None, why); a reason that needs the user is kept for the board.
 
-    It stops, and says why, when: a request or an open question waits for an answer, a task is blocked, the last
-    request failed or a continuous one was cancelled, the milestone it was working on closed (one milestone per
-    go), the next step is not one it takes alone (deploy, release, plan...), or the last step changed nothing.
+    It stops, and says why, when: a request or an open question waits for an answer, a task is blocked, a checkpoint
+    (Confirm PRD or plan) waits, the last request failed or a continuous one was cancelled, the milestone it was
+    working on closed (one milestone per go), the next step is not one it takes alone (deploy, release, plan...), or the last step changed nothing.
     Turning the mode on again on the board clears a stop."""
     raw = _read(run_dir(root) / "worker-mode.json") or {}
     if raw.get("continuous") is not True:
@@ -784,6 +802,8 @@ def continue_next(root: Path) -> tuple[dict | None, str]:
             stop = f"{questions} open question{'s' if questions != 1 else ''} wait{'' if questions != 1 else 's'} for your answer"
         elif blocked:
             stop = f"{blocked[0]} is blocked" + (f" (and {len(blocked) - 1} more)" if len(blocked) > 1 else "")
+        elif cps := ds.checkpoint_needs(store):
+            stop = f"{cps[0]['title']} waits for you"
         elif last and last["status"] != "done" and ended(last) >= since:
             stop = f"{last['id']} {'failed' if last['status'] == 'failed' else 'was cancelled'}"
         elif rec.get("milestone") and rec.get("gate") == "pending" and gate(rec["milestone"]) != "pending":
@@ -881,7 +901,9 @@ def describe(x: dict) -> str:
     a = x.get("args") or {}
     what = {"run": a.get("command"), "issue_new": f"new {a.get('type', 'issue')}", "answer_question": f"answer to {a.get('question')}",
             "plan_draft": f"plan draft ({len(a.get('ops') or [])} change(s))",
-            "release_decision": f"{a.get('decision')} {a.get('release')}"}.get(x.get("action"), x.get("action"))
+            "release_decision": f"{a.get('decision')} {a.get('release')}",
+            "checkpoint": f"{a.get('decision')} {a.get('target')}",
+            "debt_decision": f"deferred debt: {a.get('decision')}"}.get(x.get("action"), x.get("action"))
     return f"{x['id']} {x['status']}: {what}"
 
 

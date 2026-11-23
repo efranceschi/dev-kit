@@ -211,6 +211,26 @@
     "tip": {
       "tip": "tok",
       "context": "tok"
+    },
+    "hard_floor": {
+      "scope": "tok",
+      "failed": "num",
+      "checks": "num"
+    },
+    "ci": {
+      "scope": "tok",
+      "status": "tok",
+      "provider": "tok"
+    },
+    "debt": {
+      "transition": "tok",
+      "total": "num",
+      "medium": "num"
+    },
+    "checkpoint": {
+      "target": "tok",
+      "transition": "tok",
+      "round": "num"
     }
   }
 }

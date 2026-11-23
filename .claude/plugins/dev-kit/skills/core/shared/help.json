@@ -382,6 +382,10 @@
         {
           "arg": "--annotate-risk",
           "meaning": "add the risk fields to tasks already planned, without replanning"
+        },
+        {
+          "arg": "--annotate-exit",
+          "meaning": "propose an exit_check for each open milestone of an older plan"
         }
       ],
       "examples": [

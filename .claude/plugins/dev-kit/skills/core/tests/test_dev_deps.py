@@ -206,6 +206,7 @@ class TestDependencyOnlyEdits(DepBase):
         dev = self.root / ".dev"
         self.run_state("artifact", "mark", "all")
         self.run_state("review", "plan", "pass", "--score", "90")
+        self.run_state("checkpoint", "confirm", "plan")
         self.assertEqual(json.loads(self.run_state("stale", "--json").stdout)["reviews"], [])
         text = (dev / "plan.md").read_text(encoding="utf-8")
         (dev / "plan.md").write_text(text.replace("- deps: T-002", "- deps: T-001\n- dep_reasons: T-001=reads its output"), encoding="utf-8")

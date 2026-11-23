@@ -294,13 +294,14 @@ Milestones M1..Mn and small vertical-slice tasks T-xxx with dependencies, ACs an
 
 **When:** After design (or architecture for UI-less products), and to replan remaining work.
 
-**Usage:** `/dev-kit:plan [milestone focus | 'replan' | --annotate-risk]`
+**Usage:** `/dev-kit:plan [milestone focus | 'replan' | --annotate-risk | --annotate-exit]`
 
 | Argument | Meaning |
 |---|---|
 | `milestone focus` | plan one area |
 | `replan` | rewrite only todo tasks of future milestones |
 | `--annotate-risk` | add the risk fields to tasks already planned, without replanning |
+| `--annotate-exit` | propose an exit_check for each open milestone of an older plan |
 
 **Examples:**
 

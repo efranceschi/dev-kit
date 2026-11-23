@@ -17,7 +17,8 @@ Existing projects: no walking skeleton (scaffold, tooling and CI exist; skip T-0
 {{why the release ends here: complete journey, risk isolated (payments, auth, sensitive migration), 2–5 milestones}}
 
 ## M1 — {{milestone title}}
-{{one-paragraph goal and exit criterion}}
+{{one-paragraph goal}}
+- exit_check: e2e: {{test that walks the goal}}; cmd: {{command}}; acs: {{AC-n, AC-m}}
 
 ### T-001 Project scaffold, tooling and CI
 - status: todo

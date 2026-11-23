@@ -335,6 +335,7 @@ class TestArtifactsAndXref(Base):
         self.assertIn("not tracked yet", self.run_state("stale").stdout)
         self.run_state("artifact", "mark", "all")
         self.run_state("review", "plan", "pass", "--score", "90")
+        self.run_state("checkpoint", "confirm", "plan")
         self.assertEqual(json.loads(self.run_state("stale", "--json").stdout)["stale"], [])
         # header-only change (status/date) is not a change
         (dev / "prd.md").write_text((dev / "prd.md").read_text().replace("status: draft", "status: approved"), encoding="utf-8")
