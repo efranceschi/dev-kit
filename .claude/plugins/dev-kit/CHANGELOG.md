@@ -2,6 +2,15 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.6.0 — 2026-11-23
+
+### Changed
+- State changes are now transactional (conventions §20). Every `dev_state.py` command that changes anything runs under an exclusive project lock (`.dev/run/state.lock`) on a freshly loaded state, so concurrent writers no longer overwrite each other and ids are never reused.
+- A command writes `state.json` and the files that must agree with it (`plan.md`, `issues.md`, `open-questions.md`, question sidecars, the plan baseline) together: all or none, `state.json` last, with a journal (`run/txn.json`) that the next command rolls forward after a kill. A failed command writes nothing, and log and telemetry lines are written only after the commit. `fix-tasks` is all-or-nothing across its batch.
+- Writes are durable and collision-free (unique temp name, fsync); the previous good state is kept as `state.json.bak` and named in the error when `state.json` is corrupt.
+- Deterministic: one clock, which `DEV_KIT_NOW` pins (also for telemetry timestamps and the session id), so the same commands give byte-identical artifacts.
+- `dev_ui.py` records its settings in a transaction.
+
 ## 2.5.0 — 2026-11-21
 
 ### Added

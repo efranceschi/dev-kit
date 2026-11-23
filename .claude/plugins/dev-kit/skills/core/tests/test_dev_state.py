@@ -1237,7 +1237,7 @@ class TestCleanupAndDeploy(Base):
             outside = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], cwd=other)
             self.procs += [inside, outside]
             run = self.root / ".dev" / "run"
-            run.mkdir(parents=True)
+            run.mkdir(parents=True, exist_ok=True)
             (run / "test-auditor-1.pids").write_text(f"{inside.pid}\n{outside.pid}\n", encoding="utf-8")
             self.assertIn("Leftover agent processes: 2", self.run_state("status").stdout)
             self.run_state("cleanup", "--dry-run")

@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import fcntl
 import hashlib
 import io
 import json
@@ -476,12 +477,56 @@ SUBITEM_RE = re.compile(r"^\s{2,}-\s+(.*?)\s*$")
 
 # --------------------------------------------------------------------------- helpers
 
+def _clock() -> datetime:
+    """The current time; DEV_KIT_NOW (ISO 8601) pins it so tests and replays produce byte-identical artifacts."""
+    pinned = os.environ.get("DEV_KIT_NOW")
+    if pinned:
+        try:
+            d = datetime.fromisoformat(pinned.replace("Z", "+00:00"))
+            return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
+
 def now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return _clock().replace(microsecond=0).isoformat()
 
 
 def today() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return _clock().strftime("%Y-%m-%d")
+
+
+def atomic_write(path: Path, text: str) -> None:
+    """Replace `path` with `text` so a reader (or a crash) sees the old or the new content, never a mix: a unique
+    temp file in the same directory, flushed and fsynced, renamed over the target, then the directory fsynced."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _write_tmp(path, text)
+    os.replace(tmp, path)
+    _fsync_dir(path.parent)
+
+
+def _write_tmp(path: Path, text: str) -> Path:
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    return tmp
+
+
+def _fsync_dir(d: Path) -> None:
+    try:
+        fd = os.open(d, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+LOCK_TIMEOUT = 30.0
 
 
 def fail(msg: str, code: int = 1) -> "NoReturn":  # type: ignore[name-defined]
@@ -501,43 +546,222 @@ def find_root(explicit: str | None) -> Path:
 
 
 class Store:
+    """Project state. Every change goes through `transaction()`: an exclusive lock, a fresh load, the command's
+    edits to state and to the files it stages, then one commit (all files or none, state.json last), then the log
+    and telemetry lines. A command that fails (`fail()`) commits nothing."""
+
     def __init__(self, root: Path):
         self.root = root
         self.dev = root / ".dev"
         self.path = self.dev / "state.json"
         self.state: dict = {}
+        self._depth = 0
+        self._lock_f = None
+        self._staged: dict[Path, str] = {}
+        self._pending: list[tuple[str, object]] = []
+        self._state_dirty = False
 
     def exists(self) -> bool:
         return self.path.exists()
 
-    def load(self) -> dict:
-        if not self.exists():
-            fail(f"no state at {self.path}. Run `dev_state.py init` (or interview) first.", 2)
+    # ---- transactions
+    @property
+    def in_txn(self) -> bool:
+        return self._depth > 0
+
+    @property
+    def lock_path(self) -> Path:
+        return self.dev / "run" / "state.lock"
+
+    @property
+    def journal_path(self) -> Path:
+        return self.dev / "run" / "txn.json"
+
+    @contextlib.contextmanager
+    def lock(self, timeout: float = LOCK_TIMEOUT):
+        """Exclusive project lock, reentrant inside one process; timeout 0 = try once and raise TimeoutError."""
+        if self._depth > 0:
+            self._depth += 1
+            try:
+                yield
+            finally:
+                self._depth -= 1
+            return
+        run = self.dev / "run"
+        run.mkdir(parents=True, exist_ok=True)
+        gi = run / ".gitignore"
+        if not gi.exists():
+            try:
+                gi.write_text("*\n", encoding="utf-8")
+            except OSError:
+                pass
+        f = open(self.lock_path, "a+")
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    f.close()
+                    raise TimeoutError(f"another dev-kit command holds {self.lock_path} (waited {timeout:g}s)")
+                time.sleep(0.05)
+        self._lock_f = f
+        self._depth = 1
+        try:
+            yield
+        finally:
+            self._depth = 0
+            self._lock_f = None
+            try:
+                fcntl.flock(f, fcntl.LOCK_UN)
+            finally:
+                f.close()
+
+    @contextlib.contextmanager
+    def transaction(self, timeout: float = LOCK_TIMEOUT):
+        """Lock, load the latest state, let the caller edit it, then commit; nested use joins the outer one."""
+        if self._depth > 0:
+            with self.lock():
+                yield self
+            return
+        try:
+            cm = self.lock(timeout)
+            cm.__enter__()
+        except TimeoutError as e:
+            fail(str(e), 4)
+        outer_exc: tuple = (None, None, None)
+        try:
+            self._staged, self._pending, self._state_dirty = {}, [], False
+            self._recover()
+            self.state = {}
+            if self.exists():
+                self._read_state()
+            try:
+                yield self
+            except BaseException as e:  # noqa: BLE001 - decide below whether the command succeeded
+                ok = isinstance(e, SystemExit) and not e.code
+                if not ok:
+                    outer_exc = (type(e), e, e.__traceback__)
+                    self._staged, self._pending, self._state_dirty = {}, [], False
+                    raise
+            self._commit()
+        finally:
+            cm.__exit__(*outer_exc)
+
+    def stage(self, path: Path, text: str) -> None:
+        """Write `text` to `path` as part of the transaction (immediately when there is none)."""
+        if self._depth > 0:
+            self._staged[path] = text
+        else:
+            atomic_write(path, text)
+
+    def read_text(self, path: Path) -> str:
+        """A file's content as the transaction will leave it (staged text wins over the disk)."""
+        if path in self._staged:
+            return self._staged[path]
+        return path.read_text(encoding="utf-8")
+
+    def file_exists(self, path: Path) -> bool:
+        return path in self._staged or path.exists()
+
+    def _commit(self) -> None:
+        if self._state_dirty:
+            self._stamp_state()
+            self._staged[self.path] = json.dumps(self.state, indent=2, ensure_ascii=False) + "\n"
+        staged, pending = self._staged, self._pending
+        self._staged, self._pending, self._state_dirty = {}, [], False
+        if staged:
+            order = [p for p in staged if p != self.path] + ([self.path] if self.path in staged else [])
+            for p in order:
+                p.parent.mkdir(parents=True, exist_ok=True)
+            tmps = [(_write_tmp(p, staged[p]), p) for p in order]  # every file complete on disk before the first rename
+            if self.path in staged and self.path.exists():
+                try:
+                    atomic_write(self.path.with_name("state.json.bak"), self.path.read_text(encoding="utf-8"))
+                except OSError:
+                    pass
+            journal = {"files": [[str(t), str(p)] for t, p in tmps]}
+            atomic_write(self.journal_path, json.dumps(journal))
+            self._roll_forward(journal)
+        for kind, payload in pending:  # side effects only once the change is committed
+            if kind == "log":
+                self._append_log(payload)  # type: ignore[arg-type]
+            else:
+                tel.safe_emit(self.dev, payload[0], payload[1])  # type: ignore[index]
+
+    def _roll_forward(self, journal: dict) -> None:
+        for t, p in journal.get("files", []):
+            if os.path.exists(t):
+                os.replace(t, p)
+        for d in {os.path.dirname(p) for _, p in journal.get("files", [])}:
+            _fsync_dir(Path(d))
+        self.journal_path.unlink(missing_ok=True)
+
+    def _recover(self) -> None:
+        """A journal left by a killed command: finish its renames, so the files are all new or (never started) all old."""
+        if self.journal_path.exists():
+            try:
+                self._roll_forward(json.loads(self.journal_path.read_text(encoding="utf-8")))
+            except (OSError, json.JSONDecodeError):
+                self.journal_path.unlink(missing_ok=True)
+
+    def _read_state(self) -> None:
         try:
             self.state = json.loads(self.path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
-            fail(f"state.json is corrupt: {e}", 1)
+            bak = self.path.with_name("state.json.bak")
+            fail(f"state.json is corrupt: {e}" + (f" (the previous good copy is {bak})" if bak.exists() else ""), 1)
         migrate_legacy_phase(self)
+
+    def load(self) -> dict:
+        if self._depth > 0 and self.state:
+            return self.state  # inside a transaction the in-memory state is the latest, staged edits included
+        if not self.exists():
+            fail(f"no state at {self.path}. Run `dev_state.py init` (or interview) first.", 2)
+        if self._depth == 0 and self.journal_path.exists():
+            try:
+                with self.lock():
+                    self._recover()
+            except TimeoutError:
+                pass  # the writer that owns the journal is still finishing: read what is there
+        self._read_state()
         return self.state
 
-    def save(self) -> None:
+    def _stamp_state(self) -> None:
         self.state["updated_at"] = now()
         try:  # cached for the status line, the session banner and the board, which read state.json directly
             lc = lifecycle(self)
             self.state["phase"], self.state["step"], self.state["reopened"] = lc["phase"], lc["step"], lc["reopened"]
         except Exception:  # noqa: BLE001 - a derived label must never stop the state from being saved
             pass
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self.state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        os.replace(tmp, self.path)
 
-    def event(self, event: str, **fields) -> None:
-        tel.safe_emit(self.dev, event, fields)
+    def save(self) -> None:
+        """Mark the state to be written at commit. Outside a transaction it takes one: lock, write, done."""
+        if self._depth > 0:
+            self._state_dirty = True
+            return
+        with self.lock():
+            self._recover()
+            self._staged, self._pending, self._state_dirty = {}, [], True
+            self._commit()
 
-    def log(self, line: str) -> None:
+    def _append_log(self, line: str) -> None:
         self.dev.mkdir(parents=True, exist_ok=True)
         with (self.dev / "log.md").open("a", encoding="utf-8") as f:
             f.write(f"- {now()} {line}\n")
+
+    def event(self, event: str, **fields) -> None:
+        if self._depth > 0:
+            self._pending.append(("event", (event, fields)))
+        else:
+            tel.safe_emit(self.dev, event, fields)
+
+    def log(self, line: str) -> None:
+        if self._depth > 0:
+            self._pending.append(("log", f"{line}"))
+        else:
+            self._append_log(line)
 
     # ---- derived
     def tasks(self) -> dict:
@@ -727,8 +951,8 @@ def risk_lines(t: dict) -> list[str]:
     return out
 
 
-def append_task_to_plan(plan_path: Path, milestone: str, m_title: str, tid: str, t: dict) -> None:
-    text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else "# Implementation plan\n"
+def append_task_to_plan(store: Store, plan_path: Path, milestone: str, m_title: str, tid: str, t: dict) -> None:
+    text = store.read_text(plan_path) if store.file_exists(plan_path) else "# Implementation plan\n"
     lines = text.splitlines()
     # locate milestone section
     start = None
@@ -752,7 +976,7 @@ def append_task_to_plan(plan_path: Path, milestone: str, m_title: str, tid: str,
             end -= 1
         insert = ["", *task_block(tid, t).rstrip("\n").splitlines(), ""]
         lines[end:end] = insert
-    plan_path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    store.stage(plan_path, "\n".join(lines).rstrip("\n") + "\n")
 
 
 # --------------------------------------------------------------------------- commands
@@ -839,15 +1063,15 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
     store.save()
     gi = store.dev / ".gitignore"
     if not gi.exists():  # machine-local files never belong in git; the rest of .dev/ is versioned with the code
-        gi.write_text("# written by dev_state.py init\nrun/\npreview/\ntmp/\ntelemetry-session\n", encoding="utf-8")
+        store.stage(gi, "# written by dev_state.py init\nrun/\npreview/\ntmp/\ntelemetry-session\n")
     oq = store.dev / "open-questions.md"
     if not oq.exists():
-        oq.write_text(
+        store.stage(
+            oq,
             "# Open questions\n\n> Non-blocking doubts raised while working autonomously. "
             "Resolve with `/dev-kit:interview --gaps`.\n\n## Open\n"
             "| id | date | raised by | question | assumption used | impact if wrong |\n"
             "|---|---|---|---|---|---|\n\n## Resolved\n| id | resolved on | answer | ADR / task |\n|---|---|---|---|\n",
-            encoding="utf-8",
         )
     store.log("init " + ("created" if created else "updated") + f" (phase={store.state.get('phase')}, language={store.state.get('language')})")
     print(f"state {'created' if created else 'updated'} at {store.path}")
@@ -872,9 +1096,7 @@ def record_baseline(store: Store, tasks: dict) -> int:
                          "type": t["type"], "recorded_at": now()}
             added += 1
     if added:
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(base, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-        tmp.replace(path)
+        store.stage(path, json.dumps(base, indent=1, ensure_ascii=False) + "\n")
     return added
 
 
@@ -1294,7 +1516,7 @@ def cmd_add_task(store: Store, a: argparse.Namespace) -> None:
     store.tasks()[tid] = t
     if issue is not None:
         link_task(store, a.issue, tid, a.milestone)
-    append_task_to_plan(store.dev / "plan.md", a.milestone, store.milestones()[a.milestone]["title"], tid, t)
+    append_task_to_plan(store, store.dev / "plan.md", a.milestone, store.milestones()[a.milestone]["title"], tid, t)
     store.save()
     store.event("task", task=tid, transition="add", type=a.type, milestone=a.milestone)
     store.log(f"add-task {tid} [{a.milestone}] ({a.type}) {a.title} source={a.source or '-'}")
@@ -1415,9 +1637,9 @@ def cmd_add_question(store: Store, a: argparse.Namespace) -> None:
         fail("--request takes a board request id such as R-004")
     qid = store.new_question_id()
     path = store.dev / "open-questions.md"
-    if not path.exists():
-        path.write_text("# Open questions\n\n## Open\n| id | date | raised by | question | assumption used | impact if wrong |\n|---|---|---|---|---|---|\n\n## Resolved\n| id | resolved on | answer | ADR / task |\n|---|---|---|---|\n", encoding="utf-8")
-    text = path.read_text(encoding="utf-8")
+    if not store.file_exists(path):
+        store.stage(path, "# Open questions\n\n## Open\n| id | date | raised by | question | assumption used | impact if wrong |\n|---|---|---|---|---|---|\n\n## Resolved\n| id | resolved on | answer | ADR / task |\n|---|---|---|---|\n")
+    text = store.read_text(path)
     row = f"| {qid} | {today()} | {a.skill or '-'} | {a.text.replace('|', '/')} | {(a.assumption or '-').replace('|', '/')} | {(a.impact or '-').replace('|', '/')} |"
     lines = text.splitlines()
     # insert after the last row of the Open table
@@ -1430,10 +1652,10 @@ def cmd_add_question(store: Store, a: argparse.Namespace) -> None:
     while j < len(lines) and (lines[j].startswith("|") or not lines[j].strip() and j + 1 < len(lines) and lines[j + 1].startswith("|")):
         j += 1
     lines.insert(j, row)
-    path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    store.stage(path, "\n".join(lines).rstrip("\n") + "\n")
     store.save()
     if options:  # the board shows them as answers to pick (conventions §10, board mode)
-        _write_json(question_sidecar(store, qid), {"id": qid, "options": options, "recommended": a.recommended,
+        _write_json(question_sidecar(store, qid), store=store, obj={"id": qid, "options": options, "recommended": a.recommended,
                                                    "request": a.request, "answered": False, "at": now()})
     store.log(f"add-question {qid} ({a.skill or '-'}): {a.text}")
     print(qid)
@@ -2143,7 +2365,7 @@ def cmd_set_risk(store: Store, a: argparse.Namespace) -> None:
         fail("; ".join(probs))
     plan = store.dev / "plan.md"
     if plan.exists():
-        doc = PlanDoc(plan.read_text(encoding="utf-8"))
+        doc = PlanDoc(store.read_text(plan))
         i = doc.find(a.task)
         if i is None:
             fail(f"{a.task} has no section in plan.md")
@@ -2155,7 +2377,7 @@ def cmd_set_risk(store: Store, a: argparse.Namespace) -> None:
             if not skip:
                 kept.append(ln)
         doc.segs[i]["lines"] = kept + risk_lines(new)
-        plan.write_text(doc.text(), encoding="utf-8")
+        store.stage(plan, doc.text())
     for k in risk.RISK_FIELDS:
         if k in new:
             t[k] = new[k]
@@ -2235,8 +2457,7 @@ def cmd_risk_report(store: Store, a: argparse.Namespace) -> None:
     else:
         path = store.dev / "qa" / a.milestone / "risk-report.md"
         text = risk_report_md(store, a.milestone, rows_all, summ)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text + "\n", encoding="utf-8")
+    store.stage(path, text + "\n")
     esc = sum(1 for r in rows_all if r["escape"])
     print(f"risk report: {len(rows_all)} task(s), {esc} with a high finding; "
           + ", ".join(f"{t} {b['tasks']} (escape {b['escape_rate']:.0%})" for t, b in summ.items()) + f" -> {path.relative_to(store.root)}")
@@ -2498,8 +2719,7 @@ def write_issues_md(store: Store) -> None:
     out += ["", "## Closed", "| id | status | closed | tasks | title |", "|---|---|---|---|---|"]
     for k, v in sorted(closed.items()):
         out.append(f"| {k} | {v['status']} | {str(v.get('closed_at') or '-')[:10]} | {', '.join(v.get('tasks', [])) or '-'} | {v['title'].replace('|', '/')} |")
-    store.dev.mkdir(parents=True, exist_ok=True)
-    (store.dev / "issues.md").write_text("\n".join(out) + "\n", encoding="utf-8")
+    store.stage(store.dev / "issues.md", "\n".join(out) + "\n")
 
 
 def check_issue_fields(itype: str | None, iclass: str | None, severity: str | None, effort: str | None, force: bool) -> None:
@@ -2596,7 +2816,7 @@ def task_for_issue(store: Store, iid: str, milestone: str, lane: str | None) -> 
     if lane:
         t["lane"] = lane
     store.tasks()[tid] = t
-    append_task_to_plan(store.dev / "plan.md", milestone, store.milestones()[milestone]["title"], tid, t)
+    append_task_to_plan(store, store.dev / "plan.md", milestone, store.milestones()[milestone]["title"], tid, t)
     link_task(store, iid, tid, milestone)
     return tid
 
@@ -2780,7 +3000,7 @@ def pick_tip(store: Store, context: str) -> dict | None:
         return None
     tip = min(cands, key=lambda t: (seen.get(t["id"], 0), t["id"]))
     seen[tip["id"]] = seen.get(tip["id"], 0) + 1
-    seen_path.write_text(json.dumps(seen, indent=1) + "\n", encoding="utf-8")
+    atomic_write(seen_path, json.dumps(seen, indent=1) + "\n")
     store.event("tip", tip=tip["id"], context=context)
     return {"id": tip["id"], "text": tip.get("en"), "command": tip.get("command")}
 
@@ -3567,7 +3787,7 @@ def cmd_release_decide(store: Store, a: argparse.Namespace) -> None:
     rnd = int(g.get("rounds", 0)) + 1
     mid = f"M{max([int(x[1:]) for x in store.milestones()] or [0]) + 1}"
     title = f"{a.release} · Fixes" + (f" {rnd}" if rnd > 1 else "")
-    doc = PlanDoc(plan_path.read_text(encoding="utf-8"))
+    doc = PlanDoc(store.read_text(plan_path))
     last = [m for m in st["milestones"] if doc.has_milestone(m)]
     if not last:
         fail(f"no milestone of {a.release} found in plan.md")
@@ -3593,9 +3813,7 @@ def cmd_release_decide(store: Store, a: argparse.Namespace) -> None:
         store.tasks()[tid]["source"] = f"release:{a.release}"
     g.update(status=None, rounds=rnd, decided_at=now())
     g.setdefault("history", []).append({"at": now(), "event": "rejected", "milestone": mid, "tasks": tids, **({"ref": ref} if ref else {})})
-    tmp = plan_path.with_suffix(".md.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, plan_path)
+    store.stage(plan_path, text)
     store.save()
     store.log(f"release {a.release} rejected: {mid} — {title} with {', '.join(tids)}" + (f" ({ref})" if ref else ""))
     store.event("release_gate", scope=a.release, transition="reject", tasks=len(tids))
@@ -3821,11 +4039,12 @@ def question_sidecar(store: Store, qid: str) -> Path:
     return store.dev / "run" / "questions" / f"{qid}.json"
 
 
-def _write_json(path: Path, obj: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+def _write_json(path: Path, obj: object, store: "Store | None" = None) -> None:
+    text = json.dumps(obj, ensure_ascii=False, indent=1) + "\n"
+    if store is not None:
+        store.stage(path, text)
+    else:
+        atomic_write(path, text)
 
 
 def cmd_answer_question(store: Store, a: argparse.Namespace) -> None:
@@ -3838,7 +4057,7 @@ def cmd_answer_question(store: Store, a: argparse.Namespace) -> None:
     if not answer:
         fail("--answer is empty")
     path = store.dev / "open-questions.md"
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    lines = store.read_text(path).splitlines() if store.file_exists(path) else []
     section, row_i = None, None
     for i, line in enumerate(lines):
         if line.strip().startswith("## "):
@@ -3856,13 +4075,13 @@ def cmd_answer_question(store: Store, a: argparse.Namespace) -> None:
     while j < len(lines) and (lines[j].startswith("|") or not lines[j].strip() and j + 1 < len(lines) and lines[j + 1].startswith("|")):
         j += 1
     lines.insert(j, f"| {a.id} | {today()} | {answer} | {(a.ref or '-').replace('|', '/')} |")
-    path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    store.stage(path, "\n".join(lines).rstrip("\n") + "\n")
     side = question_sidecar(store, a.id)
     try:
-        q = json.loads(side.read_text(encoding="utf-8"))
+        q = json.loads(store.read_text(side))
     except (OSError, json.JSONDecodeError):
         q = {"id": a.id}
-    _write_json(side, {**q, "answered": True, "answer": answer, "answered_at": now()})
+    _write_json(side, store=store, obj={**q, "answered": True, "answer": answer, "answered_at": now()})
     store.log(f"answer-question {a.id}: {answer}")
     print(f"{a.id} resolved: {answer}")
 
@@ -4247,16 +4466,14 @@ def apply_plan_ops(store: Store, ops: list[dict], *, dry_run: bool, as_json: boo
     if not plan_path.exists():
         fail(f"plan not found: {plan_path}")
     stale = bool(base) and base != store.state.get("updated_at")
-    text, changes, errors, eff = plan_edit(store, ops, plan_path.read_text(encoding="utf-8"))
+    text, changes, errors, eff = plan_edit(store, ops, store.read_text(plan_path))
     out = {"ok": not errors, "changes": changes, "errors": errors, "state_changed_since_draft": stale, "applied": False}
     if not errors and not dry_run:
         try:
             _, _, problems = sync_plan_text(store, text)
         except ValueError as e:
             fail(f"the edited plan does not parse: {e}")
-        tmp = plan_path.with_suffix(".md.tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, plan_path)
+        store.stage(plan_path, text)
         store.save()
         write_issues_md(store)
         for tid, old, new in eff["moved"]:
@@ -4466,10 +4683,23 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+# Commands that change state.json or the artifacts the kit keeps in step with it: each runs as one transaction.
+MUTATING = frozenset({
+    cmd_init, cmd_sync_plan, cmd_set_risk, cmd_risk_report, cmd_start, cmd_done, cmd_block, cmd_unblock, cmd_drop,
+    cmd_add_task, cmd_fix_tasks, cmd_add_question, cmd_answer_question, cmd_plan_apply, cmd_move_task,
+    cmd_new_milestone, cmd_reorder, cmd_gate, cmd_review, cmd_artifact, cmd_release_submit, cmd_release_decide,
+    cmd_release_record, cmd_set, cmd_deploy, cmd_preview, cmd_add_issue, cmd_issue, cmd_pull_issues, cmd_cooldown,
+})
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     store = Store(find_root(args.root))
-    args.fn(store, args)
+    if args.fn in MUTATING:
+        with store.transaction():
+            args.fn(store, args)
+    else:
+        args.fn(store, args)
 
 
 if __name__ == "__main__":

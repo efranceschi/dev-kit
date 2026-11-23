@@ -12,7 +12,9 @@ words from the project name or the brief's entities). Anything else is rejected 
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import secrets
 from datetime import datetime, timezone
@@ -73,6 +75,13 @@ HEX_RE = re.compile(r"\b[0-9a-f]{16,}\b", re.I)
 
 
 def now() -> str:
+    pinned = os.environ.get("DEV_KIT_NOW")  # tests and replays pin the clock (see dev_state.now)
+    if pinned:
+        try:
+            d = datetime.fromisoformat(pinned.replace("Z", "+00:00"))
+            return d.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        except ValueError:
+            pass
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
@@ -202,9 +211,12 @@ def session_id(dev: Path, rotate: bool = False) -> str:
         sid = sp.read_text(encoding="utf-8").strip()
         if re.fullmatch(r"[0-9a-f]{8}", sid):
             return sid
-    sid = secrets.token_hex(4)
+    pinned = os.environ.get("DEV_KIT_NOW")
+    sid = hashlib.sha1(pinned.encode()).hexdigest()[:8] if pinned else secrets.token_hex(4)  # pinned clock: reproducible
     dev.mkdir(parents=True, exist_ok=True)
-    sp.write_text(sid + "\n", encoding="utf-8")
+    tmp = sp.with_name(f".{sp.name}.{os.getpid()}.tmp")
+    tmp.write_text(sid + "\n", encoding="utf-8")
+    os.replace(tmp, sp)
     return sid
 
 

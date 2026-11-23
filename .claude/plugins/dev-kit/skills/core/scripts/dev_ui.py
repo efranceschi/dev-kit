@@ -147,11 +147,11 @@ def record_state(root: Path, **flags: bool) -> None:
         return
     import dev_state as ds  # noqa: E402 - only when there is a project
     store = ds.Store(root)
-    store.load()
-    auto = store.state.setdefault("autonomy", ds._copy(ds.DEFAULT_AUTONOMY))
-    auto["ui"] = {**ds.DEFAULT_AUTONOMY["ui"], **(auto.get("ui") or {}), **flags, "offered": True}
-    store.save()
-    store.log("ui " + " ".join(f"{k}={'on' if v else 'off'}" for k, v in flags.items()) if flags else "ui offer declined")
+    with store.transaction():  # lock + fresh load: a concurrent dev_state command is never overwritten
+        auto = store.state.setdefault("autonomy", ds._copy(ds.DEFAULT_AUTONOMY))
+        auto["ui"] = {**ds.DEFAULT_AUTONOMY["ui"], **(auto.get("ui") or {}), **flags, "offered": True}
+        store.save()
+        store.log("ui " + " ".join(f"{k}={'on' if v else 'off'}" for k, v in flags.items()) if flags else "ui offer declined")
 
 
 def load_texts(tips_file: str | None) -> list[str]:
