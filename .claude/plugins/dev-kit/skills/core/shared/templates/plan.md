@@ -38,6 +38,7 @@ Existing projects: no walking skeleton (scaffold, tooling and CI exist; skip T-0
 - files: …
 - contract: (optional) what other tasks consume from this one: table and columns, routes and fields, event names
 - consumes: (optional) T-001 (tasks whose contract this one uses; they must also be in deps)
+- dep_reasons: (optional) T-001=why it is needed; T-002=why (only for a dependency with no consumes and no common file: a generated artifact, data file or schema it reads)
 - shared: (optional) yes when the task edits a file other tasks touch (registry, schema, shared config): it runs alone
 - risk: medium            # low | medium | high (conventions.md §9 "Tier per task")
 - complexity: medium      # low | medium | high

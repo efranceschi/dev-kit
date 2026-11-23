@@ -2,6 +2,14 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 2.6.1 — 2026-11-23
+
+### Added
+- Dependencies need a reason (conventions §4): the optional plan field `dep_reasons: T-nnn=<text>; …` is parsed, stored and kept by every command that rewrites `plan.md`; `brief` prints it ("needed because") and the board shows it with the dependencies.
+- `xref` reports `unjustified_dep` notes (no `consumes`, no common file, not `shared`, no reason) and the `critical_path` of each milestone; both are report-only, so `--strict` is unchanged.
+- `next --batch` lists `maybe_false_deps` when the batch is short, and `implement --parallel` tells the model to review each one before waiting.
+- A change that only touches `deps` or `dep_reasons` no longer makes review `plan` stale.
+
 ## 2.6.0 — 2026-11-23
 
 ### Changed

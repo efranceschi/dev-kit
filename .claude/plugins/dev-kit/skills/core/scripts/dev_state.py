@@ -894,6 +894,9 @@ def parse_plan(text: str) -> tuple[dict, dict]:
                 task["consumes"] = [d.strip() for d in re.split(r"[,\s]+", val) if d.strip()]
             elif key == "shared":
                 task["shared"] = val.strip().lower() not in ("", "no", "false", "0")
+            elif key == "dep_reasons":
+                if val.strip():
+                    task["dep_reasons"] = val.strip()  # why each dependency is needed, `T-nnn=<text>; T-mmm=<text>`, §4
             elif key in ("risk", "complexity", "uncertainty", "tier"):
                 if val.strip():
                     task[key] = val.strip().lower()
@@ -911,6 +914,9 @@ def parse_plan(text: str) -> tuple[dict, dict]:
         if s and cur_field == "contract":
             tasks[cur_t]["contract"] = "; ".join(x for x in (tasks[cur_t].get("contract") or "", s.group(1)) if x)
             continue
+        if s and cur_field == "dep_reasons":
+            tasks[cur_t]["dep_reasons"] = "; ".join(x for x in (tasks[cur_t].get("dep_reasons") or "", s.group(1)) if x)
+            continue
         if s and cur_field == "risk_reasons":
             tasks[cur_t]["risk_reasons"] = "; ".join(x for x in (tasks[cur_t].get("risk_reasons") or "", s.group(1)) if x)
             continue
@@ -920,6 +926,86 @@ def parse_plan(text: str) -> tuple[dict, dict]:
         if s and cur_field == "files":
             tasks[cur_t]["files"].append(s.group(1))
     return milestones, tasks
+
+
+def parse_dep_reasons(text: str | None) -> dict[str, str]:
+    """`T-001=why; T-002=why` -> {id: why}. Malformed parts are ignored."""
+    out: dict[str, str] = {}
+    for part in (text or "").split(";"):
+        k, sep, v = part.partition("=")
+        if sep and k.strip():
+            out[k.strip()] = v.strip()
+    return out
+
+
+def _paths_overlap(a: str, b: str) -> bool:
+    a, b = a.strip().lstrip("./").rstrip("/"), b.strip().lstrip("./").rstrip("/")
+    return bool(a and b) and (a == b or a.startswith(b + "/") or b.startswith(a + "/"))
+
+
+def unjustified_deps(tasks: dict) -> list[tuple[str, str]]:
+    """(task, dep) for every dependency of a pending task with no contract, no common path, no `shared` and no reason."""
+    out = []
+    for tid, t in tasks.items():
+        if t.get("status") not in ("todo", "blocked"):
+            continue
+        reasons = parse_dep_reasons(t.get("dep_reasons"))
+        for d in t.get("deps") or []:
+            a = tasks.get(d)
+            if a is None or a.get("status") == "dropped":
+                continue
+            if d in (t.get("consumes") or []) or a.get("shared") or d in reasons:
+                continue
+            if any(_paths_overlap(x, y) for x in a.get("files") or [] for y in t.get("files") or []):
+                continue
+            out.append((tid, d))
+    return out
+
+
+def critical_paths(tasks: dict) -> dict[str, dict]:
+    """Per milestone: task count and the longest dependency chain inside it."""
+    live = {k: v for k, v in tasks.items() if v.get("status") != "dropped"}
+    memo: dict[str, list[str]] = {}
+
+    def chain(tid: str, seen: tuple = ()) -> list[str]:
+        if tid in memo:
+            return memo[tid]
+        best: list[str] = []
+        for d in live[tid].get("deps") or []:
+            if d in live and d not in seen and live[d]["milestone"] == live[tid]["milestone"]:
+                c = chain(d, seen + (tid,))
+                if len(c) > len(best):
+                    best = c
+        memo[tid] = best + [tid]
+        return memo[tid]
+
+    out: dict[str, dict] = {}
+    for tid, t in live.items():
+        e = out.setdefault(t["milestone"], {"tasks": 0, "critical_path": 0, "chain": []})
+        e["tasks"] += 1
+        c = chain(tid)
+        if len(c) > e["critical_path"]:
+            e["critical_path"], e["chain"] = len(c), c
+    return out
+
+
+def maybe_false_deps(store: "Store", milestone: str | None, batch: list[str]) -> list[dict]:
+    """Pending tasks that wait only on tasks in progress through dependencies that look unjustified."""
+    ts = store.tasks()
+    ms = {ts[t]["milestone"] for t in batch} | {v["milestone"] for v in ts.values() if v.get("status") == "in_progress"}
+    if milestone:
+        ms &= {milestone}
+    bad: dict[str, set[str]] = {}
+    for tid, d in unjustified_deps(ts):
+        bad.setdefault(tid, set()).add(d)
+    out = []
+    for tid, v in ts.items():
+        if v.get("status") != "todo" or v["milestone"] not in ms or v.get("lane") == "hotfix":
+            continue
+        unmet = [d for d in v["deps"] if ts.get(d, {}).get("status") != "done"]
+        if unmet and all(ts.get(d, {}).get("status") == "in_progress" and d in bad.get(tid, ()) for d in unmet):
+            out.append({"task": tid, "waits_on": unmet})
+    return out
 
 
 def task_block(tid: str, t: dict) -> str:
@@ -933,6 +1019,8 @@ def task_block(tid: str, t: dict) -> str:
         lines.append("- acceptance:")
     lines.append(f"- test_notes: {t.get('test_notes', '')}")
     lines.append("- files: " + ", ".join(t.get("files", [])))
+    if t.get("dep_reasons"):
+        lines.append(f"- dep_reasons: {t['dep_reasons']}")
     if t.get("source"):
         lines.append(f"- source: {t['source']}")
     if t.get("lane"):
@@ -1157,7 +1245,7 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
             cur = store.tasks()[tid]
             for k in ("title", "milestone", "type", "deps", "acceptance", "test_notes", "files", "seq"):
                 cur[k] = t[k]
-            for k in ("contract", "consumes", "shared") + risk.RISK_FIELDS:
+            for k in ("contract", "consumes", "shared", "dep_reasons") + risk.RISK_FIELDS:
                 if k in t:
                     cur[k] = t[k]
                 else:
@@ -1169,7 +1257,7 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
                 "status": "todo", "deps": t["deps"], "acceptance": t["acceptance"],
                 "test_notes": t["test_notes"], "files": t["files"], "commit": None,
                 "blocked_reason": None, "source": None, "started_at": None, "done_at": None, "seq": t["seq"],
-                **{k: t[k] for k in ("contract", "consumes", "shared") + risk.RISK_FIELDS if k in t},
+                **{k: t[k] for k in ("contract", "consumes", "shared", "dep_reasons") + risk.RISK_FIELDS if k in t},
             }
             added_t += 1
     store.state["next_task_id"] = max_id + 1
@@ -1186,6 +1274,9 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
                 problems.append(f"{tid}: consumes {d}, which does not exist")
             elif d not in t["deps"]:
                 problems.append(f"{tid}: consumes {d} but does not depend on it (add it to deps)")
+        for d in parse_dep_reasons(t.get("dep_reasons")):
+            if d not in t["deps"]:
+                problems.append(f"{tid}: dep_reasons explains {d}, which is not in deps")
         if t["milestone"] not in store.milestones():
             problems.append(f"{tid}: milestone {t['milestone']} not declared")
         problems += risk.check_risk_fields(tid, t)
@@ -1294,15 +1385,23 @@ def cmd_next(store: Store, a: argparse.Namespace) -> None:
     store.load()
     if getattr(a, "batch", None):
         batch, why = pick_batch(store, a.milestone, a.batch)
+        maybe = maybe_false_deps(store, a.milestone, batch) if len(batch) < a.batch else []
+        hint = [f"maybe false dependency: {m['task']} waits only on {', '.join(m['waits_on'])} (in progress); review it before waiting" for m in maybe]
         if not batch:
-            print(json.dumps({"tasks": [], "reason": why}) if a.json else f"no task available: {why}")
+            if a.json:
+                print(json.dumps({"tasks": [], "reason": why, **({"maybe_false_deps": maybe} if maybe else {})}))
+            else:
+                print(f"no task available: {why}")
+                print("\n".join(hint))
             sys.exit(3)
         if a.json:
-            print(json.dumps({"tasks": [{"task": t, **store.tasks()[t]} for t in batch]}, ensure_ascii=False))
+            print(json.dumps({"tasks": [{"task": t, **store.tasks()[t]} for t in batch], **({"maybe_false_deps": maybe} if maybe else {})}, ensure_ascii=False))
         else:
             for t in batch:
                 v = store.tasks()[t]
                 print(f"{t} [{v['milestone']}] ({v['type']}) {v['title']}" + (f" · files: {', '.join(v['files'])}" if v["files"] else ""))
+            if hint:
+                print("\n".join(hint))
         return
     tid, why = pick_next(store, a.milestone)
     if tid is None:
@@ -2284,7 +2383,9 @@ def cmd_brief(store: Store, a: argparse.Namespace) -> None:
     m = re.search(r"(?im)^\W*(?:application|app|ui|interface|product)\s+language[^:\n]*:\s*(.+)$", brief)
     app_lang = m.group(1).strip()[:80] if m else "see .dev/brief.md block 2"
     cmds = _section_rows(arch, r"^## 8\b.*$")
-    deps = [f"{d} ({(store.tasks()[d].get('commit') or '')[:7] or 'no commit'}) {store.tasks()[d]['title']}" for d in t.get("deps") or [] if d in store.tasks()]
+    why_dep = parse_dep_reasons(t.get("dep_reasons"))
+    deps = [f"{d} ({(store.tasks()[d].get('commit') or '')[:7] or 'no commit'}) {store.tasks()[d]['title']}" + (f" - needed because {why_dep[d]}" if why_dep.get(d) else "")
+            for d in t.get("deps") or [] if d in store.tasks()]
     hist = led.load(store.dev).get(f"task:{a.task}")
     kit = Path(__file__).resolve().parents[1]
     out = [f"Task: {a.task} — {t['title']} (milestone {t['milestone']}, type {t['type']})",
@@ -3067,6 +3168,9 @@ def artifact_paths(store: Store, name: str) -> list[Path]:
     return out
 
 
+_DEP_LINE = re.compile(r"^-\s+(deps|dep_reasons):")
+
+
 def artifact_hash(store: Store, name: str) -> str | None:
     paths = artifact_paths(store, name)
     if not paths:
@@ -3075,6 +3179,8 @@ def artifact_hash(store: Store, name: str) -> str | None:
     for path in paths:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         body = [ln.rstrip() for i, ln in enumerate(lines) if not (i < 12 and _VOLATILE.match(ln))]
+        if name == "plan":  # dependency-only edits are not scope: they keep the plan review valid
+            body = [ln for ln in body if not _DEP_LINE.match(ln)]
         h.update(path.relative_to(store.dev).as_posix().encode() + b"\0" + "\n".join(body).strip().encode() + b"\0")
     return h.hexdigest()[:16]
 
@@ -3208,6 +3314,14 @@ def xref_report(store: Store) -> dict:
             problems.append({"check": "risk_disagrees", "id": tid,
                              "detail": f"plan says risk {t['risk']} but objective signals give {objective_tier} "
                                        f"({', '.join(s['signal'] for s in objective)})"})
+    unjust = unjustified_deps(store.tasks())
+    for tid, d in unjust:
+        notes.append(f"unjustified_dep: {tid} depends on {d} with no consumes, no common file, not shared and no dep_reasons entry "
+                     "(remove the dependency, or add consumes or dep_reasons)")
+    paths = critical_paths(store.tasks())
+    for mid, e in paths.items():
+        if e["tasks"] >= 3 and e["critical_path"] * 2 > e["tasks"]:
+            notes.append(f"critical_path: {mid} has a chain of {e['critical_path']} of {e['tasks']} tasks ({' -> '.join(e['chain'])})")
     without = [k for k, v in pending.items() if not risk.has_planner_fields(v)]
     if without:
         notes.append(f"{len(without)} pending task(s) without risk fields (run plan --annotate-risk to add them)")
@@ -3244,6 +3358,7 @@ def xref_report(store: Store) -> dict:
     for x in problems:
         counts[x["check"]] = counts.get(x["check"], 0) + 1
     return {"problems": problems, "counts": counts, "notes": notes,
+            "unjustified_deps": [{"task": t, "dep": d} for t, d in unjust], "critical_path": paths,
             "acs": {"defined": len(defined), "inactive": len(inactive), "planned": len(set(planned) & defined)}}
 
 
@@ -3257,6 +3372,8 @@ def cmd_xref(store: Store, a: argparse.Namespace) -> None:
         print(f"xref: {len(rep['problems'])} problem(s) · ACs {acs['planned']}/{acs['defined'] - acs['inactive']} planned")
         for x in rep["problems"]:
             print(f"  {x['check']}: {x['id']} - {x['detail']}")
+        for mid, e in (rep.get("critical_path") or {}).items():
+            print(f"  {mid}: {e['tasks']} task(s), critical path {e['critical_path']}")
         for x in rep.get("notes") or []:
             print(f"  note: {x}")
     if a.strict and rep["problems"]:

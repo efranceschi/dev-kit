@@ -530,8 +530,9 @@ def task_detail(root: Path, tid: str) -> dict | None:
         acs.append({"id": m.group(1) if m else None, "text": str(a),
                     "prd": prd.get(m.group(1)) if m and prd.get(m.group(1)) not in (None, (m.group(2) or "").strip()) else None})
     tasks = store.tasks()
-    deps = [{"id": d, "title": tasks.get(d, {}).get("title"), "status": tasks.get(d, {}).get("status", "unknown")}
-            for d in t.get("deps") or []]
+    why = ds.parse_dep_reasons(t.get("dep_reasons"))
+    deps = [{"id": d, "title": tasks.get(d, {}).get("title"), "status": tasks.get(d, {}).get("status", "unknown"),
+             "reason": why.get(d)} for d in t.get("deps") or []]
     blocks = [{"id": k, "title": v.get("title"), "status": v.get("status")}
               for k, v in tasks.items() if tid in (v.get("deps") or []) and v.get("status") != "dropped"]
     issue = None
@@ -852,7 +853,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         if t.get("status") == "dropped":
             continue  # removed by a replan: history only, not on the board
         tasks[tid] = {k: t.get(k) for k in ("title", "milestone", "type", "status", "lane", "deps", "commit",
-                                            "blocked_reason", "started_at", "done_at", "source", "seq")}
+                                            "blocked_reason", "started_at", "done_at", "source", "seq", "dep_reasons")}
         tasks[tid]["acceptance"] = len(t.get("acceptance") or [])
     events = _task_events(root)
     order = store.milestone_order()

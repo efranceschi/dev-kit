@@ -2174,7 +2174,8 @@
   }
   const taskRefs = (list) => (list.length ? h("ul", { class: "td-list plain" }, list.map((x) => h("li", {},
     h("button", { type: "button", class: "tid-btn", text: x.id, "aria-label": `Open ${x.id}`, onclick: () => openTask(x.id) }), ` ${x.title || ""} `,
-    h("span", { class: `chip st-chip s-${x.status}`, text: stLabel(x.status) })))) : null);
+    h("span", { class: `chip st-chip s-${x.status}`, text: stLabel(x.status) }),
+    x.reason ? h("span", { class: "muted", text: ` · needed because ${x.reason}` }) : null))) : null);
   /** A task's source as a link: a .dev markdown report (qa/M1/report.md#F-3), or the dossier of a rejected release. */
   function sourceLink(src) {
     const rel = String(src).match(/^release:(R\d{1,3})$/);
