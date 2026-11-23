@@ -72,11 +72,25 @@ STATIC = {"/": "index.html", "/index.html": "index.html", "/assets/board.css": "
 DEFAULT_PORT = 8765
 # Identity of this code: a running server whose record carries another value was started by an older copy
 # of the kit (e.g. before a plugin update) and is restarted by `start` instead of reused.
+I18N = ASSETS / "i18n"  # the board's text catalogs: en.json is the base, one file per language (pt-BR.json, …)
+
+
+def i18n_payload() -> bytes:
+    """Every catalog, as JSON safe inside the page's <script type="application/json">."""
+    cats = {}
+    for f in sorted(I18N.glob("*.json")):
+        try:
+            cats[f.stem] = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+    return json.dumps(cats, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/").encode("utf-8")
+
+
 def code_id() -> str:
     """Hash of every script and page asset the server runs, so a kit update that touches only a sibling module
     or the front-end is noticed too."""
     h = hashlib.sha256()
-    for f in sorted(SCRIPTS.glob("*.py")) + sorted(p for p in ASSETS.glob("*") if p.is_file()):
+    for f in sorted(SCRIPTS.glob("*.py")) + sorted(p for p in ASSETS.rglob("*") if p.is_file()):
         try:
             h.update(f.name.encode() + b"\0" + f.read_bytes())
         except OSError:
@@ -267,6 +281,13 @@ ADR_HEAD = re.compile(r"^###\s+(ADR-\d{1,4})\s*[—–-]\s*(.+?)\s*$")
 ADR_META = re.compile(r"status:\s*([^·\n]+?)\s*(?:·|$)")
 ADR_DATE = re.compile(r"date:\s*(\d{4}-\d{2}-\d{2})")
 DECISIONS_SHOWN = 40
+
+
+def _safe(fn):  # a derived panel never stops the board from rendering
+    try:
+        return fn()
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def decisions_list(text: str) -> list[dict]:
@@ -780,7 +801,9 @@ def qa_detail(dev: Path, m: str, info: dict, events: list[dict], run: dict | Non
     rounds: dict[int, dict] = {}
     for e in events:
         if e.get("event") == "gate" and e.get("scope") == m and e.get("qa_runs"):
-            rounds[int(e["qa_runs"])] = {"n": int(e["qa_runs"]), "value": e.get("value"), "score": e.get("score"), "at": e.get("ts")}
+            n = int(e["qa_runs"])
+            rounds[n] = {"n": n, "value": e.get("value"), "score": e.get("score"), "at": e.get("ts"),
+                         "reason": (info.get("round_reasons") or {}).get(str(n))}
     out: dict = {"runs": int(info.get("qa_runs") or 0), "note": info.get("gate_note"), "history": [rounds[k] for k in sorted(rounds)]}
     try:
         sc = json.loads((dev / "qa" / m / "scores.json").read_text(encoding="utf-8"))
@@ -790,6 +813,8 @@ def qa_detail(dev: Path, m: str, info: dict, events: list[dict], run: dict | Non
         dims = sc.get("dimensions") if isinstance(sc.get("dimensions"), dict) else {}
         out["last"] = {"overall": sc.get("overall"), "cutoff": sc.get("cutoff"), "verdict": sc.get("verdict"),
                        "blockers": len(sc.get("blockers") or []),
+                       "blocking": [{k: x.get(k) for k in ("id", "dimension", "severity", "title", "file", "line")}
+                                    for x in (sc.get("blockers") or [])[:30] if isinstance(x, dict)],
                        "below": [{"dimension": d, "score": v.get("score"), "min": v.get("min")}
                                  for d, v in sorted(dims.items()) if isinstance(v, dict) and v.get("ok") is False]}
     if run:
@@ -800,8 +825,17 @@ def qa_detail(dev: Path, m: str, info: dict, events: list[dict], run: dict | Non
         done = [{"agent": _short(e.get("agent")), "findings": e.get("findings"), "status": e.get("status"), "at": e.get("ts")}
                 for e in mine if e["event"] == "agent_end"]
         started = [_short(e.get("agent")) for e in mine if e["event"] == "agent_spawn"]
+        auditors = {}
+        for e in mine:  # the auditors of the round: state, model, time
+            a = _short(e.get("agent"))
+            x = auditors.setdefault(a, {"agent": a, "state": "running", "model": None, "started_at": None, "duration_s": None, "findings": None})
+            if e["event"] == "agent_spawn":
+                x.update(started_at=e.get("ts"), model=e.get("model") or x["model"])
+            else:
+                x.update(state="done" if e.get("status") in (None, "ok", "done") else str(e.get("status")), findings=e.get("findings"),
+                         duration_s=e.get("duration_s"), model=e.get("model") or x["model"])
         out["round"] = {"n": out["runs"] + 1, "started_at": run["started_at"], "done": done,
-                        "spawned": len(started)}
+                        "spawned": len(started), "auditors": list(auditors.values())}
     return out
 
 
@@ -837,6 +871,54 @@ def live_feed(events: list[dict], n: int = LIVE_TAIL) -> list[dict]:
     return rows[-n:]
 
 
+# The activity feed shows what means something to the user (§16 of the 3.0 spec): each row is a kind and its values,
+# worded by the board's catalog; technical lines (cleanup, tips, cost, state notes, sync) stay in the full log.
+FEED_RULES = (
+    ("task_done", re.compile(r"^done (?P<task>T-\d+)(?! commit corrected)")),
+    ("task_started", re.compile(r"^start (?P<task>T-\d+) (?P<title>.*?)(?: tier=\S+ arm=\S+)?$")),
+    ("task_blocked", re.compile(r"^block (?P<task>T-\d+): (?P<reason>.*)$")),
+    ("task_dropped", re.compile(r"^drop (?P<task>T-\d+): (?P<reason>.*)$")),
+    ("gate_passed", re.compile(r"^gate (?P<milestone>M[\d.]+) passed(?: score=(?P<score>\d+))?")),
+    ("qa_round_done", re.compile(r"^gate (?P<milestone>M[\d.]+) pending(?: score=(?P<score>\d+))?(?: \((?P<reason>.*)\))?$")),
+    ("gate_failed", re.compile(r"^gate (?P<milestone>M[\d.]+) failed(?: score=(?P<score>\d+))?")),
+    ("question_open", re.compile(r"^add-question (?P<id>Q-\d+) \([^)]*\): (?P<text>.*)$")),
+    ("question_answered", re.compile(r"^answer-question (?P<id>Q-\d+): (?P<text>.*)$")),
+    ("issue_new", re.compile(r"^add-issue (?P<id>I-\d+) \((?P<type>[a-z]+)/(?P<cls>[a-z-]+)\) (?P<title>.*)$")),
+    ("issue_classified", re.compile(r"^issue (?P<id>I-\d+) .*class=(?P<cls>[a-z-]+)")),
+    ("release_submitted", re.compile(r"^release (?P<release>R\d+) submitted for approval")),
+    ("release_approved", re.compile(r"^release (?P<release>R\d+) approved")),
+    ("release_rejected", re.compile(r"^release (?P<release>R\d+) rejected")),
+    ("released", re.compile(r"^release (?P<version>[^\sR][^\s]*) \((?P<tag>[^)]*)\)")),
+    ("deploy", re.compile(r"^deploy (?P<env>\S+) (?P<status>\S+) (?P<sha>\S+)")),
+    ("review", re.compile(r"^review (?P<name>\S+) (?P<value>\S+)(?: score=(?P<score>\d+))?")),
+    ("checkpoint", re.compile(r"^checkpoint (?P<target>prd|plan) (?P<decision>confirm|adjust)")),
+)
+
+
+def feed_item(text: str) -> dict | None:
+    for kind, rx in FEED_RULES:
+        m = rx.match(text)
+        if m:
+            return {"kind": kind, "vars": {k: v for k, v in m.groupdict().items() if v is not None}}
+    return None
+
+
+def user_feed(log_rows: list[dict], events: list[dict], tasks: dict) -> list[dict]:
+    rows = []
+    for r in log_rows:
+        x = feed_item(r["text"])
+        if x:
+            if "task" in x["vars"] and "title" not in x["vars"]:
+                x["vars"]["title"] = (tasks.get(x["vars"]["task"]) or {}).get("title", "")
+            rows.append({"at": r["at"], **x})
+    for e in events:
+        if e.get("event") == "skill_start" and e.get("skill") == "qa" and e.get("scope"):
+            rows.append({"at": e.get("ts"), "kind": "qa_round_started", "vars": {"milestone": str(e["scope"])}})
+        elif e.get("event") == "skill_end" and e.get("status") in ("failed", "error") and e.get("skill") not in ("board", None):
+            rows.append({"at": e.get("ts"), "kind": "failure", "vars": {"skill": str(e["skill"]), "scope": str(e.get("scope") or "")}})
+    return sorted(rows, key=lambda r: _ts(r.get("at")), reverse=True)[:LOG_TAIL]
+
+
 def build_state(root: Path, board: dict | None = None) -> dict:
     store = ds.Store(root)
     if not store.exists():
@@ -853,7 +935,8 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         if t.get("status") == "dropped":
             continue  # removed by a replan: history only, not on the board
         tasks[tid] = {k: t.get(k) for k in ("title", "milestone", "type", "status", "lane", "deps", "commit",
-                                            "blocked_reason", "started_at", "done_at", "source", "seq", "dep_reasons")}
+                                            "blocked_reason", "started_at", "done_at", "source", "seq", "dep_reasons",
+                                            "question", "blocked_count")}
         tasks[tid]["acceptance"] = len(t.get("acceptance") or [])
     events = _task_events(root)
     order = store.milestone_order()
@@ -871,10 +954,12 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         dep = next((d for d in reversed(prod) if d.get("milestone") == m), None)
         milestones.append({"id": m, "title": info.get("title"), "goal": goals.get(m, ""), "gate": info.get("gate", "pending"),
                            "score": info.get("score"), "qa_runs": info.get("qa_runs", 0), "passed_at": info.get("passed_at"),
-                           "frozen_at": info.get("frozen_at"),
+                           "frozen_at": info.get("frozen_at"), "max_fix_rounds": ds.fix_rounds_allowed(store, m),
                            "preview": info.get("preview"), "release": info.get("release"),
                            "deploy": {k: dep.get(k) for k in ("status", "sha", "at")} if dep else None,
                            "qa": qa_detail(store.dev, m, info, events, qa_run if qa_scope == m else None),
+                           "gate_checks": _safe(lambda m=m: [{"text": t, "hard": h} for t, h in ds.gate_problems(store, m, argparse.Namespace(scores=None))]) or [],
+                           "hard_floor": info.get("hard_floor"), "exit_check": info.get("exit_check"),
                            "tasks": [tid for tid, t in tasks.items() if t["milestone"] == m]})
     nxt, why = ds.pick_next(store, None)
     try:
@@ -911,10 +996,13 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "quality": ds.quality_cfg(store),
         "lifecycle": lifecycle(s.get("autonomy") or {}),
         "backlog": backlog,
-        "questions": question_options(root, open_questions(_read(store.dev / "open-questions.md"))),
+        "questions": [{**q, "task": ((s.get("question_meta") or {}).get(q["id"]) or {}).get("task")}
+                      for q in question_options(root, open_questions(_read(store.dev / "open-questions.md")))],
         "log": sorted(log_tail(_read(store.dev / "log.md")) + live_feed(events), key=lambda r: _ts(r.get("at")), reverse=True)[:LOG_TAIL],
+        "feed": user_feed(log_tail(_read(store.dev / "log.md"), 400), events, tasks),
         "costs": costs,
         "decisions": decisions_list(_read(store.dev / "decisions.md")),
+        "forecast": _safe(lambda: ds.forecast(store)),
         # verified facts (conventions.md §2), newest first; a stale one stays with what contradicted it
         "facts": [{"id": k, **{x: f.get(x) for x in ("text", "evidence", "sha", "date", "origin", "files", "acs", "stale")}}
                   for k, f in sorted((s.get("facts") or {}).items(), key=lambda kv: int(kv[0][2:]) if kv[0][2:].isdigit() else 0,
@@ -925,7 +1013,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "releases": [{k: r.get(k) for k in ("version", "tag", "milestones", "at", "hotfix", "release")}
                      for r in s.get("releases") or [] if isinstance(r, dict)],
         # every submission, approval and rejection of each planned release (cycle.releases carries only the last five)
-        "release_history": {rid: [{k: x.get(k) for k in ("event", "at", "dossier", "milestone", "tasks", "ref", "version") if k in x}
+        "release_history": {rid: [{k: x.get(k) for k in ("event", "at", "review_doc", "milestone", "tasks", "ref", "version") if k in x}
                                   for x in (v.get("history") or []) if isinstance(x, dict)]
                             for rid, v in (s.get("release_state") or {}).items() if isinstance(v, dict)},
         "production": production_info(store),
@@ -1204,7 +1292,7 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return self._json(500, {"ok": False, "error": f"missing asset {name}"})
         if name == "index.html":
-            body = body.replace(b"__BOARD_TOKEN__", self.server.token.encode())
+            body = body.replace(b"__BOARD_TOKEN__", self.server.token.encode()).replace(b"__BOARD_I18N__", i18n_payload())
         ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
         if ctype.startswith("text/") or ctype.endswith(("javascript", "svg+xml")):
             ctype += "; charset=utf-8"
@@ -1361,6 +1449,17 @@ def cmd_serve(root: Path, a: argparse.Namespace) -> int:
                 print("the kit was updated on disk: stopping; /dev-kit:board starts the new version", flush=True)
                 srv.stop()
     threading.Thread(target=watchdog, daemon=True).start()
+    auto = dw.AutoExecutor(root, SCRIPTS.parents[2]) if srv.actions else None
+
+    def executor_loop():  # the board starts its own executor: a request never waits for a manual /dev-kit:worker
+        while not srv.stopping.wait(1.5):
+            try:
+                auto.tick()
+            except Exception as e:  # noqa: BLE001 - the server keeps serving
+                print(f"executor: {e}", flush=True)
+        # a run in progress is left to finish its request: it writes only through dev_state and dev_worker
+    if auto:
+        threading.Thread(target=executor_loop, daemon=True).start()
     print(f"serving {url} on {host} for {root} (pid {os.getpid()})" + (" · exposed: access key required" if srv.exposed else ""), flush=True)
     try:
         srv.serve_forever(poll_interval=0.5)

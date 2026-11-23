@@ -56,6 +56,8 @@ import json
 import os
 import re
 import secrets
+import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -348,13 +350,33 @@ def validate(action: object, args: object) -> dict:
         if out["decision"] not in ("approve", "dismiss"):
             errors.append("decision must be approve or dismiss")
         out["text"] = clean(args.get("text"), "text", 300, errors, required=out["decision"] == "approve")
+    elif action == "qa_decision":
+        # QA rounds used up (conventions.md §7): more fix rounds, accept with an ADR (a justification), or replan
+        out["milestone"] = _pattern(args.get("milestone"), "milestone", r"^M\d{1,4}$", errors)
+        out["decision"] = args.get("decision")
+        if out["decision"] not in ("continue", "accept", "replan"):
+            errors.append("decision must be continue, accept or replan")
+        r = args.get("rounds", 1)
+        if out["decision"] == "continue":
+            if not isinstance(r, int) or isinstance(r, bool) or not 1 <= r <= 5:
+                errors.append("rounds must be 1 to 5")
+            out["rounds"] = r
+        out["note"] = clean(args.get("note"), "note", 2000, errors, required=out["decision"] == "accept", multiline=True)
+    elif action == "task_decision":
+        # a blocked task (unblock with a note, skip to the next milestone, drop with a reason) or an open hotfix (run, drop)
+        out["task"] = _pattern(args.get("task"), "task", r"^T-\d{3,6}$", errors)
+        out["decision"] = args.get("decision")
+        if out["decision"] not in ("unblock", "skip", "drop", "run"):
+            errors.append("decision must be unblock, skip, drop or run")
+        out["note"] = clean(args.get("note"), "note", 2000, errors, required=out["decision"] == "drop", multiline=True)
     else:
         raise Invalid(["action must be one of run, issue_new, answer_question, plan_draft, release_decision, checkpoint, debt_decision, "
-                       "lesson_decision"])
+                       "lesson_decision, qa_decision, task_decision"])
     allowed = {"run": {"command"}, "issue_new": {"title", "type", "note"}, "answer_question": {"question", "option", "answer"},
                "plan_draft": {"ops", "base"}, "release_decision": {"release", "decision", "feedback"},
                "checkpoint": {"target", "decision", "feedback"}, "debt_decision": {"decision", "note"},
-               "lesson_decision": {"agent", "signal", "decision", "text"}}[action]  # type: ignore[index]
+               "lesson_decision": {"agent", "signal", "decision", "text"}, "qa_decision": {"milestone", "decision", "rounds", "note"},
+               "task_decision": {"task", "decision", "note"}}[action]  # type: ignore[index]
     extra = set(args) - allowed
     if extra:
         errors.append(f"unknown field {sorted(extra)[0]}")
@@ -658,12 +680,139 @@ def executor(root: Path) -> dict:
             "continuous_stopped": stopped, "item": w.get("item") if live else None, "last_seen": w.get("last_seen")}
 
 
+# --------------------------------------------------------------------------- the board runs its own executor
+# The worker exists only for the board, so the board's server starts it: when a request waits and no Claude Code
+# session takes requests, it opens one headless (`claude -p "/dev-kit:worker"`, the same mechanism as the rounds of
+# §17), which works through the queue and ends when it is empty. Permissions still come to Needs you (the plugin's
+# PermissionRequest hook). A session that listens (/dev-kit:board, /dev-kit:worker) keeps priority.
+
+AUTO_FILE = "worker-auto.json"
+AUTO_GRACE_S = 4                # a listening session gets this long to take a new request first
+AUTO_BACKOFF_S = (30, 120, 600) # after a run that failed (or left its request pending), wait before the next one
+AUTO_DEFAULTS = {"auto": True, "permission_mode": "default", "timeout_min": 180}
+AUTO_MODES = ("default", "acceptEdits", "plan", "auto", "bypassPermissions", "dontAsk")
+
+
+def auto_cfg(root: Path) -> dict:
+    """autonomy.board_executor in state.json: auto (on), permission_mode, timeout_min."""
+    st = _read(root / ".dev" / "state.json") or {}
+    cfg = {**AUTO_DEFAULTS, **(((st.get("autonomy") or {}).get("board_executor")) or {})}
+    if cfg.get("permission_mode") not in AUTO_MODES:
+        cfg["permission_mode"] = "default"
+    return cfg
+
+
+def claude_exe() -> str | None:
+    return os.environ.get("DEV_KIT_CLAUDE") or shutil.which("claude")
+
+
+def auto_status(root: Path) -> dict:
+    """What the board shows about the executor it starts itself: off, idle, running (pid, since), waiting
+    (back-off after a failure, until), no_claude."""
+    st = _read(run_dir(root) / AUTO_FILE) or {}
+    if st.get("state") == "running" and not _alive(st.get("pid")):
+        st = {**st, "state": "idle"}
+    return st
+
+
+class AutoExecutor:
+    """Started by the board's server; tick() runs every second or two on its thread."""
+
+    def __init__(self, root: Path, kit: Path) -> None:
+        self.root, self.kit = root, kit
+        self.proc: subprocess.Popen | None = None
+        self.started = 0.0
+        self.fails = 0
+        self.next_try = 0.0
+        self.log = None
+        self.runs = 0
+        self.request: str | None = None
+
+    def _status(self, state: str, **extra) -> None:
+        _ensure(self.root)
+        _write(run_dir(self.root) / AUTO_FILE, {"state": state, "at": now(), "runs": self.runs, "fails": self.fails, **extra})
+
+    def _reap(self) -> None:
+        if not self.proc:
+            return
+        rc = self.proc.poll()
+        cfg = auto_cfg(self.root)
+        if rc is None:
+            if time.time() - self.started > float(cfg["timeout_min"]) * 60:
+                self.stop()
+                self.fails += 1
+                self.next_try = time.time() + AUTO_BACKOFF_S[min(self.fails, len(AUTO_BACKOFF_S)) - 1]
+                self._status("waiting", reason="timeout", until=self.next_try)
+            return
+        mine = next((x for x in items(self.root) if x["id"] == self.request), None)
+        if self.log:
+            self.log.close()
+            self.log = None
+        self.proc = None
+        if rc != 0 or (mine is not None and mine["status"] == "pending"):  # failed, or never took its request
+            self.fails += 1
+            self.next_try = time.time() + AUTO_BACKOFF_S[min(self.fails, len(AUTO_BACKOFF_S)) - 1]
+            self._status("waiting", reason=f"exit {rc}" if rc else "left the request pending", until=self.next_try, log=".dev/run/worker-auto.log")
+        else:
+            self.fails = 0
+            self._status("idle", last_exit=rc)
+
+    def tick(self) -> None:
+        self._reap()
+        if self.proc:
+            return
+        cfg = auto_cfg(self.root)
+        if not cfg.get("auto"):
+            return self._status("off")
+        if modes(self.root)["paused"] or executor(self.root)["online"]:
+            return
+        x = claimable(self.root)
+        if x is None or time.time() - _ts(x.get("ts")) < AUTO_GRACE_S or time.time() < self.next_try:
+            return
+        exe = claude_exe()
+        if not exe:
+            return self._status("no_claude")
+        cmd = [exe, "-p", "/dev-kit:worker", "--plugin-dir", str(self.kit), "--output-format", "json",
+               "--permission-mode", cfg["permission_mode"]]
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(self.root), "DEV_KIT_BOARD_CHILD": "1"}
+        _ensure(self.root)
+        self.log = open(run_dir(self.root) / "worker-auto.log", "ab")
+        self.log.write(f"\n--- {now()} {' '.join(cmd[:3])} (for {x['id']})\n".encode())
+        self.log.flush()
+        try:
+            self.proc = subprocess.Popen(cmd, cwd=self.root, env=env, stdin=subprocess.DEVNULL, stdout=self.log,
+                                         stderr=subprocess.STDOUT, start_new_session=True)
+        except OSError as e:
+            self.log.close()
+            self.log = None
+            self.fails += 1
+            self.next_try = time.time() + AUTO_BACKOFF_S[min(self.fails, len(AUTO_BACKOFF_S)) - 1]
+            return self._status("waiting", reason=str(e)[:200], until=self.next_try)
+        self.started, self.runs, self.request = time.time(), self.runs + 1, x["id"]
+        self._status("running", pid=self.proc.pid, since=now(), request=x["id"])
+
+    def stop(self) -> None:
+        if self.proc and self.proc.poll() is None:
+            try:
+                os.killpg(self.proc.pid, signal.SIGTERM)
+                self.proc.wait(10)
+            except (OSError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(self.proc.pid, signal.SIGKILL)
+                except OSError:
+                    pass
+        if self.log:
+            self.log.close()
+            self.log = None
+        self.proc = None
+
+
 def snapshot(root: Path, recent: int = 15) -> dict:
     """What the board shows: open requests, the latest finished ones, the executor and pending approvals."""
     all_ = items(root)
     open_ = [x for x in all_ if x["status"] in OPEN]
     done = [x for x in all_ if x["status"] not in OPEN][-recent:][::-1]
-    return {"open": open_, "recent": done, "executor": executor(root), "approvals": approvals(root),
+    return {"open": open_, "recent": done, "executor": {**executor(root), "auto": auto_status(root)}, "approvals": approvals(root),
             "limits": {"open": MAX_OPEN, "body": MAX_BODY}}
 
 
@@ -930,7 +1079,9 @@ def describe(x: dict) -> str:
             "release_decision": f"{a.get('decision')} {a.get('release')}",
             "checkpoint": f"{a.get('decision')} {a.get('target')}",
             "debt_decision": f"deferred debt: {a.get('decision')}",
-            "lesson_decision": f"lesson for {a.get('agent')}: {a.get('decision')}"}.get(x.get("action"), x.get("action"))
+            "lesson_decision": f"lesson for {a.get('agent')}: {a.get('decision')}",
+            "qa_decision": f"QA of {a.get('milestone')}: {a.get('decision')}",
+            "task_decision": f"{a.get('task')}: {a.get('decision')}"}.get(x.get("action"), x.get("action"))
     return f"{x['id']} {x['status']}: {what}"
 
 

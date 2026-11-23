@@ -2,6 +2,23 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.0.0-alpha.6 — 2026-11-23
+
+Fourth phase of 3.0 (board): a delivery forecast, a way out of every item of Needs you, a cleaner board, the board in the user's language, and the worker inside the board, so a click never waits for a manual step.
+
+### Breaking
+- **The dossier is now the release review.** `release` writes `.dev/releases/<R>/review.md` from `templates/release-review.md` (was `release-dossier.md`), `release-submit --review PATH` (`--dossier` is still accepted), the state keeps the path as `review_doc`, and the board, docs and glossary say "Release review" (and its translation in the pt-BR catalog). Projects with a `dossier.md` keep it: the recorded path stays valid, and the old `dossier` key of `release_state` is read as `review_doc` and written under the new name at the next save.
+- **The board starts the worker itself** (conventions §10, §17). When a request waits and no Claude Code session listens, the board's server runs `claude -p "/dev-kit:worker" --plugin-dir <kit>` headless after a few seconds and lets it work through the queue; a session that listens keeps priority, a paused queue is left alone, and permissions still come to Needs you. New `autonomy.board_executor` `{"auto": true, "permission_mode": "default", "timeout_min": 180}` (`off` turns it off). A run that fails, or leaves its request pending, backs off 30 s, 2 min, then 10 min; the top bar says what it is doing, and a missing `claude` binary is shown instead of a silent queue. Output in `.dev/run/worker-auto.log`.
+
+### Added
+- Delivery forecast (item 13): `DS forecast [--json]`, from the measured milestones (at least 2): from the cycle time, human wait and cost per task of those milestones and the tasks left, a probable date (median) and a "by" date (85th percentile) for each open release and milestone, with the cost to finish when costs are measured; `status` prints it and the board shows it as a chip. Below 2 measured milestones it says so instead of guessing.
+- Every item of Needs you has an action (item 16): a QA gate out of fix rounds offers Continue (1–5 more rounds), Accept with a note (an ADR, then a forced gate) or Replan (`DS qa-decide M continue|accept|replan`, board action `qa_decision`); a blocked task offers Unblock, Skip to the next milestone, Drop with a note, or Run (hotfix lane) (`DS task-decide T …`, board action `task_decision`); a question raised by a task is linked to it (`add-question --task T`). Telemetry event `qa_decision`.
+- Board cleanup (item 15): a QA tab with the rounds of the milestone (each with why it ran, its auditors, model, time and findings, and what blocks the gate); the gate checks, hard floor and exit check of each milestone; progress weighted by task size; a feed of what happened in user terms (the full log one click away); clearer selection and stage colours; "About the server" in the menu.
+- The board in the user's language (item 14): catalogs `shared/board/i18n/en.json` and `pt-BR.json`, every visible string through `tr()`; it follows the project's `language`, and the menu's Language entry overrides it per browser. `test_v3_board.py` fails on any visible text outside the catalog.
+
+### Tests
+- `test_v3_board.py`: the acceptance criteria of items 13–16, the release review rename and its compatibility, and the board's own executor (with a fake `claude` through `DEV_KIT_CLAUDE`); the board tests never start the real `claude`.
+
 ## 3.0.0-alpha.5 — 2026-11-23
 
 ### Fixed

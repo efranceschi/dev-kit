@@ -40,7 +40,7 @@
   <text class="sub s" x="316" y="160">plan → build → QA &amp; fixes → smoke → deploy (when per milestone) → closed</text>
   <rect class="lvl" x="300" y="176" width="596" height="44" rx="9" stroke-width="1.2"/>
   <text class="txt s" x="316" y="195" font-weight="700">Release · when all its milestones are closed</text>
-  <text class="sub s" x="316" y="212">audit → dossier →</text>
+  <text class="sub s" x="316" y="212">audit → review →</text>
   <rect class="gate" x="434" y="199" width="104" height="19" rx="9.5" stroke-width="1.2"/>
   <text class="gtxt s" x="486" y="213" text-anchor="middle">your approval</text>
   <text class="sub s" x="546" y="212">→ production + smoke → released</text>

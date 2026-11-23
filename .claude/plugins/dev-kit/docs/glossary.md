@@ -46,7 +46,7 @@
 | **prompt suggestion** | Claude Code's greyed-out guess of your next prompt; every dev-kit report ends with the next command so it is offered. Tab or Right arrow takes it. |
 | **QA harness** | Playwright with mocks that captures every screen and state (qa:shots) and runs axe (qa:a11y); added by plan to the first UI milestone. |
 | **recorded test run** | A green suite stored per commit; the test auditor and the gate reuse it until the code it covers changes. |
-| **release gate** | The one human gate of construction: when every milestone of a planned release is closed, release writes its dossier and waits; you approve (production deploy, smoke, record) or reject with what must change (a fixes milestone in the same release). |
+| **release gate** | The one human gate of construction: when every milestone of a planned release is closed, release writes its release review and waits; you approve (production deploy, smoke, record) or reject with what must change (a fixes milestone in the same release). |
 | **session log** | .dev/telemetry.jsonl: structured, high-level events of the run, without project data. |
 | **shared baseline** | Suite, lint, type-check, data smoke and screenshots run once per QA round and read by every auditor. |
 | **slot** | Per-agent isolation number that gives each agent its own port, database and scratch folder. |

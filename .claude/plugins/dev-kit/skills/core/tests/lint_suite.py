@@ -39,6 +39,7 @@ NON_SCORED = {"architect", "implementer"}
 ALLOW_NON_ENGLISH = {
     "skills/core/shared/checklists/copy-review.md": "forms of address example (tu/você)",
     "docs/e2e-checklist.md": "the Portuguese end-to-end scenario quotes simulated user input",
+    "skills/core/shared/board/i18n/pt-BR.json": "the board's Portuguese (Brazil) catalog: its translations are the point",
     "skills/core/scripts/dev_risk.py": "risk keywords also match task titles written in the user's language (Portuguese)",
 }
 ENGLISH_WORDS_WITH_ACCENTS = {"résumé", "café", "naïve", "façade", "cliché", "déjà"}

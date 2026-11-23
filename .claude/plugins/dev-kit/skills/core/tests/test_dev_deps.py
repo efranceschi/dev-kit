@@ -178,7 +178,7 @@ class TestDepReasonsSurvive(DepBase):
         self.setup_plan(plan(c_extra="- dep_reasons: T-002=reads the generated schema\n"))
         board = (CORE / "scripts" / "dev_board.py").read_text(encoding="utf-8")
         self.assertIn('"reason": why.get(d)', board)
-        self.assertIn('"dep_reasons")}', board)
+        self.assertRegex(board, r'tasks\[tid\] = \{k: t\.get\(k\) for k in \([^)]*"dep_reasons"')
         self.assertIn("needed because", (CORE / "shared" / "board" / "board.js").read_text(encoding="utf-8"))
         self.assertEqual(ds.parse_dep_reasons(self.state()["tasks"]["T-003"]["dep_reasons"]), {"T-002": "reads the generated schema"})
 

@@ -1,4 +1,4 @@
-# Release {{release}} — {{release_title}} · approval dossier ({{date}})
+# Release {{release}} — {{release_title}} · release review ({{date}})
 
 > Purpose: everything a person needs to approve or reject this release candidate in a few minutes. Written by `release` before `dev_state.py release-submit`; approval is the one human gate of construction (conventions.md §19). Facts only, from `.dev/` and the audit; no secret, token or personal data.
 

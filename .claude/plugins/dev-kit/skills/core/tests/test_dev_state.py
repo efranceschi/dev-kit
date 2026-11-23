@@ -612,8 +612,8 @@ class TestPlannedReleases(Base):
         self.run_state("release-record", "--version", "1.0.0", expect=1)  # planned: needs --release and the approval
         self.run_state("release-record", "--version", "1.0.0", "--release", "R1", expect=1)
         (self.root / ".dev" / "releases" / "R1").mkdir(parents=True)
-        (self.root / ".dev" / "releases" / "R1" / "dossier.md").write_text("# R1\n", encoding="utf-8")
-        self.run_state("release-submit", "R1", "--dossier", ".dev/releases/R1/dossier.md")
+        (self.root / ".dev" / "releases" / "R1" / "review.md").write_text("# R1\n", encoding="utf-8")
+        self.run_state("release-submit", "R1", "--review", ".dev/releases/R1/review.md")
         self.assertEqual(self.rel("R1")["status"], "awaiting_approval")
         self.assertEqual(self.nxt(), "/dev-kit:implement")  # 3.0 pipeline: R2 starts ahead on dev-kit/R2 while R1 waits
         self.assertIn("Needs your approval: R1", self.run_state("status").stdout)

@@ -94,7 +94,7 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 
 1. /dev-kit:board in a Claude Code session opens the board and makes that session listen (keep it open, e.g. in tmux); away from the machine use an SSH tunnel, --host 0.0.0.0 with the access link, or --trusted-host behind your reverse proxy
 2. on the board: Run next to a command, New issue, answer a question in Needs you, Plan to drag tasks and issues between milestones (or milestones between releases) and Send, or Go on by itself
-3. each request starts in the listening session by itself; questions come back to the board with answers to pick. In a session that is not listening, /dev-kit:worker runs the requests
+3. each request starts in the listening session by itself; questions come back to the board with answers to pick. With no session listening, the board starts a headless Claude Code session for them by itself
 
 ## Ship a version
 

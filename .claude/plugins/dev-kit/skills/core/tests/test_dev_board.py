@@ -16,6 +16,9 @@ import time
 import unittest
 from pathlib import Path
 
+# the board's server starts a headless `claude -p` worker for waiting requests: never the real one in a test
+os.environ["DEV_KIT_CLAUDE"] = __import__("shutil").which("true") or "/bin/true"
+
 CORE = Path(__file__).resolve().parent.parent
 STATE = CORE / "scripts" / "dev_state.py"
 BOARD = CORE / "scripts" / "dev_board.py"

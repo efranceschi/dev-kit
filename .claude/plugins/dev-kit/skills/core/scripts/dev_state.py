@@ -22,6 +22,8 @@ Subcommands
   start T       mark task in_progress
   done T        mark task done (optionally --commit SHA)
   block T       mark task blocked (--reason; --blocked-by I-nnn pauses it until the replan of that scope change)
+  forecast [--json]   probable (P50) and late (P85) finish and cost to finish per open milestone and release,
+                from the last 3 measured milestones (after 2), conventions §13
   pipeline ACTION   status [--json] | worktree BRANCH | integrate BRANCH: work ahead of a release waiting for
                 approval or a milestone in QA, on dev-kit/R<n> or dev-kit/M<n> (autonomy.pipeline), conventions §19
   round run SKILL M   one QA round or a milestone's implementation in a headless child session (claude -p),
@@ -37,6 +39,8 @@ Subcommands
   affected      pending tasks whose acceptance cites changed ACs (--acs AC-4,AC-7 [--json]), conventions §15
   unblock T     blocked -> todo
   drop T        drop a task removed by a replan (--reason); it no longer counts for milestones or release
+  task-decide T unblock|skip|drop|run [--note] [--request P-nnn]: Needs-you decision on a blocked task or a hotfix
+  qa-decide M continue|accept|replan [--rounds N] [--note] [--request P-nnn]: QA rounds used up
   add-task      create a task in state and plan.md
   fix-tasks     one fix task per blocking finding of a findings file (--from --milestone; idempotent)
   add-question  append a non-blocking question to open-questions.md (--options a|b --recommended a: the board
@@ -75,7 +79,7 @@ Subcommands
   tip CTX       one contextual tip (tips each show at most twice); tips [--reset] lists them all
   deploy [ENV]  record a deploy (--sha --status ok|failed|rolled_back [--milestone M] [--migration REV])
   preview M     record the local deploy of a milestone (--url --sha [--pid]) or --stopped
-  release-submit R  freeze a planned release for the user's approval (--dossier PATH): awaiting approval
+  release-submit R  freeze a planned release for the user's approval (--review PATH): awaiting approval
   release-decide R  the user's decision: --approve, or --reject --feedback ITEM… (a fixes milestone in the release),
                 or --request P-nnn (the decision made on the board)
   release-record  record a release (--version [--tag] --release R after its approval, or --hotfix T): its
@@ -102,7 +106,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir; dev_telemetry lives next to us
@@ -171,6 +175,9 @@ DEFAULT_AUTONOMY = {
     # work does not stop while a person decides (§19): one release ahead of the one waiting for approval, and the
     # independent tasks of the next milestone while the current one is in QA, each on its own branch
     "pipeline": {"releases_ahead": 1, "milestone_overlap": True},
+    # the board's server starts a headless worker session itself (`claude -p "/dev-kit:worker"`) when a request waits
+    # and no session takes requests (§17); permission_mode is passed to it, timeout_min ends a run that hangs
+    "board_executor": {"auto": True, "permission_mode": "default", "timeout_min": 180},
     # CI as the source of truth for the gate's deterministic signals (conventions.md §7): provider auto (GitHub when
     # .github/workflows exists, GitLab when .gitlab-ci.yml exists) | github | gitlab | none; required = the gate needs
     # a green run on the round's commit; timeout_min = wait before the ci_timeout pause.
@@ -468,6 +475,13 @@ def check_autonomy_field(field: str, val: object) -> object:
                 or not isinstance(val.get("releases_ahead", 1), int) or isinstance(val.get("releases_ahead", 1), bool)
                 or not 0 <= val.get("releases_ahead", 1) <= 3 or not isinstance(val.get("milestone_overlap", True), bool)):
             fail('autonomy.pipeline must be {"releases_ahead": 0-3, "milestone_overlap": true | false}')
+    elif field == "board_executor":
+        modes = ("default", "acceptEdits", "plan", "auto", "bypassPermissions", "dontAsk")
+        if (not isinstance(val, dict) or set(val) - {"auto", "permission_mode", "timeout_min"}
+                or not isinstance(val.get("auto", True), bool) or val.get("permission_mode", "default") not in modes
+                or not isinstance(val.get("timeout_min", 180), int) or isinstance(val.get("timeout_min", 180), bool)
+                or not 5 <= val.get("timeout_min", 180) <= 1440):
+            fail(f'autonomy.board_executor must be {{"auto": true | false, "permission_mode": {" | ".join(modes)}, "timeout_min": 5-1440}}')
     elif field == "ci":
         if (not isinstance(val, dict) or set(val) - {"provider", "required", "timeout_min"}
                 or val.get("provider", "auto") not in CI_PROVIDERS or not isinstance(val.get("required", True), bool)
@@ -2015,6 +2029,108 @@ def cmd_challenge(store: Store, a: argparse.Namespace) -> None:
     print(f"{a.milestone} {fid}: {verdict} · {effect}")
 
 
+# ---------------------------------------------------------------- delivery forecast (conventions.md §13)
+FORECAST_MIN = 2  # measured milestones needed before a forecast is shown
+
+
+def _pct(xs: list[float], q: float) -> float:
+    xs = sorted(xs)
+    if not xs:
+        return 0.0
+    k = (len(xs) - 1) * q
+    lo, hi = int(k), min(int(k) + 1, len(xs) - 1)
+    return xs[lo] + (xs[hi] - xs[lo]) * (k - lo)
+
+
+def measured_flows(store: Store, last: int = 3) -> list[dict]:
+    """flow.json of the last closed milestones with a measured cycle (pre-3.0 ones have none)."""
+    out = []
+    for m in store.milestone_order():
+        f = _flow_doc(store, m)
+        if f and f.get("tasks") and f.get("cycle_time_s"):
+            out.append(f)
+    return out[-last:]
+
+
+def _flow_doc(store: Store, m: str) -> dict | None:
+    try:
+        f = json.loads((store.dev / "qa" / m / "flow.json").read_text(encoding="utf-8"))
+        return f if isinstance(f, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def forecast(store: Store) -> dict:
+    """Probable finish (P50) and a late finish (P85) per open milestone and per release not released, with the cost to
+    finish: pace = cycle time per task of the last 3 measured milestones, plus the mean wait for a person (it is a
+    calendar forecast). Needs FORECAST_MIN measured milestones."""
+    flows = measured_flows(store)
+    if len(flows) < FORECAST_MIN:
+        return {"available": False, "measured": len(flows), "reason": f"forecast available after {FORECAST_MIN} measured milestones"}
+    cyc = [f["cycle_time_s"] / f["tasks"] for f in flows]
+    work = [float(f.get("working_time_s") or 0) / f["tasks"] for f in flows]
+    wait = [float(f.get("human_wait_s") or 0) for f in flows]
+    cost = [float(f["cost_per_task"]) for f in flows if f.get("cost_per_task") is not None]
+    pace = {"p50": statistics_median(cyc), "p85": _pct(cyc, 0.85)}
+    wait_m = sum(wait) / len(wait)
+    cpt = {"p50": statistics_median(cost), "p85": _pct(cost, 0.85)} if cost else None
+    start = datetime.now(timezone.utc)
+    if os.environ.get("DEV_KIT_NOW"):
+        start = datetime.fromisoformat(now().replace("Z", "+00:00"))
+    ts = store.tasks()
+    ms_rows, clock = [], {"p50": 0.0, "p85": 0.0}
+    for m in store.milestone_order():
+        mm = store.milestones()[m]
+        live = [v for v in ts.values() if v["milestone"] == m and v["status"] != "dropped"]
+        if not live or mm.get("gate") in ("passed", "skipped"):
+            continue
+        left = sum(1 for v in live if v["status"] not in FINISHED)
+        for k in clock:  # milestones run one after the other: each one starts where the previous ends
+            clock[k] += left * pace[k] + wait_m
+        ms_rows.append({"milestone": m, "release": release_of(store, m), "tasks_left": left,
+                        **{f"finish_{k}": (start + timedelta(seconds=clock[k])).strftime("%Y-%m-%dT%H:%M:%SZ") for k in clock},
+                        **({f"cost_{k}_usd": round(left * cpt[k], 2) for k in cpt} if cpt else {})})
+    rel_rows = []
+    for r in release_plan_status(store):
+        if r["status"] == "released":
+            continue
+        mine = [x for x in ms_rows if x["release"] == r["id"]]
+        if not mine:
+            continue
+        rel_rows.append({"release": r["id"], "tasks_left": sum(x["tasks_left"] for x in mine),
+                         "finish_p50": mine[-1]["finish_p50"], "finish_p85": mine[-1]["finish_p85"],
+                         **({"cost_p50_usd": round(sum(x.get("cost_p50_usd", 0) for x in mine), 2),
+                             "cost_p85_usd": round(sum(x.get("cost_p85_usd", 0) for x in mine), 2)} if cpt else {})})
+    return {"available": True, "measured": len(flows), "basis": [f["milestone"] for f in flows],
+            "pace_s_per_task": {k: round(v) for k, v in pace.items()},
+            "work_s_per_task": round(statistics_median(work)), "wait_s_per_milestone": round(wait_m),
+            "cost_per_task_usd": {k: round(v, 4) for k, v in cpt.items()} if cpt else None,
+            "milestones": ms_rows, "releases": rel_rows}
+
+
+def statistics_median(xs: list[float]) -> float:
+    return _pct(xs, 0.5)
+
+
+def forecast_line(fc: dict) -> str:
+    if not fc.get("available"):
+        return f"Forecast: {fc['reason']}"
+    parts = []
+    for r in fc["releases"][:2]:
+        cost = f" · ~US$ {r['cost_p50_usd']:.0f}–{r['cost_p85_usd']:.0f} to finish" if "cost_p50_usd" in r else ""
+        parts.append(f"{r['release']} probable {r['finish_p50'][:10]}, by {r['finish_p85'][:10]}{cost}")
+    if not parts and fc["milestones"]:
+        x = fc["milestones"][0]
+        parts.append(f"{x['milestone']} probable {x['finish_p50'][:10]}, by {x['finish_p85'][:10]}")
+    return "Forecast: " + (" · ".join(parts) if parts else "nothing open")
+
+
+def cmd_forecast(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    fc = forecast(store)
+    print(json.dumps(fc, indent=2) if a.json else forecast_line(fc))
+
+
 # ---------------------------------------------------------------- pipeline: work ahead while a person decides (§19)
 def _flow_field(store: Store, m: str, key: str) -> object:
     try:
@@ -2956,7 +3072,10 @@ def cmd_add_question(store: Store, a: argparse.Namespace) -> None:
     if options:  # the board shows them as answers to pick (conventions §10, board mode)
         _write_json(question_sidecar(store, qid), store=store, obj={"id": qid, "options": options, "recommended": a.recommended,
                                                    "request": a.request, "answered": False, "at": now()})
-    store.state.setdefault("question_meta", {})[qid] = {"at": now(), "scope": current_milestone(store)}
+    task = getattr(a, "task", None)  # internal callers build their own Namespace without it
+    if task:
+        store.task(task)["question"] = qid  # a blocked task waiting on this answer: the board shows it inline
+    store.state.setdefault("question_meta", {})[qid] = {"at": now(), "scope": current_milestone(store), **({"task": task} if task else {})}
     store.save()
     store.log(f"add-question {qid} ({a.skill or '-'}): {a.text}")
     print(qid)
@@ -3268,6 +3387,120 @@ def cmd_debt(store: Store, a: argparse.Namespace) -> None:
            "cooldown": "debt: cool-down is on; after the next gate `cooldown <M>` takes these items into the next milestone"}[decision])
 
 
+def fix_rounds_allowed(store: Store, m: str) -> int:
+    """The agreed fix rounds of a milestone's gate: the project's setting plus the rounds the user added for it."""
+    base = int((store.state.get("autonomy") or {}).get("max_fix_rounds_per_gate") or DEFAULT_AUTONOMY["max_fix_rounds_per_gate"])
+    return base + int((store.milestones().get(m) or {}).get("extra_fix_rounds") or 0)
+
+
+def _board_request(store: Store, rid: str | None, action: str) -> dict | None:
+    if not rid:
+        return None
+    import dev_worker as dw
+    x = dw.item(store.root, rid)
+    if x is None or x.get("action") != action:
+        fail(f"{rid} is not a {action.replace('_', ' ')} from the board")
+    return x["args"]
+
+
+def cmd_qa_decide(store: Store, a: argparse.Namespace) -> None:
+    """Needs you › QA rounds used up (§7): continue fixing with more rounds, accept the milestone as it is with an ADR,
+    or replan. From the board, --request P-nnn carries the decision."""
+    store.load()
+    req = _board_request(store, a.request, "qa_decision")
+    m_id, decision = (req["milestone"], req["decision"]) if req else (a.milestone, a.decision)
+    rounds, note = (int(req.get("rounds") or 1), req.get("note")) if req else (a.rounds, a.note)
+    if m_id not in store.milestones():
+        fail(f"unknown milestone {m_id}")
+    if decision not in ("continue", "accept", "replan"):
+        fail("qa-decide needs continue, accept or replan (or --request P-nnn)")
+    m = store.milestones()[m_id]
+    if m.get("gate") in ("passed", "skipped"):
+        fail(f"{m_id} is already closed")
+    held = [k for k, t in sorted(store.tasks().items()) if t["milestone"] == m_id and t["status"] == "blocked"
+            and "rounds_exhausted" in str(t.get("blocked_reason") or "")]
+    out = ""
+    if decision == "continue":
+        if not 1 <= rounds <= 5:
+            fail("--rounds takes 1 to 5")
+        m["extra_fix_rounds"] = int(m.get("extra_fix_rounds") or 0) + rounds
+        for k in held:
+            t = store.tasks()[k]
+            t["status"], t["blocked_reason"] = "todo", None
+        out = f"{m_id}: +{rounds} fix round(s) ({fix_rounds_allowed(store, m_id)} in all); next: /dev-kit:qa {m_id}"
+    elif decision == "accept":
+        if not note:
+            fail("accepting with an ADR needs --note: why the milestone ships as it is")
+        adr = append_adr(store, f"Accept {m_id} after the QA rounds were used up", [
+            f"- context: {int(m.get('qa_runs') or 0) - 1} fix rounds used of {fix_rounds_allowed(store, m_id)}; open fixes: {', '.join(held) or 'none'}",
+            f"- decision: {note}", "- consequence: the open fixes are dropped; the gate is forced with this ADR"], source="user")
+        for k in held:
+            t = store.tasks()[k]
+            t.update(status="dropped", blocked_reason=None, dropped_reason=f"accepted with {adr}", dropped_at=now())
+        m["accepted_adr"] = adr
+        out = f"{m_id}: accepted with {adr}; next: DS gate {m_id} passed --force --note \"{adr}: accepted after the QA rounds\""
+    else:
+        m["replan_requested"] = now()
+        out = f"{m_id}: replan; next: /dev-kit:plan {m_id} (the blocked fixes wait for the new plan)"
+    store.save()
+    store.log(f"qa-decide {m_id} {decision}" + (f" ({a.request})" if a.request else ""))
+    store.event("qa_decision", scope=m_id, decision=decision, rounds=rounds if decision == "continue" else None)
+    print(out)
+
+
+def cmd_task_decide(store: Store, a: argparse.Namespace) -> None:
+    """Needs you › a blocked task (unblock with a note, skip to the next milestone, drop with a reason) or an open
+    hotfix (run it now, drop it). From the board, --request P-nnn carries the decision."""
+    store.load()
+    req = _board_request(store, a.request, "task_decision")
+    tid, decision, note = (req["task"], req["decision"], req.get("note")) if req else (a.task, a.decision, a.note)
+    t = store.task(tid)
+    if t["status"] in FINISHED:
+        fail(f"{tid} is {t['status']}")
+    if decision == "unblock":
+        if t["status"] != "blocked":
+            fail(f"{tid} is {t['status']}, not blocked")
+        t.update(status="todo", blocked_reason=None)
+        t.pop("blocked_by", None)
+        if note:
+            t["unblock_note"] = note
+        out = f"{tid} todo" + (f" (note: {note})" if note else "")
+    elif decision == "skip":
+        order = store.milestone_order()
+        later = [x for x in order[order.index(t["milestone"]) + 1:] if store.milestones()[x].get("gate", "pending") == "pending"]
+        if not later:
+            fail(f"no open milestone after {t['milestone']}: replan with /dev-kit:plan")
+        held = (t["status"], t.get("blocked_reason"))
+        t["status"] = "todo"  # only a task not started moves; it stays blocked in the milestone it goes to
+        apply_plan_ops(store, [{"op": "move_task", "task": tid, "milestone": later[0]}], dry_run=False, as_json=False, label="task-decide")
+        t = store.task(tid)
+        if held[0] == "blocked":
+            t["status"], t["blocked_reason"] = held
+            store.save()
+        store.log(f"task-decide {tid} skip to {later[0]}" + (f" ({a.request})" if a.request else ""))
+        return
+    elif decision == "drop":
+        if not note:
+            fail("dropping a task needs --note: the reason")
+        t.update(status="dropped", blocked_reason=None, dropped_reason=note, dropped_at=now())
+        t.pop("blocked_by", None)
+        issue_sync(store, t)
+        out = f"{tid} dropped: {note}"
+    elif decision == "run":
+        if t.get("lane") != "hotfix":
+            fail(f"{tid} is not a hotfix: run is for the hotfix lane")
+        if t["status"] == "blocked":
+            t.update(status="todo", blocked_reason=None)
+        out = f"{tid}: next: /dev-kit:implement {tid}"
+    else:
+        fail("task-decide needs unblock, skip, drop or run (or --request P-nnn)")
+    store.save()
+    store.log(f"task-decide {tid} {decision}" + (f": {note}" if note else "") + (f" ({a.request})" if a.request else ""))
+    store.event("task", task=tid, transition={"unblock": "unblock", "drop": "drop"}.get(decision, decision), type=t.get("type"),
+                milestone=t.get("milestone"))
+    print(out)
+
+
 def cmd_gate(store: Store, a: argparse.Namespace) -> None:
     store.load()
     if a.milestone not in store.milestones():
@@ -3299,9 +3532,11 @@ def cmd_gate(store: Store, a: argparse.Namespace) -> None:
         m["forced"] = True
     if a.count_run:
         m["qa_runs"] = int(m.get("qa_runs", 0)) + 1
+        if a.note and a.value != "passed":  # why the round failed, for its chip on the board ("2 blockers", "floor: deps")
+            m.setdefault("round_reasons", {})[str(m["qa_runs"])] = a.note[:80]
     # past the agreed number of fix rounds the next round is the user's (or the policy's) decision, not automatic:
     # the open fix tasks of this milestone go to Blocked with the reason, so `next` stops picking them
-    max_rounds = int((store.state.get("autonomy") or {}).get("max_fix_rounds_per_gate") or DEFAULT_AUTONOMY["max_fix_rounds_per_gate"])
+    max_rounds = fix_rounds_allowed(store, a.milestone)
     exhausted = []
     if a.count_run and a.value == "pending" and m["qa_runs"] > max_rounds:
         for tid, t in store.tasks().items():
@@ -5306,8 +5541,13 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
                     fail(f"autonomy.{field}: {part} is not an object")
             node[parts[-1]] = parsed
             store_autonomy_object(auto, top, merged)
-        elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy", "ui", "queue", "milestone_size", "ci", "pipeline"):
-            if top == "local_deploy" and not isinstance(parsed, dict):
+        elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy", "ui", "queue", "milestone_size", "ci", "pipeline",
+                     "board_executor"):
+            if top == "board_executor" and not isinstance(parsed, dict):
+                if val not in ("on", "off", "true", "false", "yes", "no"):
+                    fail('autonomy.board_executor must be on | off or {"auto": true, "permission_mode": "default", "timeout_min": 180}')
+                parsed = {"auto": val in ("on", "true", "yes")}
+            elif top == "local_deploy" and not isinstance(parsed, dict):
                 parsed = {"mode": val}
             elif top == "model_policy" and not isinstance(parsed, dict):
                 parsed = {"mode": val}
@@ -5351,7 +5591,7 @@ def store_autonomy_object(auto: dict, top: str, obj: dict) -> None:
         obj = {**DEFAULT_AUTONOMY["local_deploy"], **obj}
     elif top in ("cooldown", "quality"):
         check_autonomy_field(top, obj)
-    elif top in ("queue", "milestone_size", "ci", "pipeline"):
+    elif top in ("queue", "milestone_size", "ci", "pipeline", "board_executor"):
         obj = {**DEFAULT_AUTONOMY[top], **obj}
         check_autonomy_field(top, obj)
     elif top == "ui":
@@ -5457,6 +5697,11 @@ def migrate_state(store: Store) -> None:
     goes to 2 and the kit's version is recorded; the plan itself migrates at the next sync-plan (§19). In memory only:
     the next command that saves writes it."""
     s = store.state
+    for g in (s.get("release_state") or {}).values():  # 3.0.0-alpha.6 renamed the "dossier" to the release review
+        if isinstance(g, dict):
+            for x in [g, *(g.get("history") or [])]:
+                if isinstance(x, dict) and "dossier" in x:
+                    x.setdefault("review_doc", x.pop("dossier"))
     if int(s.get("version") or 1) >= STATE_VERSION:
         return
     bdir = store.dev / "backup"
@@ -5636,7 +5881,7 @@ def release_status(store: Store, rid: str) -> dict:
     else:
         st = "ready_for_review"
     return {"id": rid, "title": (r or {}).get("title") or rid, "status": st, "milestones": mids, "closed": closed, "open": open_,
-            "rounds": rs.get("rounds", 0), "dossier": rs.get("dossier"), "submitted_at": rs.get("submitted_at"),
+            "rounds": rs.get("rounds", 0), "review_doc": rs.get("review_doc"), "submitted_at": rs.get("submitted_at"),
             "decided_at": rs.get("decided_at"), "history": (rs.get("history") or [])[-5:]}
 
 
@@ -5843,20 +6088,20 @@ def _planned(store: Store, rid: str) -> dict:
 
 
 def cmd_release_submit(store: Store, a: argparse.Namespace) -> None:
-    """Freeze a release candidate: every milestone of the release closed, the dossier written; the release then waits
+    """Freeze a release candidate: every milestone of the release closed, the release review written; the release then waits
     for the user's approval, the one human gate of construction (conventions.md §19)."""
     store.load()
     st = _planned(store, a.release)
     if st["status"] not in ("ready_for_review", "awaiting_approval"):
         fail(f"{a.release} is {st['status'].replace('_', ' ')}" + (f"; still open: {', '.join(st['open'])}" if st["open"] else ""))
-    if a.dossier and not (store.root / a.dossier).exists():
-        fail(f"dossier not found: {a.dossier}")
+    if a.review and not (store.root / a.review).exists():
+        fail(f"release review not found: {a.review}")
     g = release_gate(store, a.release)
     resumed = resume_ahead(store, a.release)
-    g.update(status="awaiting_approval", submitted_at=now(), dossier=a.dossier or g.get("dossier"))
-    g.setdefault("history", []).append({"at": now(), "event": "submitted", "dossier": a.dossier})
+    g.update(status="awaiting_approval", submitted_at=now(), review_doc=a.review or g.get("review_doc"))
+    g.setdefault("history", []).append({"at": now(), "event": "submitted", "review_doc": a.review})
     store.save()
-    store.log(f"release {a.release} submitted for approval" + (f" ({a.dossier})" if a.dossier else ""))
+    store.log(f"release {a.release} submitted for approval" + (f" ({a.review})" if a.review else ""))
     store.event("release_gate", scope=a.release, transition="submit")
     queue_notice(store, f"dev-kit: {a.release} waits for your approval")
     print(f"{a.release}: awaiting approval · approve or reject on the board or with /dev-kit:release"
@@ -6054,6 +6299,10 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
         out["queue_needs"] = queue_needs(store)
         out["needs"] = all_needs(store)
         out["stale"] = stale_report(store)
+        try:
+            out["forecast"] = forecast(store)
+        except Exception:  # noqa: BLE001
+            out["forecast"] = None
         lc = lifecycle(store)
         out["phase"], out["step"], out["reopened"] = lc["phase"], lc["step"], lc["reopened"]
         out["lifecycle"] = {k: lc[k] for k in ("phases", "release", "queue", "releases")}
@@ -6088,7 +6337,7 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
                                         for x in lc["releases"]))
         if rel.get("status") == "awaiting_approval":
             g = (s.get("release_state") or {}).get(rel["release"]) or {}
-            print(f"Needs your approval: {rel['release']}" + (f" · dossier {g['dossier']}" if g.get("dossier") else "")
+            print(f"Needs your approval: {rel['release']}" + (f" · release review {g['review_doc']}" if g.get("review_doc") else "")
                   + " · approve or reject on the board or with /dev-kit:release")
     if rel["milestones"] or rel["last"]:
         last = rel["last"]
@@ -6096,6 +6345,10 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
               + (f" · usability {rel['usability']} · docs {rel['docs']}" if rel["milestones"] else "")
               + (f" · waiting for {', '.join(rel['waiting_for'])}" if rel["waiting_for"] else "")
               + (f" · last: {last.get('tag') or last.get('version') or 'before 1.30'} ({str(last.get('at'))[:10]})" if last else ""))
+    try:
+        print(forecast_line(forecast(store)))
+    except Exception:  # noqa: BLE001 - the status never fails on a forecast
+        pass
     q = quality_cfg(store)
     print(f"Quality cut-off: overall {q['min_overall']} · per dimension {q['min_dimension']} · reviews {q['review_min_overall']}")
     if s.get("artifacts"):
@@ -6764,6 +7017,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--force", action="store_true"); add_risk_flags(s, tier=True)
     s.add_argument("--confirm-frozen", action="store_true", help="add to a milestone frozen for QA (it re-enters the next round)")
     s = sub.add_parser("freeze"); s.set_defaults(fn=cmd_freeze); s.add_argument("milestone")
+    s = sub.add_parser("forecast"); s.set_defaults(fn=cmd_forecast); s.add_argument("--json", action="store_true")
     s = sub.add_parser("pipeline"); s.set_defaults(fn=cmd_pipeline)
     s.add_argument("action", choices=["status", "worktree", "integrate"]); s.add_argument("branch", nargs="?")
     s.add_argument("--json", action="store_true")
@@ -6804,11 +7058,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("text"); s.add_argument("--skill"); s.add_argument("--assumption"); s.add_argument("--impact")
     s.add_argument("--options", help="answers the board offers, separated by | (2 to 6)")
     s.add_argument("--recommended", help="the option recommended, first in the board"); s.add_argument("--request")
+    s.add_argument("--task", help="the task waiting on the answer (the board shows the question on it)")
     s = sub.add_parser("answer-question"); s.set_defaults(fn=cmd_answer_question)
     s.add_argument("id"); s.add_argument("--answer", required=True); s.add_argument("--ref")
     s = sub.add_parser("plan-apply"); s.set_defaults(fn=cmd_plan_apply)
     s.add_argument("--draft", help="board request id of a plan draft (P-nnn)"); s.add_argument("--ops"); s.add_argument("--ops-file")
     s.add_argument("--dry-run", action="store_true"); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("qa-decide"); s.set_defaults(fn=cmd_qa_decide)
+    s.add_argument("milestone", nargs="?"); s.add_argument("decision", nargs="?", choices=["continue", "accept", "replan"])
+    s.add_argument("--rounds", type=int, default=1); s.add_argument("--note"); s.add_argument("--request")
+    s = sub.add_parser("task-decide"); s.set_defaults(fn=cmd_task_decide)
+    s.add_argument("task", nargs="?"); s.add_argument("decision", nargs="?", choices=["unblock", "skip", "drop", "run"])
+    s.add_argument("--note"); s.add_argument("--request")
     s = sub.add_parser("move-task"); s.set_defaults(fn=cmd_move_task)
     s.add_argument("task"); s.add_argument("milestone"); s.add_argument("--before")
     s.add_argument("--dry-run", action="store_true"); s.add_argument("--json", action="store_true")
@@ -6846,7 +7107,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("stale"); s.set_defaults(fn=cmd_stale)
     s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
     s = sub.add_parser("release-submit"); s.set_defaults(fn=cmd_release_submit)
-    s.add_argument("release"); s.add_argument("--dossier", help="path of the dossier, relative to the project root")
+    s.add_argument("release"); s.add_argument("--review", "--dossier", dest="review",
+                                             help="path of the release review, relative to the project root (--dossier: old name)")
     s = sub.add_parser("release-decide"); s.set_defaults(fn=cmd_release_decide)
     s.add_argument("release"); s.add_argument("--approve", action="store_true"); s.add_argument("--reject", action="store_true")
     s.add_argument("--feedback", action="append", help="one rejection item (repeat); each becomes a fix task")
@@ -6906,6 +7168,7 @@ MUTATING = frozenset({
     cmd_new_milestone, cmd_reorder, cmd_gate, cmd_review, cmd_artifact, cmd_release_submit, cmd_release_decide,
     cmd_release_record, cmd_set, cmd_deploy, cmd_preview, cmd_add_issue, cmd_issue, cmd_pull_issues, cmd_cooldown,
     cmd_freeze, cmd_hard_floor, cmd_ci, cmd_debt, cmd_checkpoint, cmd_slot, cmd_challenge, cmd_fact, cmd_lesson, cmd_pipeline,
+    cmd_qa_decide, cmd_task_decide,
 })
 
 

@@ -228,6 +228,11 @@
       "total": "num",
       "medium": "num"
     },
+    "qa_decision": {
+      "scope": "tok",
+      "decision": "tok",
+      "rounds": "num"
+    },
     "checkpoint": {
       "target": "tok",
       "transition": "tok",

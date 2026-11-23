@@ -524,8 +524,8 @@ dialog p { color: var(--text-secondary); }
   .workspace { grid-template-columns: minmax(0, 1fr); }
   .feed { flex: none; max-height: 420px; min-height: 0; }
   /* lifecycle: only the current phase keeps its details; the others show their name (details in the tooltip) */
-  .phase-chevrons .chev:not(.here) .lc-steps { display: none; }
-  .phase-chevrons .chev.lc:not(.here) { flex: 0 1 auto; min-height: 52px; }
+  .phase-chevrons .chev:not(.here):not(.sel) .lc-steps { display: none; }
+  .phase-chevrons .chev.lc:not(.here):not(.sel) { flex: 0 1 auto; min-height: 52px; }
   .phase-cycle { display: none; }
   .ms-top { flex-wrap: wrap; }
   .ms-facts { flex-basis: 100%; }
@@ -554,7 +554,7 @@ dialog p { color: var(--text-secondary); }
   .kicker { display: none; }
   .stage-run .run-chip { flex-wrap: wrap; row-gap: 2px; border-radius: 14px; }
   /* lifecycle on a phone: the current phase with its details; the others shrink to ✓ or their number */
-  .phase-chevrons .chev:not(.here) .chev-name { display: none; }
+  .phase-chevrons .chev:not(.here):not(.sel) .chev-name { display: none; }
   .phase-chevrons .chev.lc:not(.here) { flex: 0 0 auto; }
   .phase-chevrons .chev.lc.here { flex: 1 1 auto; }
   .phase-chevrons .chev.here .chev-name { font-size: 14.5px; }
@@ -997,3 +997,18 @@ body.compact .cons-nav .stage.here { flex-grow: 1.4; }
 .rel-page-stages { margin-bottom: 12px; }
 .rel-decision { display: grid; gap: 6px; margin-bottom: 12px; }
 #rel-page .cols-2 > div > div + div { margin-top: 14px; }
+.fc { font-size: 12px; color: var(--text-secondary); }
+.run-btn.labelled { width: auto; padding: 0 8px; gap: 5px; display: inline-flex; align-items: center; }
+.run-btn.labelled .run-label { font-size: 12px; font-weight: 600; }
+/* the selected tab (phase, milestone, release) is a border under it, never another colour: the colour says where the work is */
+.chev.sel, .schev.sel { box-shadow: inset 0 -4px 0 var(--accent-b); }
+.chev.here.sel, .schev.here.sel { box-shadow: inset 0 -4px 0 #fff; }
+.phase-chevrons .chev.sel { flex-grow: 1.7; }
+.tab-stage { font-size: 12px; line-height: 1; }
+.segbar .st-qa-done { background: var(--accent-a); }
+.segbar .st-qa-left { background: color-mix(in srgb, var(--accent-a) 18%, var(--surface-3)); }
+.stage-sub { display: block; font-size: 11.5px; opacity: .85; margin-top: 2px; }
+.qa-panel { display: grid; gap: 14px; }
+.qa-sect .list-title { margin-bottom: 6px; }
+.qa-fixes { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.qa-fix-col { display: grid; gap: 4px; align-content: start; }

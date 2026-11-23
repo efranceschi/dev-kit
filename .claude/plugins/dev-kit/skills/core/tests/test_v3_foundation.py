@@ -486,7 +486,7 @@ class TestRequestIds(Base):
         import re
         js = (CORE / "shared" / "board" / "board.js").read_text(encoding="utf-8")
         self.assertIsNone(re.search(r"`R\$\{(r\.n|x\.round)\}", js))
-        self.assertIn("`Round ${r.n}", js)
+        self.assertIn('tr("Round {n}{v}", { n: r.n', js)  # the round pill, through the board's catalog
 
 
 class TestHotfixDropped(Base):

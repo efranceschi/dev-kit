@@ -3,28 +3,62 @@
   "use strict";
 
   const TOKEN = document.querySelector('meta[name="board-token"]').content;
+
+  // ------------------------------------------------------------------ text catalogs (i18n/<lang>.json): every visible text goes through tr()
+  // Keys are the English text (en.json is the base); {name} takes a value; plurals live under "plurals" with Intl plural
+  // forms. The project's own content (task titles, questions, notes) is never translated.
+  const CATS = (() => { try { return JSON.parse(document.getElementById("i18n-catalogs").textContent); } catch (e) { return {}; } })();
+  const LANGS = Object.keys(CATS).length ? Object.keys(CATS) : ["en"];
+  const LANG_NAME = { en: "English", "pt-BR": "Português (Brasil)" };
+  let LANG = "en";
+  const pickLang = (want) => {
+    if (!want) return null;
+    const w = String(want).toLowerCase();
+    return LANGS.find((l) => l.toLowerCase() === w) || LANGS.find((l) => l.toLowerCase().split("-")[0] === w.split("-")[0]) || null;
+  };
+  const cat = () => CATS[LANG] || {};
+  const base = () => CATS.en || {};
+  const fmtNum = (n) => { try { return new Intl.NumberFormat(LANG).format(n); } catch (e) { return String(n); } };
+  const fill_ = (str, vars) => String(str).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? (typeof vars[k] === "number" ? fmtNum(vars[k]) : String(vars[k])) : m));
+  /** The text of a key in the language shown, with its values. */
+  function tr(key, vars) {
+    const c = cat().strings || {}, b = base().strings || {};
+    return fill_(c[key] != null ? c[key] : b[key] != null ? b[key] : key, vars);
+  }
+  /** A key marked for the catalog where it is defined; tr() translates it where it is shown. */
+  const N_ = (key) => key;
+  /** A map (or record) whose text values are catalog keys: read through it, they come out in the language shown. */
+  const tmap = (obj, fields) => new Proxy(obj, { get: (o, k) => (typeof o[k] === "string" && (!fields || fields.includes(k)) ? tr(o[k]) : o[k]) });
+  /** "3 tasks": the noun's plural forms from the catalog (Intl plural rules of the language shown). */
+  function plural(n, one, many) {
+    const forms = (cat().plurals || {})[one] || (base().plurals || {})[one];
+    let rule = "other";
+    try { rule = new Intl.PluralRules(LANG).select(n); } catch (e) { /* other */ }
+    const s = forms ? forms[rule] || forms.other : `{n} ${n === 1 ? one : many || one + "s"}`;
+    return fill_(s, { n });
+  }
   const SVGNS = "http://www.w3.org/2000/svg";
   const STATUS = [
-    { key: "todo", label: "To do", icon: "○" },
-    { key: "in_progress", label: "In progress", icon: "◐" },
-    { key: "blocked", label: "Blocked", icon: "⛔" },
-    { key: "done", label: "Done", icon: "✓" },
+    tmap({ key: "todo", label: N_("To do"), icon: "○" }, ["label"]),
+    tmap({ key: "in_progress", label: N_("In progress"), icon: "◐" }, ["label"]),
+    tmap({ key: "blocked", label: N_("Blocked"), icon: "⛔" }, ["label"]),
+    tmap({ key: "done", label: N_("Done"), icon: "✓" }, ["label"]),
   ];
   // project lifecycle (conventions.md §19): conception -> planning -> construction -> stable, as a cycle
-  const PHASE_NAME = { conception: "Conception", planning: "Planning", construction: "Construction", stable: "Stable", releases: "Releases" };
-  const PHASE_WORD = { done: "done", current: "current phase", active: "still running", upcoming: "not started" };
-  const STEP_NAME = { interview: "interview", prd: "PRD", architecture: "architecture", ux: "UX", ui: "UI", plan: "plan",
-    milestones: "milestones", release: "release" };
-  const STEP_WORD = { todo: "to do", doing: "in progress", stale: "out of date", review: "waiting for its review", checkpoint: "waiting for your confirmation", done: "done", skipped: "skipped" };
+  const PHASE_NAME = tmap({ conception: N_("Conception"), planning: N_("Planning"), construction: N_("Construction"), stable: N_("Stable"), releases: N_("Releases") });
+  const PHASE_WORD = tmap({ done: N_("done"), current: N_("current phase"), active: N_("still running"), upcoming: N_("not started") });
+  const STEP_NAME = tmap({ interview: N_("interview"), prd: N_("PRD"), architecture: N_("architecture"), ux: N_("UX"), ui: N_("UI"), plan: N_("plan"),
+    milestones: N_("milestones"), release: N_("release") });
+  const STEP_WORD = tmap({ todo: N_("to do"), doing: N_("in progress"), stale: N_("out of date"), review: N_("waiting for its review"), checkpoint: N_("waiting for your confirmation"), done: N_("done"), skipped: N_("skipped") });
   const STEP_MARK = { todo: "○", doing: "◐", stale: "↻", review: "◐", checkpoint: "◐", done: "✓", skipped: "–" };
   const PHASES = ["conception", "planning", "construction", "stable"];  // the lifecycle phases; the Releases tab is a view next to them, not a phase
-  const STEP_TITLE = { interview: "Interview", prd: "PRD", architecture: "Architecture", ux: "UX", ui: "UI", plan: "Plan" };
-  const STEP_ABOUT = { interview: "Requirements interview, written to brief.md", prd: "Product requirements with numbered acceptance criteria",
-    architecture: "Stack, data model, contracts and ADRs", ux: "Journeys, screens and every screen state", ui: "Design tokens, components and screen specs",
-    plan: "Milestones of small tasks, with dependencies" };
+  const STEP_TITLE = tmap({ interview: N_("Interview"), prd: N_("PRD"), architecture: N_("Architecture"), ux: N_("UX"), ui: N_("UI"), plan: N_("Plan") });
+  const STEP_ABOUT = tmap({ interview: N_("Requirements interview, written to brief.md"), prd: N_("Product requirements with numbered acceptance criteria"),
+    architecture: N_("Stack, data model, contracts and ADRs"), ux: N_("Journeys, screens and every screen state"), ui: N_("Design tokens, components and screen specs"),
+    plan: N_("Milestones of small tasks, with dependencies") });
   const STEP_CMD = { interview: "/dev-kit:interview", prd: "/dev-kit:prd", architecture: "/dev-kit:architecture", ux: "/dev-kit:ux", ui: "/dev-kit:ui", plan: "/dev-kit:plan" };
   const STEP_REVIEW_CMD = { prd: "/dev-kit:review prd", ux: "/dev-kit:review design", ui: "/dev-kit:review design", plan: "/dev-kit:review plan" };
-  const REVIEW_NAME = { prd: "PRD", design: "Design", plan: "Plan", ux: "Usability", docs: "Docs" };
+  const REVIEW_NAME = tmap({ prd: N_("PRD"), design: N_("Design"), plan: N_("Plan"), ux: N_("Usability"), docs: N_("Docs") });
 
   let data = null;
   let selected = null;       // milestone id chosen by the user (null = follow the current one)
@@ -62,43 +96,18 @@
   }
   const fill = (el, ...kids) => { el.replaceChildren(...kids.flat().filter(Boolean)); return el; };
   const parseT = (v) => (v ? new Date(v).getTime() : NaN);
-  const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const fmtDT = (t) => new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  const compact = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e4 ? Math.round(n / 1e3) + "K" : n.toLocaleString());
+  const fmtDate = (v) => new Date(v).toLocaleDateString(LANG, { month: "short", day: "numeric" });
+  const fmtDT = (v) => new Date(v).toLocaleString(LANG, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const compact = (n) => { try { return new Intl.NumberFormat(LANG, { notation: n >= 1e4 ? "compact" : "standard", maximumFractionDigits: 1 }).format(n); } catch (e) { return String(n); } };
   function ago(t) {
     const s = Math.max(0, Math.round((Date.now() - t) / 1000));
-    if (s < 5) return "just now";
-    if (s < 60) return `${s} s ago`;
-    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-    return `${Math.floor(s / 3600)} h ago`;
+    if (s < 5) return tr("just now");
+    if (s < 60) return tr("{s} s ago", { s });
+    if (s < 3600) return tr("{v} min ago", { v: Math.floor(s / 60) });
+    return tr("{v} h ago", { v: Math.floor(s / 3600) });
   }
   function tasksOf(m) { return (m ? m.tasks : []).map((id) => ({ id, ...data.tasks[id] })); }
-  function gateBadge(m) {
-    if (!m) return null;
-    const x = qaState(m);
-    const why = qaReason(x.qa, m);
-    const last = x.qa.last;
-    const title = last ? `Last QA run: overall ${last.overall} (cut-off ${last.cutoff}); ${why || "no dimension below its minimum"}`
-      : `Cut-off ${data.quality.min_overall} overall · ${data.quality.min_dimension} per dimension`;
-    let b;
-    if (m.gate === "passed") b = h("span", { class: "badge good" }, "✓ Gate passed" + (m.score != null ? ` · ${m.score}` : "") + (x.qa.runs > 1 ? ` in round ${x.qa.runs}` : ""));
-    else if (m.gate === "skipped") b = h("span", { class: "badge neutral" }, "Gate skipped");
-    else if (x.running) b = h("span", { class: "badge warn" }, `◌ QA round ${x.round} running`);
-    else if (x.exhausted) b = h("span", { class: "badge bad" }, `✕ ${x.qa.runs} QA rounds failed · needs your decision`);
-    else if (x.qa.runs) b = h("span", { class: "badge bad" }, `✕ Round ${x.qa.runs} failed` + (why ? ` · ${why.length > 44 ? why.slice(0, 43) + "…" : why}` : ""));
-    else if (x.ts.length && !x.buildOpen.length) {
-      // every task is done and no QA round ran yet: say what the gate waits for, not just "pending"
-      b = h("span", { class: "badge warn" }, "◌ Waiting for QA");
-      b.title = `All tasks of ${m.id} are done; the QA gate has not run yet. It runs with /dev-kit:qa ${m.id} (▶ on the board queues it; autopilot or /dev-kit:worker runs it). ${title}`;
-      return b;
-    } else {
-      b = h("span", { class: "badge neutral" }, "Gate after the build");
-      b.title = `The QA gate runs once every task of ${m.id} is done. ${title}`;
-      return b;
-    }
-    b.title = title;
-    return b;
-  }
+
 
   // ------------------------------------------------------------------ tooltip
   const tip = $("tooltip");
@@ -126,7 +135,7 @@
   let mobileCol = null;      // column shown on narrow screens (null = pick the most useful one)
   let goalOpen = false;      // milestone goal expanded
   // construction: one card, one row of tabs - the task board and the insights (the plan view lives in Planning)
-  const VIEWS = ["tasks", ...INS];
+  const VIEWS = ["tasks", "qa", ...INS];
   const VIEW_KEY = "board-view-v2";
   // the phase shown: null follows the project's phase; a phase picked by the user stays until "Back to the current phase"
   const PHASE_KEY = "board-phase-v1";
@@ -139,7 +148,6 @@
   let view = VIEWS.includes(store.get(VIEW_KEY, "")) ? store.get(VIEW_KEY, "") : "tasks";
   let firstRender = true;
 
-  const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + "s"}`;
   const stLabel = (x) => String(x || "").replace("_", " ");
   function dur(sec) {
     sec = Math.max(0, Math.round(sec));
@@ -147,7 +155,7 @@
   }
   function agoShort(t) {
     const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
-    return sec < 60 ? "now" : sec < 3600 ? `${Math.floor(sec / 60)}m ago` : sec < 86400 ? `${Math.floor(sec / 3600)}h ago` : sec < 7 * 86400 ? `${Math.floor(sec / 86400)}d ago` : fmtDate(t);
+    return sec < 60 ? tr("now") : sec < 3600 ? tr("{v}m ago", { v: Math.floor(sec / 60) }) : sec < 86400 ? tr("{v}h ago", { v: Math.floor(sec / 3600) }) : sec < 7 * 86400 ? tr("{v}d ago", { v: Math.floor(sec / 86400) }) : fmtDate(t);
   }
   const activeAgents = () => ((data && data.agents && data.agents.active) || []);
   const agentsOn = (key) => activeAgents().filter((x) => x.node === key);
@@ -182,7 +190,7 @@
     return ok;
   }
   function copyBtn(text) {
-    const label = `Copy ${text}`;
+    const label = tr("Copy {text}", { text });
     const btn = h("button", { type: "button", class: "copy-btn", title: label, "aria-label": label }, copySvg());
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -190,14 +198,30 @@
       btn.classList.toggle("copied", ok);
       btn.classList.toggle("copy-failed", !ok);
       fill(btn, ok ? "✓" : "✕");
-      $("copy-status").textContent = ok ? `Copied ${text}. Paste it in Claude Code.` : `Could not copy. Select ${text} and copy it by hand.`;
+      $("copy-status").textContent = ok ? tr("Copied {text}. Paste it in Claude Code.", { text }) : tr("Could not copy. Select {text} and copy it by hand.", { text });
       clearTimeout(btn._t);
       btn._t = setTimeout(() => { btn.classList.remove("copied", "copy-failed"); fill(btn, copySvg()); }, 1600);
     });
     return btn;
   }
   /** A command shown as code with its copy button and, when the board takes requests, a button that queues it. */
-  const cmd = (text) => h("span", { class: "cmd" }, h("code", { text }), runnable(text) ? runBtn(text) : null, copyBtn(text));
+  const cmd = (text) => (runnable(text) ? h("span", { class: "cmd act" }, runBtn(text, true), copyBtn(text))
+    : h("span", { class: "cmd" }, h("code", { text }), copyBtn(text)));
+  /** What a command does, in words, for its button ("Run QA of M2"); the literal command is in the title and the copy button. */
+  const ACTION_LABEL = tmap({ qa: N_("Run QA of {s}"), implement: N_("Build {s}"), autopilot: N_("Continue construction"), docs: N_("Generate docs"), release: N_("Prepare release {s}"),
+    plan: N_("Plan"), review: N_("Review {s}"), interview: N_("Answer open questions"), prd: N_("Write the PRD"), architecture: N_("Design the architecture"), ux: N_("Design the UX"),
+    ui: N_("Design the UI"), usability: N_("Test usability"), deploy: N_("Deploy"), issue: N_("Triage issues"), backlog: N_("Review the backlog"), feedback: N_("Review the kit's feedback"),
+    start: N_("Start"), worker: N_("Take board requests"), board: N_("Open the board"), settings: N_("Settings"), onboarding: N_("Onboard the project") });
+  function actionLabel(text) {
+    const m = /^\/dev-kit:([a-z-]+)\s*(.*)$/.exec(text || "");
+    if (!m) return text;
+    const scope = m[2].trim();
+    const base = ACTION_LABEL[m[1]];
+    if (!base) return text;
+    return base.includes("{s}") ? (scope ? base.replace("{s}", scope.split(/\s+/)[0]) : base.replace(/ (of )?\{s\}/, "")) : base;
+  }
+  /** The run of this command going on now (same skill and scope), if any. */
+  const runningRun = (text) => skillRuns().find((r) => runCmd(r) === String(text || "").trim());
   // static commands in index.html: <code data-copy>
   document.querySelectorAll("code[data-copy]").forEach((c) => {
     const wrap = h("span", { class: "cmd" });
@@ -246,7 +270,7 @@
     document.documentElement.dataset.effective = effectiveTheme();
     document.querySelectorAll("[data-theme-opt]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themeOpt === v)));
     const next = effectiveTheme() === "dark" ? "light" : "dark";
-    const label = `Switch to ${next} theme`;
+    const label = next === "light" ? tr("Switch to light theme") : tr("Switch to dark theme");
     $("theme-btn").setAttribute("aria-label", label);
     $("theme-btn").title = label;
   }
@@ -261,6 +285,35 @@
     const b = e.target.closest("[data-theme-opt]");
     if (b) setTheme(b.dataset.themeOpt);
   });
+
+  // ------------------------------------------------------------------ language: the user's choice (kept in this browser),
+  // else the project's language (state.json), else the browser's, else English
+  const LANG_KEY = "board-lang";
+  let langPicked = pickLang(store.get(LANG_KEY, ""));
+  LANG = langPicked || pickLang(navigator.language) || "en";
+  /** The static texts of the page (data-i18n*); "once" ones are rewritten by the render that follows. */
+  function applyStatic(all) {
+    document.documentElement.lang = LANG;
+    document.querySelectorAll(all ? "[data-i18n], [data-i18n-once]" : "[data-i18n]").forEach((el) => { el.textContent = tr(el.dataset.i18n || el.dataset.i18nOnce); });
+    for (const at of ["title", "aria-label", "placeholder"]) {
+      const key = `i18n${at === "aria-label" ? "AriaLabel" : at[0].toUpperCase() + at.slice(1)}`;
+      document.querySelectorAll(`[data-i18n-${at}]`).forEach((el) => el.setAttribute(at, tr(el.dataset[key])));
+    }
+    fill($("lang-switch"), LANGS.map((l) => h("button", { type: "button", class: "seg-btn", "data-lang": l, "aria-pressed": String(l === LANG), lang: l, text: LANG_NAME[l] || l })));
+  }
+  function setLang(l, remember) {
+    const want = pickLang(l) || "en";
+    if (remember) { langPicked = want; store.set(LANG_KEY, want); }
+    if (want === LANG && !remember) return;
+    LANG = want;
+    applyStatic(false);
+    applyTheme();
+    if (data && data.ok) render();  // the same data, in the other language
+    tickUpdated();
+  }
+  $("lang-switch").addEventListener("click", (e) => { const b = e.target.closest("[data-lang]"); if (b) setLang(b.dataset.lang, true); });
+  applyStatic(true);
+  applyTheme();
 
   // ------------------------------------------------------------------ header
   // ------------------------------------------------------------------ what Claude Code runs now: skills (outermost first) and agents
@@ -306,7 +359,7 @@
     if (!runs.length) return null;
     const ags = looseAgents(runs);
     return h("div", { class: "run-banner", role: "status" },
-      h("span", { class: "rn-dot", "aria-hidden": "true" }), h("strong", { text: "Running now" }),
+      h("span", { class: "rn-dot", "aria-hidden": "true" }), h("strong", { text: tr("Running now") }),
       runs.map((r) => h("span", { class: "rb-cmd" }, h("code", { text: runCmd(r) }), " ", since(r.started_at))),
       ags.length ? h("span", { class: "rb-agents" }, ags.map((a) => h("span", { class: "agent-chip" }, agentBits(a, true)))) : null);
   }
@@ -318,11 +371,11 @@
     const nx = data.next && data.next.command;
     if (!runs.length && !ags.length) {
       btn.className = "run-now idle";
-      fill(btn, h("span", { class: "rn-dot", "aria-hidden": "true" }), "Idle");
-      btn.setAttribute("aria-label", "Nothing is running now");
-      fill($("run-pop"), h("p", { class: "pop-title", text: "Nothing is running now" }),
-        nx ? h("p", { class: "pop-note top" }, "Next step: ", cmd(nx)) : null,
-        h("p", { class: "pop-note", text: "Skills and agents show here while Claude Code runs them (from the session log)." }));
+      fill(btn, h("span", { class: "rn-dot", "aria-hidden": "true" }), tr("Idle"));
+      btn.setAttribute("aria-label", tr("Nothing is running now"));
+      fill($("run-pop"), h("p", { class: "pop-title", text: tr("Nothing is running now") }),
+        nx && !runningRun(nx) ? h("p", { class: "pop-note top" }, tr("Next step: "), cmd(nx)) : null,
+        h("p", { class: "pop-note", text: tr("Skills and agents show here while Claude Code runs them (from the session log).") }));
       return;
     }
     const chain = runs.slice(-2).map(runCmd);
@@ -330,22 +383,22 @@
     fill(btn, h("span", { class: "rn-dot", "aria-hidden": "true" }), h("span", { class: "rn-label", text: chain.length ? chain.join(" › ") : "agents" }),
       ags.length ? h("span", { class: "rn-count", text: plural(ags.length, "agent") }) : null,
       runs.length ? since(runs[0].started_at) : null);
-    btn.setAttribute("aria-label", `Running now: ${runs.map(runCmd).join(", ") || "agents"}${ags.length ? `, ${plural(ags.length, "agent")}` : ""}. Show details`);
-    fill($("run-pop"), h("p", { class: "pop-title", text: "Running now" }),
+    btn.setAttribute("aria-label", tr("Running now: {v}{v2}. Show details", { v: runs.map(runCmd).join(", ") || tr("agents"), v2: ags.length ? `, ${plural(ags.length, "agent")}` : "" }));
+    fill($("run-pop"), h("p", { class: "pop-title", text: tr("Running now") }),
       runs.length ? h("ol", { class: "rn-list" }, runs.map((r, i) => h("li", { class: i ? "nested" : null },
         h("code", { text: runCmd(r) }), h("span", { class: "card-sub" }, " for ", since(r.started_at))))) : null,
       ags.length ? [h("p", { class: "pop-title", text: plural(ags.length, "agent") }), h("ul", { class: "rn-list" }, ags.map((a) => h("li", {},
         h("span", { class: "agent-chip" }, agentBits(a, true)),
         a.node ? (TASK_RE.test(a.node) ? h("button", { type: "button", class: "tid-btn", text: a.node, onclick: () => openTask(a.node) })
-          : h("span", { class: "chip", text: a.node.replace("GATE:", "QA ") })) : h("span", { class: "card-sub", text: "not linked" }))))] : null,
-      h("p", { class: "pop-note", text: "From the session log: a skill shows from its start until it ends." }));
+          : h("span", { class: "chip", text: a.node.replace("GATE:", "QA ") })) : h("span", { class: "card-sub", text: tr("not linked") }))))] : null,
+      h("p", { class: "pop-note", text: tr("From the session log: a skill shows from its start until it ends.") }));
   }
 
   function renderHeader() {
     $("project").textContent = data.project;
     renderRunning();
     $("kit-ver").textContent = data.kit && data.kit !== "unknown" ? `v${data.kit}` : "";
-    $("bf-mode").textContent = data.brownfield ? `existing project · ${data.brownfield.mode || "feature"} · since ${data.brownfield.baseline_ref || "baseline"}` : "";
+    $("bf-mode").textContent = data.brownfield ? tr("existing project · {v} · since {v2}", { v: data.brownfield.mode || "feature", v2: data.brownfield.baseline_ref || "baseline" }) : "";
     renderLifecycle();
   }
 
@@ -356,13 +409,13 @@
     if (p.key === "planning") return st[0] ? STEP_WORD[st[0].state] : "";
     if (p.key === "construction") {
       const ms = st.find((x) => x.key === "milestones"), rel = st.find((x) => x.key === "release");
-      const relWord = rel && rel.count ? (rel.state === "review" ? `${rel.count} awaits you` : /^R\d/.test(rel.count) ? null : `${rel.count} to release`) : null;
-      return [ms && ms.count ? `${ms.count} closed` : null, relWord].filter(Boolean).join(" · ");
+      const relWord = rel && rel.count ? (rel.state === "review" ? tr("{count} awaits you", { count: rel.count }) : /^R\d/.test(rel.count) ? null : tr("{count} to release", { count: rel.count })) : null;
+      return [ms && ms.count ? tr("{count} closed", { count: ms.count }) : null, relWord].filter(Boolean).join(" · ");
     }
     const n = (data.releases || []).length;
     return n ? plural(n, "release") : "";
   }
-  const phaseTip = (p) => [`${PHASE_NAME[p.key]}: ${PHASE_WORD[p.state]}${p.reopened ? ", reopened" : ""}`,
+  const phaseTip = (p) => [`${PHASE_NAME[p.key]}: ${PHASE_WORD[p.state]}${p.reopened ? tr(", reopened") : ""}`,
     ...(p.steps || []).map((x) => `${STEP_NAME[x.key]}: ${STEP_WORD[x.state]}${x.note ? ` (${x.note})` : ""}`)].join("\n");
 
   /** The lifecycle bar is the page's top navigation: one tab per phase; the panel below shows only that phase. */
@@ -374,8 +427,8 @@
     // the sub-stage in progress, never a milestone id: the bar names only finite stages and sub-stages
     const sub = cur && cur.steps ? (cur.steps.find((x) => !["done", "skipped"].includes(x.state)) || null) : null;
     const step = sub ? STEP_NAME[sub.key] : "";
-    $("phase-step").textContent = `Now: ${PHASE_NAME[data.phase]}${step ? ` · ${step}` : ""}`
-      + (data.reopened ? " · reopened by a change, construction goes on" : "");
+    $("phase-step").textContent = tr("Now: {v}{v2}", { v: PHASE_NAME[data.phase], v2: step ? ` · ${step}` : "" })
+      + (data.reopened ? tr(" · reopened by a change, construction goes on") : "");
     $("phase-back").hidden = shown === data.phase;
     fill($("phases"), lc.phases.map((p, i) => {
       const sel = p.key === shown;
@@ -383,17 +436,17 @@
       const badge = phaseBadge(p);
       const need = needsBy[p.key] || 0;
       return h("button", { type: "button", role: "tab", id: `ph-${p.key}`, "aria-controls": `phase-${p.key}`, "aria-selected": String(sel), tabindex: sel ? "0" : "-1",
-        class: `chev lc st-${st}${sel ? " here" : ""}${i === idx ? " now" : ""}${p.reopened ? " reopened" : ""}`, title: phaseTip(p),
+        class: `chev lc st-${st}${i === idx ? " here now" : ""}${sel ? " sel" : ""}${p.reopened ? " reopened" : ""}`, title: phaseTip(p),
         onclick: () => setPhase(p.key) },
       h("span", { class: "chev-ico", "aria-hidden": "true", text: p.state === "done" ? "✓" : p.key === "stable" ? "↻" : String(i + 1) }),
       h("span", { class: "lc-body" },
-        h("span", { class: "chev-name" }, PHASE_NAME[p.key], p.reopened ? h("span", { class: "lc-tag", text: "reopened" }) : null,
-          i === idx && !sel ? h("span", { class: "lc-tag now-tag", text: "now" }) : null),
+        h("span", { class: "chev-name" }, PHASE_NAME[p.key], p.reopened ? h("span", { class: "lc-tag", text: tr("reopened") }) : null,
+          i === idx ? h("span", { class: "lc-tag now-tag", text: tr("now") }) : null),
         badge ? h("span", { class: "lc-badge", text: badge }) : null),
-      phaseRunning(p.key) ? h("span", { class: "lc-run", title: `Running now in ${PHASE_NAME[p.key]}: ${skillRuns().filter((r) => (runPlace(r) || [])[0] === p.key).map(runCmd).join(", ")}` },
+      phaseRunning(p.key) ? h("span", { class: "lc-run", title: tr("Running now in {v}: {v2}", { v: PHASE_NAME[p.key], v2: skillRuns().filter((r) => (runPlace(r) || [])[0] === p.key).map(runCmd).join(", ") }) },
         h("span", { class: "rn-dot", "aria-hidden": "true" }), "running") : null,
-      need ? h("span", { class: "lc-needs", title: `${plural(need, "item")} in Needs you`, text: String(need) }) : null,
-      h("span", { class: "visually-hidden", text: `: ${PHASE_WORD[p.state]}${i === idx ? ", the project is here" : ""}${badge ? `, ${badge}` : ""}${need ? `, ${plural(need, "item")} need you` : ""}.` }));
+      need ? h("span", { class: "lc-needs", title: tr("{v} in Needs you", { v: plural(need, "item") }), text: String(need) }) : null,
+      h("span", { class: "visually-hidden", text: `: ${PHASE_WORD[p.state]}${i === idx ? tr(", the project is here") : ""}${badge ? `, ${badge}` : ""}${need ? tr(", {v} need you", { v: plural(need, "item") }) : ""}.` }));
     }), releasesTab());
   }
   /** The Releases tab: a view of the planned releases, not a lifecycle phase (the project's phase never says "releases"). */
@@ -404,11 +457,11 @@
     const out = rp.filter((r) => r.status === "released").length;
     const need = needsBy.releases || 0;
     return h("button", { type: "button", role: "tab", id: "ph-releases", "aria-controls": "phase-releases", "aria-selected": String(sel), tabindex: sel ? "0" : "-1",
-      class: `chev lc st-view${sel ? " here" : ""}`, title: `${plural(rp.length, "planned release")}, ${out} released`, onclick: () => setPhase("releases") },
+      class: `chev lc st-view${sel ? " sel" : ""}`, title: tr("{v}, {out} released", { v: plural(rp.length, "planned release"), out }), onclick: () => setPhase("releases") },
     h("span", { class: "chev-ico", "aria-hidden": "true", text: "◎" }),
-    h("span", { class: "lc-body" }, h("span", { class: "chev-name", text: PHASE_NAME.releases }), h("span", { class: "lc-badge", text: `${out}/${rp.length} released` })),
-    need ? h("span", { class: "lc-needs", title: `${plural(need, "release")} waiting for your approval`, text: String(need) }) : null,
-    h("span", { class: "visually-hidden", text: `: ${out} of ${rp.length} released${need ? `, ${plural(need, "release")} need you` : ""}.` }));
+    h("span", { class: "lc-body" }, h("span", { class: "chev-name", text: PHASE_NAME.releases }), h("span", { class: "lc-badge", text: tr("{out}/{rp_n} released", { out, rp_n: rp.length }) })),
+    need ? h("span", { class: "lc-needs", title: tr("{v} waiting for your approval", { v: plural(need, "release") }), text: String(need) }) : null,
+    h("span", { class: "visually-hidden", text: tr(": {out} of {rp_n} released{v}.", { out, rp_n: rp.length, v: need ? tr(", {v} need you", { v: plural(need, "release") }) : "" }) }));
   }
   function setPhase(p, focus) {
     phasePick = data && p === data.phase ? null : p;   // picking the current phase goes back to following it
@@ -453,9 +506,9 @@
     render();
     if (focus && $(`rel-${rid}`)) $(`rel-${rid}`).focus();
   }
-  const REL_WORD = { in_progress: "in progress", ready_for_review: "ready for review", awaiting_approval: "waiting for your approval",
-    deploying_prod: "approved · going to production", released: "released" };
-  /** The release strip (R1 ✓ › R2 ● › R3 ○) and the stages of the release shown: milestones, dossier, approval, production, released. */
+  const REL_WORD = tmap({ in_progress: N_("in progress"), ready_for_review: N_("ready for review"), awaiting_approval: N_("waiting for your approval"),
+    deploying_prod: N_("approved · going to production"), released: N_("released") });
+  /** The release strip (R1 ✓ › R2 ● › R3 ○) and the stages of the release shown: milestones, release review, approval, production, released. */
   function renderReleases() {
     const rp = relPlan();
     $("rel-row").hidden = !rp.length;
@@ -464,18 +517,19 @@
     fill($("rel-tabs"), rp.map((r, i) => {
       const done = r.status === "released", sel = r.id === shown.id;
       const live = r.milestones.filter((mid) => { const m = data.milestones.find((x) => x.id === mid); return m && tasksOf(m).length; }).length;
-      const state = sel ? "here" : done ? "st-done" : r.status === "in_progress" && !r.closed.length ? "st-upcoming" : "st-current";
+      const now = r.id === (rp.find((x) => x.status !== "released") || {}).id;  // the release being built: always the same colour
+      const state = now ? "here" : done ? "st-done" : r.status === "in_progress" && !r.closed.length ? "st-upcoming" : "st-current";
       return h("button", { type: "button", role: "tab", id: `rel-${r.id}`, "aria-selected": String(sel), tabindex: sel ? "0" : "-1",
-        class: `schev ${state}${i === 0 ? " chev-first" : ""}${i === rp.length - 1 ? " chev-last" : ""}`, title: `${r.id} · ${r.title}: ${REL_WORD[r.status]}`,
+        class: `schev ${state}${sel ? " sel" : ""}${i === 0 ? " chev-first" : ""}${i === rp.length - 1 ? " chev-last" : ""}`, title: `${r.id} · ${r.title}: ${REL_WORD[r.status]}`,
         onclick: () => selectRelease(r.id, true) },
       done ? h("span", { class: "tab-ok", "aria-hidden": "true", text: "✓" }) : h("span", { class: `tab-dot${r.status === "awaiting_approval" ? " wait" : r.closed.length ? " active" : ""}`, "aria-hidden": "true" }),
       h("strong", { text: r.id }), h("span", { class: "tab-count", text: `${r.closed.length}/${live}` }),
-      r.status === "awaiting_approval" ? h("span", { class: "tab-qa", text: "approve" }) : null,
+      r.status === "awaiting_approval" ? h("span", { class: "tab-qa", text: tr("approve") }) : null,
       h("span", { class: "visually-hidden", text: `: ${REL_WORD[r.status]}` }));
     }));
     fill($("rel-stages"), releaseStages(shown));
   }
-  /** The five stages of a release (milestones, dossier, your approval, production, released), for Construction and the Releases tab. */
+  /** The five stages of a release (milestones, release review, your approval, production, released), for Construction and the Releases tab. */
   function releaseStages(shown) {
     const lc = data.lifecycle || {};
     const prodOn = lc.deploy_when && lc.deploy_when !== "none";
@@ -494,11 +548,11 @@
     };
     const rej = (shown.history || []).filter((x) => x.event === "rejected").length;
     return [
-      stage(0, "Milestones", `${shown.closed.length}/${live} closed${rej ? ` · ${plural(rej, "rejection")}` : ""}`),
-      stage(1, "Dossier", at === 1 ? "Audit and submit:" : shown.dossier ? "Submitted" : "", at === 1 ? "/dev-kit:release" : null),
-      stage(2, "Your approval", at === 2 ? "Waiting for you" : at > 2 ? "Approved" : ""),
-      stage(3, "Production", !prodOn ? "No production" : at === 3 ? "Deploy and smoke:" : "", at === 3 ? "/dev-kit:release" : null, !prodOn && at !== 3),
-      stage(4, "Released", at === 4 ? ((data.releases || []).filter((x) => x.release === shown.id).map((x) => x.tag || x.version).join(", ") || "Recorded") : "")];
+      stage(0, tr("Milestones"), tr("{closed_n}/{live} closed{v}", { closed_n: shown.closed.length, live, v: rej ? ` · ${plural(rej, "rejection")}` : "" })),
+      stage(1, tr("Release review"), at === 1 ? tr("Audit and submit:") : shown.review_doc ? tr("Submitted") : "", at === 1 ? "/dev-kit:release" : null),
+      stage(2, tr("Your approval"), at === 2 ? tr("Waiting for you") : at > 2 ? tr("Approved") : ""),
+      stage(3, tr("Production"), !prodOn ? tr("No production") : at === 3 ? tr("Deploy and smoke:") : "", at === 3 ? "/dev-kit:release" : null, !prodOn && at !== 3),
+      stage(4, tr("Released"), at === 4 ? ((data.releases || []).filter((x) => x.release === shown.id).map((x) => x.tag || x.version).join(", ") || tr("Recorded")) : "")];
   }
   $("rel-tabs").addEventListener("keydown", (e) => {
     const rp = relPlan();
@@ -510,19 +564,19 @@
   /** Approve, or reject with what must change: queued for Claude Code, which records it (release-decide --request). */
   const rejectDrafts = {};
   function releaseDecision(r) {
-    if (!actionsOn()) return h("span", { class: "sub" }, "Decide in Claude Code with ", cmd("/dev-kit:release"));
+    if (!actionsOn()) return h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd("/dev-kit:release"));
     const sent = inbox().open.find((x) => x.action === "release_decision" && x.args && x.args.release === r.id);
-    if (sent) return h("div", { class: "sub answer-sent", text: `Decision sent (${sent.id}): ${sent.args.decision}. Claude Code applies it.` });
-    const box = h("div", { class: "sub answer rel-decide", role: "group", "aria-label": `Decision on ${r.id}` });
-    const ta = h("textarea", { id: `rej-${r.id}`, maxlength: "4000", rows: "3", class: "answer-input", "aria-label": `What must change in ${r.id}, one item per line`,
-      placeholder: "What must change, one item per line (each becomes a fix task)" });
+    if (sent) return h("div", { class: "sub answer-sent", text: tr("Decision sent ({id}): {decision}. Claude Code applies it.", { id: sent.id, decision: sent.args.decision }) });
+    const box = h("div", { class: "sub answer rel-decide", role: "group", "aria-label": tr("Decision on {id}", { id: r.id }) });
+    const ta = h("textarea", { id: `rej-${r.id}`, maxlength: "4000", rows: "3", class: "answer-input", "aria-label": tr("What must change in {id}, one item per line", { id: r.id }),
+      placeholder: tr("What must change, one item per line (each becomes a fix task)") });
     ta.value = rejectDrafts[r.id] || "";
     ta.addEventListener("input", () => { rejectDrafts[r.id] = ta.value; });
     const send = async (args, el) => { el.disabled = true; try { await queue("release_decision", { release: r.id, ...args }); delete rejectDrafts[r.id]; } catch (e) { el.disabled = false; } };
     box.append(
-      h("button", { type: "button", class: "btn btn-sm btn-primary", text: `Approve ${r.id}`, onclick: (e) => send({ decision: "approve" }, e.currentTarget) }),
-      h("span", { class: "answer-free" }, ta, h("button", { type: "button", class: "btn btn-sm btn-danger", id: `rej-send-${r.id}`, text: "Reject",
-        onclick: (e) => { const v = ta.value.trim(); if (v) send({ decision: "reject", feedback: v }, e.currentTarget); else { ta.focus(); toast("Write what must change before rejecting.", true); } } })));
+      h("button", { type: "button", class: "btn btn-sm btn-primary", text: tr("Approve {id}", { id: r.id }), onclick: (e) => send({ decision: "approve" }, e.currentTarget) }),
+      h("span", { class: "answer-free" }, ta, h("button", { type: "button", class: "btn btn-sm btn-danger", id: `rej-send-${r.id}`, text: tr("Reject"),
+        onclick: (e) => { const v = ta.value.trim(); if (v) send({ decision: "reject", feedback: v }, e.currentTarget); else { ta.focus(); toast(tr("Write what must change before rejecting."), true); } } })));
     return box;
   }
 
@@ -562,8 +616,8 @@
       tok += Number(c.tokens) || 0;
       if (c.usd_complete === false || (!(Number(c.usd) > 0) && Number(c.tokens) > 0)) complete = false;
     });
-    const spend = !any ? null : usd > 0 ? { text: `US$ ${usd.toFixed(2)}${complete ? "" : "+"}`, title: complete ? "Estimated cost, API-equivalent" : "At least this much: some work has no price yet" }
-      : tok > 0 ? { text: `${compact(tok)} tok`, title: "Tokens used (no price measured)" } : null;
+    const spend = !any ? null : usd > 0 ? { text: tr("US$ {v}{v2}", { v: usd.toFixed(2), v2: complete ? "" : "+" }), title: complete ? tr("Estimated cost, API-equivalent") : tr("At least this much: some work has no price yet") }
+      : tok > 0 ? { text: tr("{v} tok", { v: compact(tok) }), title: tr("Tokens used (no price measured)") } : null;
     const gates = live.filter(isClosed).length;
     return { ms, live, ts, done, elapsed, work, spend, gates, pace: work && done ? done / work : null };
   }
@@ -582,22 +636,23 @@
     return h("button", { type: "button", class: `rel-card s-${r.status}${picked ? " here" : ""}`, "aria-pressed": String(picked), onclick: () => openRelease(r.id) },
       h("div", { class: "rel-card-top" }, h("strong", { class: "id", text: r.id }), h("span", { class: "rel-card-title", text: r.title || r.id, title: r.title || null }),
         h("span", { class: `chip rel-st-${r.status}`, text: REL_WORD[r.status] || r.status })),
-      bar(t.done, t.ts.length, `${t.done} of ${t.ts.length} tasks done`),
+      bar(t.done, t.ts.length, tr("{done} of {ts_n} tasks done", { done: t.done, ts_n: t.ts.length })),
       h("div", { class: "rel-facts" },
-        fact("Tasks", `${t.done}/${t.ts.length}`),
-        fact("Milestones", `${r.closed.length}/${t.live.length} closed`),
-        fact("QA gates", `${t.gates}/${t.live.length} passed`),
-        fact("Cost", t.spend ? t.spend.text : "—", t.spend && t.spend.title),
-        fact("Time", fmtH(t.work), t.elapsed != null ? `${fmtH(t.elapsed)} from the first task to ${r.status === "released" || r.status === "ready_for_review" ? "the last gate" : "now"}` : "No task started"),
-        fact("Pace", t.pace != null ? `${t.pace.toFixed(1)} tasks/h` : "—", "Tasks done per working hour, parallel work counted once")),
-      ready ? h("div", { class: "rel-ready" }, `${chk(ready.usability)} usability · ${chk(ready.docs)} docs`, ready.waiting_for && ready.waiting_for.length ? ` · building ${ready.waiting_for.join(", ")}` : "") : null,
-      r.status === "awaiting_approval" ? h("div", { class: "rel-ready bad", text: "Waiting for your approval" }) : null);
+        fact(tr("Tasks"), `${t.done}/${t.ts.length}`),
+        fact(tr("Milestones"), tr("{closed_n}/{live_n} closed", { closed_n: r.closed.length, live_n: t.live.length })),
+        fact(tr("QA gates"), tr("{gates}/{live_n} passed", { gates: t.gates, live_n: t.live.length })),
+        fact(tr("Cost"), t.spend ? t.spend.text : "—", t.spend && t.spend.title),
+        fact(tr("Time"), fmtH(t.work), t.elapsed != null ? tr("{v} from the first task to {v2}", { v: fmtH(t.elapsed), v2: r.status === "released" || r.status === "ready_for_review" ? tr("the last gate") : "now" }) : tr("No task started")),
+        fact(tr("Pace"), t.pace != null ? tr("{v} tasks/h", { v: t.pace.toFixed(1) }) : "—", tr("Tasks done per working hour, parallel work counted once"))),
+      ready ? h("div", { class: "rel-ready" }, tr("{u} usability · {d} docs", { u: chk(ready.usability), d: chk(ready.docs) }), ready.waiting_for && ready.waiting_for.length ? ` · building ${ready.waiting_for.join(", ")}` : "") : null,
+      r.status === "awaiting_approval" ? h("div", { class: "rel-ready bad", text: tr("Waiting for your approval") }) : null,
+      fcFor("releases", "release", r.id) ? h("div", { class: "rel-ready fc" }, `${r.id}: `, forecastChip(fcFor("releases", "release", r.id))) : null);
   }
   function renderReleasesTab() {
     const rp = relPlan();
     const sel = relPick();
-    $("rel-sum-sub").textContent = rp.length ? `${plural(rp.length, "planned release")} · ${rp.filter((r) => r.status === "released").length} released. Pick one for its page.` : "";
-    if (!rp.length) { fill($("rel-overview"), h("div", { class: "empty" }, "No planned releases. Group the milestones with ", cmd("/dev-kit:plan"), ".")); fill($("rel-page")); $("rel-pg-sub").textContent = ""; return; }
+    $("rel-sum-sub").textContent = rp.length ? tr("{v} · {v2} released. Pick one for its page.", { v: plural(rp.length, "planned release"), v2: rp.filter((r) => r.status === "released").length }) : "";
+    if (!rp.length) { fill($("rel-overview"), h("div", { class: "empty" }, tr("No planned releases. Group the milestones with "), cmd("/dev-kit:plan"), ".")); fill($("rel-page")); $("rel-pg-sub").textContent = ""; return; }
     fill($("rel-overview"), rp.map((r) => relCard(r, r.id === sel.id)));
     renderRelPage(sel);
   }
@@ -610,9 +665,9 @@
     // milestones
     const msRows = t.ms.map((m) => {
       const x = milestoneInfo(m), tm = msTiming(m), sp = msSpend(m.id), q = qaState(m);
-      return h("li", { class: "has-btn" }, h("button", { type: "button", class: "row-btn", title: `Show ${m.id} in construction`, onclick: () => openMilestone(m.id) },
+      return h("li", { class: "has-btn" }, h("button", { type: "button", class: "row-btn", title: tr("Show {id} in construction", { id: m.id }), onclick: () => openMilestone(m.id) },
         h("span", { class: "id", text: m.id }), h("span", { text: m.title || "" }),
-        h("span", { class: `chip${isClosed(m) ? " good" : ""}`, text: isClosed(m) ? `gate ${m.gate}${m.score != null ? ` · ${m.score}` : ""}` : q.running ? "QA running" : `${x.done}/${x.total} tasks` }),
+        h("span", { class: `chip${isClosed(m) ? " good" : ""}`, text: isClosed(m) ? `gate ${m.gate}${m.score != null ? ` · ${m.score}` : ""}` : q.running ? tr("QA running") : tr("{done}/{total} tasks", { done: x.done, total: x.total }) }),
         q.qa.runs > 1 ? h("span", { class: "chip", text: plural(q.qa.runs - 1, "fix round") }) : null,
         h("span", { class: "sub", text: [tm ? fmtH(tm.work) : null, sp ? sp.text : null].filter(Boolean).join(" · ") })));
     });
@@ -621,44 +676,44 @@
     const issues = Object.entries(((data.backlog || {}).issues) || {}).filter(([, i]) => ids.has(i.scheduled_in)).map(([id, i]) => ({ id, ...i }));
     const fixRows = fixes.map((x) => h("li", { class: "has-btn" }, h("button", { type: "button", class: "row-btn", "data-tid": x.id, onclick: () => openTask(x.id) },
       h("span", { class: "id", text: x.id }), h("span", { text: x.title || "" }), h("span", { class: `chip st-chip s-${x.status}`, text: stLabel(x.status) }),
-      h("span", { class: "sub", text: [x.milestone, String(x.source || "").startsWith("release:") ? "from a rejection" : "from QA"].join(" · ") }))));
+      h("span", { class: "sub", text: [x.milestone, String(x.source || "").startsWith("release:") ? tr("from a rejection") : tr("from QA")].join(" · ") }))));
     // what holds the release back
     const blocked = t.ts.filter((x) => x.status === "blocked");
     const stuck = t.ms.filter((m) => qaState(m).exhausted);
     const hot = ((data.backlog || {}).hotfix_open || []);
     const blockRows = blocked.map((x) => h("li", { class: "has-btn" }, h("button", { type: "button", class: "row-btn", "data-tid": x.id, onclick: () => openTask(x.id) },
-      h("span", { class: "id", text: x.id }), h("span", { text: x.title || "" }), h("span", { class: "chip", text: "blocked" }), h("span", { class: "sub", text: x.blocked_reason || "" }))))
-      .concat(stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }), h("span", { text: "QA rounds used up. Keep fixing, accept with an ADR, or replan." }), h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))))
-      .concat(hot.map((id) => h("li", {}, issueId(id), h("span", { text: (data.tasks[id] || ((data.backlog || {}).issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))));
+      h("span", { class: "id", text: x.id }), h("span", { text: x.title || "" }), h("span", { class: "chip", text: tr("blocked") }), h("span", { class: "sub", text: x.blocked_reason || "" }))))
+      .concat(stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }), h("span", { text: tr("QA rounds used up. Keep fixing, accept with an ADR, or replan.") }), h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))))
+      .concat(hot.map((id) => h("li", {}, issueId(id), h("span", { text: (data.tasks[id] || ((data.backlog || {}).issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: tr("hotfix") }))));
     // QA scores of the milestones that ran QA
-    const scores = t.ms.filter((m) => m.qa && m.qa.last).map((m) => dodRow(`${m.id} QA`, m.qa.last.overall, m.qa.last.cutoff != null ? m.qa.last.cutoff : cut != null ? cut : 80, m.qa.last.verdict,
-      hasDoc(`qa/${m.id}/report.md`) ? [docLink(`qa/${m.id}/report.md`, "Report")] : []));
+    const scores = t.ms.filter((m) => m.qa && m.qa.last).map((m) => dodRow(tr("{id} QA", { id: m.id }), m.qa.last.overall, m.qa.last.cutoff != null ? m.qa.last.cutoff : cut != null ? cut : 80, m.qa.last.verdict,
+      hasDoc(`qa/${m.id}/report.md`) ? [docLink(`qa/${m.id}/report.md`, tr("Report"))] : []));
     // history of the gate: every submission, approval and rejection
     const hist = ((data.release_history || {})[r.id] || []).slice().reverse();
     const histRows = hist.map((x) => h("li", {}, h("span", { class: `chip${x.event === "rejected" ? " bad" : x.event === "approved" || x.event === "released" ? " good" : ""}`, text: x.event }),
       h("span", { text: x.at ? fmtDT(parseT(x.at)) : "" }),
-      x.event === "rejected" && x.milestone ? h("span", { class: "sub", text: `fixes in ${x.milestone}${(x.tasks || []).length ? `: ${x.tasks.join(", ")}` : ""}` }) : null,
-      x.event === "submitted" && x.dossier ? h("span", { class: "sub" }, docLink(x.dossier, "Dossier")) : null,
+      x.event === "rejected" && x.milestone ? h("span", { class: "sub", text: tr("fixes in {milestone}{v}", { milestone: x.milestone, v: (x.tasks || []).length ? `: ${x.tasks.join(", ")}` : "" }) }) : null,
+      x.event === "submitted" && x.review_doc ? h("span", { class: "sub" }, docLink(x.review_doc, tr("Release review"))) : null,
       x.event === "released" && x.version ? h("span", { class: "sub", text: x.version }) : null));
     // documents of the release
     const docs = [];
-    if (r.dossier) docs.push(h("li", {}, docLink(r.dossier, "Dossier")));
+    if (r.review_doc) docs.push(h("li", {}, docLink(r.review_doc, tr("Release review"))));
     (data.releases || []).filter((x) => x.release === r.id).forEach((x) => {
       const notes = `releases/release-notes-${x.version}.md`;
       const alt = (data.docs || []).find((p) => p.endsWith(`release-notes-${x.version}.md`));
-      if (alt || hasDoc(notes)) docs.push(h("li", {}, docLink(alt || notes, `Release notes ${x.version}`)));
+      if (alt || hasDoc(notes)) docs.push(h("li", {}, docLink(alt || notes, tr("Release notes {version}", { version: x.version }))));
     });
-    r.milestones.forEach((id) => { if (hasDoc(`qa/${id}/report.md`)) docs.push(h("li", {}, docLink(`qa/${id}/report.md`, `${id} QA report`))); });
+    r.milestones.forEach((id) => { if (hasDoc(`qa/${id}/report.md`)) docs.push(h("li", {}, docLink(`qa/${id}/report.md`, tr("{id} QA report", { id })))); });
     fill($("rel-page"),
-      h("ol", { class: "chevrons stages rel-stages rel-page-stages", "aria-label": `Stages of ${r.id}` }, releaseStages(r)),
-      r.status === "awaiting_approval" ? h("div", { class: "rel-decision" }, r.dossier ? h("span", { class: "sub" }, docLink(r.dossier, "Open the dossier")) : null, releaseDecision(r)) : null,
+      h("ol", { class: "chevrons stages rel-stages rel-page-stages", "aria-label": tr("Stages of {id}", { id: r.id }) }, releaseStages(r)),
+      r.status === "awaiting_approval" ? h("div", { class: "rel-decision" }, r.review_doc ? h("span", { class: "sub" }, docLink(r.review_doc, tr("Open the release review"))) : null, releaseDecision(r)) : null,
       h("div", { class: "cols-2 phase-row" },
-        h("div", {}, listBlock("Milestones", msRows, "No milestone yet.", true), listBlock("Holding the release back", blockRows, "Nothing blocks this release.", true)),
-        h("div", {}, listBlock("Fixes", fixRows, "No fix tasks.", true), listBlock("Issues scheduled in it", issues.map(issueLi), "No issue is scheduled in this release.", true))),
-      scores.length ? h("div", { class: "dod" }, h("div", { class: "list-title", text: "QA scores" }), scores) : null,
+        h("div", {}, listBlock(tr("Milestones"), msRows, tr("No milestone yet."), true), listBlock(tr("Holding the release back"), blockRows, tr("Nothing blocks this release."), true)),
+        h("div", {}, listBlock(tr("Fixes"), fixRows, tr("No fix tasks."), true), listBlock(tr("Issues scheduled in it"), issues.map(issueLi), tr("No issue is scheduled in this release."), true))),
+      scores.length ? h("div", { class: "dod" }, h("div", { class: "list-title", text: tr("QA scores") }), scores) : null,
       h("div", { class: "cols-2 phase-row" },
-        listBlock("Gate history", histRows, "Not submitted yet.", true),
-        listBlock("Documents", docs, "No document yet.", true)));
+        listBlock(tr("Gate history"), histRows, tr("Not submitted yet."), true),
+        listBlock(tr("Documents"), docs, tr("No document yet."), true)));
   }
   const currentMilestone = () => (data && data.milestones.find((x) => x.id === currentId())) || null;
   function selectMilestone(id, focusTab) {
@@ -689,33 +744,34 @@
       const x = milestoneInfo(m);
       const closed = m.gate === "passed" || m.gate === "skipped";
       const inQa = !closed && x.total > 0 && x.done === x.total;
-      const state = m.id === cur ? "here" : closed ? "st-done" : x.active || inQa || m.id === data.current_milestone ? "st-current" : "st-upcoming";
+      // the colour says where the work is (the current milestone always the same colour); the selection is a border
+      const state = m.id === data.current_milestone ? "here" : closed ? "st-done" : x.active || inQa ? "st-current" : "st-upcoming";
       const edge = `${i === 0 && !hasEarlier ? " chev-first" : ""}${i === shown.length - 1 && !hasLater ? " chev-last" : ""}`;
       return h("button", {
-        role: "tab", type: "button", id: `tab-${m.id}`, class: `schev ${state}${edge}`, "aria-selected": String(m.id === cur), "aria-controls": "main",
-        tabindex: m.id === cur ? "0" : "-1", title: `${m.title || m.id} · gate ${m.gate}`,
+        role: "tab", type: "button", id: `tab-${m.id}`, class: `schev ${state}${m.id === cur ? " sel" : ""}${edge}`, "aria-selected": String(m.id === cur), "aria-controls": "main",
+        tabindex: m.id === cur ? "0" : "-1", title: tr("{v} · gate {gate}", { v: m.title || m.id, gate: m.gate }),
         onclick: () => selectMilestone(m.id, true),
       }, closed ? h("span", { class: "tab-ok", "aria-hidden": "true", text: "✓" }) : h("span", { class: `tab-dot ${x.active ? "active" : m.gate}`, "aria-hidden": "true" }),
       h("strong", { text: m.id }), h("span", { class: "tab-count", text: `${x.done}/${x.total}` }),
-      !closed && x.total > 0 && x.done === x.total ? h("span", { class: "tab-qa", title: "All tasks done; waiting for the QA gate", text: "QA" }) : null,
-      m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null);
+      !closed && x.total > 0 && x.done === x.total ? h("span", { class: "tab-stage", title: tr("In QA & fixes"), "aria-label": tr("in QA & fixes"), text: "◐" }) : null,
+      m.id === data.current_milestone ? h("span", { class: "tab-current", text: tr("now") }) : null);
     });
-    if (!tabs.length) tabs.push(h("span", { class: "card-sub" }, "No milestones yet. They appear after ", cmd("/dev-kit:plan"), "."));
+    if (!tabs.length) tabs.push(h("span", { class: "card-sub" }, tr("No milestones yet. They appear after "), cmd("/dev-kit:plan"), "."));
     fill($("tabs"), tabs);
     const side = (key, list, word) => {
       $(`tabs-${key}-wrap`).hidden = !list.length;
-      fill($(`tabs-${key}`), `+${list.length}`, h("span", { class: "mt-word", text: ` ${word}` }));
-      $(`tabs-${key}`).setAttribute("aria-label", `${plural(list.length, `${word} milestone`)}: choose one`);
+      fill($(`tabs-${key}`), `+${list.length}`, h("span", { class: "mt-word", text: ` ${tr(word)}` }));
+      $(`tabs-${key}`).setAttribute("aria-label", tr("{v}: choose one", { v: key === "earlier" ? plural(list.length, "earlier milestone") : plural(list.length, "later milestone") }));
       fill($(`tabs-${key}-list`), list.map((m) => {
         const x = milestoneInfo(m);
         return h("li", {}, h("button", { type: "button", class: "ms-item", onclick: () => { pops.forEach((p) => p.close()); selectMilestone(m.id, true); } },
           h("span", { class: `tab-dot ${x.active ? "active" : m.gate}`, "aria-hidden": "true" }), h("strong", { text: m.id }),
           h("span", { class: "si-title", text: m.title || "" }), h("span", { class: "si-count", text: `${x.done}/${x.total}` }),
-          m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null));
+          m.id === data.current_milestone ? h("span", { class: "tab-current", text: tr("current") }) : null));
       }));
     };
-    side("earlier", ms.slice(0, a).reverse(), "earlier");  // the lists read newest first, like every milestone list
-    side("later", ms.slice(b).reverse(), "later");
+    side("earlier", ms.slice(0, a).reverse(), N_("earlier"));  // the lists read newest first, like every milestone list
+    side("later", ms.slice(b).reverse(), N_("later"));
     $("tabs-back").hidden = !data.current_milestone || cur === data.current_milestone;
   }
   $("tabs-back").addEventListener("click", () => { selected = null; selectMilestone(null, true); });
@@ -724,35 +780,42 @@
     const ts = tasksOf(m);
     const counts = Object.fromEntries(STATUS.map((st) => [st.key, ts.filter((t) => t.status === st.key).length]));
     const pct = ts.length ? Math.round((counts.done / ts.length) * 100) : 0;
-    $("ms-title").textContent = m ? `${m.id} · ${m.title || "Milestone"}` : "No milestone planned yet";
+    $("ms-title").textContent = m ? `${m.id} · ${m.title || tr("Milestone")}` : tr("No milestone planned yet");
     const goal = $("ms-goal");
-    if (m) goal.textContent = m.goal || "No goal paragraph in plan.md for this milestone.";
-    else fill(goal, "Run ", cmd("/dev-kit:plan"), " to create milestones and tasks.");
+    if (m) goal.textContent = m.goal || tr("No goal paragraph in plan.md for this milestone.");
+    else fill(goal, tr("Run "), cmd("/dev-kit:plan"), tr(" to create milestones and tasks."));
     goal.classList.remove("open");
     const clipped = goal.scrollHeight > goal.clientHeight + 1;
     goal.classList.toggle("open", goalOpen);
     $("goal-more").hidden = !clipped;
-    $("goal-more").textContent = goalOpen ? "Show less" : "Show more";
+    $("goal-more").textContent = goalOpen ? tr("Show less") : tr("Show more");
     $("goal-more").setAttribute("aria-expanded", String(goalOpen));
     $("ms-done").textContent = String(counts.done);
-    $("ms-total").textContent = ` of ${plural(ts.length, "task")} done`;
-    // the percentage counts tasks, not the milestone: show where the milestone is instead
+    $("ms-total").textContent = `/${plural(ts.length, "task")}`;
+    // the stage chevrons are the one place that says where the milestone is; here, the weighted progress:
+    // tasks 70%, QA 30% (0 before the first round, the blocking findings fixed so far, 100% when the gate passes)
     const st = m ? stagesOf(m) : [];
     const live = st.filter((x) => x.state !== "na");
     const hereIdx = live.findIndex((x) => x.here);
     const closedNow = st.length && st.at(-1).state === "done";
-    $("ms-pct").textContent = !m ? "" : closedNow ? "Closed" : hereIdx >= 0 ? `Stage ${hereIdx + 1} of ${live.length} · ${live[hereIdx].name}` : `${pct}%`;
-    $("ms-pct").title = m ? `${pct}% of the tasks are done` : "";
+    const prog = m ? weightedProgress(m) : null;
+    $("ms-pct").textContent = !m ? "" : closedNow ? tr(" · closed") : prog.runs ? tr(" · QA round {runs}", { runs: prog.runs }) : "";
+    $("ms-pct").title = m ? tr("{v}% of the milestone: tasks {pct}% (70% of the bar), QA {v2}% (30%)", { v: Math.round(prog.total * 100), pct, v2: Math.round(prog.qa * 100) }) : "";
     const next = st.slice(hereIdx + 1).find((x) => x.state !== "na");
     $("ms-caption").textContent = m && ts.length && counts.done === ts.length && !closedNow
-      ? `All tasks done; the milestone closes after ${hereIdx >= 0 ? (live[hereIdx].key === "qa" ? "the QA gate" : live[hereIdx].name.toLowerCase()) : "its gate"}${next && next.key !== "close" ? ` and ${next.name.toLowerCase()}` : ""}.` : "";
+      ? tr("All tasks done; the milestone closes after {v}{v2}.", { v: hereIdx >= 0 ? (live[hereIdx].key === "qa" ? tr("the QA gate") : live[hereIdx].name.toLowerCase()) : tr("its gate"), v2: next && next.key !== "close" ? ` and ${next.name.toLowerCase()}` : "" }) : "";
     const order = ["done", "in_progress", "blocked", "todo"];
     const label = (k) => STATUS.find((x) => x.key === k).label;
+    const tot = Math.max(1, ts.length);
     fill($("segbar"), order.filter((k) => counts[k]).map((k) => {
       const sp = h("span", { class: `st-${k}`, title: `${label(k)}: ${counts[k]}` });
-      sp.style.flexGrow = String(counts[k]);
+      sp.style.flexGrow = String((0.7 * counts[k]) / tot);
       return sp;
-    }));
+    }), m && ts.length ? [["qa-done", prog.qa], ["qa-left", 1 - prog.qa]].filter(([, v]) => v > 0).map(([k, v]) => {
+      const sp = h("span", { class: `st-${k}`, title: k === "qa-done" ? tr("QA: {v}%", { v: Math.round(prog.qa * 100) }) : tr("QA still to do") });
+      sp.style.flexGrow = String(0.3 * v);
+      return sp;
+    }) : null);
     $("segbar").setAttribute("aria-label", order.map((k) => `${label(k)} ${counts[k]}`).join(", "));
     fill($("seg-legend"), order.map((k) => h("li", {}, h("span", { class: `swatch st-${k}`, "aria-hidden": "true" }), `${label(k)} ${counts[k]}`)));
     // project totals and cost live in Stable; here only what belongs to this milestone: its issues and its gate
@@ -760,9 +823,35 @@
     const buf = b.buffer && m && b.buffer.milestone === m.id ? b.buffer : null;
     const sched = m ? Object.entries(b.issues || {}).filter(([, v]) => v.scheduled_in === m.id && ["scheduled", "in_progress"].includes(v.status)) : [];
     fill($("ms-facts"),
-      buf || sched.length ? h("span", { title: [buf ? `${buf.pct}% of the milestone reserved for issues` : null, sched.length ? `Scheduled here: ${sched.map(([id, v]) => `${id} ${v.title || ""}`).join("; ")}` : null].filter(Boolean).join("\n"),
-        text: [buf ? (buf.capacity ? `Issue buffer ${buf.used}/${buf.capacity}` : `${plural(buf.used, "issue task")}`) : null, sched.length ? plural(sched.length, "issue") : null].filter(Boolean).join(" · ") }) : null,
-      gateBadge(m));
+      buf || sched.length ? h("span", { title: [buf ? tr("{pct}% of the milestone reserved for issues", { pct: buf.pct }) : null, sched.length ? tr("Scheduled here: {v}", { v: sched.map(([id, v]) => `${id} ${v.title || ""}`).join("; ") }) : null].filter(Boolean).join("\n"),
+        text: [buf ? (buf.capacity ? bufferText(buf) : `${plural(buf.used, "issue task")}`) : null, sched.length ? plural(sched.length, "issue") : null].filter(Boolean).join(" · ") }) : null,
+      forecastChip(m && fcFor("milestones", "milestone", m.id)));
+  }
+  // ------------------------------------------------------------------ forecast: probable finish (P50), late finish (P85), cost to finish
+  const fcFor = (kind, key, id) => { const fc = data.forecast; return fc && fc.available ? (fc[kind] || []).find((x) => x[key] === id) || null : null; };
+  const fcCost = (x) => (x && x.cost_p50_usd != null ? tr("~US$ {v}–{v2}", { v: Math.round(x.cost_p50_usd), v2: Math.round(x.cost_p85_usd) }) : "");
+  function forecastText(x) {
+    return x ? tr("probable {v}, by {v2}{v3}", { v: fmtDate(x.finish_p50), v2: fmtDate(x.finish_p85), v3: fcCost(x) ? tr(" · {v} to finish", { v: fcCost(x) }) : "" }) : "";
+  }
+  function forecastChip(x) {
+    if (!x) return null;
+    const fc = data.forecast;
+    return h("span", { class: "fc", title: tr("Forecast from the pace of {v} ({v2} left): 50% chance by {v3}, 85% by {v4}", { v: fc.basis.join(", "), v2: plural(x.tasks_left, "task"), v3: fmtDT(x.finish_p50), v4: fmtDT(x.finish_p85) }),
+      text: forecastText(x) });
+  }
+  /** The issue buffer of a milestone: the share reserved for issues, and what went past it with the user's confirmation. */
+  function bufferText(b) {
+    const over = b.capacity && b.used > b.capacity ? b.used - b.capacity : 0;
+    return tr("Issue buffer {used}/{capacity}{v}", { used: b.used, capacity: b.capacity, v: over ? tr(" · {over} above the limit, confirmed by you", { over }) : "" });
+  }
+  /** Tasks 70%, QA 30%: 0 before the first round, then the blocking findings fixed (fix tasks done; at most 90% until
+   * the gate), 100% when it passes. */
+  function weightedProgress(m) {
+    const x = qaState(m);
+    const build = x.ts.filter((t) => !isFix(t));
+    const tasks = build.length ? build.filter((t) => t.status === "done").length / build.length : 0;
+    const qa = x.passed ? 1 : !x.qa.runs ? 0 : x.fixes.length ? 0.9 * (x.fixes.length - x.fixOpen.length) / x.fixes.length : 0;
+    return { tasks, qa, total: 0.7 * tasks + 0.3 * qa, runs: x.qa.runs };
   }
   $("goal-more").addEventListener("click", () => { goalOpen = !goalOpen; renderMilestone(currentMilestone()); });
 
@@ -774,22 +863,22 @@
     const isNext = data.next && data.next.task === t.id;
     const wait = t.status === "done" ? [] : waitingOn(t);
     const here = agentsOn(t.id);
-    return h("article", { class: `tcard s-${t.status}${isNext ? " next" : ""}`, "aria-label": `${t.id} ${t.title}, ${stLabel(t.status)}${wait.length ? `, waiting on ${wait.join(", ")}` : ""}. Open details`,
+    return h("article", { class: `tcard s-${t.status}${isNext ? " next" : ""}`, "aria-label": tr("{id} {title}, {v}{v2}. Open details", { id: t.id, title: t.title, v: stLabel(t.status), v2: wait.length ? tr(", waiting on {v}", { v: wait.join(", ") }) : "" }),
       tabindex: "0", role: "button", "aria-haspopup": "dialog", "data-tid": t.id,
       onclick: () => openTask(t.id), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTask(t.id); } } },
       h("div", { class: "tcard-top" }, h("span", { class: "tid", text: t.id }), h("span", { class: "chip", text: t.type }),
         t.lane ? h("span", { class: `chip lane-${t.lane}`, text: t.lane }) : null,
-        isNext ? h("span", { class: "chip next-chip", text: "next up" }) : null),
+        isNext ? h("span", { class: "chip next-chip", text: tr("next up") }) : null),
       h("div", { class: "tcard-title", text: t.title }),
       here.length ? h("div", { class: "tcard-agents" }, here.map((x) => h("span", { class: "agent-chip" }, agentBits(x)))) : null,
       t.status === "blocked" && t.blocked_reason ? h("div", { class: "reason", text: t.blocked_reason }) : null,
       h("div", { class: "tcard-meta" },
-        wait.length ? h("span", { class: "chip wait", text: `Waiting on ${wait.join(", ")}` }) : null,
-        t.status === "todo" && !wait.length && !isNext ? h("span", { class: "chip ready", text: "Ready" }) : null,
-        t.acceptance ? h("span", { title: "Acceptance criteria", text: `${t.acceptance} AC` }) : null,
-        t.status === "in_progress" && t.started_at ? h("span", { text: `started ${ago(parseT(t.started_at))}` }) : null,
-        t.status === "done" && t.done_at ? h("span", { text: `done ${fmtDT(parseT(t.done_at))}` }) : null,
-        t.commit ? h("span", { class: "tid", title: "Commit", text: t.commit.slice(0, 7) }) : null));
+        wait.length ? h("span", { class: "chip wait", text: tr("Waiting on {v}", { v: wait.join(", ") }) }) : null,
+        t.status === "todo" && !wait.length && !isNext ? h("span", { class: "chip ready", text: tr("Ready") }) : null,
+        t.acceptance ? h("span", { title: tr("Acceptance criteria"), text: tr("{acceptance} AC", { acceptance: t.acceptance }) }) : null,
+        t.status === "in_progress" && t.started_at ? h("span", { text: tr("started {v}", { v: ago(parseT(t.started_at)) }) }) : null,
+        t.status === "done" && t.done_at ? h("span", { text: tr("done {v}", { v: fmtDT(parseT(t.done_at)) }) }) : null,
+        t.commit ? h("span", { class: "tid", title: tr("Commit"), text: t.commit.slice(0, 7) }) : null));
   }
 
   function renderKanban(m) {
@@ -800,7 +889,7 @@
     if (typeFilter && !types.includes(typeFilter)) typeFilter = "";
     if (sel.dataset.types !== types.join(",")) {
       sel.dataset.types = types.join(",");
-      fill(sel, h("option", { value: "", text: "All types" }), types.map((t) => h("option", { value: t, text: t })));
+      fill(sel, h("option", { value: "", text: tr("All types") }), types.map((t) => h("option", { value: t, text: t })));
     }
     sel.value = typeFilter;
     sel.disabled = types.length < 2;
@@ -810,12 +899,12 @@
     const shown = ts.filter(match);
     const note = $("filter-note");
     note.hidden = !filtering;
-    if (filtering) fill(note, `${shown.length} of ${plural(ts.length, "task")} shown. `,
-      h("button", { type: "button", class: "link-btn", text: "Clear filter", onclick: () => { query = ""; typeFilter = ""; $("task-search").value = ""; renderKanban(currentMilestone()); $("task-search").focus(); } }));
+    if (filtering) fill(note, tr("{shown_n} of {v} shown. ", { shown_n: shown.length, v: plural(ts.length, "task") }),
+      h("button", { type: "button", class: "link-btn", text: tr("Clear filter"), onclick: () => { query = ""; typeFilter = ""; $("task-search").value = ""; renderKanban(currentMilestone()); $("task-search").focus(); } }));
     const box = $("kanban");
     if (!m) {
       fill($("col-tabs"));
-      fill(box, h("div", { class: "board-empty" }, "No milestone planned yet. Run ", cmd("/dev-kit:plan"), " to create milestones and tasks."));
+      fill(box, h("div", { class: "board-empty" }, tr("No milestone planned yet. Run "), cmd("/dev-kit:plan"), tr(" to create milestones and tasks.")));
       return;
     }
     const by = Object.fromEntries(STATUS.map((st) => [st.key, shown.filter((t) => t.status === st.key)]));
@@ -834,7 +923,7 @@
       if (list.length > COL_LIMIT && !filtering) {
         const open = expanded.has(st.key);
         more = h("button", { type: "button", class: "col-more", id: `more-${st.key}`, "aria-expanded": String(open),
-          text: open ? "Show less" : `Show all ${list.length}`,
+          text: open ? tr("Show less") : tr("Show all {list_n}", { list_n: list.length }),
           onclick: () => { if (open) expanded.delete(st.key); else expanded.add(st.key); keepFocus(() => renderKanban(currentMilestone())); } });
         if (!open) list = list.slice(0, COL_LIMIT);
       }
@@ -842,7 +931,7 @@
       return h("section", { class: `col${slim ? " slim" : ""}`, "data-st": st.key, "aria-label": `${st.label}, ${plural(by[st.key].length, "task")}` },
         h("div", { class: "col-head" }, h("span", { class: `swatch st-${st.key}`, "aria-hidden": "true" }), st.label,
           h("span", { class: "count", text: String(by[st.key].length) })),
-        list.length ? list.map(taskCard) : h("div", { class: "col-empty", text: filtering ? "No match" : st.key === "blocked" ? "Nothing blocked" : "Empty" }),
+        list.length ? list.map(taskCard) : h("div", { class: "col-empty", text: filtering ? tr("No match") : st.key === "blocked" ? tr("Nothing blocked") : tr("Empty") }),
         more);
     }));
   }
@@ -871,14 +960,14 @@
     const box = $("burndown");
     const ser = m && burndownSeries(m);
     if (!ser) {
-      fill(box, h("div", { class: "chart-empty", text: "The burndown starts when the first task of this milestone starts." }));
+      fill(box, h("div", { class: "chart-empty", text: tr("The burndown starts when the first task of this milestone starts.") }));
       fill($("burndown-table"));
       return;
     }
     const W = Math.max(300, Math.round(box.clientWidth || 640)), H = 240, L = 36, R = 16, T = 14, B = 28;
     const x = (t) => L + ((t - ser.t0) / (ser.t1 - ser.t0)) * (W - L - R);
     const y = (v) => T + (1 - v / Math.max(1, ser.total)) * (H - T - B);
-    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Burndown for ${m.id}: ${ser.pts.at(-1)[1]} of ${ser.total} tasks remaining` });
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": tr("Burndown for {id}: {v} of {total} tasks remaining", { id: m.id, v: ser.pts.at(-1)[1], total: ser.total }) });
     const step = ser.total <= 6 ? 1 : Math.ceil(ser.total / 5);
     const grid = s("g", { class: "grid" });
     for (let v = 0; v <= ser.total; v += step) {
@@ -902,12 +991,12 @@
     svg.append(s("path", { class: "line-actual", d: pathD }));
     const last = ser.pts.at(-1);
     svg.append(s("circle", { class: "marker", cx: x(last[0]), cy: y(last[1]), r: 5 }));
-    svg.append(s("text", { class: "label-strong", x: x(last[0]) - 8, y: y(last[1]) - 10, "text-anchor": "end", text: `${last[1]} left` }));
+    svg.append(s("text", { class: "label-strong", x: x(last[0]) - 8, y: y(last[1]) - 10, "text-anchor": "end", text: tr("{v} left", { v: last[1] }) }));
     const cross = s("line", { class: "crosshair", y1: T, y2: y(0), visibility: "hidden" });
     const dot = s("circle", { class: "marker", r: 4, visibility: "hidden" });
     svg.append(cross, dot);
     const hit = s("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent", tabindex: "0",
-      "aria-label": "Burndown chart; use the table view for every value" });
+      "aria-label": tr("Burndown chart; use the table view for every value") });
     const remAt = (t) => { let v = ser.total; for (const [pt, pv] of ser.pts) if (pt <= t) v = pv; return v; };
     const idealAt = (t) => Math.max(0, ser.total * (1 - (t - ser.t0) / (ser.t1 - ser.t0)));
     function move(evt) {
@@ -923,10 +1012,10 @@
     hit.addEventListener("pointerleave", out); hit.addEventListener("blur", out);
     svg.append(hit);
     fill(box, svg);
-    const rows = [[ser.t0, ser.total, "milestone start"]];
+    const rows = [[ser.t0, ser.total, tr("milestone start")]];
     let rem = ser.total;
-    for (const d of ser.dones) { rem -= 1; rows.push([d, rem, "task done"]); }
-    fill($("burndown-table"), h("table", {}, h("thead", {}, h("tr", {}, h("th", { text: "When" }), h("th", { text: "Remaining" }), h("th", { text: "Event" }))),
+    for (const d of ser.dones) { rem -= 1; rows.push([d, rem, tr("task done")]); }
+    fill($("burndown-table"), h("table", {}, h("thead", {}, h("tr", {}, h("th", { text: tr("When") }), h("th", { text: tr("Remaining") }), h("th", { text: tr("Event") }))),
       h("tbody", {}, rows.map(([t, v, e]) => h("tr", {}, h("td", { text: fmtDT(t) }), h("td", { text: String(v) }), h("td", { text: e }))))));
   }
 
@@ -959,8 +1048,8 @@
   function msSpend(id) {
     const c = (data.milestone_costs || {})[id];
     if (!c) return null;
-    if (Number(c.usd) > 0) return { text: `US$ ${Number(c.usd).toFixed(2)}${c.usd_complete === false ? "+" : ""}`, title: c.usd_complete === false ? "Some requests had no price: at least this much" : "Estimated cost, API-equivalent" };
-    if (Number(c.tokens) > 0) return { text: `${compact(Number(c.tokens))} tok`, title: c.partial ? "Tokens reported by the skills (no transcripts): partial" : "Tokens used (no price for the model)" };
+    if (Number(c.usd) > 0) return { text: tr("US$ {v}{v2}", { v: Number(c.usd).toFixed(2), v2: c.usd_complete === false ? "+" : "" }), title: c.usd_complete === false ? tr("Some requests had no price: at least this much") : tr("Estimated cost, API-equivalent") };
+    if (Number(c.tokens) > 0) return { text: tr("{v} tok", { v: compact(Number(c.tokens)) }), title: c.partial ? tr("Tokens reported by the skills (no transcripts): partial") : tr("Tokens used (no price for the model)") };
     return null;
   }
   function renderVelocity(cur) {
@@ -970,7 +1059,7 @@
       return { id: m.id, title: m.title, done: ts.filter((t) => t.status === "done").length, total: ts.length, time: msTiming(m), spend: msSpend(m.id) };
     }).filter((r) => r.total);
     if (!rows.length) {
-      fill(box, h("div", { class: "chart-empty", text: "Velocity appears once milestones have tasks." }));
+      fill(box, h("div", { class: "chart-empty", text: tr("Velocity appears once milestones have tasks.") }));
       fill($("velocity-hours"));
       fill($("velocity-table"));
       return;
@@ -981,7 +1070,7 @@
     const y = (v) => T + (1 - v / max) * (H - T - B);
     const band = (W - L - R) / rows.length;
     const bw = Math.min(24, band * 0.6);
-    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Tasks done per milestone: " + rows.map((r) => `${r.id} ${r.done}`).join(", ") });
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": tr("Tasks done per milestone: ") + rows.map((r) => `${r.id} ${r.done}`).join(", ") });
     svg.append(s("defs", {}, s("linearGradient", { id: "accent-grad", x1: "0", y1: "1", x2: "0", y2: "0" },
       s("stop", { offset: "0", "stop-color": "#8b5cf6" }), s("stop", { offset: "1", "stop-color": "#22d3ee" }))));
     const step = max <= 6 ? 1 : Math.ceil(max / 5);
@@ -995,7 +1084,7 @@
       const rad = Math.min(4, hgt);
       const d = hgt > 0 ? `M${cx - bw / 2},${base}V${top + rad}Q${cx - bw / 2},${top} ${cx - bw / 2 + rad},${top}H${cx + bw / 2 - rad}Q${cx + bw / 2},${top} ${cx + bw / 2},${top + rad}V${base}Z` : "";
       const hit = s("rect", { class: "hit", x: cx - band / 2 + 2, y: T, width: band - 4, height: H - T - B, tabindex: "0",
-        "aria-label": `${r.id}: ${r.done} of ${r.total} tasks done` });
+        "aria-label": tr("{id}: {done} of {total} tasks done", { id: r.id, done: r.done, total: r.total }) });
       const tipFn = (evt) => showTip(evt, `${r.id} · ${r.title || ""}`, velTip(r));
       hit.addEventListener("pointermove", tipFn); hit.addEventListener("focus", tipFn);
       hit.addEventListener("pointerleave", hideTip); hit.addEventListener("blur", hideTip);
@@ -1006,14 +1095,14 @@
     fill(box, svg);
     renderHours(rows, W);
     // the table is a list: newest first (the charts keep time order)
-    fill($("velocity-table"), h("table", {}, h("thead", {}, h("tr", {}, ["Milestone", "Done", "Total", "Elapsed", "Working", "Cost or tokens"].map((x) => h("th", { text: x })))),
+    fill($("velocity-table"), h("table", {}, h("thead", {}, h("tr", {}, [tr("Milestone"), tr("Done"), tr("Total"), tr("Elapsed"), tr("Working"), tr("Cost or tokens")].map((x) => h("th", { text: x })))),
       h("tbody", {}, rows.slice().reverse().map((r) => h("tr", {}, h("td", { text: `${r.id} ${r.title || ""}` }), h("td", { text: String(r.done) }), h("td", { text: String(r.total) }),
-        h("td", { text: r.time ? fmtH(r.time.elapsed) + (r.time.open ? " so far" : "") : "—" }), h("td", { text: r.time ? fmtH(r.time.work) : "—" }),
-        h("td", { text: r.spend ? r.spend.text : "not measured" }))))));
+        h("td", { text: r.time ? fmtH(r.time.elapsed) + (r.time.open ? tr(" so far") : "") : "—" }), h("td", { text: r.time ? fmtH(r.time.work) : "—" }),
+        h("td", { text: r.spend ? r.spend.text : tr("not measured") }))))));
   }
   function velTip(r) {
-    const out = [[`${r.done}`, `done of ${r.total}`, "s1"]];
-    if (r.time) out.push([fmtH(r.time.elapsed), r.time.open ? "elapsed so far" : "elapsed", "s1"], [fmtH(r.time.work), "working", "s2"]);
+    const out = [[`${r.done}`, tr("done of {total}", { total: r.total }), "s1"]];
+    if (r.time) out.push([fmtH(r.time.elapsed), r.time.open ? tr("elapsed so far") : "elapsed", "s1"], [fmtH(r.time.work), "working", "s2"]);
     if (r.spend) out.push([r.spend.text, r.spend.text.endsWith("tok") ? "tokens" : "cost"]);
     return out;
   }
@@ -1022,7 +1111,7 @@
   function renderHours(rows, W) {
     const box = $("velocity-hours");
     const pts = rows.filter((r) => r.time);
-    if (!pts.length) { fill(box, h("div", { class: "chart-empty", text: "Hours appear once a task of a milestone has started." })); return; }
+    if (!pts.length) { fill(box, h("div", { class: "chart-empty", text: tr("Hours appear once a task of a milestone has started.") })); return; }
     const H = 220, L = 44, R = 64, T = 16, B = 44;
     const max = Math.max(0.5, ...pts.map((r) => Math.max(r.time.elapsed, r.time.work)));
     const nice = (v) => { const p = 10 ** Math.floor(Math.log10(v)); return [1, 2, 2.5, 5, 10].map((k) => k * p).find((k) => k >= v); };
@@ -1030,7 +1119,7 @@
     const y = (v) => T + (1 - v / top) * (H - T - B);
     const band = (W - L - R) / rows.length;
     const cx = (i) => L + band * i + band / 2;
-    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Hours per milestone: " + pts.map((r) => `${r.id} elapsed ${fmtH(r.time.elapsed)}, working ${fmtH(r.time.work)}`).join("; ") });
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": tr("Hours per milestone: ") + pts.map((r) => tr("{id} elapsed {v}, working {v2}", { id: r.id, v: fmtH(r.time.elapsed), v2: fmtH(r.time.work) })).join("; ") });
     const grid = s("g", { class: "grid" });
     for (let v = 0; v <= top + 1e-9; v += step) grid.append(s("line", { x1: L, x2: W - R, y1: y(v), y2: y(v) }), s("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end", text: v ? fmtH(v).replace(" ", " ") : "0" }));
     svg.append(grid, s("line", { class: "axis-line", x1: L, x2: W - R, y1: y(0), y2: y(0) }));
@@ -1046,13 +1135,13 @@
     const last = rows[lastI];
     const ye = y(last.time.elapsed), yw = y(last.time.work);
     const gap = Math.abs(ye - yw) < 14 ? (ye <= yw ? [-7, 7] : [7, -7]) : [0, 0];  // keep the two direct labels apart
-    svg.append(s("text", { class: "label-strong", x: cx(lastI) + 9, y: ye + 4 + gap[0], text: "elapsed" }),
-      s("text", { class: "label-strong", x: cx(lastI) + 9, y: yw + 4 + gap[1], text: "working" }));
+    svg.append(s("text", { class: "label-strong", x: cx(lastI) + 9, y: ye + 4 + gap[0], text: tr("elapsed") }),
+      s("text", { class: "label-strong", x: cx(lastI) + 9, y: yw + 4 + gap[1], text: tr("working") }));
     rows.forEach((r, i) => {
       svg.append(s("text", { x: cx(i), y: H - 24, "text-anchor": "middle", text: r.id }));
       if (r.spend) svg.append(s("text", { class: "spend", x: cx(i), y: H - 8, "text-anchor": "middle", text: r.spend.text }));
       const hit = s("rect", { class: "hit", x: cx(i) - band / 2 + 2, y: T, width: band - 4, height: H - T - B, tabindex: "0",
-        "aria-label": `${r.id}: ${r.time ? `elapsed ${fmtH(r.time.elapsed)}, working ${fmtH(r.time.work)}` : "not started"}${r.spend ? `, ${r.spend.text}` : ""}` });
+        "aria-label": `${r.id}: ${r.time ? tr("elapsed {v}, working {v2}", { v: fmtH(r.time.elapsed), v2: fmtH(r.time.work) }) : tr("not started")}${r.spend ? `, ${r.spend.text}` : ""}` });
       const tipFn = (evt) => showTip(evt, `${r.id} · ${r.title || ""}`, velTip(r));
       hit.addEventListener("pointermove", tipFn); hit.addEventListener("focus", tipFn);
       hit.addEventListener("pointerleave", hideTip); hit.addEventListener("blur", hideTip);
@@ -1063,7 +1152,7 @@
 
   // ------------------------------------------------------------------ needs you, activity
   /** A small button naming a phase: it opens that phase. */
-  const phaseTag = (p) => h("button", { type: "button", class: "phase-tag", title: `Open ${PHASE_NAME[p]}`, text: PHASE_NAME[p], onclick: () => setPhase(p) });
+  const phaseTag = (p) => h("button", { type: "button", class: "phase-tag", title: tr("Open {v}", { v: PHASE_NAME[p] }), text: PHASE_NAME[p], onclick: () => setPhase(p) });
   function listBlock(title, items, emptyText, good, phase) {
     return h("div", {}, h("div", { class: "list-title" }, title, items.length ? h("span", { class: "chip", text: String(items.length) }) : null, phase ? phaseTag(phase) : null),
       items.length ? h("ul", { class: "list" }, items) : h("div", { class: `empty${good ? " good" : ""}`, text: emptyText }));
@@ -1078,12 +1167,13 @@
     return "construction";
   }
   function renderImpediments() {
-    const blocked = Object.entries(data.tasks).filter(([, t]) => t.status === "blocked");
     const b = data.backlog || {};
-    const hot = b.hotfix_open || [];
+    const hot = (b.hotfix_open || []).filter((id) => !data.tasks[id] || !["done", "dropped"].includes(data.tasks[id].status));
     const warns = b.warnings || [];
     // milestones past the QA limit with no blocked card to show it (the round failed on scores alone)
-    const stuck = data.milestones.filter((m) => qaState(m).exhausted && !qaState(m).fixBlocked.length);
+    const stuck = data.milestones.filter((m) => qaState(m).exhausted);
+    const heldByQa = (t) => isFix(t) && /rounds_exhausted/.test(t.blocked_reason || "");
+    const blocked = Object.entries(data.tasks).filter(([, t]) => t.status === "blocked" && !heldByQa(t) && t.lane !== "hotfix");
     const approvals = actionsOn() ? inbox().approvals : [];
     const waitingRel = relPlan().filter((r) => r.status === "awaiting_approval");
     const allNeeds = b.needs || [];
@@ -1104,82 +1194,135 @@
     needsN = n;
     if (!n) { fill($("impediments")); return; }
     fill($("impediments"),
-      approvals.length ? listBlock("Claude Code asks permission", approvals.map(approvalRow), "") : null,
-      waitingRel.length ? listBlock("Releases waiting for your approval", waitingRel.map((r) => h("li", {}, h("span", { class: "id", text: r.id }),
-        h("span", { text: `${r.title} · ${plural(r.closed.length, "milestone")} closed` }),
-        h("button", { type: "button", class: "link-btn", text: "Open", onclick: () => openRelease(r.id) }),
-        r.dossier ? h("span", { class: "sub" }, docLink(r.dossier, "Open the dossier")) : null,
+      approvals.length ? listBlock(tr("Claude Code asks permission"), approvals.map(approvalRow), "") : null,
+      waitingRel.length ? listBlock(tr("Releases waiting for your approval"), waitingRel.map((r) => h("li", {}, h("span", { class: "id", text: r.id }),
+        h("span", { text: tr("{title} · {v} closed", { title: r.title, v: plural(r.closed.length, "milestone") }) }),
+        h("button", { type: "button", class: "link-btn", text: tr("Open"), onclick: () => openRelease(r.id) }),
+        r.review_doc ? h("span", { class: "sub" }, docLink(r.review_doc, tr("Open the release review"))) : null,
         releaseDecision(r))), "", false, "releases") : null,
-      stuck.length ? listBlock("QA rounds used up", stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }),
-        h("span", { text: `${qaState(m).qa.runs - 1} fix rounds used of ${qaState(m).max} (${qaReason(qaState(m).qa, m) || "see the QA report"}). Keep fixing, accept with an ADR, or replan.` }),
-        h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))), "", false, "construction") : null,
-      cneeds.length ? listBlock("Confirm before building", cneeds.map(checkpointRow), "", false, cpPrd ? "conception" : "planning") : null,
-      dneeds.length ? listBlock("Deferred debt above the cap", dneeds.map(debtRow), "", false, "construction") : null,
-      lneeds.length ? listBlock("Proposed lessons", lneeds.map(lessonRow), "", false, "construction") : null,
-      qneeds.length ? listBlock("Issue queue", qneeds.map(queueNeedRow), "", false, "planning") : null,
-      hot.length ? listBlock("Open hotfixes", hot.map((id) => h("li", {}, issueId(id),
-        h("span", { text: (data.tasks[id] || (b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))), "", false, "construction") : null,
-      blocked.length ? listBlock("Blocked tasks", blocked.map(([id, t]) => h("li", { class: "has-btn" },
-        h("button", { type: "button", class: "row-btn", "data-tid": id, "aria-haspopup": "dialog", onclick: () => openTask(id) },
-          h("span", { class: "id", text: id }), h("span", { text: t.title }), h("span", { class: "chip", text: t.milestone }),
-          h("span", { class: "sub bad", text: t.blocked_reason || "No reason recorded" })))), "", false, "construction") : null,
-      data.questions.length ? listBlock("Open questions", data.questions.map((q) => h("li", {}, hasDoc("open-questions.md") ? docLink("open-questions.md", q.id, q.id, "id") : h("span", { class: "id", text: q.id }), h("span", {}, linkify(q.question)),
-        h("span", { class: "q-tags" }, h("span", { class: "chip", text: q.by || "?" }), phaseTag(questionPhase(q))), q.assumption ? h("span", { class: "sub", text: `Assumed meanwhile: ${q.assumption}` }) : null,
+      stuck.length ? listBlock(tr("QA rounds used up"), stuck.map(qaDecisionRow), "", false, "construction") : null,
+      cneeds.length ? listBlock(tr("Confirm before building"), cneeds.map(checkpointRow), "", false, cpPrd ? "conception" : "planning") : null,
+      dneeds.length ? listBlock(tr("Deferred debt above the cap"), dneeds.map(debtRow), "", false, "construction") : null,
+      lneeds.length ? listBlock(tr("Proposed lessons"), lneeds.map(lessonRow), "", false, "construction") : null,
+      qneeds.length ? listBlock(tr("Issue queue"), qneeds.map(queueNeedRow), "", false, "planning") : null,
+      hot.length ? listBlock(tr("Open hotfixes"), hot.map((id) => hotfixRow(id, b)), "", false, "construction") : null,
+      blocked.length ? listBlock(tr("Blocked tasks"), blocked.map(([id, t]) => blockedRow(id, t)), "", false, "construction") : null,
+      data.questions.length ? listBlock(tr("Open questions"), data.questions.map((q) => h("li", {}, hasDoc("open-questions.md") ? docLink("open-questions.md", q.id, q.id, "id") : h("span", { class: "id", text: q.id }), h("span", {}, linkify(q.question)),
+        h("span", { class: "q-tags" }, h("span", { class: "chip", text: q.by || "?" }), phaseTag(questionPhase(q))), q.assumption ? h("span", { class: "sub", text: tr("Assumed meanwhile: {assumption}", { assumption: q.assumption }) }) : null,
         actionsOn() ? answerBox(q) : null)), "") : null,
-      warns.length ? listBlock("Warnings", warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
-      actionsOn() && data.questions.length ? h("p", { class: "needs-hint" }, "Answer here: Claude Code records the answer and continues what was waiting on it.") : null,
-      data.questions.length || blocked.length ? h("p", { class: "needs-hint" }, actionsOn() ? "Or go through all of them with " : "Answer in Claude Code with ", cmd("/dev-kit:interview --gaps")) : null);
+      warns.length ? listBlock(tr("Warnings"), warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
+      actionsOn() && data.questions.length ? h("p", { class: "needs-hint" }, tr("Answer here: Claude Code records the answer and continues what was waiting on it.")) : null,
+      data.questions.length || blocked.length ? h("p", { class: "needs-hint" }, actionsOn() ? tr("Or go through all of them with ") : tr("Answer in Claude Code with "), cmd("/dev-kit:interview --gaps")) : null);
+  }
+  /** A row of decision buttons that queue one request; the recommended one first and highlighted, a note field when asked. */
+  const decisionDrafts = {};
+  function decisionBox(key, label, action, base, options, sentText) {
+    const sent = inbox().open.find((r) => r.action === action && Object.entries(base).every(([k, v]) => r.args && r.args[k] === v));
+    if (sent) return h("div", { class: "sub answer-sent", text: tr("Sent ({id}): {v}. Claude Code applies it.", { id: sent.id, v: sentText(sent.args) }) });
+    const ta = h("textarea", { maxlength: "2000", rows: "2", class: "answer-input", "aria-label": tr("{label}: note", { label }), placeholder: tr("Note or reason (needed where marked *)") });
+    ta.value = decisionDrafts[key] || "";
+    ta.addEventListener("input", () => { decisionDrafts[key] = ta.value; });
+    const send = async (o, el) => {
+      const note = ta.value.trim();
+      if (o.needsNote && !note) { ta.focus(); toast(tr("Write the reason first."), true); return; }
+      el.disabled = true;
+      try { await queue(action, { ...base, ...o.args, ...(note ? { note } : {}) }); delete decisionDrafts[key]; } catch (e) { el.disabled = false; }
+    };
+    const opts = options.slice().sort((a, b) => Boolean(b.recommended) - Boolean(a.recommended));
+    return h("div", { class: "sub answer", role: "group", "aria-label": label },
+      opts.map((o) => h("button", { type: "button", class: `btn btn-sm${o.recommended ? " btn-primary" : o.danger ? " btn-danger" : ""}`, title: o.title || null,
+        onclick: (e) => send(o, e.currentTarget) }, o.text + (o.needsNote ? " *" : ""), o.recommended ? h("span", { class: "rec", text: tr("recommended") }) : null)),
+      options.some((o) => o.note !== false) ? h("span", { class: "answer-free" }, ta) : null);
+  }
+  /** Needs you › QA rounds used up (conventions §7): keep fixing (+1 round), accept with an ADR (a justification), or replan. */
+  function qaDecisionRow(m) {
+    const q = qaState(m);
+    const head = [h("span", { class: "id", text: m.id }),
+      h("span", { text: tr("{v} fix rounds used of {max} ({v2}).", { v: Math.max(0, q.qa.runs - 1), max: q.max, v2: qaReason(q.qa, m) || tr("see the QA report") }) })];
+    if (!actionsOn()) return h("li", {}, ...head, h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd(`/dev-kit:qa ${m.id}`)));
+    // a fix that did not hold twice points to the plan, not to one more round
+    const replan = q.fixBlocked.some((t) => (t.blocked_count || 0) >= 2);
+    return h("li", {}, ...head, decisionBox(`qa:${m.id}`, tr("QA of {id}", { id: m.id }), "qa_decision", { milestone: m.id }, [
+      { text: tr("Continue fixing (+1 round)"), args: { decision: "continue", rounds: 1 }, recommended: !replan, title: tr("One more fix round, then QA again") },
+      { text: tr("Accept with an ADR"), args: { decision: "accept" }, needsNote: true, title: tr("The milestone closes as it is; an ADR records why") },
+      { text: tr("Replan"), args: { decision: "replan" }, recommended: replan, title: tr("Change the plan of this milestone") }],
+    (a) => ({ continue: tr("continue fixing"), accept: tr("accept with an ADR"), replan: "replan" })[a.decision]));
+  }
+  /** Needs you › a blocked task: the question it waits on, answered right here, or unblock / skip / drop. */
+  function blockedRow(id, t) {
+    const q = data.questions.find((x) => x.task === id);
+    const head = h("button", { type: "button", class: "row-btn", "data-tid": id, "aria-haspopup": "dialog", onclick: () => openTask(id) },
+      h("span", { class: "id", text: id }), h("span", { text: t.title }), h("span", { class: "chip", text: t.milestone }),
+      h("span", { class: "sub bad", text: t.blocked_reason || tr("No reason recorded") }));
+    if (!actionsOn()) return h("li", { class: "has-btn" }, head);
+    if (q) return h("li", { class: "has-btn" }, head, h("span", { class: "sub" }, tr("Waiting on {id}: ", { id: q.id }), linkify(q.question)), answerBox(q));
+    return h("li", { class: "has-btn" }, head, decisionBox(`task:${id}`, tr("Blocked {id}", { id }), "task_decision", { task: id }, [
+      { text: tr("Unblock"), args: { decision: "unblock" }, recommended: true, title: tr("Back to To do, with your note for the implementer") },
+      { text: tr("Skip to the next milestone"), args: { decision: "skip" }, title: tr("Move it to the next open milestone") },
+      { text: tr("Drop"), args: { decision: "drop" }, needsNote: true, danger: true, title: tr("Remove it from the plan, with the reason") }],
+    (a) => ({ unblock: "unblock", skip: tr("skip to the next milestone"), drop: "drop" })[a.decision]));
+  }
+  /** Needs you › an open hotfix: where it is, and run it now or drop it. */
+  function hotfixRow(id, b) {
+    const t = data.tasks[id] || {};
+    const head = [issueId(id), h("span", { text: t.title || ((b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: tr("hotfix") }),
+      t.status ? h("span", { class: "chip", text: stLabel(t.status) }) : null];
+    if (!actionsOn() || !data.tasks[id]) return h("li", {}, ...head);
+    return h("li", {}, ...head, decisionBox(`hot:${id}`, tr("Hotfix {id}", { id }), "task_decision", { task: id }, [
+      { text: tr("Run"), args: { decision: "run" }, recommended: true, title: tr("Build {id} now", { id }), note: false },
+      { text: tr("Drop"), args: { decision: "drop" }, needsNote: true, danger: true, title: tr("Drop the hotfix, with the reason") }],
+    (a) => (a.decision === "run" ? "run" : "drop")));
   }
   /** Needs you › Confirm PRD / Confirm plan (conventions §19): the document opens formatted in the side drawer; Confirm,
    * or ask for changes with what must change (the skill revises, a new review and a new checkpoint follow). */
   const adjustDrafts = {};
   function checkpointRow(x) {
-    const doc = hasDoc(x.doc) ? docLink(x.doc, `Open ${x.doc}`) : h("span", { class: "sub", text: x.doc });
-    const head = [h("span", { class: "id", text: x.target === "prd" ? "PRD" : "Plan" }),
-      h("span", { text: `${x.title}${x.round > 1 ? ` · round ${x.round}` : ""}: the review passed; nothing ${x.target === "prd" ? "after the PRD" : "new is built"} until you confirm.` }),
+    const doc = hasDoc(x.doc) ? docLink(x.doc, tr("Open {doc}", { doc: x.doc })) : h("span", { class: "sub", text: x.doc });
+    const head = [h("span", { class: "id", text: x.target === "prd" ? tr("PRD") : tr("Plan") }),
+      h("span", { text: tr("{title}{v}: the review passed; nothing {v2} until you confirm.", { title: x.title, v: x.round > 1 ? tr(" · round {round}", { round: x.round }) : "", v2: x.target === "prd" ? tr("after the PRD") : tr("new is built") }) }),
       h("span", { class: "sub" }, doc)];
     const summary = x.summary ? h("div", { class: "sub cp-summary" }, linkify(x.summary)) : null;
-    if (!actionsOn()) return h("li", {}, ...head, summary, h("span", { class: "sub" }, "Confirm in Claude Code with ", cmd(`/dev-kit:review ${x.target}`)));
+    if (!actionsOn()) return h("li", {}, ...head, summary, h("span", { class: "sub" }, tr("Confirm in Claude Code with "), cmd(`/dev-kit:review ${x.target}`)));
     const sent = inbox().open.find((r) => r.action === "checkpoint" && r.args && r.args.target === x.target);
-    if (sent) return h("li", {}, ...head, summary, h("div", { class: "sub answer-sent", text: `Sent (${sent.id}): ${sent.args.decision}. Claude Code records it.` }));
-    const ta = h("textarea", { maxlength: "4000", rows: "3", class: "answer-input", "aria-label": `What must change in the ${x.target}`, placeholder: "What must change (Claude revises it and asks again)" });
+    if (sent) return h("li", {}, ...head, summary, h("div", { class: "sub answer-sent", text: tr("Sent ({id}): {decision}. Claude Code records it.", { id: sent.id, decision: sent.args.decision }) }));
+    const ta = h("textarea", { maxlength: "4000", rows: "3", class: "answer-input", "aria-label": tr("What must change in the {target}", { target: x.target }), placeholder: tr("What must change (Claude revises it and asks again)") });
     ta.value = adjustDrafts[x.target] || "";
     ta.addEventListener("input", () => { adjustDrafts[x.target] = ta.value; });
     const send = async (args, el) => { el.disabled = true; try { await queue("checkpoint", { target: x.target, ...args }); delete adjustDrafts[x.target]; } catch (e) { el.disabled = false; } };
     return h("li", {}, ...head, summary, h("div", { class: "sub answer", role: "group", "aria-label": x.title },
-      h("button", { type: "button", class: "btn btn-sm btn-primary", text: "Confirm", onclick: (e) => send({ decision: "confirm" }, e.currentTarget) }),
-      h("span", { class: "answer-free" }, ta, h("button", { type: "button", class: "btn btn-sm", text: "Ask for changes",
-        onclick: (e) => { const v = ta.value.trim(); if (v) send({ decision: "adjust", feedback: v }, e.currentTarget); else { ta.focus(); toast("Write what must change first.", true); } } }))));
+      h("button", { type: "button", class: "btn btn-sm btn-primary", text: tr("Confirm"), onclick: (e) => send({ decision: "confirm" }, e.currentTarget) }),
+      h("span", { class: "answer-free" }, ta, h("button", { type: "button", class: "btn btn-sm", text: tr("Ask for changes"),
+        onclick: (e) => { const v = ta.value.trim(); if (v) send({ decision: "adjust", feedback: v }, e.currentTarget); else { ta.focus(); toast(tr("Write what must change first."), true); } } }))));
   }
   /** Needs you › deferred debt above the cap (conventions §7): promote to issues, accept with an ADR, or the next cool-down. */
   function debtRow(x) {
-    const head = [h("span", { class: "id", text: "!" }), h("span", { text: `${x.total} deferred findings open (cap ${x.cap_total}) · ${x.medium} medium (cap ${x.cap_medium}).` })];
-    if (!actionsOn()) return h("li", {}, ...head, h("span", { class: "sub" }, "Decide in Claude Code with ", cmd("/dev-kit:backlog")));
+    const head = [h("span", { class: "id", text: "!" }), h("span", { text: tr("{total} deferred findings open (cap {cap_total}) · {medium} medium (cap {cap_medium}).", { total: x.total, cap_total: x.cap_total, medium: x.medium, cap_medium: x.cap_medium }) })];
+    if (!actionsOn()) return h("li", {}, ...head, h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd("/dev-kit:backlog")));
     const sent = inbox().open.find((r) => r.action === "debt_decision");
-    if (sent) return h("li", {}, ...head, h("div", { class: "sub answer-sent", text: `Sent (${sent.id}): ${sent.args.decision}.` }));
+    if (sent) return h("li", {}, ...head, h("div", { class: "sub answer-sent", text: tr("Sent ({id}): {decision}.", { id: sent.id, decision: sent.args.decision }) }));
     const send = (decision, what) => queue("debt_decision", { decision }).then(() => toast(what)).catch(() => {});
     return h("li", {}, ...head, h("span", { class: "q-tags" },
-      h("button", { type: "button", class: "btn btn-sm", text: "Promote to issues", title: "Choose which findings become standard issues", onclick: () => send("promote", "Claude Code lists the findings to promote.") }),
-      h("button", { type: "button", class: "btn btn-sm", text: "Accept formally", title: "An ADR lists the accepted findings", onclick: () => send("accept", "Claude Code records the ADR.") }),
-      h("button", { type: "button", class: "btn btn-sm", text: "Use the next cool-down", title: "Cool-down is turned on for the next milestone with these items", onclick: () => send("cooldown", "Cool-down turned on for the next milestone.") })));
+      h("button", { type: "button", class: "btn btn-sm", text: tr("Promote to issues"), title: tr("Choose which findings become standard issues"), onclick: () => send("promote", tr("Claude Code lists the findings to promote.")) }),
+      h("button", { type: "button", class: "btn btn-sm", text: tr("Accept formally"), title: tr("An ADR lists the accepted findings"), onclick: () => send("accept", tr("Claude Code records the ADR.")) }),
+      h("button", { type: "button", class: "btn btn-sm", text: tr("Use the next cool-down"), title: tr("Cool-down is turned on for the next milestone with these items"), onclick: () => send("cooldown", tr("Cool-down turned on for the next milestone.")) })));
   }
   /** Needs you › a proposed lesson of method for one agent (conventions §13), with the evidence that raised it: approve
    * (the text can be edited first) or dismiss. An approved lesson goes into every prompt of that agent. */
   const lessonDrafts = {};
   function lessonRow(x) {
     const key = `${x.agent}:${x.signal}`;
-    const head = [h("span", { class: "id", text: x.agent }), h("span", { text: x.text }), h("span", { class: "sub", text: `Why: ${x.evidence}` })];
-    if (!actionsOn()) return h("li", {}, ...head, h("span", { class: "sub" }, "Decide in Claude Code with ", cmd("/dev-kit:feedback")));
+    const head = [h("span", { class: "id", text: x.agent }), h("span", { text: x.text }), h("span", { class: "sub", text: tr("Why: {evidence}", { evidence: x.evidence }) })];
+    if (!actionsOn()) return h("li", {}, ...head, h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd("/dev-kit:feedback")));
     const sent = inbox().open.find((r) => r.action === "lesson_decision" && r.args && `${r.args.agent}:${r.args.signal}` === key);
-    if (sent) return h("li", {}, ...head, h("div", { class: "sub answer-sent", text: `Sent (${sent.id}): ${sent.args.decision}.` }));
-    const ta = h("textarea", { maxlength: "300", rows: "2", class: "answer-input", "aria-label": `Lesson for ${x.agent}` });
+    if (sent) return h("li", {}, ...head, h("div", { class: "sub answer-sent", text: tr("Sent ({id}): {decision}.", { id: sent.id, decision: sent.args.decision }) }));
+    const ta = h("textarea", { maxlength: "300", rows: "2", class: "answer-input", "aria-label": tr("Lesson for {agent}", { agent: x.agent }) });
     ta.value = lessonDrafts[key] !== undefined ? lessonDrafts[key] : x.text;
     ta.addEventListener("input", () => { lessonDrafts[key] = ta.value; });
     const send = (args, what) => queue("lesson_decision", { agent: x.agent, signal: x.signal, ...args }).then(() => { delete lessonDrafts[key]; toast(what); }).catch(() => {});
-    return h("li", {}, ...head, h("div", { class: "sub answer", role: "group", "aria-label": `Lesson for ${x.agent}` },
+    return h("li", {}, ...head, h("div", { class: "sub answer", role: "group", "aria-label": tr("Lesson for {agent}", { agent: x.agent }) },
       h("span", { class: "answer-free" }, ta,
-        h("button", { type: "button", class: "btn btn-sm btn-primary", text: "Approve", onclick: () => { const v = ta.value.trim(); if (v) send({ decision: "approve", text: v }, "Claude Code adds the lesson."); else ta.focus(); } }),
-        h("button", { type: "button", class: "btn btn-sm", text: "Dismiss", onclick: () => send({ decision: "dismiss" }, "Suggestion dismissed.") }))));
+        h("button", { type: "button", class: "btn btn-sm btn-primary", text: tr("Approve"), onclick: () => { const v = ta.value.trim(); if (v) send({ decision: "approve", text: v }, tr("Claude Code adds the lesson.")); else ta.focus(); } }),
+        h("button", { type: "button", class: "btn btn-sm", text: tr("Dismiss"), onclick: () => send({ decision: "dismiss" }, tr("Suggestion dismissed.")) }))));
   }
   /** Needs you › the issue queue (conventions §15): above the limit, or an issue waiting too long. Every action is a
    * plan draft the user sends; nothing changes the plan by itself. */
@@ -1190,20 +1333,20 @@
         draft = { ops: x.draft.ops.slice(), base: data.updated_at, serverErrors: [], buffer: false, frozen: false };
         planMode = "tasks";
         setPhase("planning");
-        toast(`Draft of ${x.milestone} — Issues with ${plural(x.issues.length, "issue")}: review it, then send it.`);
+        toast(tr("Draft of {milestone} — Issues with {v}: review it, then send it.", { milestone: x.milestone, v: plural(x.issues.length, "issue") }));
       };
       return h("li", {}, h("span", { class: "id", text: "!" }),
-        h("span", { text: `Queue above the limit: ${plural(x.count, "issue")} waiting (limit ${x.limit}).` }),
-        acts && x.issues.length ? h("button", { type: "button", class: "btn btn-sm", text: "Plan the queue milestone", title: `Draft ${x.milestone} — Issues with the oldest and most severe issues; nothing changes until you send it`, onclick: load }) : null);
+        h("span", { text: tr("Queue above the limit: {v} waiting (limit {limit}).", { v: plural(x.count, "issue"), limit: x.limit }) }),
+        acts && x.issues.length ? h("button", { type: "button", class: "btn btn-sm", text: tr("Plan the queue milestone"), title: tr("Draft {milestone} — Issues with the oldest and most severe issues; nothing changes until you send it", { milestone: x.milestone }), onclick: load }) : null);
     }
     const nextOpen = (data.milestones || []).find((m) => m.gate === "pending" && !m.frozen_at);
     const send = (ops, what) => queue("plan_draft", { ops, base: data.updated_at }).then(() => toast(what)).catch(() => {});
     return h("li", {}, issueId(x.issue),
-      h("span", { text: `${(issueOf(x.issue) || {}).title || ""} · waiting for ${plural(x.milestones, "closed milestone")}` }),
+      h("span", { text: tr("{v} · waiting for {v2}", { v: (issueOf(x.issue) || {}).title || "", v2: plural(x.milestones, "closed milestone") }) }),
       acts ? h("span", { class: "q-tags" },
-        nextOpen ? h("button", { type: "button", class: "btn btn-sm", text: `Schedule in ${nextOpen.id}`, onclick: () => send([{ op: "schedule_issue", issue: x.issue, milestone: nextOpen.id, force: true }], `${x.issue} → ${nextOpen.id} queued.`) }) : null,
-        h("button", { type: "button", class: "btn btn-sm", text: "Park", title: "Parked issues are never pulled into a milestone until you schedule them", onclick: () => send([{ op: "set_issue_status", issue: x.issue, status: "parked" }], `${x.issue} parked.`) }),
-        h("button", { type: "button", class: "btn btn-sm", text: "Won't fix", onclick: () => send([{ op: "set_issue_status", issue: x.issue, status: "wontfix" }], `${x.issue} closed as won't fix.`) })) : null);
+        nextOpen ? h("button", { type: "button", class: "btn btn-sm", text: tr("Schedule in {id}", { id: nextOpen.id }), onclick: () => send([{ op: "schedule_issue", issue: x.issue, milestone: nextOpen.id, force: true }], tr("{issue} → {id} queued.", { issue: x.issue, id: nextOpen.id })) }) : null,
+        h("button", { type: "button", class: "btn btn-sm", text: tr("Park"), title: tr("Parked issues are never pulled into a milestone until you schedule them"), onclick: () => send([{ op: "set_issue_status", issue: x.issue, status: "parked" }], tr("{issue} parked.", { issue: x.issue })) }),
+        h("button", { type: "button", class: "btn btn-sm", text: tr("Won't fix"), onclick: () => send([{ op: "set_issue_status", issue: x.issue, status: "wontfix" }], tr("{issue} closed as won't fix.", { issue: x.issue })) })) : null);
   }
   function goNeeds() {
     const el = $("needs");
@@ -1225,7 +1368,7 @@
     const passed = m.gate === "passed" || m.gate === "skipped";
     const agents = agentsOn(`GATE:${m.id}`);
     const running = !passed && (Boolean(qa.round) || agents.length > 0);
-    const max = (data.lifecycle || {}).max_fix_rounds || 3;
+    const max = m.max_fix_rounds || (data.lifecycle || {}).max_fix_rounds || 3;
     const fixActive = fixes.filter((t) => t.status === "todo" || t.status === "in_progress");
     const fixBlocked = fixes.filter((t) => t.status === "blocked");
     // past the agreed fix rounds (or a fix that did not hold twice) the next step is a decision: dev_state blocks those cards
@@ -1244,7 +1387,7 @@
         : below.map((d) => `${d.dimension} ${d.score} < ${d.min}`).join(", "));
     }
     if (last.blockers) parts.push(plural(last.blockers, "blocking finding"));
-    if (last.overall != null && last.cutoff != null && last.overall < last.cutoff) parts.push(`overall ${last.overall} below ${last.cutoff}`);
+    if (last.overall != null && last.cutoff != null && last.overall < last.cutoff) parts.push(tr("overall {overall} below {cutoff}", { overall: last.overall, cutoff: last.cutoff }));
     return parts.join("; ");
   }
   /** The QA loop as a trail: one pill per round, the fixes in between, and the round running or due now. */
@@ -1254,19 +1397,23 @@
     const pills = [];
     hist.forEach((r, i) => {
       const ok = r.value === "passed" || r.value === "skipped";
-      pills.push({ cls: ok ? "ok" : "bad", text: `Round ${r.n} ${ok ? "✓" : "✕"}${r.score != null ? ` ${r.score}` : ""}`,
-        title: `Round ${r.n}: ${ok ? "passed" : "failed"}${r.score != null ? ` with ${r.score}` : ""}${i === hist.length - 1 && !ok ? ` · ${qaReason(x.qa, m)}` : ""}` });
+      // a failed round says why: its reason, or the blockers of the last round; the score only when it is the reason
+      const last = i === hist.length - 1 && x.qa.last;
+      const why = ok ? null : r.reason || (last && last.blockers ? plural(last.blockers, "blocker") : null)
+        || (r.score != null ? `${r.score}${last && last.cutoff != null ? ` < ${last.cutoff}` : ""}` : null);
+      pills.push({ cls: ok ? "ok" : "bad", text: tr("Round {n}{v}", { n: r.n, v: ok ? ` ✓${r.score != null ? ` ${r.score}` : ""}` : ` ✕${why ? ` · ${why}` : ""}` }),
+        title: tr("Round {n}: {v}{v2}{v3}", { n: r.n, v: ok ? tr("passed") : tr("failed"), v2: r.score != null ? tr(" with {score}", { score: r.score }) : "", v3: i === hist.length - 1 && !ok ? ` · ${qaReason(x.qa, m)}` : "" }) });
     });
     if (x.fixes.length) {
       const done = x.fixes.length - x.fixOpen.length;
       pills.push({ cls: x.fixBlocked.length ? "bad" : x.fixOpen.length ? "run" : "ok",
-        text: `${done}/${plural(x.fixes.length, "fix", "fixes")}${x.fixBlocked.length ? ` · ${x.fixBlocked.length} blocked` : x.fixOpen.length ? "" : " ✓"}`,
-        title: x.fixBlocked.length ? `${x.fixBlocked.length} fix task(s) blocked: the agreed limit was reached` : x.fixOpen.length ? `${x.fixOpen.length} fix task(s) still open` : "All fix tasks done" });
+        text: `${done}/${plural(x.fixes.length, "fix", "fixes")}${x.fixBlocked.length ? tr(" · {fixBlocked_n} blocked", { fixBlocked_n: x.fixBlocked.length }) : x.fixOpen.length ? "" : " ✓"}`,
+        title: x.fixBlocked.length ? tr("{fixBlocked_n} fix task(s) blocked: the agreed limit was reached", { fixBlocked_n: x.fixBlocked.length }) : x.fixOpen.length ? tr("{fixOpen_n} fix task(s) still open", { fixOpen_n: x.fixOpen.length }) : tr("All fix tasks done") });
     }
     if (!x.passed && x.ts.length && !x.buildOpen.length) {
-      if (x.running) pills.push({ cls: "run", text: `Round ${x.round} ●`, title: `Round ${x.round} is running now` });
-      else if (x.exhausted) pills.push({ cls: "bad", text: "decide", title: "The agreed limit was reached: keep fixing, accept with an ADR, or replan" });
-      else if (!x.fixOpen.length) pills.push({ cls: "next", text: `Round ${x.round} next`, title: `Round ${x.round} has not started yet` });
+      if (x.running) pills.push({ cls: "run", text: tr("Round {round} ●", { round: x.round }), title: tr("Round {round} is running now", { round: x.round }) });
+      else if (x.exhausted) pills.push({ cls: "bad", text: tr("decide"), title: tr("The agreed limit was reached: keep fixing, accept with an ADR, or replan") });
+      else if (!x.fixOpen.length) pills.push({ cls: "next", text: tr("Round {round} next", { round: x.round }), title: tr("Round {round} has not started yet", { round: x.round }) });
     }
     return pills;
   }
@@ -1281,65 +1428,72 @@
     const deployOn = lc.deploy_when === "per_milestone";
     const dep = m.deploy;
     const st = [];
-    st.push({ key: "plan", name: "Plan", state: ts.length ? "done" : "current",
-      note: ts.length ? plural(ts.length, "task") : "Run", cmd: ts.length ? null : "/dev-kit:plan", tasks: [] });
-    st.push({ key: "build", name: "Build", tasks: build,
+    st.push({ key: "plan", name: tr("Plan"), state: ts.length ? "done" : "current",
+      note: ts.length ? plural(ts.length, "task") : tr("Run"), cmd: ts.length ? null : "/dev-kit:plan", tasks: [] });
+    st.push({ key: "build", name: tr("Build"), tasks: build,
       state: !ts.length ? "upcoming" : buildOpen.length ? "current" : "done",
-      note: build.length ? `${build.length - buildOpen.length}/${build.length} done` : "No tasks" });
+      note: build.length ? tr("{v}/{build_n} done", { v: build.length - buildOpen.length, build_n: build.length }) : tr("No tasks") });
     // QA and its fixes are one loop: audit → fix → audit again, until the gate passes
     const qaCmd = `/dev-kit:qa ${m.id}`;
     let qaNote, qaCmdShown = null, qaStateName;
-    if (passed) { qaStateName = "done"; qaNote = m.gate === "skipped" ? "Skipped" : `Passed${m.score != null ? ` · ${m.score}` : ""}${x.qa.runs > 1 ? ` in round ${x.qa.runs}` : ""}`; }
-    else if (!ts.length || buildOpen.length) { qaStateName = "upcoming"; qaNote = "After the build"; }
+    if (passed) { qaStateName = "done"; qaNote = m.gate === "skipped" ? tr("Skipped") : tr("Passed{v}{v2}", { v: m.score != null ? ` · ${m.score}` : "", v2: x.qa.runs > 1 ? tr(" in round {runs}", { runs: x.qa.runs }) : "" }); }
+    else if (!ts.length || buildOpen.length) { qaStateName = "upcoming"; qaNote = tr("After the build"); }
     else if (x.running) {
       qaStateName = "current";
       const r = x.qa.round;
-      qaNote = `Round ${x.round} running` + (r && r.spawned ? ` · ${r.done.length} of ${r.spawned} auditors done` : "");
+      qaNote = tr("Round {round} running", { round: x.round }) + (r && r.spawned ? tr(" · {done_n} of {spawned} auditors done", { done_n: r.done.length, spawned: r.spawned }) : "");
+      if (runningRun(qaCmd)) qaCmdShown = qaCmd;  // shown disabled, with how long it has run
     } else if (x.exhausted) {
       qaStateName = "failed";
-      qaNote = x.qa.runs > x.max ? `${x.qa.runs - 1} fix rounds used of ${x.max}: needs your decision`
-        : `${plural(x.fixBlocked.length, "fix", "fixes")} did not hold twice: needs your decision`;
-    } else if (x.fixActive.length) { qaStateName = "current"; qaNote = `Fixing round ${x.qa.runs}: ${x.fixes.length - x.fixOpen.length}/${x.fixes.length} done · ${qaReason(x.qa, m)}`; }
-    else if (skillRuns().some((r) => r.skill === "autopilot")) { qaStateName = "current"; qaNote = `${x.qa.runs ? "Fixes" : "Tasks"} done; autopilot runs QA round ${x.round} next`; }
-    else if (x.qa.runs) { qaStateName = "current"; qaNote = `Fixes done; round ${x.round} not started. Run`; qaCmdShown = qaCmd; }
-    else { qaStateName = "current"; qaNote = "Tasks done; round 1 not started. Run"; qaCmdShown = qaCmd; }
+      qaNote = x.qa.runs > x.max ? tr("{v} fix rounds used of {max}: needs your decision", { v: x.qa.runs - 1, max: x.max })
+        : tr("{v} did not hold twice: needs your decision", { v: plural(x.fixBlocked.length, "fix", "fixes") });
+    } else if (x.fixActive.length) { qaStateName = "current"; qaNote = tr("Fixing round {runs}: {v}/{fixes_n} done · {v2}", { runs: x.qa.runs, v: x.fixes.length - x.fixOpen.length, fixes_n: x.fixes.length, v2: qaReason(x.qa, m) }); }
+    else if (runningRun(qaCmd)) { qaStateName = "current"; qaNote = tr("Round {round}:", { round: x.round }); qaCmdShown = qaCmd; }  // the ▶ shows it running, disabled
+    else if (skillRuns().some((r) => r.skill === "autopilot")) { qaStateName = "current"; qaNote = tr("{v} done; autopilot runs QA round {round} next", { v: x.qa.runs ? tr("Fixes") : tr("Tasks"), round: x.round }); }
+    else if (x.qa.runs) { qaStateName = "current"; qaNote = tr("Fixes done; round {round} not started. Run", { round: x.round }); qaCmdShown = qaCmd; }
+    else { qaStateName = "current"; qaNote = tr("Tasks done; round 1 not started. Run"); qaCmdShown = qaCmd; }
     st.push({ key: "qa", name: "QA & fixes", tasks: x.fixes, agents: x.agents, state: qaStateName, note: qaNote, cmd: qaCmdShown,
       trail: qaTrail(m, x), decide: x.exhausted && !x.fixBlocked.length });
-    st.push({ key: "smoke", name: "Smoke test", tasks: [],
+    st.push({ key: "smoke", name: tr("Smoke test"), tasks: [],
       state: !smokeOn ? "na" : m.preview ? "done" : "upcoming",
-      note: !smokeOn ? "Local preview off" : m.preview ? (m.preview.pid != null ? "Preview running" : "Passed") : passed ? "Not recorded" : "Runs inside QA" });
+      note: !smokeOn ? tr("Local preview off") : m.preview ? (m.preview.pid != null ? tr("Preview running") : tr("Passed")) : passed ? tr("Not recorded") : tr("Runs inside QA") });
     const deploying = passed && runsAt("prod").length > 0;  // a deploy runs now (this milestone is past its gate)
-    st.push({ key: "deploy", name: "Deploy", tasks: [], running: deploying,
+    st.push({ key: "deploy", name: tr("Deploy"), tasks: [], running: deploying,
       state: deploying ? "current" : !deployOn ? "na" : dep && dep.status === "ok" ? "done" : dep ? "failed" : passed ? "current" : "upcoming",
-      note: deploying ? "Running now" : !deployOn ? (lc.deploy_when === "on_release" ? "At release" : "Not per milestone")
+      note: deploying ? tr("Running now") : !deployOn ? (lc.deploy_when === "on_release" ? tr("At release") : tr("Not per milestone"))
         : dep && dep.status === "ok" ? `${(dep.sha || "").slice(0, 7)}${dep.at && Number.isFinite(parseT(dep.at)) ? ` · ${fmtDate(parseT(dep.at))}` : ""}`
-        : dep ? stLabel(dep.status) : passed ? "Waiting for" : "After the gate",
+        : dep ? stLabel(dep.status) : passed ? tr("Waiting for") : tr("After the gate"),
       cmd: !deploying && deployOn && passed && !(dep && dep.status === "ok") ? "/dev-kit:deploy" : null });
     const closed = passed && (!deployOn || (dep && dep.status === "ok"));
-    st.push({ key: "close", name: "Closed", tasks: [], state: closed ? "done" : "upcoming",
-      note: closed ? (m.passed_at && Number.isFinite(parseT(m.passed_at)) ? fmtDate(parseT(m.passed_at)) : "Milestone closed") : "" });
+    st.push({ key: "close", name: tr("Closed"), tasks: [], state: closed ? "done" : "upcoming",
+      note: closed ? (m.passed_at && Number.isFinite(parseT(m.passed_at)) ? fmtDate(parseT(m.passed_at)) : tr("Milestone closed")) : "" });
+    // stages that do not apply are not drawn: no smoke without a local preview, no deploy unless it is per milestone;
+    // the smoke test runs inside QA, so it is a line of the QA stage
+    const smoke = st.find((y) => y.key === "smoke"), qa = st.find((y) => y.key === "qa");
+    if (smoke.state !== "na") qa.sub = { name: tr("Smoke test"), state: smoke.state, note: smoke.note };
+    const out = st.filter((y) => y.key !== "smoke" && y.state !== "na");
     // one stage is "where we are": the first current or failed one
-    const here = st.find((y) => y.state === "current" || y.state === "failed");
+    const here = out.find((y) => y.state === "current" || y.state === "failed");
     if (here) here.here = true;
-    return st;
+    return out;
   }
   const STAGE_ICON = { done: "✓", current: "●", upcoming: "○", failed: "✕", na: "–" };
-  const STAGE_WORD = { done: "done", current: "in progress", upcoming: "not started", failed: "failed", na: "does not apply" };
+  const STAGE_WORD = tmap({ done: N_("done"), current: N_("in progress"), upcoming: N_("not started"), failed: N_("failed"), na: N_("does not apply") });
   function runChip(t) {
-    return h("button", { type: "button", class: "run-chip", "data-tid": t.id, title: `${t.id} ${t.title}. Open details`, onclick: () => openTask(t.id) },
+    return h("button", { type: "button", class: "run-chip", "data-tid": t.id, title: tr("{id} {title}. Open details", { id: t.id, title: t.title }), onclick: () => openTask(t.id) },
       h("span", { class: "tid", text: t.id }), h("span", { class: "run-title", text: t.title }), agentsOn(t.id).slice(0, 2).flatMap((a) => agentBits(a)));
   }
   function renderStages(m) {
     const box = $("stages");
     if (!m) {
-      fill(box, h("li", { class: "stage-empty card-sub", text: "Stages appear once the plan has milestones." }));
+      fill(box, h("li", { class: "stage-empty card-sub", text: tr("Stages appear once the plan has milestones.") }));
       $("stages-sub").textContent = ""; $("also-running").hidden = true;
       return;
     }
     const st = stagesOf(m);
     const here = st.find((x) => x.here);
     const closed = st.at(-1).state === "done";
-    $("stages-sub").textContent = closed ? `${m.id} is closed` : here ? `${m.id} is in ${here.name}${here.key === "qa" && qaState(m).running ? ` · round ${qaState(m).round} running` : ""}` : "";
+    $("stages-sub").textContent = "";  // the chevrons themselves say where the milestone is
     const shown = new Set();
     fill(box, st.map((x) => {
       const running = x.tasks.filter((t) => t.status === "in_progress");
@@ -1351,56 +1505,78 @@
         const nt = data.next && data.next.task && data.tasks[data.next.task];
         if (nt && nt.milestone === m.id && x.tasks.some((t) => t.id === data.next.task)) {
           nextBtn = h("button", { type: "button", class: "next-btn", "data-tid": data.next.task, onclick: () => openTask(data.next.task) },
-            h("span", { class: "chip next-chip", text: "next up" }), h("span", { class: "tid", text: data.next.task }), h("span", { class: "run-title", text: nt.title }));
+            h("span", { class: "chip next-chip", text: tr("next up") }), h("span", { class: "tid", text: data.next.task }), h("span", { class: "run-title", text: nt.title }));
         }
       }
       const isRun = x.running || (x.key === "qa" && qaState(m).running);
       return h("li", { class: `chev stage st-${x.state}${x.here ? " here" : ""}${isRun ? " running" : ""}`, "aria-current": x.here ? "step" : null },
         h("div", { class: "stage-top" }, h("span", { class: "stage-ico", "aria-hidden": "true", text: STAGE_ICON[x.state] }),
           h("span", { class: "stage-name", text: x.name }), isRun ? h("span", { class: "lc-run" }, h("span", { class: "rn-dot", "aria-hidden": "true" }), "running") : null,
-          h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[x.state]}${isRun ? ", running now" : ""}.` })),
+          h("span", { class: "visually-hidden", text: `: ${STAGE_WORD[x.state]}${isRun ? tr(", running now") : ""}.` })),
         x.note ? h("span", { class: "stage-note" }, x.note, x.cmd ? [" ", cmd(x.cmd)] : null,
           x.key === "qa" && hasDoc(`qa/${m.id}/report.md`) ? [" ", docLink(`qa/${m.id}/report.md`, "report")] : null) : null,
-        x.trail && x.trail.length ? h("ol", { class: "qa-trail", "aria-label": "QA rounds" },
+        x.sub ? h("span", { class: `stage-sub st-${x.sub.state}` }, h("span", { "aria-hidden": "true", text: `${STAGE_ICON[x.sub.state]} ` }), `${x.sub.name}: ${x.sub.note}`) : null,
+        x.trail && x.trail.length ? h("ol", { class: "qa-trail", "aria-label": tr("QA rounds") },
           x.trail.map((p, i) => h("li", { class: `qa-pill ${p.cls}`, title: p.title }, i ? h("span", { class: "qa-arrow", "aria-hidden": "true", text: "→" }) : null,
             h("span", { class: "qa-tag", text: p.text }), h("span", { class: "visually-hidden", text: `: ${p.title}.` })))) : null,
-        x.decide ? h("button", { type: "button", class: "stage-blocked", text: "Needs your decision", onclick: goNeeds }) : null,
-        blocked.length ? h("button", { type: "button", class: "stage-blocked", text: `⛔ ${blocked.length} blocked`, onclick: goNeeds }) : null,
+        x.decide ? h("button", { type: "button", class: "stage-blocked", text: tr("Needs your decision"), onclick: goNeeds }) : null,
+        blocked.length ? h("button", { type: "button", class: "stage-blocked", text: tr("⛔ {blocked_n} blocked", { blocked_n: blocked.length }), onclick: goNeeds }) : null,
         chips.length ? h("div", { class: "stage-run" }, chips) : null, nextBtn);
     }));
     // anything running outside this milestone's stages stays visible
     const elsewhere = Object.entries(data.tasks).filter(([id, t]) => t.status === "in_progress" && !shown.has(id)).map(([id, t]) => runChip({ id, ...t }));
     const taskIds = new Set(Object.keys(data.tasks));
     activeAgents().filter((a) => !(a.node && (taskIds.has(a.node) || a.node === `GATE:${m.id}`))).forEach((a) =>
-      elsewhere.push(h("span", { class: "run-chip", title: `${roleOf(a.agent).about || a.agent}${a.node ? "" : ". Not linked to a task or a QA gate"}` },
-        a.node ? h("span", { class: "tid", text: a.node.replace("GATE:", "QA ") }) : h("span", { class: "unlinked", text: "not linked" }), agentBits(a, true))));
+      elsewhere.push(h("span", { class: "run-chip", title: `${roleOf(a.agent).about || a.agent}${a.node ? "" : tr(". Not linked to a task or a QA gate")}` },
+        a.node ? h("span", { class: "tid", text: a.node.replace("GATE:", "QA ") }) : h("span", { class: "unlinked", text: tr("not linked") }), agentBits(a, true))));
     const also = $("also-running");
     also.hidden = !elsewhere.length;
-    fill(also, elsewhere.length ? [h("span", { class: "also-label", text: "Running outside this milestone" }), ...elsewhere] : []);
+    fill(also, elsewhere.length ? [h("span", { class: "also-label", text: tr("Running outside this milestone") }), ...elsewhere] : []);
   }
 
+  /** The words of one feed row: what happened, for the user (the full log keeps every technical line). */
+  const FEED_TEXT = tmap({
+    task_done: N_("{task} done: {title}"), task_started: N_("{task} started: {title}"), task_blocked: N_("{task} blocked: {reason}"), task_dropped: N_("{task} dropped: {reason}"),
+    gate_passed: N_("{milestone} passed the QA gate{score_part}"), qa_round_done: N_("QA round of {milestone} finished{score_part}: fixes follow{reason_part}"),
+    gate_failed: N_("{milestone} failed the QA gate{score_part}"), qa_round_started: N_("QA round of {milestone} started"),
+    question_open: N_("Question {id}: {text}"), question_answered: N_("{id} answered: {text}"), issue_new: N_("New {type} {id}: {title}"), issue_classified: N_("{id} classified as {cls}"),
+    release_submitted: N_("{release} submitted for your approval"), release_approved: N_("{release} approved"), release_rejected: N_("{release} rejected: fixes planned"),
+    released: N_("Released {version} ({tag})"), deploy: N_("Deploy to {env}: {status} ({sha})"), review: N_("Review of the {name}: {value}{score_part}"),
+    checkpoint: N_("{target_word} {decision_word}"), failure: N_("/dev-kit:{skill} {scope} failed") });
+  function feedText(r) {
+    const v = { ...(r.vars || {}) };
+    v.score_part = v.score ? ` (${v.score})` : "";
+    v.reason_part = v.reason ? ` · ${v.reason}` : "";
+    v.target_word = v.target === "prd" ? tr("PRD") : tr("Plan");
+    v.decision_word = v.decision === "confirm" ? "confirmed" : tr("sent back for changes");
+    return (FEED_TEXT[r.kind] || r.kind).replace(/\{(\w+)\}/g, (_, k) => (v[k] != null ? String(v[k]) : "")).replace(/\s+$/, "");
+  }
+  let fullLog = false;
   function renderFeed() {
-    fill($("log-link"), hasDoc("log.md") ? docLink("log.md", "Full log") : null);
-    fill($("feed"), data.log.length ? data.log.map((r) => {
+    fill($("log-link"), h("button", { type: "button", class: "link-btn", "aria-pressed": String(fullLog), text: fullLog ? tr("Activity") : tr("Full log"),
+      title: fullLog ? tr("Back to what happened") : tr("Every line of .dev/log.md and the session log"), onclick: () => { fullLog = !fullLog; renderFeed(); } }),
+      fullLog && hasDoc("log.md") ? [" · ", docLink("log.md", "log.md")] : null);
+    const rows = fullLog ? data.log : (data.feed || []);
+    fill($("feed"), rows.length ? rows.map((r) => {
       const t = parseT(r.at);
-      return h("li", { class: r.kind === "live" ? "feed-live" : null }, h("time", { datetime: r.at, title: Number.isFinite(t) ? fmtDT(t) : r.at, text: Number.isFinite(t) ? agoShort(t) : r.at }),
-        h("span", { class: "txt" }, linkify(r.text)));
-    }) : h("li", {}, h("span", { class: "txt", text: "No activity logged yet." })));
+      return h("li", { class: r.kind === "live" ? "feed-live" : r.kind ? `feed-${r.kind}` : null }, h("time", { datetime: r.at, title: Number.isFinite(t) ? fmtDT(t) : r.at, text: Number.isFinite(t) ? agoShort(t) : r.at }),
+        h("span", { class: "txt" }, linkify(fullLog ? r.text : feedText(r))));
+    }) : h("li", {}, h("span", { class: "txt", text: tr("No activity logged yet.") })));
+    fill($("foot"), tr("{v} of {project}/.dev{v2} · autonomy {v3}", { v: actionsOn() ? tr("View") : tr("Read-only view"), project: data.project, v2: actionsOn() ? tr(" · requests run by Claude Code") : "", v3: data.autonomy || "?" }));
     const b = data.board;
-    fill($("foot"), `${actionsOn() ? "View" : "Read-only view"} of ${data.project}/.dev${actionsOn() ? " · requests run by Claude Code" : ""} · autonomy ${data.autonomy || "?"}`,
-      b ? ` · server pid ${b.pid} on port ${b.port}` : "", " · stop it from the ⋯ menu or with ", cmd("/dev-kit:board stop"));
+    fill($("server-about"), b ? tr("Server pid {pid} on port {port}", { pid: b.pid, port: b.port }) : tr("Server details unknown"), tr(". Stop it here or with "), cmd("/dev-kit:board stop"), ".");
   }
 
   // ------------------------------------------------------------------ insights: quality (definition of done) and backlog
   function dodRow(name, score, cut, verdict, links) {
     const mm = h("div", { class: "meter" });
     const sp = h("span"); sp.style.width = `${score != null ? Math.min(100, score) : 0}%`;
-    const c = h("span", { class: "cut", title: `cut-off ${cut}` }); c.style.left = `calc(${cut}% - 1px)`;
+    const c = h("span", { class: "cut", title: tr("cut-off {cut}", { cut }) }); c.style.left = `calc(${cut}% - 1px)`;
     mm.append(sp, c);
     const ok = verdict === "pass" || verdict === "passed" || verdict === "skipped" || verdict === "n/a";
     const bad = verdict === "fail" || (score != null && score < cut && !ok);
     return h("div", { class: "dod-row" }, h("span", { class: "name" }, name, " ",
-      h("span", { class: `badge ${ok ? "good" : bad ? "bad" : "neutral"}`, text: ok ? `✓ ${verdict}` : bad ? "✕ below cut-off" : verdict || "pending" }),
+      h("span", { class: `badge ${ok ? "good" : bad ? "bad" : "neutral"}`, text: ok ? `✓ ${verdict}` : bad ? tr("✕ below cut-off") : verdict || "pending" }),
       links && links.length ? h("span", { class: "dod-links" }, links) : null),
       h("span", { class: "score", text: score != null ? `${score} / ${cut}` : `— / ${cut}` }), mm);
   }
@@ -1425,24 +1601,24 @@
       else pend.push(rname(k));
     });
     return h("div", {}, rows.length ? h("div", { class: "list" }, rows) : null,
-      pend.length ? h("p", { class: "pending-line", text: `Not run yet: ${pend.join(", ")}` }) : null,
+      pend.length ? h("p", { class: "pending-line", text: tr("Not run yet: {v}", { v: pend.join(", ") }) }) : null,
       !rows.length && !pend.length ? h("div", { class: "empty", text: emptyText }) : null);
   }
   const OWN_REVIEWS = ["prd", "design", "plan", "ux", "docs"];
-  const cutoffNote = () => `Cut-off: reviews ${data.quality.review_min_overall} · usability ${data.quality.min_overall}. Rows show the score against its cut-off mark.`;
+  const cutoffNote = () => tr("Cut-off: reviews {review_min_overall} · usability {min_overall}. Rows show the score against its cut-off mark.", { review_min_overall: data.quality.review_min_overall, min_overall: data.quality.min_overall });
 
   /** Construction › Gates: the QA gate of every milestone that ran one. */
-  const debtLine = (d) => `Deferred debt: ${d.total} open (cap ${d.cap_total ?? "off"}) · ${d.medium} medium (cap ${d.cap_medium ?? "off"})${d.over ? " · above the cap" : ""}`;
+  const debtLine = (d) => tr("Deferred debt: {total} open (cap {v}) · {medium} medium (cap {v2}){v3}", { total: d.total, v: d.cap_total ?? "off", medium: d.medium, v2: d.cap_medium ?? "off", v3: d.over ? tr(" · above the cap") : "" });
   function renderGates() {
     const q = data.quality;
-    $("dod-sub").textContent = `Cut-off ${q.min_overall} overall · ${q.min_dimension} per dimension. Rows show the score against its cut-off mark.`;
+    $("dod-sub").textContent = tr("Cut-off {min_overall} overall · {min_dimension} per dimension. Rows show the score against its cut-off mark.", { min_overall: q.min_overall, min_dimension: q.min_dimension });
     const gStarted = (m) => m.score != null || m.gate !== "pending";
     const rows = data.milestones.filter(gStarted).map((m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? "fail" : m.gate,
-      [`qa/${m.id}/report.md`, `qa/${m.id}/risk-report.md`].filter(hasDoc).map((p) => docLink(p, p.endsWith("risk-report.md") ? "risk report" : "report")))).reverse();
+      [`qa/${m.id}/report.md`, `qa/${m.id}/risk-report.md`].filter(hasDoc).map((p) => docLink(p, p.endsWith("risk-report.md") ? tr("risk report") : tr("report"))))).reverse();
     const pending = data.milestones.filter((m) => !gStarted(m)).map((m) => m.id);
     const debt = (data.backlog || {}).debt;
-    fill($("dod"), rows.length ? h("div", { class: "list" }, rows) : !pending.length ? h("div", { class: "empty", text: "No milestones yet." }) : null,
-      pending.length ? h("p", { class: "pending-line", text: `Not run yet: ${pending.join(", ")}` }) : null,
+    fill($("dod"), rows.length ? h("div", { class: "list" }, rows) : !pending.length ? h("div", { class: "empty", text: tr("No milestones yet.") }) : null,
+      pending.length ? h("p", { class: "pending-line", text: tr("Not run yet: {v}", { v: pending.join(", ") }) }) : null,
       debt && debt.total ? h("p", { class: `pending-line${debt.over ? " bad" : ""}`, text: debtLine(debt) }) : null);
   }
 
@@ -1460,14 +1636,14 @@
     const curIdx = data.milestones.findIndex((m) => m.id === cur);
     const later = data.milestones.slice(curIdx + 1).map((m) => ({ m, left: tasksOf(m).filter((t) => t.status !== "done").length })).filter((x) => x.left);
     const laterTasks = later.reduce((n, x) => n + x.left, 0);
-    $("pb-sub").textContent = `${plural(queued.length, "queued issue")} · ${plural(laterTasks, "task")} in later milestones`;
+    $("pb-sub").textContent = tr("{v} · {v2} in later milestones", { v: plural(queued.length, "queued issue"), v2: plural(laterTasks, "task") });
     fill($("product-backlog"),
-      listBlock("Issue queue", queued.map(issueLi), "No issues waiting.", true),
-      scheduled.length ? listBlock("Scheduled issues", scheduled.map(([id, v]) => issueLi({ id, c: v.class, ...v })), "") : null,
-      listBlock("Later milestones", later.slice().reverse().map(({ m, left }) => h("li", { class: "has-btn" },
-        h("button", { type: "button", class: "row-btn", title: `Show ${m.id} in construction`, onclick: () => openMilestone(m.id) },
+      listBlock(tr("Issue queue"), queued.map(issueLi), tr("No issues waiting."), true),
+      scheduled.length ? listBlock(tr("Scheduled issues"), scheduled.map(([id, v]) => issueLi({ id, c: v.class, ...v })), "") : null,
+      listBlock(tr("Later milestones"), later.slice().reverse().map(({ m, left }) => h("li", { class: "has-btn" },
+        h("button", { type: "button", class: "row-btn", title: tr("Show {id} in construction", { id: m.id }), onclick: () => openMilestone(m.id) },
           h("span", { class: "id", text: m.id }), h("span", { text: m.title || "" }), h("span", { class: "chip", text: plural(left, "task") })))),
-        "Nothing planned after the current milestone."));
+        tr("Nothing planned after the current milestone.")));
   }
   /** Shows a milestone in Construction, from anywhere on the board. */
   function openMilestone(id) {
@@ -1480,9 +1656,51 @@
   }
 
   function renderInsights(m, curId) {
-    if (view === "burndown") renderBurndown(m);
+    if (view === "qa") renderQaPanel(m);
+    else if (view === "burndown") renderBurndown(m);
     else if (view === "velocity") renderVelocity(curId);
     else if (view === "gates") renderGates();
+  }
+
+  // ------------------------------------------------------------------ QA panel: what the QA & fixes stage is doing now
+  let qaAutoFor = null;  // the milestone the panel opened by itself for (once; the user's choice of tab is kept after that)
+  function autoQaView(m) {
+    const here = m && stagesOf(m).find((x) => x.here);
+    if (here && here.key === "qa" && qaAutoFor !== m.id) { qaAutoFor = m.id; if (view === "tasks") { view = "qa"; applyView(); } }
+  }
+  function renderQaPanel(m) {
+    const box = $("qa-panel");
+    if (!m) { fill(box); return; }
+    const x = qaState(m);
+    const sect = (title, ...kids) => h("section", { class: "qa-sect" }, h("h3", { class: "list-title", text: title }), ...kids);
+    const r = x.qa.round;
+    const auditors = r && r.auditors && r.auditors.length ? h("ul", { class: "list" }, r.auditors.map((a) => h("li", {},
+      h("span", { class: "id", text: a.agent }), h("span", { class: `chip ${a.state === "running" ? "wait" : a.state === "done" ? "ready" : "bad"}`, text: a.state }),
+      a.model ? h("span", { class: "chip", text: a.model }) : null,
+      h("span", { class: "sub", text: a.duration_s != null ? dur(a.duration_s) : a.started_at ? tr("for {v}", { v: dur((Date.now() - parseT(a.started_at)) / 1000) }) : "" }),
+      a.findings ? h("span", { class: "sub", text: Object.entries(a.findings).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(", ") }) : null)))
+      : h("div", { class: "empty", text: x.running ? tr("Auditors starting") : x.passed ? tr("The gate passed") : tr("No round running now") });
+    const last = x.qa.last;
+    const report = hasDoc(`qa/${m.id}/report.md`) ? `qa/${m.id}/report.md` : null;
+    const blocking = !x.passed && last && last.blocking && last.blocking.length ? h("ul", { class: "list" }, last.blocking.map((f) => h("li", {},
+      report && f.id ? docLink(report, f.id, f.id, "id") : h("span", { class: "id", text: f.id || "!" }),
+      h("span", { text: f.title || "" }), h("span", { class: `chip sev-${f.severity}`, text: f.severity || "" }),
+      f.file ? h("span", { class: "sub mono-wrap", text: `${f.file}${f.line ? `:${f.line}` : ""}` }) : null)))
+      : h("div", { class: "empty good", text: x.passed ? tr("None: the gate passed") : tr("No blocking finding open") });
+    const cols = ["todo", "in_progress", "blocked", "done"].map((k) => [k, x.fixes.filter((t) => t.status === k)]).filter(([, v]) => v.length);
+    const fixes = cols.length ? h("div", { class: "qa-fixes" }, cols.map(([k, v]) => h("div", { class: `qa-fix-col s-${k}` },
+      h("div", { class: "list-title", text: `${stLabel(k)} ${v.length}` }), v.map((t) => h("button", { type: "button", class: "run-chip", "data-tid": t.id, onclick: () => openTask(t.id) },
+        h("span", { class: "tid", text: t.id }), h("span", { class: "run-title", text: t.title })))))) : h("div", { class: "empty", text: tr("No fix tasks") });
+    const hf = m.hard_floor && m.hard_floor.checks ? h("ul", { class: "list" }, Object.entries(m.hard_floor.checks).map(([n, c]) => h("li", {},
+      h("span", { class: "id", text: c.status === "fail" ? "✕" : c.status === "pass" ? "✓" : "–" }), h("span", { text: n }),
+      c.severity ? h("span", { class: "chip", text: c.severity }) : null, c.task ? h("span", { class: "sub", text: c.task }) : null)))
+      : h("div", { class: "empty", text: tr("No deterministic checks recorded yet") });
+    const ex = m.exit_check ? h("div", { class: "sub" }, [m.exit_check.cmd ? `cmd: ${m.exit_check.cmd}` : null, m.exit_check.e2e ? `e2e: ${m.exit_check.e2e}` : null,
+      (m.exit_check.acs || []).length ? tr("acs: {v}", { v: (m.exit_check.acs || []).join(", ") }) : null].filter(Boolean).join(" · "))
+      : h("div", { class: "empty", text: tr("No exit_check in the plan for this milestone") });
+    const problems = (m.gate_checks || []).length ? h("ul", { class: "list" }, m.gate_checks.map((g) => h("li", {}, h("span", { class: "id", text: g.hard ? "⛔" : "!" }), h("span", { text: g.text })))) : null;
+    fill(box, sect(tr("Auditors{v}", { v: r ? tr(" · round {n}", { n: r.n }) : "" }), auditors), sect(tr("Blocking findings open"), blocking, report ? h("p", { class: "sub" }, docLink(report, tr("Open the QA report"))) : null),
+      sect(tr("Fixes"), fixes), sect(tr("Hard floor"), hf), sect(tr("Exit check"), ex), problems ? sect(tr("What still stops the gate"), problems) : null);
   }
 
   // ------------------------------------------------------------------ phases: conception, planning, stable (construction is the milestone view above)
@@ -1504,21 +1722,21 @@
 
   function renderConception() {
     fill($("conc-steps"), (phaseOf("conception").steps || []).map(stepCard));
-    $("conc-rev-sub").textContent = `Cut-off ${data.quality.review_min_overall}`;
-    fill($("conc-reviews"), reviewList(["prd", "design"], "No reviews."));
+    $("conc-rev-sub").textContent = tr("Cut-off {review_min_overall}", { review_min_overall: data.quality.review_min_overall });
+    fill($("conc-reviews"), reviewList(["prd", "design"], tr("No reviews.")));
     const issues = Object.entries((data.backlog || {}).issues || {}).map(([id, v]) => ({ id, c: v.class, ...v }))
       .filter((i) => i.type === "change" || i.class === "change");
     const open = issues.filter((i) => !["closed", "done", "dropped"].includes(i.status));
-    fill($("conc-changes"), listBlock("Open", open.map(issueLi), "No scope change waiting.", true),
-      issues.length > open.length ? h("p", { class: "pending-line", text: `${issues.length - open.length} closed` }) : null);
+    fill($("conc-changes"), listBlock(tr("Open"), open.map(issueLi), tr("No scope change waiting."), true),
+      issues.length > open.length ? h("p", { class: "pending-line", text: tr("{v} closed", { v: issues.length - open.length }) }) : null);
     const adrs = data.decisions || [];
-    $("conc-adr-sub").textContent = adrs.length ? `${plural(adrs.length, "decision")} from .dev/decisions.md, newest first` : "From .dev/decisions.md";
+    $("conc-adr-sub").textContent = adrs.length ? tr("{v} from .dev/decisions.md, newest first", { v: plural(adrs.length, "decision") }) : tr("From .dev/decisions.md");
     const adrLi = (d) => h("li", { class: /supersed/i.test(d.status || "") ? "muted" : null }, docLink("decisions.md", d.id, d.id, "id"), h("span", { text: d.title }),
       h("span", { class: "chip", text: d.status || "?" }), d.date ? h("span", { class: "sub", text: d.date }) : null);
     const SHOWN = 6;
     fill($("conc-adrs"), adrs.length ? [h("ul", { class: "list" }, adrs.slice(0, SHOWN).map(adrLi)),
-      adrs.length > SHOWN ? h("details", { class: "more-list" }, h("summary", { text: `Show ${adrs.length - SHOWN} older` }), h("ul", { class: "list" }, adrs.slice(SHOWN).map(adrLi))) : null]
-      : h("div", { class: "empty", text: "No decision recorded yet. The interview and architecture write them." }));
+      adrs.length > SHOWN ? h("details", { class: "more-list" }, h("summary", { text: tr("Show {v} older", { v: adrs.length - SHOWN }) }), h("ul", { class: "list" }, adrs.slice(SHOWN).map(adrLi))) : null]
+      : h("div", { class: "empty", text: tr("No decision recorded yet. The interview and architecture write them.") }));
     renderFacts();
   }
   /** Conception › Facts (conventions §2): verified facts with their evidence, newest first; a contradicted one stays,
@@ -1526,21 +1744,21 @@
   let factQuery = "";
   function renderFacts() {
     const all = data.facts || [];
-    $("conc-facts-sub").textContent = all.length ? `${plural(all.filter((f) => !f.stale).length, "fact")} from .dev/facts.md, newest first` : "From .dev/facts.md";
+    $("conc-facts-sub").textContent = all.length ? tr("{v} from .dev/facts.md, newest first", { v: plural(all.filter((f) => !f.stale).length, "fact") }) : tr("From .dev/facts.md");
     const q = factQuery.trim().toLowerCase();
     const hit = (f) => !q || [f.id, f.text, f.evidence, ...(f.files || []), ...(f.acs || [])].some((v) => String(v || "").toLowerCase().includes(q));
     const li = (f) => h("li", { class: f.stale ? "muted" : null }, hasDoc("facts.md") ? docLink("facts.md", f.id, f.id, "id") : h("span", { class: "id", text: f.id }),
       f.stale ? h("s", { text: f.text }) : h("span", { text: f.text }),
-      h("span", { class: "sub", text: `Evidence: ${f.evidence}${f.sha ? ` @${f.sha}` : ""} · ${f.date || ""} · ${f.origin || ""}` }),
+      h("span", { class: "sub", text: tr("Evidence: {evidence}{v} · {v2} · {v3}", { evidence: f.evidence, v: f.sha ? ` @${f.sha}` : "", v2: f.date || "", v3: f.origin || "" }) }),
       (f.files || []).length || (f.acs || []).length ? h("span", { class: "q-tags" }, ...(f.files || []).map((x) => h("span", { class: "chip", text: x })), ...(f.acs || []).map((x) => h("span", { class: "chip", text: x }))) : null,
-      f.stale ? h("span", { class: "sub bad", text: `Contradicted by ${f.stale.by}: ${f.stale.evidence}` }) : null);
-    const input = h("input", { type: "search", class: "answer-input", placeholder: "Search facts, files, ACs", "aria-label": "Search facts" });
+      f.stale ? h("span", { class: "sub bad", text: tr("Contradicted by {by}: {evidence}", { by: f.stale.by, evidence: f.stale.evidence }) }) : null);
+    const input = h("input", { type: "search", class: "answer-input", placeholder: tr("Search facts, files, ACs"), "aria-label": tr("Search facts") });
     input.value = factQuery;
     const list = h("ul", { class: "list" });
     const paint = () => fill(list, all.filter(hit).map(li));
     input.addEventListener("input", () => { factQuery = input.value; paint(); });
     paint();
-    fill($("conc-facts"), all.length ? [input, list] : h("div", { class: "empty", text: "No fact recorded yet. Agents record what they verify with evidence." }));
+    fill($("conc-facts"), all.length ? [input, list] : h("div", { class: "empty", text: tr("No fact recorded yet. Agents record what they verify with evidence.") }));
   }
 
   // the CSP forbids style attributes: the width goes through the CSSOM
@@ -1552,7 +1770,7 @@
     fillRunSlot("run-backlog", "backlog");
     const ms = data.milestones;
     const closed = ms.filter((m) => m.gate === "passed" || m.gate === "skipped").length;
-    $("road-sub").textContent = ms.length ? `${closed} of ${plural(ms.length, "milestone")} closed. Open one to see it in construction.` : "";
+    $("road-sub").textContent = ms.length ? tr("{closed} of {v} closed. Open one to see it in construction.", { closed, v: plural(ms.length, "milestone") }) : "";
     const row = (m) => {
       const x = milestoneInfo(m);
       const done = m.gate === "passed" || m.gate === "skipped";
@@ -1560,60 +1778,60 @@
         h("span", { class: done ? "tab-ok" : `tab-dot ${x.active ? "active" : m.gate}`, "aria-hidden": "true", text: done ? "✓" : null }),
         h("strong", { class: "id", text: m.id }),
         h("span", { class: "road-text" }, h("span", { class: "road-title", text: m.title || m.id }), m.goal ? h("span", { class: "road-goal", text: m.goal }) : null),
-        m.id === data.current_milestone ? h("span", { class: "tab-current", text: "current" }) : null,
+        m.id === data.current_milestone ? h("span", { class: "tab-current", text: tr("current") }) : null,
         h("span", { class: "road-count", text: `${x.done}/${x.total}` }),
         roadMeter(x)));
     };
-    // lists show milestones newest first (the chevron strips and the charts keep time order)
+    // the roadmap reads in time order, M1 first (the activity feed is the list that reads newest first)
     const rp = relPlan();
-    const newest = ms.slice().reverse();
+    const newest = ms.slice();
     const byRel = rp.length ? newest.filter((m) => !rp.some((r) => r.milestones.includes(m.id))).map(row)
-      .concat(rp.slice().reverse().flatMap((r) => [h("li", { class: `road-rel s-${r.status}` }, h("strong", { text: r.id }), h("span", { text: r.title }),
+      .concat(rp.slice().flatMap((r) => [h("li", { class: `road-rel s-${r.status}` }, h("strong", { text: r.id }), h("span", { text: r.title }),
         h("span", { class: "chip", text: REL_WORD[r.status] })), ...newest.filter((m) => r.milestones.includes(m.id)).map(row)]))
       : newest.map(row);
-    $("road-sub").textContent += rp.length ? ` ${plural(rp.length, "planned release")}: each waits for your approval before production.` : "";
-    fill($("roadmap"), ms.length ? byRel : h("li", { class: "empty" }, "No milestones yet. They appear after ", cmd("/dev-kit:plan"), "."));
+    $("road-sub").textContent += rp.length ? tr(" {v}: each waits for your approval before production.", { v: plural(rp.length, "planned release") }) : "";
+    fill($("roadmap"), ms.length ? byRel : h("li", { class: "empty" }, tr("No milestones yet. They appear after "), cmd("/dev-kit:plan"), "."));
   }
 
   function renderStable() {
     const p = data.progress, c = data.costs, ms = data.milestones, rel = data.releases || [];
     const closed = ms.filter((m) => m.gate === "passed" || m.gate === "skipped").length;
-    $("st-sum-sub").textContent = data.phase === "stable" ? "Stable: nothing open, everything released" : `Not stable yet: the project is in ${PHASE_NAME[data.phase]}`;
+    $("st-sum-sub").textContent = data.phase === "stable" ? tr("Stable: nothing open, everything released") : tr("Not stable yet: the project is in {v}", { v: PHASE_NAME[data.phase] });
     const fact = (label, value, extra) => h("div", { class: "fact" }, h("span", { class: "fact-label", text: label }), h("strong", { class: "fact-value", text: value }), extra || null);
     fill($("st-summary"),
-      fact("Tasks done", `${p.done}/${p.total}`),
-      fact("Milestones closed", `${closed}/${ms.length}`),
-      (data.backlog || {}).debt ? fact("Deferred debt", String(data.backlog.debt.total), h("span", { class: "card-sub", text: debtLine(data.backlog.debt) })) : null,
-      fact("Releases", String(rel.length), rel.length ? h("span", { class: "card-sub", text: `last ${rel.at(-1).tag || rel.at(-1).version || ""}` }) : null),
-      c && (Number(c.usd) > 0 || Number(c.tokens) > 0) ? fact("Cost (estimate)", `US$ ${Number(c.usd || 0).toFixed(2)}`, h("span", { class: "card-sub", text: `${compact(c.tokens || 0)} tokens` }))
-        : fact("Cost", "not computed", h("span", { class: "fact-cmd" }, copyBtn("/dev-kit:costs"))));
+      fact(tr("Tasks done"), `${p.done}/${p.total}`),
+      fact(tr("Milestones closed"), `${closed}/${ms.length}`),
+      (data.backlog || {}).debt ? fact(tr("Deferred debt"), String(data.backlog.debt.total), h("span", { class: "card-sub", text: debtLine(data.backlog.debt) })) : null,
+      fact(tr("Releases"), String(rel.length), rel.length ? h("span", { class: "card-sub", text: tr("last {v}", { v: rel.at(-1).tag || rel.at(-1).version || "" }) }) : null),
+      c && (Number(c.usd) > 0 || Number(c.tokens) > 0) ? fact(tr("Cost (estimate)"), tr("US$ {v}", { v: Number(c.usd || 0).toFixed(2) }), h("span", { class: "card-sub", text: tr("{v} tokens", { v: compact(c.tokens || 0) }) }))
+        : fact(tr("Cost"), tr("not computed"), h("span", { class: "fact-cmd" }, copyBtn("/dev-kit:costs"))));
     fillRunSlot("run-prod", "prod");
     fillRunSlot("run-checks", "checks");
     fillRunSlot("run-releases", "releases");
     // production
     const pr = data.production, lc = data.lifecycle || {};
-    const when = { per_milestone: "after each milestone", on_release: "at each release", manual: "by hand", none: "no production environment" };
-    $("st-prod-sub").textContent = `Deploys ${when[lc.deploy_when] || lc.deploy_when || "?"}`;
-    if (!pr) fill($("st-prod"), h("div", { class: "empty", text: lc.deploy_when === "none" ? "This project has no production deploy." : "No production deploy recorded yet." }),
-      lc.deploy_when && lc.deploy_when !== "none" ? h("p", { class: "pending-line" }, "Deploy with ", cmd("/dev-kit:deploy")) : null);
+    const when = { per_milestone: tr("after each milestone"), on_release: tr("at each release"), manual: tr("by hand"), none: tr("no production environment") };
+    $("st-prod-sub").textContent = tr("Deploys {v}", { v: when[lc.deploy_when] || lc.deploy_when || "?" });
+    if (!pr) fill($("st-prod"), h("div", { class: "empty", text: lc.deploy_when === "none" ? tr("This project has no production deploy.") : tr("No production deploy recorded yet.") }),
+      lc.deploy_when && lc.deploy_when !== "none" ? h("p", { class: "pending-line" }, tr("Deploy with "), cmd("/dev-kit:deploy")) : null);
     else {
       const cur = pr.current, last = pr.last;
       fill($("st-prod"), h("ul", { class: "list" },
-        cur ? h("li", {}, h("span", { class: "id", text: (cur.sha || "").slice(0, 7) }), h("span", { text: cur.milestone ? `Running ${cur.milestone}` : "Running" }),
-          h("span", { class: "badge good", text: "✓ ok" }), h("span", { class: "sub", text: [cur.at && Number.isFinite(parseT(cur.at)) ? fmtDT(parseT(cur.at)) : null, cur.migration ? `migration ${cur.migration}` : null].filter(Boolean).join(" · ") })) : null,
-        last && last.status !== "ok" ? h("li", {}, h("span", { class: "id", text: (last.sha || "").slice(0, 7) }), h("span", { text: "Last attempt" }),
+        cur ? h("li", {}, h("span", { class: "id", text: (cur.sha || "").slice(0, 7) }), h("span", { text: cur.milestone ? tr("Running {milestone}", { milestone: cur.milestone }) : tr("Running") }),
+          h("span", { class: "badge good", text: tr("✓ ok") }), h("span", { class: "sub", text: [cur.at && Number.isFinite(parseT(cur.at)) ? fmtDT(parseT(cur.at)) : null, cur.migration ? tr("migration {v}", { v: cur.migration }) : null].filter(Boolean).join(" · ") })) : null,
+        last && last.status !== "ok" ? h("li", {}, h("span", { class: "id", text: (last.sha || "").slice(0, 7) }), h("span", { text: tr("Last attempt") }),
           h("span", { class: "badge bad", text: stLabel(last.status) }), h("span", { class: "sub", text: last.at && Number.isFinite(parseT(last.at)) ? fmtDT(parseT(last.at)) : "" })) : null),
       pr.drift ? h("p", { class: "pending-line", text: pr.drift }) : null);
     }
     // release checks: usability and docs reviews, and any other review the project recorded
     const others = Object.keys(data.reviews).filter((k) => !OWN_REVIEWS.includes(k));
     $("st-rev-sub").textContent = cutoffNote();
-    fill($("st-reviews"), reviewList(["ux", "docs", ...others], "No checks."));
+    fill($("st-reviews"), reviewList(["ux", "docs", ...others], tr("No checks.")));
     fill($("st-releases"), rel.length ? h("ul", { class: "list" }, rel.slice().reverse().map((r) => h("li", {},
       hasDoc(`release-notes-${r.version}.md`) ? docLink(`release-notes-${r.version}.md`, r.tag || r.version, null, "id") : h("span", { class: "id", text: r.tag || r.version || "release" }),
-      h("span", { text: (r.release ? `${r.release} · ` : "") + (r.hotfix ? `Hotfix ${r.hotfix}` : (r.milestones || []).join(", ") || "—") }),
+      h("span", { text: (r.release ? `${r.release} · ` : "") + (r.hotfix ? tr("Hotfix {hotfix}", { hotfix: r.hotfix }) : (r.milestones || []).join(", ") || "—") }),
       h("span", { class: "chip", text: r.version || "" }), r.at && Number.isFinite(parseT(r.at)) ? h("span", { class: "sub", text: fmtDate(parseT(r.at)) }) : null)))
-      : h("div", { class: "empty", text: "No release yet. Closed milestones wait for the next release (the Construction tab counts them)." }));
+      : h("div", { class: "empty", text: tr("No release yet. Closed milestones wait for the next release (the Construction tab counts them).") }));
   }
 
   function tickAgents() {
@@ -1644,29 +1862,35 @@
     let d = {};
     try { d = await r.json(); } catch (e) { /* no body */ }
     if (!r.ok) {
-      const err = new Error((d.errors && d.errors.join("; ")) || d.hint || d.error || `HTTP ${r.status}`);
+      const err = new Error((d.errors && d.errors.join("; ")) || d.hint || d.error || tr("HTTP {status}", { status: r.status }));
       err.errors = d.errors || [err.message];
       throw err;
     }
     return d;
   }
-  const takesIt = (ex) => Boolean(ex.listening || (ex.online && ex.state === "running"));
-  const workerHint = () => (takesIt(inbox().executor) ? "Claude Code takes it." : "Run /dev-kit:worker in Claude Code to start it.");
+  // the board starts Claude Code by itself when a request waits (unless it is off, or no claude command is installed)
+  const autoOn = (ex) => Boolean(ex.auto && !["off", "no_claude"].includes(ex.auto.state));
+  const takesIt = (ex) => Boolean(ex.listening || (ex.online && ex.state === "running") || autoOn(ex));
+  const workerHint = () => (takesIt(inbox().executor) ? tr("Claude Code takes it.")
+    : (inbox().executor.auto || {}).state === "no_claude" ? tr("The claude command was not found: install Claude Code, or run /dev-kit:worker in a session.")
+    : tr("Run /dev-kit:worker in Claude Code to start it."));
   async function queue(action, args, quietErrors) {
     try {
       const d = await api("/api/inbox", { action, args });
-      toast(`Queued ${d.item.id}. ${workerHint()}`);
+      toast(tr("Queued {id}. {v}", { id: d.item.id, v: workerHint() }));
       load();
       return d.item;
     } catch (e) {
-      if (!quietErrors) toast(`Not queued: ${e.message}`, true);
+      if (!quietErrors) toast(tr("Not queued: {message}", { message: e.message }), true);
       throw e;
     }
   }
-  function runBtn(text) {
-    const q = openRun(text);
-    const label = q ? `${text} is queued (${q.id}, ${stLabel(q.status)})` : `Run ${text} in Claude Code`;
-    const btn = h("button", { type: "button", class: `run-btn${q ? " queued" : ""}`, title: label, "aria-label": label, disabled: q ? true : null }, q ? "◷" : "▶");
+  function runBtn(text, labelled) {
+    const q = openRun(text), live = runningRun(text);
+    const busy = live ? tr("Running for {v}", { v: dur((Date.now() - parseT(live.started_at)) / 1000) }) : q ? tr("Queued ({id})", { id: q.id }) : null;
+    const label = busy ? `${text}: ${busy}` : tr("Run {text} in Claude Code", { text });
+    const btn = h("button", { type: "button", class: `run-btn${busy ? " queued" : ""}${labelled ? " labelled" : ""}`, title: label, "aria-label": labelled ? `${actionLabel(text)}: ${label}` : label,
+      disabled: busy ? true : null, "data-cmd": text }, busy ? "◷" : "▶", labelled ? h("span", { class: "run-label", text: busy ? `${actionLabel(text)} · ${busy}` : actionLabel(text) }) : null);
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       btn.disabled = true;
@@ -1677,24 +1901,30 @@
   function describeReq(x) {
     const a = x.args || {};
     if (x.action === "run") return h("code", { text: a.command || "" });
-    if (x.action === "issue_new") return `New ${a.type === "improvement" ? "improvement" : a.type === "change" ? "change" : "bug"}: ${a.title || ""}`;
-    if (x.action === "answer_question") return `Answer to ${a.question}: ${a.option || a.answer || ""}`;
-    if (x.action === "plan_draft") return `Plan draft · ${plural((a.ops || []).length, "change")}`;
-    if (x.action === "release_decision") return `${a.decision === "approve" ? "Approve" : "Reject"} ${a.release}`;
-    if (x.action === "checkpoint") return `${a.decision === "confirm" ? "Confirm" : "Ask for changes in"} ${a.target === "prd" ? "the PRD" : "the plan"}`;
-    if (x.action === "debt_decision") return `Deferred debt: ${a.decision}`;
-    if (x.action === "lesson_decision") return `Lesson for ${a.agent}: ${a.decision}`;
+    if (x.action === "issue_new") return tr("New {v}: {v2}", { v: a.type === "improvement" ? "improvement" : a.type === "change" ? "change" : "bug", v2: a.title || "" });
+    if (x.action === "answer_question") return tr("Answer to {question}: {v}", { question: a.question, v: a.option || a.answer || "" });
+    if (x.action === "plan_draft") return tr("Plan draft · {v}", { v: plural((a.ops || []).length, "change") });
+    if (x.action === "release_decision") return `${a.decision === "approve" ? tr("Approve") : tr("Reject")} ${a.release}`;
+    if (x.action === "checkpoint") return `${a.decision === "confirm" ? tr("Confirm") : tr("Ask for changes in")} ${a.target === "prd" ? tr("the PRD") : tr("the plan")}`;
+    if (x.action === "debt_decision") return tr("Deferred debt: {decision}", { decision: a.decision });
+    if (x.action === "lesson_decision") return tr("Lesson for {agent}: {decision}", { agent: a.agent, decision: a.decision });
+    if (x.action === "qa_decision") return tr("QA of {milestone}: {decision}{v}", { milestone: a.milestone, decision: a.decision, v: a.rounds ? ` (+${a.rounds})` : "" });
+    if (x.action === "task_decision") return `${a.task}: ${a.decision}`;
     return x.action;
   }
-  const REQ_WORD = { pending: "waiting", running: "running", needs_input: "needs your answer", done: "done", failed: "failed", cancelled: "cancelled", stale: "stopped" };
+  const REQ_WORD = tmap({ pending: N_("waiting"), running: N_("running"), needs_input: N_("needs your answer"), done: N_("done"), failed: N_("failed"), cancelled: N_("cancelled"), stale: N_("stopped") });
   function execLabel(ex) {
     const runs = skillRuns();
-    if (!ex.online && !runs.length) return ["off", "Claude Code: not running"];
-    if (ex.paused) return ["paused", "Claude Code: paused"];
-    if (ex.state === "running") return ["on", `Claude Code: working${ex.item ? ` on ${ex.item}` : ""}`];
-    if (ex.listening) return ["on", "Claude Code: listening"];
-    if (runs.length) return ["on", `Claude Code: running ${runCmd(runs[runs.length - 1])}; requests wait for it`];
-    return ["idle", "Claude Code: open, not listening"];
+    const au = ex.auto || {};
+    if (au.state === "running") return ["on", tr("Claude Code: started by the board{v}", { v: au.request ? ` (${au.request})` : "" })];
+    if (au.state === "waiting") return ["paused", tr("Claude Code: the last run failed ({reason}); it tries again soon", { reason: au.reason || "?" })];
+    if (!ex.online && !runs.length) return ["off", tr("Claude Code: not running")];
+    if (ex.paused) return ["paused", tr("Claude Code: paused")];
+    if (ex.state === "running") return ["on", tr("Claude Code: working{v}", { v: ex.item ? ` on ${ex.item}` : "" })];
+    if (ex.listening) return ["on", tr("Claude Code: listening")];
+
+    if (runs.length) return ["on", tr("Claude Code: running {v}; requests wait for it", { v: runCmd(runs[runs.length - 1]) })];
+    return ["idle", tr("Claude Code: open, not listening")];
   }
   function renderRequests() {
     const ib = inbox();
@@ -1709,7 +1939,7 @@
     const pb = $("pause-btn");
     pb.hidden = !ib.actions;
     pb.setAttribute("aria-pressed", String(Boolean(ib.executor.paused)));
-    pb.textContent = ib.executor.paused ? "Resume queue" : "Pause queue";
+    pb.textContent = ib.executor.paused ? tr("Resume queue") : tr("Pause queue");
     const cb = $("cont-btn");
     cb.hidden = !ib.actions;
     cb.setAttribute("aria-pressed", String(Boolean(ib.executor.continuous)));
@@ -1717,35 +1947,36 @@
     const stopped = ib.executor.continuous && ib.executor.continuous_stopped;
     const line = (...kids) => h("span", { class: "hint-line" }, kids);
     fill($("req-hint"),
-      !ib.actions ? line("This board only shows the project: requests are off (start it with --actions on).") : null,
-      ib.actions && !takesIt(ib.executor) && waiting ? line(`${plural(waiting, "request")} waiting. In Claude Code, run `, h("span", { class: "cmd" }, h("code", { text: "/dev-kit:worker" }), copyBtn("/dev-kit:worker"))) : null,
-      ib.actions && !ib.executor.online && !waiting ? line("No Claude Code session is listening. Run ", h("span", { class: "cmd" }, h("code", { text: "/dev-kit:board" }), copyBtn("/dev-kit:board")), " in one: requests then start by themselves.") : null,
-      ib.actions && ib.executor.paused ? line("Paused: Claude Code finishes what it is doing and takes nothing new.") : null,
-      ib.actions && ib.executor.continuous && !stopped ? line("Going on by itself: after each step Claude Code starts the next one, until something needs you or the milestone closes.") : null,
-      stopped ? h("span", { class: "hint-line bad" }, `It stopped going on by itself: ${stopped}. `,
-        h("button", { type: "button", class: "link-btn", text: "Go on", onclick: () => setContinuous(true) })) : null,
-      ib.actions && !ib.open.length && !ib.recent.length ? line("Nothing queued. Use ▶ next to a command, answer a question, add an issue, or plan by dragging cards.") : null);
+      !ib.actions ? line(tr("This board only shows the project: requests are off (start it with --actions on).")) : null,
+      ib.actions && !takesIt(ib.executor) && waiting && (ib.executor.auto || {}).state === "no_claude" ? h("span", { class: "hint-line bad" }, workerHint()) : null,
+      ib.actions && !takesIt(ib.executor) && waiting && (ib.executor.auto || {}).state !== "no_claude" ? line(tr("{v} waiting. In Claude Code, run ", { v: plural(waiting, "request") }), h("span", { class: "cmd" }, h("code", { text: "/dev-kit:worker" }), copyBtn("/dev-kit:worker"))) : null,
+      ib.actions && !ib.executor.online && !waiting && !autoOn(ib.executor) ? line(tr("No Claude Code session is listening. Run "), h("span", { class: "cmd" }, h("code", { text: "/dev-kit:board" }), copyBtn("/dev-kit:board")), tr(" in one: requests then start by themselves.")) : null,
+      ib.actions && ib.executor.paused ? line(tr("Paused: Claude Code finishes what it is doing and takes nothing new.")) : null,
+      ib.actions && ib.executor.continuous && !stopped ? line(tr("Going on by itself: after each step Claude Code starts the next one, until something needs you or the milestone closes.")) : null,
+      stopped ? h("span", { class: "hint-line bad" }, tr("It stopped going on by itself: {stopped}. ", { stopped }),
+        h("button", { type: "button", class: "link-btn", text: tr("Go on"), onclick: () => setContinuous(true) })) : null,
+      ib.actions && !ib.open.length && !ib.recent.length ? line(tr("Nothing queued. Use ▶ next to a command, answer a question, add an issue, or plan by dragging cards.")) : null);
     const row = (x, open) => h("li", { class: `req s-${x.status}` },
       h("span", { class: "id", text: x.id }),
       h("span", { class: "req-what" }, describeReq(x)),
       h("span", { class: `chip req-st s-${x.status}`, text: x.cancel_requested ? "cancelling" : REQ_WORD[x.status] || x.status }),
       x.note ? h("span", { class: "sub", text: x.note }) : null,
-      x.status === "needs_input" ? h("button", { type: "button", class: "link-btn sub", text: `Answer ${x.question || "the question"} in Needs you`, onclick: goNeeds }) : null,
-      open && ib.actions && !x.cancel_requested ? h("button", { type: "button", class: "link-btn req-cancel", "aria-label": `Cancel ${x.id}`, text: "Cancel",
-        onclick: async (e) => { e.currentTarget.disabled = true; try { await api(`/api/inbox/${x.id}/cancel`, {}); toast(`${x.id}: ${x.status === "running" ? "Claude Code stops at the next safe point" : "cancelled"}.`); load(); } catch (err) { toast(err.message, true); } } }) : null);
+      x.status === "needs_input" ? h("button", { type: "button", class: "link-btn sub", text: tr("Answer {v} in Needs you", { v: x.question || tr("the question") }), onclick: goNeeds }) : null,
+      open && ib.actions && !x.cancel_requested ? h("button", { type: "button", class: "link-btn req-cancel", "aria-label": tr("Cancel {id}", { id: x.id }), text: tr("Cancel"),
+        onclick: async (e) => { e.currentTarget.disabled = true; try { await api(`/api/inbox/${x.id}/cancel`, {}); toast(`${x.id}: ${x.status === "running" ? tr("Claude Code stops at the next safe point") : "cancelled"}.`); load(); } catch (err) { toast(err.message, true); } } }) : null);
     fill($("req-list"), ib.open.map((x) => row(x, true)), ib.recent.slice(0, 6).map((x) => row(x, false)));
     const nx = data.next && data.next.command;
-    fill($("ms-next"), nx ? ["Next step: ", cmd(nx)] : null);
+    fill($("ms-next"), nx && !runningRun(nx) ? [tr("Next step: "), cmd(nx)] : null);  // a step already running is not the next one
   }
   $("pause-btn").addEventListener("click", async () => {
     const paused = !inbox().executor.paused;
-    try { await api("/api/worker/mode", { paused }); toast(paused ? "Queue paused." : "Queue resumed."); load(); } catch (e) { toast(e.message, true); }
+    try { await api("/api/worker/mode", { paused }); toast(paused ? tr("Queue paused.") : tr("Queue resumed.")); load(); } catch (e) { toast(e.message, true); }
   });
   async function setContinuous(on) {
     try {
       await api("/api/worker/mode", { continuous: on });
-      toast(on ? `Going on by itself. ${takesIt(inbox().executor) ? "Claude Code starts the next step." : "It starts when a Claude Code session listens (/dev-kit:board)."}`
-        : "It now waits for you after each request.");
+      toast(on ? tr("Going on by itself. {v}", { v: takesIt(inbox().executor) ? tr("Claude Code starts the next step.") : tr("It starts when a Claude Code session listens (/dev-kit:board).") })
+        : tr("It now waits for you after each request."));
       load();
     } catch (e) { toast(e.message, true); }
   }
@@ -1763,7 +1994,7 @@
       fails.length = 0;
     }
     const n = needsN + fails.length;
-    document.title = n ? `(${n}) Needs you · ${data.project}` : `${data.project} · dev-kit board`;
+    document.title = n ? tr("({n}) Needs you · {project}", { n, project: data.project }) : tr("{project} · dev-kit board", { project: data.project });
     const icon = document.querySelector('link[rel="icon"]');
     const want = n ? "/assets/favicon-alert.svg" : "/assets/favicon.svg";
     if (icon && icon.getAttribute("href") !== want) icon.setAttribute("href", want);
@@ -1786,25 +2017,25 @@
   const answerDrafts = {};
   function answerBox(q) {
     const sent = inbox().open.find((x) => x.action === "answer_question" && x.args && x.args.question === q.id);
-    if (sent) return h("div", { class: "sub answer-sent", text: `Answer sent (${sent.id}): ${sent.args.option || sent.args.answer}. Claude Code applies it.` });
+    if (sent) return h("div", { class: "sub answer-sent", text: tr("Answer sent ({id}): {v}. Claude Code applies it.", { id: sent.id, v: sent.args.option || sent.args.answer }) });
     const opts = (q.options || []).slice().sort((a, b) => (b === q.recommended) - (a === q.recommended));
-    const box = h("div", { class: "sub answer", role: "group", "aria-label": `Answer ${q.id}` });
+    const box = h("div", { class: "sub answer", role: "group", "aria-label": tr("Answer {id}", { id: q.id }) });
     const send = async (args, el) => { el.disabled = true; try { await queue("answer_question", { question: q.id, ...args }); delete answerDrafts[q.id]; } catch (e) { el.disabled = false; } };
     opts.forEach((o) => box.append(h("button", { type: "button", class: `btn btn-sm${o === q.recommended ? " btn-primary" : ""}`, onclick: (e) => send({ option: o }, e.currentTarget) },
-      o, o === q.recommended ? h("span", { class: "rec", text: "recommended" }) : null)));
-    if (!opts.length && q.assumption) box.append(h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: (e) => send({ answer: q.assumption }, e.currentTarget) }, "Keep the assumption"));
-    const inp = h("input", { type: "text", id: `ans-${q.id}`, maxlength: "2000", class: "answer-input", "aria-label": `Your answer to ${q.id}`,
-      placeholder: opts.length || q.assumption ? "Or write another answer" : "Your answer" });
+      o, o === q.recommended ? h("span", { class: "rec", text: tr("recommended") }) : null)));
+    if (!opts.length && q.assumption) box.append(h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: (e) => send({ answer: q.assumption }, e.currentTarget) }, tr("Keep the assumption")));
+    const inp = h("input", { type: "text", id: `ans-${q.id}`, maxlength: "2000", class: "answer-input", "aria-label": tr("Your answer to {id}", { id: q.id }),
+      placeholder: opts.length || q.assumption ? tr("Or write another answer") : tr("Your answer") });
     inp.value = answerDrafts[q.id] || "";
     inp.addEventListener("input", () => { answerDrafts[q.id] = inp.value; });
-    const go = h("button", { type: "button", class: "btn btn-sm", id: `ans-send-${q.id}`, text: "Send",
+    const go = h("button", { type: "button", class: "btn btn-sm", id: `ans-send-${q.id}`, text: tr("Send"),
       onclick: (e) => { const v = inp.value.trim(); if (v) send({ answer: v }, e.currentTarget); else inp.focus(); } });
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go.click(); } });
     box.append(h("span", { class: "answer-free" }, inp, go));
     return box;
   }
-  const DECIDED = { allow: "Allowed", allow_session: "Allowed for this session", deny: "Denied" };
-  const leftText = (ms) => (ms <= 0 ? "No answer in time: denied." : ms < 60000 ? `Denied in ${Math.ceil(ms / 1000)} s without an answer.` : `Denied in ${Math.ceil(ms / 60000)} min without an answer.`);
+  const DECIDED = tmap({ allow: N_("Allowed"), allow_session: N_("Allowed for this session"), deny: N_("Denied") });
+  const leftText = (ms) => (ms <= 0 ? tr("No answer in time: denied.") : ms < 60000 ? tr("Denied in {v} s without an answer.", { v: Math.ceil(ms / 1000) }) : tr("Denied in {v} min without an answer.", { v: Math.ceil(ms / 60000) }));
   function approvalRow(a) {
     const deadline = lastUpdate + (a.seconds_left || 0) * 1000;
     const decide = async (decision, el) => {
@@ -1813,12 +2044,12 @@
     };
     return h("li", {}, h("span", { class: "id", text: a.tool || "tool" }), h("span", { class: "mono-wrap", text: a.target || "" }),
       h("span", { class: "chip", text: a.request || "" }),
-      h("div", { class: "sub answer", role: "group", "aria-label": `Permission for ${a.tool}` },
-        h("button", { type: "button", class: "btn btn-sm btn-primary", text: "Allow", onclick: (e) => decide("allow", e.currentTarget) }),
-        a.rule ? h("button", { type: "button", class: "btn btn-sm", title: `Until the Claude Code session ends, without asking again: ${a.rule}`,
-          onclick: (e) => decide("allow_session", e.currentTarget) }, "Allow for this session") : null,
-        h("button", { type: "button", class: "btn btn-sm btn-danger", text: "Deny", onclick: (e) => decide("deny", e.currentTarget) })),
-      a.rule ? h("span", { class: "sub" }, "For this session it would allow: ", h("code", { text: a.rule })) : null,
+      h("div", { class: "sub answer", role: "group", "aria-label": tr("Permission for {tool}", { tool: a.tool }) },
+        h("button", { type: "button", class: "btn btn-sm btn-primary", text: tr("Allow"), onclick: (e) => decide("allow", e.currentTarget) }),
+        a.rule ? h("button", { type: "button", class: "btn btn-sm", title: tr("Until the Claude Code session ends, without asking again: {rule}", { rule: a.rule }),
+          onclick: (e) => decide("allow_session", e.currentTarget) }, tr("Allow for this session")) : null,
+        h("button", { type: "button", class: "btn btn-sm btn-danger", text: tr("Deny"), onclick: (e) => decide("deny", e.currentTarget) })),
+      a.rule ? h("span", { class: "sub" }, tr("For this session it would allow: "), h("code", { text: a.rule })) : null,
       h("span", { class: "sub approval-left", "data-deadline": String(deadline), text: leftText(deadline - Date.now()) }));
   }
   setInterval(() => document.querySelectorAll(".approval-left[data-deadline]").forEach((el) => { el.textContent = leftText(Number(el.dataset.deadline) - Date.now()); }), 1000);
@@ -1827,7 +2058,7 @@
   let draft = { ops: [], base: null, serverErrors: [], buffer: false, frozen: false };
   /** A milestone whose QA began: its scope is frozen; adding to it needs a confirmation (conventions §15). */
   const isFrozen = (mid) => Boolean(((data.milestones || []).find((m) => m.id === mid) || {}).frozen_at);
-  const FROZEN_COST = (mid) => `This item enters the next QA round of ${mid} and invalidates the audit of the files it touches.`;
+  const FROZEN_COST = (mid) => tr("This item enters the next QA round of {mid} and invalidates the audit of the files it touches.", { mid });
   const MS_NUM = (id) => { const m = /^M(\d+)(?:\.(\d+))?$/.exec(String(id)); return m ? Number(m[1]) + Number(m[2] || 0) / 100 : 1e6; };
   const REL_OPS = ["move_milestone", "new_release", "drop_release"];
   const RELEASE_SIZE = [2, 5];  // milestones per release (conventions.md §4); dev_state.py checks it again
@@ -1860,13 +2091,13 @@
     };
     queued.forEach((c) => { where[c.id] = "queue"; });
     draft.ops.forEach((op, n) => {
-      const at = `Change ${n + 1}`;
+      const at = tr("Change {v}", { v: n + 1 });
       if (REL_OPS.includes(op.op)) return;  // release changes are replayed by relModel
       if (op.op === "new_milestone") { ms.push({ id: op.milestone, title: op.title, isNew: true }); cols[op.milestone] = []; return; }
-      if (!cols[op.milestone]) { problems.push(`${at}: ${op.milestone} is no longer open`); return; }
+      if (!cols[op.milestone]) { problems.push(tr("{at}: {milestone} is no longer open", { at, milestone: op.milestone })); return; }
       const id = op.op === "move_task" ? op.task : op.issue;
-      if (op.op === "move_task" && !movableTask(data.tasks[id])) { problems.push(`${at}: ${id} is ${stLabel((data.tasks[id] || {}).status || "gone")} now; undo this change`); return; }
-      if (op.op === "schedule_issue" && !movableIssue(issueOf(id))) { problems.push(`${at}: ${id} is not open any more; undo this change`); return; }
+      if (op.op === "move_task" && !movableTask(data.tasks[id])) { problems.push(tr("{at}: {id} is {v} now; undo this change", { at, id, v: stLabel((data.tasks[id] || {}).status || "gone") })); return; }
+      if (op.op === "schedule_issue" && !movableIssue(issueOf(id))) { problems.push(tr("{at}: {id} is not open any more; undo this change", { at, id })); return; }
       const card = take(id);
       if (card) put(card, op.milestone, op.before);
     });
@@ -1875,7 +2106,7 @@
       if (c.kind !== "task") return;
       (data.tasks[c.id].deps || []).forEach((d) => {
         const dt = data.tasks[d];
-        if (dt && dt.status !== "done" && where[d] && where[d] !== "queue" && MS_NUM(where[d]) > MS_NUM(m)) problems.push(`${c.id} depends on ${d}, which would be in a later milestone (${where[d]})`);
+        if (dt && dt.status !== "done" && where[d] && where[d] !== "queue" && MS_NUM(where[d]) > MS_NUM(m)) problems.push(tr("{id} depends on {d}, which would be in a later milestone ({v})", { id: c.id, d, v: where[d] }));
       });
     }));
     return { ms, cols, queued, where, problems };
@@ -1901,15 +2132,15 @@
     } else {
       addOp({ op: "schedule_issue", issue: card.id, milestone: m, ...(before ? { before } : {}) });
     }
-    toast(`${card.id} → ${m}${before ? ` (before ${before})` : ""}. Send the draft when it is ready.`);
+    toast(tr("{id} → {m}{v}. Send the draft when it is ready.", { id: card.id, m, v: before ? tr(" (before {before})", { before }) : "" }));
   }
   function describeOp(op) {
-    if (op.op === "new_milestone") return `New milestone ${op.milestone} · ${op.title}`;
+    if (op.op === "new_milestone") return tr("New milestone {milestone} · {title}", { milestone: op.milestone, title: op.title });
     if (op.op === "move_milestone") return `${op.milestone} → ${op.release}`;
-    if (op.op === "new_release") return `New release ${op.release}${op.title ? ` · ${op.title}` : ""}`;
-    if (op.op === "drop_release") return `Remove release ${op.release}`;
-    if (op.op === "move_task") return `${op.task} → ${op.milestone}${op.before ? ` (before ${op.before})` : ""}`;
-    if (op.op === "schedule_issue") return `${op.issue} → ${op.milestone}${op.before ? ` (before ${op.before})` : ""}${op.force ? " · over the buffer" : ""}${op.confirm_frozen ? " · confirmed after the freeze" : ""}`;
+    if (op.op === "new_release") return tr("New release {release}{v}", { release: op.release, v: op.title ? ` · ${op.title}` : "" });
+    if (op.op === "drop_release") return tr("Remove release {release}", { release: op.release });
+    if (op.op === "move_task") return `${op.task} → ${op.milestone}${op.before ? tr(" (before {before})", { before: op.before }) : ""}`;
+    if (op.op === "schedule_issue") return `${op.issue} → ${op.milestone}${op.before ? tr(" (before {before})", { before: op.before }) : ""}${op.force ? tr(" · over the buffer") : ""}${op.confirm_frozen ? tr(" · confirmed after the freeze") : ""}`;
     if (op.op === "set_issue_status") return `${op.issue} → ${op.status}`;
     return op.op;
   }
@@ -1920,10 +2151,10 @@
     if (!x) return null;
     const movable = isTask ? movableTask(x) : movableIssue(x);
     const targets = model.ms.map((t) => t.id);
-    const sel = movable ? h("select", { class: "move-sel", "aria-label": `Move ${c.id}`, id: `mv-${c.id}` },
-      h("option", { value: "", text: "Move…" }),
-      isTask && m ? [h("option", { value: "up", text: "↑ Up" }), h("option", { value: "down", text: "↓ Down" })] : null,
-      targets.filter((t) => t !== m).map((t) => h("option", { value: `to:${t}`, text: `To ${t}` }))) : null;
+    const sel = movable ? h("select", { class: "move-sel", "aria-label": tr("Move {id}", { id: c.id }), id: `mv-${c.id}` },
+      h("option", { value: "", text: tr("Move…") }),
+      isTask && m ? [h("option", { value: "up", text: tr("↑ Up") }), h("option", { value: "down", text: tr("↓ Down") })] : null,
+      targets.filter((t) => t !== m).map((t) => h("option", { value: `to:${t}`, text: tr("To {t}", { t }) }))) : null;
     if (sel) sel.addEventListener("change", () => {
       const v = sel.value;
       sel.value = "";
@@ -1936,7 +2167,7 @@
       requestAnimationFrame(() => { const el = $(`mv-${c.id}`); if (el) el.focus(); });
     });
     const el = h("li", { class: `pcard ${isTask ? `s-${x.status}` : "issue"}${movable ? " movable" : " locked"}`, "data-id": c.id, draggable: movable ? "true" : null,
-      title: movable ? "Drag to another place, or use Move…" : isTask ? `${stLabel(x.status)}: only tasks not started move` : `${x.class}: goes through /dev-kit:issue` },
+      title: movable ? tr("Drag to another place, or use Move…") : isTask ? tr("{v}: only tasks not started move", { v: stLabel(x.status) }) : tr("{class}: goes through /dev-kit:issue", { class: x.class }) },
       h("div", { class: "tcard-top" }, h("span", { class: "tid", text: c.id }),
         isTask ? h("span", { class: "chip", text: x.type }) : h("span", { class: `chip${x.class === "expedite" ? " lane-hotfix" : ""}`, text: x.class || "issue" }),
         isTask && x.status !== "todo" ? h("span", { class: `chip st-chip s-${x.status}`, text: stLabel(x.status) }) : null,
@@ -1971,7 +2202,7 @@
       if (m === "queue") {
         // back to the queue: undo the scheduling of this issue (the latest one)
         const i = draft.ops.map((o) => o.issue).lastIndexOf(card.id);
-        if (i >= 0) { draft.ops.splice(i, 1); renderPlan(); toast(`${card.id} back in the queue.`); }
+        if (i >= 0) { draft.ops.splice(i, 1); renderPlan(); toast(tr("{id} back in the queue.", { id: card.id })); }
         return;
       }
       moveCard(card, m, t ? t.dataset.id : null, model);
@@ -1992,7 +2223,7 @@
       const from = rels.find((r) => r.ms.includes(op.milestone)), to = rels.find((r) => r.id === op.release);
       const m = data.milestones.find((x) => x.id === op.milestone);
       if (!from || !to || !m || m.gate !== "pending" || from.status !== "in_progress" || to.status !== "in_progress") {
-        problems.push(`${op.milestone} → ${op.release} no longer fits the plan; undo this change`);
+        problems.push(tr("{milestone} → {release} no longer fits the plan; undo this change", { milestone: op.milestone, release: op.release }));
         return;
       }
       from.ms.splice(from.ms.indexOf(op.milestone), 1);
@@ -2001,7 +2232,7 @@
       touched.add(from.id); touched.add(to.id);
     });
     rels.filter((r) => touched.has(r.id) && (r.ms.length < RELEASE_SIZE[0] || r.ms.length > RELEASE_SIZE[1]))
-      .forEach((r) => problems.push(`${r.id} would hold ${plural(r.ms.length, "milestone")}; a release holds ${RELEASE_SIZE[0]} to ${RELEASE_SIZE[1]}`));
+      .forEach((r) => problems.push(tr("{id} would hold {v}; a release holds {v2} to {v3}", { id: r.id, v: plural(r.ms.length, "milestone"), v2: RELEASE_SIZE[0], v3: RELEASE_SIZE[1] })));
     return { rels, problems };
   }
   const relLocked = (r) => r.status !== "in_progress";
@@ -2011,20 +2242,20 @@
     const ts = msTasks(mid);
     const running = ts.some((t) => t.status === "in_progress");
     const movable = m.gate === "pending" && !relLocked(rel) && !running;
-    const why = m.gate !== "pending" ? `its gate is ${m.gate}` : relLocked(rel) ? `${rel.id} is ${REL_WORD[rel.status] || rel.status}` : running ? "a task is running" : "";
+    const why = m.gate !== "pending" ? tr("its gate is {gate}", { gate: m.gate }) : relLocked(rel) ? `${rel.id} is ${REL_WORD[rel.status] || rel.status}` : running ? tr("a task is running") : "";
     const targets = model.rels.filter((r) => r.id !== rel.id && !relLocked(r));
-    const sel = movable && targets.length ? h("select", { class: "move-sel", "aria-label": `Move ${mid} to another release`, id: `mv-${mid}` },
-      h("option", { value: "", text: "Move…" }), targets.map((r) => h("option", { value: r.id, text: `To ${r.id}` }))) : null;
+    const sel = movable && targets.length ? h("select", { class: "move-sel", "aria-label": tr("Move {mid} to another release", { mid }), id: `mv-${mid}` },
+      h("option", { value: "", text: tr("Move…") }), targets.map((r) => h("option", { value: r.id, text: tr("To {id}", { id: r.id }) }))) : null;
     if (sel) sel.addEventListener("change", () => {
       const v = sel.value;
       sel.value = "";
-      if (v) { addOp({ op: "move_milestone", milestone: mid, release: v }); toast(`${mid} → ${v}. Send the draft when it is ready.`); }
+      if (v) { addOp({ op: "move_milestone", milestone: mid, release: v }); toast(tr("{mid} → {v}. Send the draft when it is ready.", { mid, v })); }
       requestAnimationFrame(() => { const el = $(`mv-${mid}`); if (el) el.focus(); });
     });
     const el = h("li", { class: `pcard${movable ? " movable" : " locked"}${m.gate === "pending" ? "" : " s-done"}`, "data-id": mid, draggable: movable ? "true" : null,
-      title: movable ? "Drag to another release, or use Move…" : `Stays here: ${why}` },
+      title: movable ? tr("Drag to another release, or use Move…") : tr("Stays here: {why}", { why }) },
       h("div", { class: "tcard-top" }, h("span", { class: "tid", text: mid }),
-        h("span", { class: "chip", text: m.gate === "pending" ? plural(ts.length, "task") : `gate ${m.gate}` })),
+        h("span", { class: "chip", text: m.gate === "pending" ? plural(ts.length, "task") : tr("gate {v}", { v: m.gate }) })),
       h("div", { class: "tcard-title", text: m.title || mid, title: m.title || null }), sel);
     if (movable) {
       el.addEventListener("dragstart", (e) => { dragging = { kind: "ms", id: mid, from: rel.id }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", mid); el.classList.add("dragging"); });
@@ -2044,7 +2275,7 @@
       const card = dragging;
       dragging = null;
       addOp({ op: "move_milestone", milestone: card.id, release: rel.id });
-      toast(`${card.id} → ${rel.id}. Send the draft when it is ready.`);
+      toast(tr("{id} → {id2}. Send the draft when it is ready.", { id: card.id, id2: rel.id }));
     });
   }
   /** The lanes of releases mode, and the one to create the next release. */
@@ -2052,24 +2283,24 @@
     const model = relModel();
     const lanes = model.rels.map((r) => {
       const list = h("ol", { class: "pcol-list", "data-key": `rel-${r.id}`, "aria-label": `${r.id} ${r.title}, ${plural(r.ms.length, "milestone")}` }, r.ms.map((m) => msCard(m, r, model)).filter(Boolean));
-      if (!r.ms.length) list.append(h("li", { class: "col-empty", text: relLocked(r) ? "—" : "Drop milestones here" }));
+      if (!r.ms.length) list.append(h("li", { class: "col-empty", text: relLocked(r) ? "—" : tr("Drop milestones here") }));
       relDropZone(list, r);
       const canDrop = !relLocked(r) && !r.ms.length;
       return h("section", { class: `pcol rel${r.isNew ? " new" : ""}${relLocked(r) ? " locked" : ""}`, "aria-label": `${r.id} ${r.title}` },
         h("div", { class: "col-head" }, h("strong", { text: r.id }), r.title && r.title !== r.id ? h("span", { class: "pcol-title", text: r.title, title: r.title }) : null,
           h("span", { class: "count", text: String(r.ms.length) })),
-        h("p", { class: "card-sub", text: r.isNew ? "New in this draft" : REL_WORD[r.status] || r.status }), list,
-        canDrop ? h("button", { type: "button", class: "link-btn", text: `Remove ${r.id}`, onclick: () => addOp({ op: "drop_release", release: r.id }) }) : null);
+        h("p", { class: "card-sub", text: r.isNew ? tr("New in this draft") : REL_WORD[r.status] || r.status }), list,
+        canDrop ? h("button", { type: "button", class: "link-btn", text: tr("Remove {id}", { id: r.id }), onclick: () => addOp({ op: "drop_release", release: r.id }) }) : null);
     });
     const next = `R${Math.max(0, ...model.rels.map((r) => Number(r.id.slice(1)))) + 1}`;
-    const inp = h("input", { type: "text", id: "new-rel-title", maxlength: "80", placeholder: `Title of ${next} (optional)`, "aria-label": `Title of the new release ${next}` });
+    const inp = h("input", { type: "text", id: "new-rel-title", maxlength: "80", placeholder: tr("Title of {next} (optional)", { next }), "aria-label": tr("Title of the new release {next}", { next }) });
     inp.value = newRelTitle;
     inp.addEventListener("input", () => { newRelTitle = inp.value; });
-    const add = () => { const v = inp.value.trim(); newRelTitle = ""; addOp({ op: "new_release", release: next, ...(v ? { title: v } : {}) }); toast(`${next} added to the draft: drag its milestones in.`); };
+    const add = () => { const v = inp.value.trim(); newRelTitle = ""; addOp({ op: "new_release", release: next, ...(v ? { title: v } : {}) }); toast(tr("{next} added to the draft: drag its milestones in.", { next })); };
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } });
     lanes.push(h("section", { class: "pcol add" }, h("div", { class: "col-head" }, h("strong", { text: `＋ ${next}` })),
-      h("p", { class: "card-sub", text: "The next release, after the others. Create it, then drag milestones into it. A release holds 2 to 5 milestones." }),
-      h("div", { class: "answer-free" }, inp, h("button", { type: "button", class: "btn btn-sm", text: "Add", onclick: add }))));
+      h("p", { class: "card-sub", text: tr("The next release, after the others. Create it, then drag milestones into it. A release holds 2 to 5 milestones.") }),
+      h("div", { class: "answer-free" }, inp, h("button", { type: "button", class: "btn btn-sm", text: tr("Add"), onclick: add }))));
     return { cols: lanes, problems: model.problems };
   }
   let newMsTitle = "";
@@ -2090,18 +2321,18 @@
       const done = cards.filter((c) => c.kind === "task" && data.tasks[c.id].status === "done");
       const open = cards.filter((c) => !done.includes(c));
       const list = h("ol", { class: "pcol-list", "data-key": key, "aria-label": `${title}, ${plural(open.length, "open card")}` }, open.map((c) => planCard(c, model, key === "queue" ? null : key)).filter(Boolean));
-      if (!open.length) list.append(h("li", { class: "col-empty", text: key === "queue" ? "No open issue" : "Drop tasks or issues here" }));
+      if (!open.length) list.append(h("li", { class: "col-empty", text: key === "queue" ? tr("No open issue") : tr("Drop tasks or issues here") }));
       dropZone(list, key, model);
       let folded = null;
       if (done.length) {
-        folded = h("details", { class: "pcol-done" }, h("summary", { text: `${plural(done.length, "task")} done` }),
-          h("ol", { class: "pcol-list done-list", "aria-label": `${title}, done tasks` }, done.map((c) => planCard(c, model, key)).filter(Boolean)));
+        folded = h("details", { class: "pcol-done" }, h("summary", { text: tr("{v} done", { v: plural(done.length, "task") }) }),
+          h("ol", { class: "pcol-list done-list", "aria-label": tr("{title}, done tasks", { title }) }, done.map((c) => planCard(c, model, key)).filter(Boolean)));
         folded.open = doneOpen.has(key);
         folded.addEventListener("toggle", () => { if (folded.open) doneOpen.add(key); else doneOpen.delete(key); });
       }
-      return h("section", { class: `pcol${key === "queue" ? " queue" : ""}${isNew ? " new" : ""}`, "aria-label": key === "queue" ? "Issue queue" : `${key} ${title}` },
-        h("div", { class: "col-head" }, h("strong", { text: key === "queue" ? "Issue queue" : key }), key === "queue" || title === key ? null : h("span", { class: "pcol-title", text: title, title }),
-          h("span", { class: "count", title: done.length ? `${open.length} open, ${done.length} done` : null, text: !done.length ? String(open.length) : open.length ? `${open.length} · ${done.length} ✓` : `${done.length} ✓` })),
+      return h("section", { class: `pcol${key === "queue" ? " queue" : ""}${isNew ? " new" : ""}`, "aria-label": key === "queue" ? tr("Issue queue") : `${key} ${title}` },
+        h("div", { class: "col-head" }, h("strong", { text: key === "queue" ? tr("Issue queue") : key }), key === "queue" || title === key ? null : h("span", { class: "pcol-title", text: title, title }),
+          h("span", { class: "count", title: done.length ? tr("{open_n} open, {done_n} done", { open_n: open.length, done_n: done.length }) : null, text: !done.length ? String(open.length) : open.length ? `${open.length} · ${done.length} ✓` : `${done.length} ✓` })),
         sub ? h("p", { class: "card-sub", text: sub }) : null, list, folded, extra);
     };
     const newNum = `M${Math.floor(Math.max(0, ...data.milestones.map((m) => MS_NUM(m.id)), ...draft.ops.filter((o) => o.op === "new_milestone").map((o) => MS_NUM(o.milestone)))) + 1}`;
@@ -2110,23 +2341,23 @@
     const hasRels = relPlan().length > 0;
     if (!hasRels) planMode = "tasks";
     const rm = planMode === "releases" ? relColumns() : null;
-    const cols = rm ? rm.cols : [column("queue", "Issue queue", "Expedite and change issues go through /dev-kit:issue.", model.queued)]
-      .concat(model.ms.slice().reverse().map((m) => column(m.id, m.title || m.id, m.isNew ? "New in this draft" : isFrozen(m.id) ? "🔒 Frozen for QA — adding needs your confirmation" : b && b.milestone === m.id ? `Issue buffer ${b.used}/${b.capacity}` : null, model.cols[m.id] || [], null, m.isNew)));
+    const cols = rm ? rm.cols : [column("queue", tr("Issue queue"), tr("Expedite and change issues go through /dev-kit:issue."), model.queued)]
+      .concat(model.ms.slice().map((m) => column(m.id, m.title || m.id, m.isNew ? tr("New in this draft") : isFrozen(m.id) ? tr("🔒 Frozen for QA — adding needs your confirmation") : b && b.milestone === m.id ? bufferText(b) : null, model.cols[m.id] || [], null, m.isNew)));
     if (!hasNew && !rm) {
-      const inp = h("input", { type: "text", id: "new-ms-title", maxlength: "80", placeholder: `Title of ${newNum}`, "aria-label": `Title of the new milestone ${newNum}` });
+      const inp = h("input", { type: "text", id: "new-ms-title", maxlength: "80", placeholder: tr("Title of {newNum}", { newNum }), "aria-label": tr("Title of the new milestone {newNum}", { newNum }) });
       inp.value = newMsTitle;
       inp.addEventListener("input", () => { newMsTitle = inp.value; });
-      const add = () => { const v = inp.value.trim(); if (!v) { inp.focus(); return; } newMsTitle = ""; addOp({ op: "new_milestone", milestone: newNum, title: v }); toast(`${newNum} added to the draft.`); };
+      const add = () => { const v = inp.value.trim(); if (!v) { inp.focus(); return; } newMsTitle = ""; addOp({ op: "new_milestone", milestone: newNum, title: v }); toast(tr("{newNum} added to the draft.", { newNum })); };
       inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } });
       cols.push(h("section", { class: "pcol add" }, h("div", { class: "col-head" }, h("strong", { text: `＋ ${newNum}` })),
-        h("p", { class: "card-sub", text: "The next milestone, after the others. Name it, then drag cards into it." }),
-        h("div", { class: "answer-free" }, inp, h("button", { type: "button", class: "btn btn-sm", text: "Add", onclick: add }))));
+        h("p", { class: "card-sub", text: tr("The next milestone, after the others. Name it, then drag cards into it.") }),
+        h("div", { class: "answer-free" }, inp, h("button", { type: "button", class: "btn btn-sm", text: tr("Add"), onclick: add }))));
     }
     const errors = model.problems.concat(relModel().problems, draft.serverErrors);
-    const modeBar = hasRels ? h("div", { class: "plan-mode", role: "group", "aria-label": "What to plan" },
-      [["tasks", "Tasks and issues"], ["releases", "Releases"]].map(([k, label]) => h("button", { type: "button", class: "btn btn-sm", "aria-pressed": String(planMode === k), text: label,
+    const modeBar = hasRels ? h("div", { class: "plan-mode", role: "group", "aria-label": tr("What to plan") },
+      [["tasks", tr("Tasks and issues")], ["releases", tr("Releases")]].map(([k, label]) => h("button", { type: "button", class: "btn btn-sm", "aria-pressed": String(planMode === k), text: label,
         onclick: () => { planMode = k; renderPlan(); } }))) : null;
-    const sendBtn = h("button", { type: "button", class: "btn btn-primary", id: "plan-send", disabled: !draft.ops.length || errors.some((x) => !draft.serverErrors.includes(x)) ? true : null, text: "Send to Claude Code",
+    const sendBtn = h("button", { type: "button", class: "btn btn-primary", id: "plan-send", disabled: !draft.ops.length || errors.some((x) => !draft.serverErrors.includes(x)) ? true : null, text: tr("Send to Claude Code"),
       onclick: async (e) => {
         e.currentTarget.disabled = true;
         const ops = draft.ops.map((o) => (o.op === "schedule_issue" && draft.buffer ? { ...o, force: true } : o))
@@ -2145,22 +2376,22 @@
     const frozenM = frozenHit ? (/(M\d+(?:\.\d+)?) is frozen/.exec(frozenHit) || [])[1] : null;
     fill(box, modeBar,
       h("div", { class: "plan-cols" }, cols),
-      h("aside", { class: "plan-draft", "aria-label": "Draft of the plan" },
-        h("div", { class: "list-title" }, "Draft", draft.ops.length ? h("span", { class: "chip", text: String(draft.ops.length) }) : null),
+      h("aside", { class: "plan-draft", "aria-label": tr("Draft of the plan") },
+        h("div", { class: "list-title" }, tr("Draft"), draft.ops.length ? h("span", { class: "chip", text: String(draft.ops.length) }) : null),
         draft.ops.length ? h("ol", { class: "td-list" }, draft.ops.map((o) => h("li", { text: describeOp(o) })))
-          : h("p", { class: "card-sub", text: "Drag tasks not started and open issues between open milestones, or milestones between releases, or use Move… on a card. Nothing changes until you send the draft; Claude Code applies it with /dev-kit:worker." }),
+          : h("p", { class: "card-sub", text: tr("Drag tasks not started and open issues between open milestones, or milestones between releases, or use Move… on a card. Nothing changes until you send the draft; Claude Code applies it with /dev-kit:worker.") }),
         errors.length ? h("ul", { class: "td-list plan-errors", role: "alert" }, errors.map((x) => h("li", { text: x }))) : null,
-        overBuffer ? h("button", { type: "button", class: "link-btn", text: "Go over the issue buffer and send again", onclick: () => { draft.buffer = true; draft.serverErrors = []; renderPlan(); $("plan-send").click(); } }) : null,
+        overBuffer ? h("button", { type: "button", class: "link-btn", text: tr("Go over the issue buffer and send again"), onclick: () => { draft.buffer = true; draft.serverErrors = []; renderPlan(); $("plan-send").click(); } }) : null,
         frozenM ? h("p", { class: "card-sub bad", text: FROZEN_COST(frozenM) }) : null,
-        frozenM ? h("button", { type: "button", class: "link-btn", text: `Confirm adding to ${frozenM} and send again`, onclick: () => { draft.frozen = true; draft.serverErrors = []; renderPlan(); $("plan-send").click(); } }) : null,
+        frozenM ? h("button", { type: "button", class: "link-btn", text: tr("Confirm adding to {frozenM} and send again", { frozenM }), onclick: () => { draft.frozen = true; draft.serverErrors = []; renderPlan(); $("plan-send").click(); } }) : null,
         h("div", { class: "plan-actions" },
-          h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: "Undo", onclick: () => { draft.ops.pop(); draft.serverErrors = []; renderPlan(); } }),
-          h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: "Discard", onclick: () => { draft = { ops: [], base: null, serverErrors: [], buffer: false, frozen: false }; renderPlan(); } }),
+          h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: tr("Undo"), onclick: () => { draft.ops.pop(); draft.serverErrors = []; renderPlan(); } }),
+          h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: tr("Discard"), onclick: () => { draft = { ops: [], base: null, serverErrors: [], buffer: false, frozen: false }; renderPlan(); } }),
           sendBtn)));
     box.querySelector(".plan-cols").scrollLeft = scrollX;
     box.querySelectorAll(".pcol-list[data-key]").forEach((l) => { if (scrollY[l.dataset.key]) l.scrollTop = scrollY[l.dataset.key]; });
   }
-  const VIEW_TITLE = { tasks: "Task board", burndown: "Burndown", velocity: "Velocity", gates: "Milestone gates" };
+  const VIEW_TITLE = tmap({ tasks: N_("Task board"), qa: N_("QA & fixes"), burndown: N_("Burndown"), velocity: N_("Velocity"), gates: N_("Milestone gates") });
   const viewsShown = () => VIEWS;
   /** The plan view (drag, draft, send) lives only in Planning, while the board takes requests. */
   const planShown = () => actionsOn() && shownPhase() === "planning";
@@ -2174,6 +2405,7 @@
       b.tabIndex = on ? 0 : -1;
     });
     $("view-tasks").hidden = view !== "tasks";
+    $("view-qa").hidden = view !== "qa";
     INS.forEach((k) => { $(`ins-${k}`).hidden = k !== view; });
     $("board-card").dataset.view = view;
     $("workspace").classList.toggle("planning", planShown());
@@ -2202,7 +2434,7 @@
     if (!data) return;
     const banner = $("banner");
     if (!data.ok) {
-      banner.hidden = false; banner.textContent = data.message || "Could not read the project state.";
+      banner.hidden = false; banner.textContent = data.message || tr("Could not read the project state.");
       return;
     }
     banner.hidden = true;
@@ -2216,7 +2448,7 @@
       placePlanner(); applyView();
       if (ph === "conception") renderConception();
       else if (ph === "planning") { renderPlanning(); renderPlan(); }
-      else if (ph === "construction") { renderReleases(); renderTabs(); renderMilestone(m); renderStages(m); renderKanban(m); renderInsights(m, curId); }
+      else if (ph === "construction") { renderReleases(); renderTabs(); renderMilestone(m); renderStages(m); autoQaView(m); renderKanban(m); renderInsights(m, curId); }
       else if (ph === "releases") renderReleasesTab();
       else renderStable();
     });
@@ -2242,6 +2474,7 @@
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
       const next = await r.json();
+      if (next.ok && !data && !langPicked && pickLang(next.language) && pickLang(next.language) !== LANG) { data = next; setLang(next.language, false); }
       if (next.ok || !data) data = next;
       else if (!next.ok && next.error === "corrupt_state") { /* mid-write: keep the previous frame */ }
       else data = next;
@@ -2251,7 +2484,7 @@
       if (tdlg.open && tdCur) fetchTask(tdCur, true);
       if (ddlg.open && docCur) fetchDoc(docCur, true);
     } catch (e) {
-      setLive("off", "Offline");
+      setLive("off", tr("Offline"));
     } finally {
       loading = false;
       if (pending) { pending = false; setTimeout(load, 150); }
@@ -2263,28 +2496,41 @@
     el.className = `live ${state}`;
     $("live-text").textContent = text;
   }
-  function tickUpdated() { $("updated").textContent = lastUpdate ? `updated ${ago(lastUpdate)}` : ""; }
+  /** The time header: how long the orchestrator and the current skill have run, and when the last event came
+   * ("Live" says the connection is up; "last event" says something is happening). */
+  function tickUpdated() {
+    if (!data || !data.ok) { $("updated").textContent = ""; return; }
+    const runs = skillRuns(), parts = [];
+    const orch = runs.find((r) => ["autopilot", "worker"].includes(r.skill));
+    const work = [...runs].reverse().find((r) => !["autopilot", "worker", "board"].includes(r.skill));
+    if (orch) parts.push(`${orch.skill} for ${dur((Date.now() - parseT(orch.started_at)) / 1000)}`);
+    if (work) parts.push(`${actionLabel(runCmd(work)).replace(/^Run /, "")} for ${dur((Date.now() - parseT(work.started_at)) / 1000)}`);
+    const last = Math.max(0, ...[...(data.log || []), ...(data.feed || [])].map((r) => parseT(r.at)).filter(Number.isFinite));
+    if (last) parts.push(tr("last event {v}", { v: ago(last) }));
+    $("updated").textContent = parts.join(" · ");
+    $("updated").title = lastUpdate ? tr("Board data refreshed {v}", { v: ago(lastUpdate) }) : "";
+  }
 
   function connect() {
     if (stopped) return;
     es = new EventSource("/api/events");
-    es.addEventListener("hello", () => { setLive("on", "Live"); $("banner").hidden = !(data && !data.ok); load(); });
+    es.addEventListener("hello", () => { setLive("on", tr("Live")); $("banner").hidden = !(data && !data.ok); load(); });
     es.addEventListener("change", () => load());
     es.addEventListener("bye", () => { es.close(); showStopped(); });
     es.onerror = () => {
       if (stopped) return;
-      setLive("off", "Reconnecting…");
-      const b = $("banner"); b.hidden = false; fill(b, "The board server is not answering. Reconnecting… Start it again with ", cmd("/dev-kit:board"));
+      setLive("off", tr("Reconnecting…"));
+      const b = $("banner"); b.hidden = false; fill(b, tr("The board server is not answering. Reconnecting… Start it again with "), cmd("/dev-kit:board"));
     };
   }
 
   function showStopped() {
     stopped = true;
     if (es) es.close();
-    setLive("off", "Stopped");
+    setLive("off", tr("Stopped"));
     if (tdlg.open) tdlg.close();
     $("stopped").hidden = false;
-    document.title = "Board stopped · dev-kit";
+    document.title = tr("Board stopped · dev-kit");
   }
 
   // ------------------------------------------------------------------ task details: a side drawer, linkable as #T-nnn
@@ -2296,42 +2542,45 @@
     return body.length ? h("section", { class: "td-sec" }, h("h3", { text: title }), body) : null;
   }
   const taskRefs = (list) => (list.length ? h("ul", { class: "td-list plain" }, list.map((x) => h("li", {},
-    h("button", { type: "button", class: "tid-btn", text: x.id, "aria-label": `Open ${x.id}`, onclick: () => openTask(x.id) }), ` ${x.title || ""} `,
+    h("button", { type: "button", class: "tid-btn", text: x.id, "aria-label": tr("Open {id}", { id: x.id }), onclick: () => openTask(x.id) }), ` ${x.title || ""} `,
     h("span", { class: `chip st-chip s-${x.status}`, text: stLabel(x.status) }),
-    x.reason ? h("span", { class: "muted", text: ` · needed because ${x.reason}` }) : null))) : null);
-  /** A task's source as a link: a .dev markdown report (qa/M1/report.md#F-3), or the dossier of a rejected release. */
+    x.reason ? h("span", { class: "muted", text: tr(" · needed because {reason}", { reason: x.reason }) }) : null))) : null);
+  /** A task's source as a link: a .dev markdown report (qa/M1/report.md#F-3), or the release review of a rejected release. */
   function sourceLink(src) {
     const rel = String(src).match(/^release:(R\d{1,3})$/);
-    if (rel) return docLink(`releases/${rel[1]}/dossier.md`, `${rel[1]} rejected · dossier`);
+    if (rel) {
+      const r = relPlan().find((x) => x.id === rel[1]);
+      return docLink((r && r.review_doc) || `releases/${rel[1]}/review.md`, tr("{v} rejected · release review", { v: rel[1] }));
+    }
     const m = String(src).match(/^(?:\.dev\/)?([\w./-]+\.md)(?:#([\w-]+))?/);
     return m && hasDoc(m[1]) ? docLink(m[1], src, m[2] || null) : String(src);
   }
   function renderTask(d) {
     const body = $("task-body");
-    if (!d.ok) { fill(body, h("p", { class: "card-sub", text: d.error === "unknown task" ? "This task no longer exists (a replan may have removed it)." : "Could not load the task." })); return; }
+    if (!d.ok) { fill(body, h("p", { class: "card-sub", text: d.error === "unknown task" /* i18n-ok: server code */ ? tr("This task no longer exists (a replan may have removed it).") : tr("Could not load the task.") })); return; }
     $("task-title").textContent = `${d.id} ${d.title || ""}`;
     const c = d.commit;
     fill(body, [
       h("div", { class: "tcard-top" }, h("span", { class: `chip st-chip s-${d.status}`, text: stLabel(d.status) }), h("span", { class: "chip", text: d.type }),
         d.lane ? h("span", { class: `chip lane-${d.lane}`, text: d.lane }) : null, h("span", { class: "chip", text: d.milestone }),
-        d.started_at ? h("span", { text: `started ${fmtDT(parseT(d.started_at))}` }) : null,
-        d.done_at ? h("span", { text: `done ${fmtDT(parseT(d.done_at))}` }) : null),
+        d.started_at ? h("span", { text: tr("started {v}", { v: fmtDT(parseT(d.started_at)) }) }) : null,
+        d.done_at ? h("span", { text: tr("done {v}", { v: fmtDT(parseT(d.done_at)) }) }) : null),
       agentsOn(d.id).length ? h("div", { class: "tcard-agents td-sec" }, agentsOn(d.id).map((x) => h("span", { class: "agent-chip" }, agentBits(x)))) : null,
       d.blocked_reason ? h("div", { class: "reason td-sec", text: d.blocked_reason }) : null,
-      section("Origin", d.issue ? h("p", {}, h("span", { class: "tid", text: d.issue.id }), ` ${d.issue.title || ""}`,
+      section(tr("Origin"), d.issue ? h("p", {}, h("span", { class: "tid", text: d.issue.id }), ` ${d.issue.title || ""}`,
         h("span", { class: "card-sub", text: ` · ${[d.issue.type, d.issue.class, d.issue.severity, d.issue.status].filter(Boolean).join(" · ")}` }),
         d.issue.note ? h("span", { class: "td-note", text: d.issue.note }) : null) : (d.source ? h("p", {}, sourceLink(d.source)) : null)),
-      section(`Acceptance criteria (${d.acceptance.length})`, d.acceptance.length ? h("ul", { class: "td-list" }, d.acceptance.map((a) =>
-        h("li", {}, a.text, a.prd ? h("span", { class: "td-note", text: `PRD: ${a.prd}` }) : null))) : null),
-      section("How to test", d.test_notes ? h("p", { text: d.test_notes }) : null),
-      section("Depends on", taskRefs(d.deps)),
-      section("Unblocks", taskRefs(d.blocks)),
-      section("Planned files", d.files.length ? h("ul", { class: "td-list mono" }, d.files.map((f) => h("li", { text: f }))) : null),
-      section("Commit", c ? [h("p", {}, h("span", { class: "tid", text: c.sha.slice(0, 7) }), ` ${c.subject}`, h("span", { class: "card-sub", text: ` · ${c.author} · ${fmtDT(parseT(c.date))}` })),
+      section(tr("Acceptance criteria ({acceptance_n})", { acceptance_n: d.acceptance.length }), d.acceptance.length ? h("ul", { class: "td-list" }, d.acceptance.map((a) =>
+        h("li", {}, a.text, a.prd ? h("span", { class: "td-note", text: tr("PRD: {prd}", { prd: a.prd }) }) : null))) : null),
+      section(tr("How to test"), d.test_notes ? h("p", { text: d.test_notes }) : null),
+      section(tr("Depends on"), taskRefs(d.deps)),
+      section(tr("Unblocks"), taskRefs(d.blocks)),
+      section(tr("Planned files"), d.files.length ? h("ul", { class: "td-list mono" }, d.files.map((f) => h("li", { text: f }))) : null),
+      section(tr("Commit"), c ? [h("p", {}, h("span", { class: "tid", text: c.sha.slice(0, 7) }), ` ${c.subject}`, h("span", { class: "card-sub", text: ` · ${c.author} · ${fmtDT(parseT(c.date))}` })),
         c.files.length ? h("ul", { class: "td-list mono" }, c.files.map((f) => h("li", { text: f }))) : null, c.summary ? h("p", { class: "card-sub", text: c.summary }) : null]
-        : (d.commit_sha ? h("p", {}, h("span", { class: "tid", text: d.commit_sha.slice(0, 7) }), h("span", { class: "card-sub", text: " · not available in this checkout" })) : null)),
-      section("History", d.log.length ? h("ul", { class: "td-list plain" }, d.log.map((r) => h("li", {}, h("span", { class: "card-sub", text: `${r.at} ` }), r.text))) : null),
-      h("p", { class: "card-sub td-foot", text: "No free-text description is stored for tasks yet; this is everything recorded in .dev/." })]);
+        : (d.commit_sha ? h("p", {}, h("span", { class: "tid", text: d.commit_sha.slice(0, 7) }), h("span", { class: "card-sub", text: tr(" · not available in this checkout") })) : null)),
+      section(tr("History"), d.log.length ? h("ul", { class: "td-list plain" }, d.log.map((r) => h("li", {}, h("span", { class: "card-sub", text: `${r.at} ` }), r.text))) : null),
+      h("p", { class: "card-sub td-foot", text: tr("No free-text description is stored for tasks yet; this is everything recorded in .dev/.") })]);
   }
   async function fetchTask(id, quiet) {
     try {
@@ -2344,7 +2593,7 @@
     if (!tdlg.open) tdOrigin = id;
     tdCur = id;
     $("task-title").textContent = data && data.tasks && data.tasks[id] ? `${id} ${data.tasks[id].title}` : id;
-    fill($("task-body"), h("p", { class: "card-sub", text: "Loading…" }));
+    fill($("task-body"), h("p", { class: "card-sub", text: tr("Loading…") }));
     if (!tdlg.open) (tdlg.showModal ? tdlg.showModal() : tdlg.setAttribute("open", ""));
     tdlg.scrollTop = 0;
     if (location.hash !== `#${id}`) history.replaceState(null, "", `#${id}`);
@@ -2438,7 +2687,7 @@
       if (cb) body = cb[2];
       cur = h("li", { class: cb ? "md-task" : null },
         cb ? h("span", { class: "md-box", "aria-hidden": "true", text: cb[1] === " " ? "☐" : "☑" }) : null,
-        cb ? h("span", { class: "visually-hidden", text: cb[1] === " " ? "to do: " : "done: " }) : null,
+        cb ? h("span", { class: "visually-hidden", text: cb[1] === " " ? tr("to do: ") : tr("done: ") }) : null,
         mdInline(body, base));
       const id = body.match(ID_TOKEN);
       if (id) cur.setAttribute("data-anchor", id[1]);
@@ -2506,8 +2755,8 @@
   }
 
   const ddlg = $("doc-dialog");
-  const DOC_NAME = { "brief.md": "Brief", "prd.md": "PRD", "architecture.md": "Architecture", "design/ux-flows.md": "UX flows", "design/ui-spec.md": "UI spec",
-    "plan.md": "Plan", "decisions.md": "Decisions", "facts.md": "Facts", "open-questions.md": "Open questions", "issues.md": "Issues", "log.md": "Log" };
+  const DOC_NAME = tmap({ "brief.md": N_("Brief"), "prd.md": N_("PRD"), "architecture.md": N_("Architecture"), "design/ux-flows.md": N_("UX flows"), "design/ui-spec.md": N_("UI spec"),
+    "plan.md": N_("Plan"), "decisions.md": N_("Decisions"), "facts.md": N_("Facts"), "open-questions.md": N_("Open questions"), "issues.md": N_("Issues"), "log.md": N_("Log") });
   let docStack = [];          // documents opened from inside the drawer: "Back" walks them
   let docOrigin = null;       // element the drawer was opened from: focus returns there
   const hasDoc = (p) => (data.docs || []).includes(p);
@@ -2516,7 +2765,7 @@
   function docLink(path, label, anchor, cls) {
     const p = relDev(path);
     if (!hasDoc(p)) return h("span", { class: `doc-off${cls ? ` ${cls}` : ""}`, title: `.dev/${p} does not exist yet`, text: label || p });
-    return h("button", { type: "button", class: `doc-link${cls ? ` ${cls}` : ""}`, "data-doc": p, title: `Open .dev/${p}${anchor ? ` at ${anchor}` : ""}`,
+    return h("button", { type: "button", class: `doc-link${cls ? ` ${cls}` : ""}`, "data-doc": p, title: tr("Open .dev/{p}{v}", { p, v: anchor ? ` at ${anchor}` : "" }),
       onclick: (e) => { e.stopPropagation(); openDoc(p, anchor); } }, h("span", { class: "doc-ico", "aria-hidden": "true", text: "▤" }), label || p);
   }
   function scrollDoc(anchor) {
@@ -2531,7 +2780,7 @@
   }
   function renderDoc(d) {
     const body = $("doc-body");
-    if (!d.ok) { fill(body, h("p", { class: "card-sub", text: d.error === "not found" ? "This document does not exist (any more)." : `Could not open it: ${d.error || "error"}.` })); return; }
+    if (!d.ok) { fill(body, h("p", { class: "card-sub", text: d.error === "not found" /* i18n-ok: server code */ ? tr("This document does not exist (any more).") : tr("Could not open it: {v}.", { v: d.error || "error" }) })); return; }
     fill(body, renderMarkdown(d.text, d.path), h("p", { class: "card-sub td-foot", text: `.dev/${d.path} · changed ${Number.isFinite(parseT(d.mtime)) ? fmtDT(parseT(d.mtime)) : d.mtime}` }));
     if (!DOC_NAME[d.path]) { const h1 = body.querySelector(".md-h"); if (h1) $("doc-title").textContent = h1.textContent; }
   }
@@ -2555,7 +2804,7 @@
     $("doc-title").textContent = DOC_NAME[path] || path.split("/").pop().replace(/\.md$/i, "");
     fill($("doc-path"), h("code", { text: `.dev/${path}` }), copyBtn(`.dev/${path}`));
     $("doc-back").hidden = !docStack.length;
-    fill($("doc-body"), h("p", { class: "card-sub", text: "Loading…" }));
+    fill($("doc-body"), h("p", { class: "card-sub", text: tr("Loading…") }));
     if (!ddlg.open) (ddlg.showModal ? ddlg.showModal() : ddlg.setAttribute("open", ""));
     ddlg.scrollTop = 0;
     const hash = `#doc:${path}${anchor ? `:${anchor}` : ""}`;
@@ -2578,7 +2827,7 @@
   const dlg = $("stop-dialog");
   $("stop-btn").addEventListener("click", () => {
     pops.forEach((p) => p.close());
-    if (dlg.showModal) dlg.showModal(); else if (confirm("Stop the board server?")) stopServer();
+    if (dlg.showModal) dlg.showModal(); else if (confirm(tr("Stop the board server?"))) stopServer();
   });
   dlg.addEventListener("close", () => { if (dlg.returnValue === "stop") stopServer(); else $("menu-btn").focus(); });
   async function stopServer() {
@@ -2590,7 +2839,7 @@
       showStopped();
     } catch (e) {
       btn.disabled = false;
-      const b = $("banner"); b.hidden = false; fill(b, `Could not stop the server (${e.message}). Use `, cmd("/dev-kit:board stop"));
+      const b = $("banner"); b.hidden = false; fill(b, tr("Could not stop the server ({message}). Use ", { message: e.message }), cmd("/dev-kit:board stop"));
     }
   }
 
