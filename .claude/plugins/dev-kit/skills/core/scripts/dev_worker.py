@@ -600,6 +600,21 @@ def request_approval(root: Path, tool: str, target: str, request: str, rule: str
     return aid
 
 
+def _log_wait(root: Path, aid: str) -> None:
+    """The time a permission request waited for the user (§19, human_wait_s), on the current milestone."""
+    try:
+        rec = _read(run_dir(root) / "approvals" / f"{aid}.json") or {}
+        import dev_state as ds
+        store = ds.Store(root)
+        store.load()
+        scope = ds.current_milestone(store)
+        secs = ds._secs_between(rec.get("ts"), ds.now())
+        if secs is not None:
+            ds.tel.safe_emit(root / ".dev", "human_wait", {"kind": "permission", "scope": ds.tel.scope_token(scope or "-"), "duration_s": secs})
+    except Exception:  # noqa: BLE001 - measuring never breaks the hook
+        pass
+
+
 def wait_decision(root: Path, aid: str, wait_s: float, request: str | None = None, poll: float = 0.5) -> str:
     """Wait for the board's decision. Returns allow | allow_session | deny | cancelled (the request was cancelled
     on the board meanwhile) | timeout. The approval is removed either way."""
@@ -609,6 +624,7 @@ def wait_decision(root: Path, aid: str, wait_s: float, request: str | None = Non
         while True:
             try:
                 got = (d / f"{aid}.decision").read_text(encoding="utf-8").strip()
+                _log_wait(root, aid)
                 return got if got in ("allow", "allow_session", "deny") else "deny"
             except OSError:
                 pass

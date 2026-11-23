@@ -1,0 +1,763 @@
+{
+  "version": 1,
+  "project": "proj-planned-releases",
+  "language": "pt",
+  "phase": "construction",
+  "step": "M5",
+  "autonomy": {
+    "level": "high",
+    "decide_alone": [
+      "library_choice",
+      "file_structure",
+      "naming",
+      "test_strategy",
+      "ui_details",
+      "minor_scope_tradeoffs",
+      "dev_tooling",
+      "data_model_details"
+    ],
+    "always_ask": [
+      "paid_services",
+      "delete_data",
+      "public_exposure",
+      "scope_change_major",
+      "security_model_change",
+      "credentials",
+      "model_escalation"
+    ],
+    "max_fix_rounds_per_gate": 3,
+    "max_review_rounds": 3,
+    "model_policy": {
+      "mode": "ask",
+      "tiers": {},
+      "risk_tiers": "apply",
+      "risk_weights": {},
+      "router": {
+        "mode": "apply",
+        "balance": "balanced",
+        "budget_usd_per_milestone": null
+      }
+    },
+    "pause_policy": {},
+    "on_park": "stop_when_idle",
+    "notify_on_park": false,
+    "local_deploy": {
+      "mode": "off",
+      "port": null,
+      "notify": false
+    },
+    "issue_buffer_pct": 20,
+    "cooldown": {
+      "enabled": false,
+      "max_tasks": 5
+    },
+    "tips": "on",
+    "ui": {
+      "offered": false,
+      "spinner_tips": false,
+      "statusline": false,
+      "title": true,
+      "notify": false
+    },
+    "task_checks": "ui",
+    "incremental": {
+      "enabled": true,
+      "spot_check_pct": 10,
+      "full_on_last_gate": false
+    },
+    "production": {
+      "when": "none",
+      "method": null,
+      "host": null,
+      "targets": [],
+      "smoke": [],
+      "prerequisites": []
+    },
+    "task_time_budget_min": 30,
+    "commit_per_task": true,
+    "may_install_deps": true,
+    "may_run_servers": true,
+    "may_push": false,
+    "quality": {
+      "min_overall": 85,
+      "min_dimension": 70,
+      "dimension_min": {
+        "security": 90,
+        "tests": 80,
+        "spec": 85,
+        "a11y": 80
+      },
+      "review_min_overall": 80,
+      "low_cap": 10,
+      "weights": {
+        "code": 15,
+        "security": 15,
+        "tests": 15,
+        "spec": 15,
+        "ux": 8,
+        "a11y": 8,
+        "visual": 6,
+        "copy": 3,
+        "performance": 6,
+        "data": 4,
+        "operations": 3,
+        "dependencies": 2,
+        "docs": 5,
+        "design": 10,
+        "requirements": 10
+      }
+    }
+  },
+  "stack": {},
+  "reviews": {
+    "prd": {
+      "rounds": 0,
+      "verdict": "pass",
+      "score": 96,
+      "hashes": {
+        "prd": "4438991a161c8a46"
+      },
+      "at": "2026-11-23T19:56:28+00:00"
+    },
+    "design": {
+      "rounds": 0,
+      "verdict": "n/a",
+      "note": "no UI",
+      "at": "2026-11-23T19:56:28+00:00"
+    },
+    "plan": {
+      "rounds": 0,
+      "verdict": "pass",
+      "score": 95,
+      "hashes": {
+        "plan": "db8029b6d58b0751"
+      },
+      "at": "2026-11-23T19:56:28+00:00"
+    }
+  },
+  "milestones": {
+    "M1": {
+      "title": "Catalog",
+      "gate": "passed",
+      "qa_runs": 0,
+      "release": "R1",
+      "passed_at": "2026-11-23T19:56:30+00:00",
+      "score": 95
+    },
+    "M2": {
+      "title": "Cart",
+      "gate": "passed",
+      "qa_runs": 0,
+      "release": "R1",
+      "passed_at": "2026-11-23T19:56:31+00:00",
+      "score": 95
+    },
+    "M3": {
+      "title": "Checkout",
+      "gate": "passed",
+      "qa_runs": 0,
+      "release": "R2",
+      "passed_at": "2026-11-23T19:56:33+00:00",
+      "score": 95
+    },
+    "M4": {
+      "title": "Accounts",
+      "gate": "pending",
+      "qa_runs": 0,
+      "release": "R3"
+    },
+    "M5": {
+      "title": "R2 · Fixes",
+      "gate": "pending",
+      "qa_runs": 0,
+      "release": "R2"
+    }
+  },
+  "tasks": {
+    "T-001": {
+      "title": "Catalog step 1",
+      "milestone": "M1",
+      "type": "feature",
+      "status": "done",
+      "deps": [],
+      "acceptance": [
+        "AC-1: catalog step 1 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f1.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:29+00:00",
+      "done_at": "2026-11-23T19:56:29+00:00",
+      "seq": 1
+    },
+    "T-002": {
+      "title": "Catalog step 2",
+      "milestone": "M1",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-001"
+      ],
+      "acceptance": [
+        "AC-2: catalog step 2 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f2.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:29+00:00",
+      "done_at": "2026-11-23T19:56:29+00:00",
+      "seq": 2,
+      "dep_reasons": "T-001: uses its model"
+    },
+    "T-003": {
+      "title": "Catalog step 3",
+      "milestone": "M1",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-002"
+      ],
+      "acceptance": [
+        "AC-3: catalog step 3 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f3.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:29+00:00",
+      "done_at": "2026-11-23T19:56:29+00:00",
+      "seq": 3,
+      "dep_reasons": "T-002: uses its model"
+    },
+    "T-004": {
+      "title": "Catalog step 4",
+      "milestone": "M1",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-003"
+      ],
+      "acceptance": [
+        "AC-4: catalog step 4 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f4.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:29+00:00",
+      "done_at": "2026-11-23T19:56:30+00:00",
+      "seq": 4,
+      "dep_reasons": "T-003: uses its model"
+    },
+    "T-005": {
+      "title": "Catalog step 5",
+      "milestone": "M1",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-004"
+      ],
+      "acceptance": [
+        "AC-5: catalog step 5 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f5.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:30+00:00",
+      "done_at": "2026-11-23T19:56:30+00:00",
+      "seq": 5,
+      "dep_reasons": "T-004: uses its model"
+    },
+    "T-006": {
+      "title": "Cart step 6",
+      "milestone": "M2",
+      "type": "feature",
+      "status": "done",
+      "deps": [],
+      "acceptance": [
+        "AC-6: cart step 6 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f6.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:30+00:00",
+      "done_at": "2026-11-23T19:56:30+00:00",
+      "seq": 6
+    },
+    "T-007": {
+      "title": "Cart step 7",
+      "milestone": "M2",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-006"
+      ],
+      "acceptance": [
+        "AC-7: cart step 7 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f7.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:30+00:00",
+      "done_at": "2026-11-23T19:56:30+00:00",
+      "seq": 7,
+      "dep_reasons": "T-006: uses its model"
+    },
+    "T-008": {
+      "title": "Cart step 8",
+      "milestone": "M2",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-007"
+      ],
+      "acceptance": [
+        "AC-8: cart step 8 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f8.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:31+00:00",
+      "done_at": "2026-11-23T19:56:31+00:00",
+      "seq": 8,
+      "dep_reasons": "T-007: uses its model"
+    },
+    "T-009": {
+      "title": "Cart step 9",
+      "milestone": "M2",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-008"
+      ],
+      "acceptance": [
+        "AC-9: cart step 9 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f9.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:31+00:00",
+      "done_at": "2026-11-23T19:56:31+00:00",
+      "seq": 9,
+      "dep_reasons": "T-008: uses its model"
+    },
+    "T-010": {
+      "title": "Cart step 10",
+      "milestone": "M2",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-009"
+      ],
+      "acceptance": [
+        "AC-10: cart step 10 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f10.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:31+00:00",
+      "done_at": "2026-11-23T19:56:31+00:00",
+      "seq": 10,
+      "dep_reasons": "T-009: uses its model"
+    },
+    "T-011": {
+      "title": "Checkout step 11",
+      "milestone": "M3",
+      "type": "feature",
+      "status": "done",
+      "deps": [],
+      "acceptance": [
+        "AC-11: checkout step 11 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f11.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:32+00:00",
+      "done_at": "2026-11-23T19:56:32+00:00",
+      "seq": 11
+    },
+    "T-012": {
+      "title": "Checkout step 12",
+      "milestone": "M3",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-011"
+      ],
+      "acceptance": [
+        "AC-12: checkout step 12 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f12.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:32+00:00",
+      "done_at": "2026-11-23T19:56:32+00:00",
+      "seq": 12,
+      "dep_reasons": "T-011: uses its model"
+    },
+    "T-013": {
+      "title": "Checkout step 13",
+      "milestone": "M3",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-012"
+      ],
+      "acceptance": [
+        "AC-13: checkout step 13 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f13.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:32+00:00",
+      "done_at": "2026-11-23T19:56:32+00:00",
+      "seq": 13,
+      "dep_reasons": "T-012: uses its model"
+    },
+    "T-014": {
+      "title": "Checkout step 14",
+      "milestone": "M3",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-013"
+      ],
+      "acceptance": [
+        "AC-14: checkout step 14 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f14.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:33+00:00",
+      "done_at": "2026-11-23T19:56:33+00:00",
+      "seq": 14,
+      "dep_reasons": "T-013: uses its model"
+    },
+    "T-015": {
+      "title": "Checkout step 15",
+      "milestone": "M3",
+      "type": "feature",
+      "status": "done",
+      "deps": [
+        "T-014"
+      ],
+      "acceptance": [
+        "AC-15: checkout step 15 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f15.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:33+00:00",
+      "done_at": "2026-11-23T19:56:33+00:00",
+      "seq": 15,
+      "dep_reasons": "T-014: uses its model"
+    },
+    "T-016": {
+      "title": "Accounts step 16",
+      "milestone": "M4",
+      "type": "feature",
+      "status": "todo",
+      "deps": [],
+      "acceptance": [
+        "AC-16: accounts step 16 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f16.py"
+      ],
+      "commit": null,
+      "blocked_reason": null,
+      "source": null,
+      "started_at": null,
+      "done_at": null,
+      "seq": 17
+    },
+    "T-017": {
+      "title": "Accounts step 17",
+      "milestone": "M4",
+      "type": "feature",
+      "status": "todo",
+      "deps": [
+        "T-016"
+      ],
+      "acceptance": [
+        "AC-17: accounts step 17 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f17.py"
+      ],
+      "commit": null,
+      "blocked_reason": null,
+      "source": null,
+      "started_at": null,
+      "done_at": null,
+      "seq": 18,
+      "dep_reasons": "T-016: uses its model"
+    },
+    "T-018": {
+      "title": "Accounts step 18",
+      "milestone": "M4",
+      "type": "feature",
+      "status": "todo",
+      "deps": [
+        "T-017"
+      ],
+      "acceptance": [
+        "AC-18: accounts step 18 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f18.py"
+      ],
+      "commit": null,
+      "blocked_reason": null,
+      "source": null,
+      "started_at": null,
+      "done_at": null,
+      "seq": 19,
+      "dep_reasons": "T-017: uses its model"
+    },
+    "T-019": {
+      "title": "Accounts step 19",
+      "milestone": "M4",
+      "type": "feature",
+      "status": "todo",
+      "deps": [
+        "T-018"
+      ],
+      "acceptance": [
+        "AC-19: accounts step 19 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f19.py"
+      ],
+      "commit": null,
+      "blocked_reason": null,
+      "source": null,
+      "started_at": null,
+      "done_at": null,
+      "seq": 20,
+      "dep_reasons": "T-018: uses its model"
+    },
+    "T-020": {
+      "title": "Accounts step 20",
+      "milestone": "M4",
+      "type": "feature",
+      "status": "todo",
+      "deps": [
+        "T-019"
+      ],
+      "acceptance": [
+        "AC-20: accounts step 20 works"
+      ],
+      "test_notes": "unit",
+      "files": [
+        "src/f20.py"
+      ],
+      "commit": null,
+      "blocked_reason": null,
+      "source": null,
+      "started_at": null,
+      "done_at": null,
+      "seq": 21,
+      "dep_reasons": "T-019: uses its model"
+    },
+    "T-021": {
+      "title": "Receipt total wrong",
+      "milestone": "M5",
+      "type": "fix",
+      "status": "todo",
+      "deps": [],
+      "acceptance": [
+        "Receipt total wrong"
+      ],
+      "test_notes": "From the rejection of R2: show the reviewer it is fixed.",
+      "files": [],
+      "commit": null,
+      "blocked_reason": null,
+      "source": "release:R2",
+      "started_at": null,
+      "done_at": null,
+      "seq": 16
+    }
+  },
+  "next_task_id": 22,
+  "next_question_id": 1,
+  "created_at": "2026-11-23T19:56:28+00:00",
+  "updated_at": "2026-11-23T19:56:33+00:00",
+  "issues": {},
+  "reopened": false,
+  "artifacts": {
+    "brief": {
+      "hash": "3d92d4913ea80dda",
+      "at": "2026-11-23T19:56:28+00:00",
+      "upstream": {}
+    },
+    "prd": {
+      "hash": "4438991a161c8a46",
+      "at": "2026-11-23T19:56:28+00:00",
+      "upstream": {
+        "brief": "3d92d4913ea80dda"
+      }
+    },
+    "architecture": {
+      "hash": "81183601f375ccc8",
+      "at": "2026-11-23T19:56:28+00:00",
+      "upstream": {
+        "prd": "4438991a161c8a46"
+      }
+    },
+    "plan": {
+      "hash": "db8029b6d58b0751",
+      "at": "2026-11-23T19:56:28+00:00",
+      "upstream": {
+        "prd": "4438991a161c8a46",
+        "architecture": "81183601f375ccc8"
+      }
+    }
+  },
+  "release_plan": [
+    {
+      "id": "R1",
+      "title": "First sale",
+      "milestones": [
+        "M1",
+        "M2"
+      ]
+    },
+    {
+      "id": "R2",
+      "title": "Payments",
+      "milestones": [
+        "M3",
+        "M5"
+      ]
+    },
+    {
+      "id": "R3",
+      "title": "Accounts",
+      "milestones": [
+        "M4"
+      ]
+    }
+  ],
+  "release_state": {
+    "R1": {
+      "status": "released",
+      "rounds": 0,
+      "history": [
+        {
+          "at": "2026-11-23T19:56:32+00:00",
+          "event": "submitted",
+          "dossier": null
+        },
+        {
+          "at": "2026-11-23T19:56:32+00:00",
+          "event": "approved"
+        },
+        {
+          "at": "2026-11-23T19:56:32+00:00",
+          "event": "released",
+          "version": "1.0.0"
+        }
+      ],
+      "submitted_at": "2026-11-23T19:56:32+00:00",
+      "dossier": null,
+      "decided_at": "2026-11-23T19:56:32+00:00"
+    },
+    "R2": {
+      "status": null,
+      "rounds": 1,
+      "history": [
+        {
+          "at": "2026-11-23T19:56:33+00:00",
+          "event": "submitted",
+          "dossier": null
+        },
+        {
+          "at": "2026-11-23T19:56:33+00:00",
+          "event": "rejected",
+          "milestone": "M5",
+          "tasks": [
+            "T-021"
+          ]
+        }
+      ],
+      "submitted_at": "2026-11-23T19:56:33+00:00",
+      "dossier": null,
+      "decided_at": "2026-11-23T19:56:33+00:00"
+    }
+  },
+  "releases": [
+    {
+      "version": "1.0.0",
+      "tag": "v1.0.0",
+      "milestones": [
+        "M1",
+        "M2"
+      ],
+      "at": "2026-11-23T19:56:32+00:00",
+      "release": "R1"
+    }
+  ]
+}

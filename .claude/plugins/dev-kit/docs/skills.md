@@ -364,7 +364,7 @@ Implements ready tasks test-first, full suite, one commit per task; hotfix lane 
 
 **When:** To build tasks by hand instead of autopilot, or to run a specific task (e.g. a fix).
 
-**Usage:** `/dev-kit:implement [T-003 | --tasks N | --milestone M1 | --parallel N | --skip-gate]`
+**Usage:** `/dev-kit:implement [T-003 | --tasks N | --milestone M1 | --parallel N | --skip-gate | --round-child]`
 
 | Argument | Meaning |
 |---|---|
@@ -372,6 +372,7 @@ Implements ready tasks test-first, full suite, one commit per task; hotfix lane 
 | `--milestone M1 | --tasks N` | a milestone or N tasks |
 | `--parallel N` | N isolated implementers in git worktrees |
 | `--skip-gate` | work past a pending gate (records an ADR and sets the gate skipped) |
+| `--round-child` | internal: the milestone runs in a child session started by `dev_state.py round run` |
 
 **Examples:**
 
@@ -410,7 +411,7 @@ Milestone gate: auditors in parallel, 0-100 score per dimension, fix tasks until
 
 **When:** When a milestone's tasks are done, or to check one task (e.g. after a hotfix).
 
-**Usage:** `/dev-kit:qa [M1 | --only code,security,tests,spec,data,deps,ops,perf,a11y,visual,copy | --scope T-003 | --full]`
+**Usage:** `/dev-kit:qa [M1 | --only code,security,tests,spec,data,deps,ops,perf,a11y,visual,copy | --scope T-003 | --full | --round-child]`
 
 | Argument | Meaning |
 |---|---|
@@ -418,6 +419,7 @@ Milestone gate: auditors in parallel, 0-100 score per dimension, fix tasks until
 | `--scope T-003` | audit one task |
 | `--only code,security,...` | run a subset of auditors |
 | `--full` | audit everything again, without reusing earlier clean reviews |
+| `--round-child` | internal: one round in a child session started by `dev_state.py round run` |
 
 **Examples:**
 

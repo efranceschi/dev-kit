@@ -22,6 +22,10 @@ Subcommands
   start T       mark task in_progress
   done T        mark task done (optionally --commit SHA)
   block T       mark task blocked (--reason; --blocked-by I-nnn pauses it until the replan of that scope change)
+  pipeline ACTION   status [--json] | worktree BRANCH | integrate BRANCH: work ahead of a release waiting for
+                approval or a milestone in QA, on dev-kit/R<n> or dev-kit/M<n> (autonomy.pipeline), conventions §19
+  round run SKILL M   one QA round or a milestone's implementation in a headless child session (claude -p),
+                prints a JSON summary [--permission-mode MODE --timeout MIN], conventions §17
   fact ACTION   add --text --evidence --origin [--files --acs --sha] | stale K-nnn --by --evidence | list [--files
                 --acs --all --json]: verified facts in .dev/facts.md (secrets and personal data refused), conventions §2
   lesson ACTION add AGENT "<text>" | rm AGENT N | show AGENT | list | suggest | dismiss AGENT SIGNAL: lessons of
@@ -74,8 +78,8 @@ Subcommands
   release-submit R  freeze a planned release for the user's approval (--dossier PATH): awaiting approval
   release-decide R  the user's decision: --approve, or --reject --feedback ITEM… (a fixes milestone in the release),
                 or --request P-nnn (the decision made on the board)
-  release-record  record a cut release (--version [--tag] [--release R | --milestones M1,M2 | --hotfix T]): the
-                milestones are no longer waiting for a release; the phase (conception, planning, construction, stable) is always derived
+  release-record  record a release (--version [--tag] --release R after its approval, or --hotfix T): its
+                milestones are no longer waiting for a release (writes .dev/releases/R/flow.json); the phase (conception, planning, construction, stable) is always derived
   set KEY VAL   set language | project | stack.<field> | autonomy.<field>[.<sub>] (nested keys merge;
                 autonomy.level applies its preset; incl. autonomy.pause_policy.<point>)
   status        human (--short) or --json view; --next prints only the next command; --quiet-if-missing for hooks
@@ -93,6 +97,7 @@ import io
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -106,7 +111,7 @@ import dev_ledger as led  # noqa: E402
 import dev_risk as risk  # noqa: E402
 import dev_router as router  # noqa: E402
 
-STATE_VERSION = 1
+STATE_VERSION = 2  # 2 = 3.0: planned releases always, a managed .dev/.gitignore (migrate_state)
 # Project lifecycle (conventions.md §19): derived from the artifacts, reviews, milestones, issues and releases,
 # never set by hand. Conception and planning run once at the start and again for every scope change; construction
 # runs the milestone cycle and the next release; stable = nothing open, everything built is released.
@@ -163,6 +168,9 @@ DEFAULT_AUTONOMY = {
     # Milestone size (conventions.md §4): planned tasks + buffer slots + cool-down; outside the range sync-plan warns
     # unless the milestone states a `size_reason:`.
     "milestone_size": {"min": 5, "max": 12},
+    # work does not stop while a person decides (§19): one release ahead of the one waiting for approval, and the
+    # independent tasks of the next milestone while the current one is in QA, each on its own branch
+    "pipeline": {"releases_ahead": 1, "milestone_overlap": True},
     # CI as the source of truth for the gate's deterministic signals (conventions.md §7): provider auto (GitHub when
     # .github/workflows exists, GitLab when .gitlab-ci.yml exists) | github | gitlab | none; required = the gate needs
     # a green run on the round's commit; timeout_min = wait before the ci_timeout pause.
@@ -455,6 +463,11 @@ def check_autonomy_field(field: str, val: object) -> object:
                 or not all(isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 200 for v in val.values())
                 or val.get("min", 5) > val.get("max", 12)):
             fail("autonomy.milestone_size must be {\"min\": 5, \"max\": 12} (integers, min <= max)")
+    elif field == "pipeline":
+        if (not isinstance(val, dict) or set(val) - {"releases_ahead", "milestone_overlap"}
+                or not isinstance(val.get("releases_ahead", 1), int) or isinstance(val.get("releases_ahead", 1), bool)
+                or not 0 <= val.get("releases_ahead", 1) <= 3 or not isinstance(val.get("milestone_overlap", True), bool)):
+            fail('autonomy.pipeline must be {"releases_ahead": 0-3, "milestone_overlap": true | false}')
     elif field == "ci":
         if (not isinstance(val, dict) or set(val) - {"provider", "required", "timeout_min"}
                 or val.get("provider", "auto") not in CI_PROVIDERS or not isinstance(val.get("required", True), bool)
@@ -827,6 +840,7 @@ class Store:
             bak = self.path.with_name("state.json.bak")
             fail(f"state.json is corrupt: {e}" + (f" (the previous good copy is {bak})" if bak.exists() else ""), 1)
         migrate_legacy_phase(self)
+        migrate_state(self)
 
     def load(self) -> dict:
         if self._depth > 0 and self.state:
@@ -844,6 +858,9 @@ class Store:
 
     def _stamp_state(self) -> None:
         self.state["updated_at"] = now()
+        kv = kit_version()
+        if kv:
+            self.state["kit_version"] = kv
         try:  # cached for the status line, the session banner and the board, which read state.json directly
             lc = lifecycle(self)
             self.state["phase"], self.state["step"], self.state["reopened"] = lc["phase"], lc["step"], lc["reopened"]
@@ -1164,6 +1181,28 @@ def risk_lines(t: dict) -> list[str]:
     return out
 
 
+def release_for_new_milestone(store: Store, milestone: str, title: str) -> tuple[str, str] | None:
+    """A milestone created at the end of plan.md (an issue opening `M<n+1> — Maintenance`, §16) falls under the last
+    release heading. It needs a new one when that release was submitted for approval (or approved, or released)
+    or, for maintenance, already holds the most milestones a release groups (§4). Returns (id, title) to add, or None."""
+    plan = store.state.get("release_plan") or []
+    if not plan:
+        return None
+    last = plan[-1]
+    st = release_status(store, last["id"])
+    maint = bool(re.search(r"\bmaintenance\b", title or "", re.I))
+    full = maint and len(last.get("milestones") or []) >= RELEASE_SIZE[1]
+    if st["status"] in ("in_progress", "ready_for_review") and not full and last["id"] != "R0":
+        last.setdefault("milestones", []).append(milestone)
+        store.milestones()[milestone]["release"] = last["id"]
+        return None
+    n = max(int(r["id"][1:]) for r in plan) + 1
+    rid, rtitle = f"R{n}", ("Maintenance" if maint else title or f"Release {n}")
+    plan.append({"id": rid, "title": rtitle, "milestones": [milestone]})
+    store.milestones()[milestone]["release"] = rid
+    return rid, rtitle
+
+
 def append_task_to_plan(store: Store, plan_path: Path, milestone: str, m_title: str, tid: str, t: dict) -> None:
     text = store.read_text(plan_path) if store.file_exists(plan_path) else "# Implementation plan\n"
     lines = text.splitlines()
@@ -1177,6 +1216,9 @@ def append_task_to_plan(store: Store, plan_path: Path, milestone: str, m_title: 
     if start is None:
         if lines and lines[-1].strip():
             lines.append("")
+        rel = release_for_new_milestone(store, milestone, m_title)
+        if rel:
+            lines += [f"## {rel[0]} — {rel[1]}", ""]
         lines += [f"## {milestone} — {m_title}", "", task_block(tid, t).rstrip("\n")]
     else:
         end = len(lines)
@@ -1274,9 +1316,7 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
         if store.state.get("brownfield"):
             auto.setdefault("pause_policy", {})["dirty_tree"] = {"action": "ask"}
     store.save()
-    gi = store.dev / ".gitignore"
-    if not gi.exists():  # machine-local files never belong in git; the rest of .dev/ is versioned with the code
-        store.stage(gi, "# written by dev_state.py init\nrun/\npreview/\ntmp/\ntelemetry-session\n")
+    stage_gitignore(store)
     oq = store.dev / "open-questions.md"
     if not oq.exists():
         store.stage(
@@ -1336,7 +1376,7 @@ def plan_releases(text: str, milestones: dict) -> tuple[list[dict], list[str]]:
             n = len(x["milestones"])
             if not n:
                 problems.append(f"release {x['id']} has no milestone")
-            elif n > RELEASE_SIZE[1]:
+            elif n > RELEASE_SIZE[1] and x["id"] != "R0":
                 problems.append(f"release {x['id']} has {n} milestones; aim for {RELEASE_SIZE[0]} to {RELEASE_SIZE[1]} so its review stays short")
     return out, problems
 
@@ -1352,13 +1392,23 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
     # one in an older plan only warns, and its gate does not ask for `exit: pass` until it is annotated
     v3 = bool(store.state.get("exit_checks")) or any(i.get("exit_check") for i in milestones.values())
     exit_problems = []
+    released = {x for r in store.state.get("releases") or [] for x in r.get("milestones") or []}
+    turning_on = v3 and not store.state.get("exit_checks")
+    lacking = []
     for m, info in milestones.items():
         if info.get("exit_check") or exit_exempt(m, info["title"]):
             continue
+        if m in released or (store.milestones().get(m) or {}).get("gate") in ("passed", "skipped"):
+            continue  # closed: nothing left to check
         if v3 and m not in store.milestones():
             raise ValueError(f"{m} has no exit_check: add `exit_check: e2e: <test>; cmd: <command>; acs: AC-n` "
                              "below its goal (conventions.md §4)")
+        lacking.append(m)
         exit_problems.append(f"{m}: no exit_check; its gate checks only the tasks (/dev-kit:plan --annotate-exit proposes one)")
+    if turning_on and lacking:
+        exit_problems.insert(0, f"exit checks are now on for the whole project: every gate also needs the hard floor recorded, "
+                                f"and these open milestones have no exit_check: {', '.join(lacking)} (annotate them all with "
+                                "/dev-kit:plan --annotate-exit)")
     if v3:
         store.state["exit_checks"] = True
     for m, info in milestones.items():
@@ -1460,14 +1510,48 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
     plan_path = Path(a.plan) if a.plan else store.dev / "plan.md"
     if not plan_path.exists():
         fail(f"plan not found: {plan_path}")
+    text = plan_path.read_text(encoding="utf-8")
+    mig = migrate_releases(store, text)
+    notices: list[str] = []
+    legacy = bool(store.state.get("needs_release_migration") or store.state.get("releases")
+                  or any(v.get("status") != "todo" for v in store.tasks().values()))
+    if mig and not legacy:
+        text, groups = mig
+        store.stage(plan_path, text)
+        notices.append("plan.md had no `## R<n>`: every milestone now belongs to a planned release (" + " · ".join(groups)
+                       + "); /dev-kit:plan groups them")
+    elif mig:
+        text, groups = mig
+        store.stage(plan_path, text)
+        adr = append_adr(store, "Migration to planned releases", [
+            "- context: dev-kit 3.0 has one model: every milestone belongs to a planned release, and every release waits for the "
+            "user's approval before production (conventions.md §19).",
+            "- decision: " + "; ".join(groups) + ".",
+            "- consequences: review plan is stale until the grouping is reviewed; the next passed plan review opens the "
+            "Confirm plan checkpoint, and no milestone that has not started begins until it is confirmed."])
+        revs = store.state.setdefault("reviews", {})
+        if (revs.get("plan") or {}).get("verdict") == "pass":
+            revs["plan"]["stale_reason"] = "planned releases added by the 3.0 migration"
+        store.state.pop("needs_release_migration", None)
+        notices.append(f"migrated to planned releases ({adr}): " + " · ".join(groups))
+        notices.append("review the grouping with /dev-kit:review plan (now stale); when it passes, Confirm plan holds every "
+                       "milestone not started yet until you confirm it (board Needs you or the review's question)")
+        store.event("migration", transition="releases")
+    if store.state.pop("needs_gitignore", None) and stage_gitignore(store):
+        notices.append("updated .dev/.gitignore: machine-local files are ignored (your own rules were kept)")
+        tracked = _git(store, "ls-files", "--", ".dev/telemetry.jsonl", ".dev/tips-seen.json", ".dev/costs") or ""
+        if tracked:
+            notices.append("still tracked by git, now ignored: " + ", ".join(tracked.split()) + " (`git rm --cached` them to stop versioning)")
     try:
-        tasks, (added_m, added_t, updated_t), problems = sync_plan_text(store, plan_path.read_text(encoding="utf-8"))
+        tasks, (added_m, added_t, updated_t), problems = sync_plan_text(store, text)
     except ValueError as e:
         fail(str(e))
     store.save()
     record_baseline(store, tasks)
     store.log(f"sync-plan +{added_m} milestones, +{added_t} tasks, ~{updated_t} updated")
     print(f"synced: {added_m} new milestones, {added_t} new tasks, {updated_t} updated")
+    for x in notices:
+        print(f"migration: {x}")
     if problems:
         print("warnings:\n  " + "\n  ".join(problems))
 
@@ -1500,14 +1584,20 @@ def pick_next(store: Store, milestone: str | None) -> tuple[str | None, str]:
         if not pending:
             continue
         ok, why = store.gate_open_for(m)
+        ahead = None
         if not ok:
-            return None, why
+            ahead = ahead_branch(store, m)
+            if not ahead:
+                return None, why
         if checkpoint_pending(store, "plan") and not any(v["milestone"] == m and v["status"] in ("done", "in_progress") for v in ts.values()):
             return None, f"{m} waits for the plan's confirmation (Needs you › Confirm plan, §19)"
         ready = [
             t for t, v in pending.items()
             if v["status"] == "todo" and all(ts.get(d, {}).get("status") == "done" for d in v["deps"])
+            and (not ahead or ahead_ok(store, t, ahead))
         ]
+        if ahead and not ready:
+            return None, why + f" (nothing of {m} can run ahead on {ahead['branch']})"
         if not ready:
             blocked = [t for t, v in pending.items() if v["status"] == "blocked"]
             inprog = [t for t, v in pending.items() if v["status"] == "in_progress"]
@@ -1538,8 +1628,9 @@ def pick_batch(store: Store, milestone: str | None, n: int) -> tuple[list[str], 
     if t0.get("lane") == "hotfix" or n <= 1:
         return [first], ""
     m = t0["milestone"]
+    ahead = ahead_branch(store, m) if not store.gate_open_for(m)[0] else None
     ready = [t for t, v in ts.items() if v["milestone"] == m and v["status"] == "todo" and v.get("lane") != "hotfix"
-             and all(ts.get(d, {}).get("status") == "done" for d in v["deps"])]
+             and all(ts.get(d, {}).get("status") == "done" for d in v["deps"]) and (not ahead or ahead_ok(store, t, ahead))]
     ready.sort(key=lambda t: (t != first, 0 if ts[t].get("lane") == "cooldown" else 1, 0 if ts[t]["type"] == "fix" else 1, plan_order(ts, t)))
     chosen, files, serial_used = [], set(), False
     for t in ready:
@@ -1569,7 +1660,10 @@ def cmd_next(store: Store, a: argparse.Namespace) -> None:
                 print("\n".join(hint))
             sys.exit(3)
         if a.json:
-            print(json.dumps({"tasks": [{"task": t, **store.tasks()[t]} for t in batch], **({"maybe_false_deps": maybe} if maybe else {})}, ensure_ascii=False))
+            m0 = store.tasks()[batch[0]]["milestone"]
+            ah = None if store.gate_open_for(m0)[0] else ahead_branch(store, m0)
+            print(json.dumps({"tasks": [{"task": t, **store.tasks()[t]} for t in batch], **({"maybe_false_deps": maybe} if maybe else {}),
+                              **({"branch": ah["branch"], "ahead_of": ah["waits_for"]} if ah else {})}, ensure_ascii=False))
         else:
             for t in batch:
                 v = store.tasks()[t]
@@ -1585,10 +1679,11 @@ def cmd_next(store: Store, a: argparse.Namespace) -> None:
             print(f"no task available: {why}")
         sys.exit(3)
     t = store.tasks()[tid]
+    ah = None if store.gate_open_for(t["milestone"])[0] else ahead_branch(store, t["milestone"])
     if a.json:
-        print(json.dumps({"task": tid, **t}, ensure_ascii=False))
+        print(json.dumps({"task": tid, **t, **({"branch": ah["branch"], "ahead_of": ah["waits_for"]} if ah else {})}, ensure_ascii=False))
     else:
-        print(f"{tid} [{t['milestone']}] ({t['type']}) {t['title']}")
+        print(f"{tid} [{t['milestone']}] ({t['type']}) {t['title']}" + (f" · ahead on {ah['branch']}" if ah else ""))
         if t["acceptance"]:
             print("  acceptance: " + " | ".join(t["acceptance"]))
         if t["test_notes"]:
@@ -1612,7 +1707,10 @@ def cmd_start(store: Store, a: argparse.Namespace) -> None:
     if unmet and not a.force:
         fail(f"{a.task} has unmet dependencies: {', '.join(unmet)}")
     ok, why = store.gate_open_for(t["milestone"])
-    if not ok and not a.force and t.get("lane") != "hotfix":
+    ahead = None if ok or t.get("lane") == "hotfix" else ahead_branch(store, t["milestone"])
+    if ahead and not ahead_ok(store, a.task, ahead):
+        ahead = None
+    if not ok and not ahead and not a.force and t.get("lane") != "hotfix":
         fail(f"cannot start {a.task}: {why}")
     if (checkpoint_pending(store, "plan") and t.get("lane") != "hotfix" and not any(
             v["milestone"] == t["milestone"] and v["status"] in ("done", "in_progress") for v in store.tasks().values())):
@@ -1622,6 +1720,9 @@ def cmd_start(store: Store, a: argparse.Namespace) -> None:
     issue_sync(store, t)
     t["started_at"] = now()
     t["blocked_reason"] = None
+    if ahead:
+        t["branch"] = ahead["branch"]
+        t["ahead_of"] = ahead["waits_for"]
     if r:
         t["tier"] = {"rule": r["tier"], "score": r["score"], "source": r["source"], "rule_arm": r["arm"],
                      "arm": r["final_arm"], "routed": r["final_arm"] != r["arm"], "context": r["route"]["context"],
@@ -1634,6 +1735,10 @@ def cmd_start(store: Store, a: argparse.Namespace) -> None:
         store.event("route", context=tel_ctx(r["route"]["context"]), rule_tier=risk.tier_token(r["tier"]),
                     arm=r["final_arm"].replace("/", "."), reason_code=r["route"]["reason_code"], explore=bool(r["route"]["explore"]))
     print(f"{a.task} in_progress: {t['title']}" + (f" · {r['final_model']} / {r['final_effort']} ({r['tier']})" if r else ""))
+    if ahead:
+        print(f"  ahead of {ahead['waits_for']}: work on branch {ahead['branch']} in its own worktree "
+              f"(`pipeline worktree {ahead['branch']}`), never on the main branch; it is integrated when {ahead['waits_for']} "
+              + ("is released" if ahead["kind"] == "release" else "passes its gate") + " (§19)")
 
 
 def safe_route(store: Store, tid: str) -> dict | None:
@@ -1908,6 +2013,349 @@ def cmd_challenge(store: Store, a: argparse.Namespace) -> None:
     if qid:
         effect = f"still blocking: a disputed critical security finding is the user's decision ({qid} in Needs you)"
     print(f"{a.milestone} {fid}: {verdict} · {effect}")
+
+
+# ---------------------------------------------------------------- pipeline: work ahead while a person decides (§19)
+def _flow_field(store: Store, m: str, key: str) -> object:
+    try:
+        return json.loads((store.dev / "qa" / m / "flow.json").read_text(encoding="utf-8")).get(key)
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return None
+
+
+def record_wait(store: Store, kind: str, since: object, scope: object) -> None:
+    """How long something waited for a person in Needs you (§19, `human_wait_s`): a question, a permission, a
+    checkpoint, a release approval. Logged once, when the answer arrives; flow.json and feedback sum it."""
+    try:
+        secs = _secs_between(str(since), now()) if since else None
+    except Exception:  # noqa: BLE001
+        secs = None
+    if secs is None or secs < 0:
+        return
+    store.event("human_wait", kind=kind, scope=tel.scope_token(scope or "-"), duration_s=round(secs))
+
+
+def human_wait(events: list[dict], scopes: set) -> int | None:
+    xs = [float(e.get("duration_s") or 0) for e in events if e["event"] == "human_wait" and e.get("scope") in scopes]
+    return round(sum(xs)) if xs else 0
+
+
+def pipeline_cfg(store: Store) -> dict:
+    return {**DEFAULT_AUTONOMY["pipeline"], **((store.state.get("autonomy") or {}).get("pipeline") or {})}
+
+
+def ahead_branch(store: Store, m: str) -> dict | None:
+    """Whether milestone m may run ahead, and on which branch: {kind, branch, waits_for}. A release ahead: every
+    earlier release not released is waiting for approval (or approved and deploying), at most `releases_ahead` of
+    them, and m's own milestones before it are closed. A milestone ahead: the milestone right before m is frozen for
+    QA (its tasks are done), `milestone_overlap` is on, and everything before that one is closed."""
+    cfg = pipeline_cfg(store)
+    rel = release_of(store, m)
+    plan = store.state.get("release_plan") or []
+    ms, ts = store.milestones(), store.tasks()
+
+    def closed(x: str) -> bool:
+        return ms[x].get("gate") in ("passed", "skipped") or not any(v["milestone"] == x and v["status"] != "dropped" for v in ts.values())
+
+    order = store.milestone_order()
+    before = order[:order.index(m)] if m in order else []
+    if rel:
+        waiting = []
+        for r in plan:
+            if r["id"] == rel:
+                break
+            st = release_status(store, r["id"])["status"]
+            if st == "released":
+                continue
+            if st not in ("awaiting_approval", "deploying_prod"):
+                waiting = None
+                break
+            waiting.append(r["id"])
+        if waiting:
+            if len(waiting) > int(cfg["releases_ahead"]):
+                return None
+            own = [x for x in before if release_of(store, x) == rel]
+            if all(closed(x) for x in own):
+                return {"kind": "release", "branch": f"dev-kit/{rel}", "waits_for": waiting[-1]}
+            return None
+        if waiting is None:
+            return None
+    if not cfg["milestone_overlap"] or not before:
+        return None
+    prev = before[-1]
+    if not frozen(store, prev) or closed(prev) or not all(closed(x) for x in before[:-1]):
+        return None
+    if release_of(store, prev) != rel:
+        return None  # across releases only the release rule applies
+    return {"kind": "milestone", "branch": f"dev-kit/{m}", "waits_for": prev}
+
+
+def ahead_ok(store: Store, tid: str, ahead: dict) -> bool:
+    """A task may run ahead of a milestone in QA only if it shares nothing with it: no dependency on its tasks, no file
+    it touched, not `shared`, and not sent back by one of its fixes. Ahead of a release every task of the
+    milestone may run (it is on its own branch until the release ships)."""
+    t = store.tasks()[tid]
+    if t.get("redo_after") and (store.milestones().get(t["redo_after"]) or {}).get("gate") not in ("passed", "skipped"):
+        return False
+    if ahead["kind"] == "release":
+        return True
+    prev = ahead["waits_for"]
+    theirs = {k: v for k, v in store.tasks().items() if v["milestone"] == prev and v["status"] != "dropped"}
+    if t.get("shared") or any(d in theirs for d in t.get("deps") or []):
+        return False
+    mine = [f.strip("/") for f in t.get("files") or [] if f.strip()]
+    if not mine:
+        return False
+    used = [f.strip("/") for v in theirs.values() for f in v.get("files") or [] if f.strip()]
+    return not any(x == y or x.startswith(y + "/") or y.startswith(x + "/") for x in mine for y in used)
+
+
+def ahead_tasks(store: Store, branch: str | None = None) -> dict:
+    return {k: v for k, v in store.tasks().items() if v.get("branch") and (branch is None or v["branch"] == branch)}
+
+
+def send_back_ahead(store: Store, m: str, files: list[str], why: str) -> list[str]:
+    """A fix in milestone m that touches a file of a task run ahead of it: that task goes back to todo (its work stays on
+    the branch to reuse) and is redone after m's gate (§19)."""
+    fs = [f.strip("/") for f in files if f and f.strip()]
+    out = []
+    for tid, v in ahead_tasks(store).items():
+        if v.get("ahead_of") != m or v["status"] not in ("done", "in_progress"):
+            continue
+        mine = [f.strip("/") for f in v.get("files") or [] if f.strip()]
+        if any(x == y or x.startswith(y + "/") or y.startswith(x + "/") for x in mine for y in fs):
+            v.update(status="todo", redo_after=m, blocked_reason=None, done_at=None)
+            v["redo_note"] = f"{why}: redo after the gate of {m}; the earlier work is on {v['branch']}"
+            out.append(tid)
+            store.event("task", task=tid, transition="reopen", type=v.get("type"), milestone=v.get("milestone"))
+    return out
+
+
+def pause_ahead(store: Store, rid: str) -> list[str]:
+    """A rejected release: the work of later releases started ahead stops until it is submitted again (§19)."""
+    out = []
+    for tid, v in ahead_tasks(store).items():
+        if v.get("ahead_of") == rid and v["status"] == "in_progress":
+            v.update(status="blocked", blocked_reason=f"pipeline: {rid} was rejected; this resumes when it is submitted again",
+                     pipeline_paused=rid)
+            out.append(tid)
+    return out
+
+
+def resume_ahead(store: Store, rid: str) -> list[str]:
+    out = []
+    for tid, v in store.tasks().items():
+        if v.get("pipeline_paused") == rid and v["status"] == "blocked":
+            v.update(status="in_progress", blocked_reason=None)
+            v.pop("pipeline_paused", None)
+            out.append(tid)
+    return out
+
+
+def main_branch(store: Store) -> str:
+    for b in ("main", "master"):
+        if _git(store, "rev-parse", "--verify", "--quiet", f"refs/heads/{b}") is not None:
+            return b
+    return _git(store, "rev-parse", "--abbrev-ref", "HEAD") or "main"
+
+
+def cmd_pipeline(store: Store, a: argparse.Namespace) -> None:
+    """status [--json] | worktree BRANCH (create or show the worktree of a branch ahead) | integrate BRANCH (rebase it on
+    the main branch once what it waited for is released or gated, then fast-forward the main branch to it)."""
+    store.load()
+    if a.action == "status":
+        rows = []
+        for m in store.milestone_order():
+            if store.gate_open_for(m)[0]:
+                continue
+            ah = ahead_branch(store, m)
+            if ah:
+                rows.append({"milestone": m, **ah, "tasks": sorted(k for k, v in store.tasks().items() if v["milestone"] == m
+                                                                    and v["status"] == "todo" and ahead_ok(store, k, ah))})
+        branches = sorted({v["branch"] for v in ahead_tasks(store).values()})
+        out = {"config": pipeline_cfg(store), "ahead": rows, "branches": branches,
+               "paused": sorted(k for k, v in store.tasks().items() if v.get("pipeline_paused")),
+               "redo": sorted(k for k, v in store.tasks().items() if v.get("redo_after") and v["status"] == "todo")}
+        if a.json:
+            print(json.dumps(out, indent=2))
+        else:
+            for r in rows:
+                print(f"{r['milestone']} can run ahead of {r['waits_for']} on {r['branch']}: {', '.join(r['tasks']) or 'no task yet'}")
+            if not rows:
+                print("nothing can run ahead now")
+            for b in branches:
+                print(f"branch {b}: {', '.join(sorted(k for k, v in ahead_tasks(store, b).items()))}")
+        return
+    br = a.branch or ""
+    if not re.fullmatch(r"dev-kit/(R\d+|M\d+(?:\.\d+)?)", br):
+        fail("the branch is dev-kit/R<n> or dev-kit/M<n>")
+    target = br.split("/", 1)[1]
+    wt = store.dev / "run" / "worktrees" / br.replace("/", "-")
+    main = main_branch(store)
+    if a.action == "worktree":
+        if wt.exists():
+            print(str(wt))
+            return
+        exists = _git(store, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}") is not None
+        args = ["worktree", "add", str(wt), br] if exists else ["worktree", "add", "-b", br, str(wt), main]
+        if _git(store, *args) is None:
+            fail(f"git worktree add failed for {br}")
+        print(str(wt))
+        return
+    # integrate
+    if target.startswith("R"):
+        waits = sorted({v.get("ahead_of") for v in ahead_tasks(store, br).values() if v.get("ahead_of")})
+        open_ = [r for r in waits if release_status(store, r)["status"] != "released"]
+        if open_:
+            fail(f"{br} waits for {', '.join(open_)} to be released")
+    else:
+        prev = sorted({v.get("ahead_of") for v in ahead_tasks(store, br).values() if v.get("ahead_of")})
+        open_ = [m for m in prev if store.milestones()[m].get("gate") not in ("passed", "skipped")]
+        if open_:
+            fail(f"{br} waits for the gate of {', '.join(open_)}")
+    if _git(store, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}") is None:
+        fail(f"no branch {br}")
+    old_base = _git(store, "merge-base", main, br)
+    cwd = wt if wt.exists() else store.root
+    if wt.exists():
+        r = subprocess.run(["git", "-C", str(wt), "rebase", main], capture_output=True, text=True)
+    else:
+        r = subprocess.run(["git", "-C", str(store.root), "rebase", main, br], capture_output=True, text=True)
+    if r.returncode != 0:
+        subprocess.run(["git", "-C", str(cwd), "rebase", "--abort"], capture_output=True, text=True)
+        if not wt.exists():
+            subprocess.run(["git", "-C", str(store.root), "checkout", "-q", main], capture_output=True, text=True)
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            cmd_add_question(store, argparse.Namespace(
+                text=f"Rebasing {br} on {main} conflicts: resolve it by hand, or redo its tasks on {main}?", skill="implement",
+                assumption="redo its tasks on the main branch", impact="the work ahead may be lost if redone",
+                options="resolve by hand|redo the tasks", recommended="resolve by hand", request=None))
+        tel.safe_emit(store.dev, "error", {"code": "merge_conflict"})
+        print(f"conflict rebasing {br} on {main}: {buf.getvalue().strip()} in Needs you; nothing was changed")
+        store.event("pipeline", transition="conflict")
+        store.exit_code = 1
+        return
+    new_base = _git(store, "rev-parse", main)
+    changed = (_git(store, "diff", "--name-only", f"{old_base}..{new_base}") or "").split() if old_base else []
+    dropped = drop_ledger_files(store, changed) if changed else 0
+    # milestones of the branch already gated: re-run QA on the delta only (§18), since their base moved
+    requal = []
+    if changed:
+        for mm in sorted({v["milestone"] for v in ahead_tasks(store, br).values()}, key=mkey):
+            if store.milestones()[mm].get("gate") == "passed":
+                store.milestones()[mm].update(gate="pending", requalify=f"{br} rebased on {main}")
+                requal.append(mm)
+    cur = _git(store, "rev-parse", "--abbrev-ref", "HEAD")
+    if cur == main:
+        ff = subprocess.run(["git", "-C", str(store.root), "merge", "--ff-only", "-q", br], capture_output=True, text=True)
+        merged = ff.returncode == 0
+    else:
+        merged = False
+    for v in ahead_tasks(store, br).values():
+        v["integrated"] = now()
+    store.save()
+    store.log(f"pipeline integrate {br} on {main}" + (f": {len(changed)} files changed below it" if changed else ""))
+    store.event("pipeline", transition="integrate", requalify=len(requal))
+    print(f"{br} rebased on {main}" + (f" and {main} fast-forwarded to it" if merged else f"; merge it into {main} (fast-forward)")
+          + (f" · ledger: {dropped} unit(s) invalidated" if dropped else "")
+          + (f" · re-run qa on the delta: {', '.join(requal)}" if requal else ""))
+
+
+# ---------------------------------------------------------------- rounds in a child session (conventions.md §17)
+ROUND_SKILLS = ("qa", "implement")
+PERMISSION_MODES = ("default", "acceptEdits", "plan", "auto", "bypassPermissions", "dontAsk")
+
+
+def round_snapshot(store: Store, scope: str) -> dict:
+    ts = store.tasks()
+    return {"done": {t for t, v in ts.items() if v["status"] == "done"}, "tasks": set(ts),
+            "qa_runs": int((store.milestones().get(scope) or {}).get("qa_runs", 0))}
+
+
+def round_summary(store: Store, skill: str, scope: str, before: dict, rc: int, dur: float, log: Path) -> dict:
+    """What the parent session reads instead of the child's reports: counts, ids and paths only."""
+    store.state = {}
+    store.load()
+    ms = store.milestones().get(scope) or {}
+    ts = store.tasks()
+    new = sorted(set(ts) - before["tasks"], key=lambda t: int(t[2:]))
+    fixes = [t for t in new if ts[t].get("type") == "fix"]
+    done = sorted({t for t, v in ts.items() if v["status"] == "done"} - before["done"], key=lambda t: int(t[2:]))
+    sc_path = store.dev / "qa" / scope / "scores.json"
+    sc = {}
+    if skill == "qa":
+        try:
+            sc = json.loads(sc_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            sc = {}
+    try:
+        deferred = len(json.loads((store.dev / "qa" / scope / "findings.json").read_text(encoding="utf-8")).get("deferred") or [])
+    except (OSError, json.JSONDecodeError, AttributeError):
+        deferred = None
+    gate = ms.get("gate")
+    if rc != 0:
+        verdict = "error"
+    elif skill == "qa":
+        verdict = "pass" if gate == "passed" else ("fail" if int(ms.get("qa_runs", 0)) > before["qa_runs"] or sc else "unknown")
+    else:
+        left = [t for t, v in ts.items() if v["milestone"] == scope and v["status"] not in FINISHED]
+        verdict = "done" if not left else ("blocked" if any(ts[t]["status"] == "blocked" for t in left) else "partial")
+    cost = None
+    try:
+        cost = (json.loads((store.dev / "costs" / "summary.json").read_text(encoding="utf-8")).get("total") or {}).get("usd")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        pass
+    report = store.dev / "qa" / scope / "report.md"
+    return {"skill": skill, "scope": scope, "verdict": verdict, "exit_code": rc, "score": ms.get("score") if skill == "qa" else None,
+            "fix_tasks": fixes, "tasks_done": done, "deferred": deferred, "gate": gate, "cost": cost,
+            "duration_s": round(dur, 1), "report": str(report.relative_to(store.root)) if report.exists() else None,
+            "log": str(log.relative_to(store.root)), "next": next_command(store)}
+
+
+def cmd_round(store: Store, a: argparse.Namespace) -> None:
+    """run SKILL SCOPE: one QA round or one milestone's implementation in a headless child session of Claude Code
+    (`claude -p "/dev-kit:<skill> <scope> --round-child" --plugin-dir <kit>`), with a clean context, the same project
+    directory and permission mode; it waits and prints a JSON summary for the parent, which never reads the child's
+    reports (conventions.md §17). The child logs into the parent's telemetry session (`parent_session`)."""
+    store.load()
+    if a.skill not in ROUND_SKILLS:
+        fail(f"round run takes {' or '.join(ROUND_SKILLS)}")
+    if a.scope not in store.milestones():
+        fail(f"unknown milestone {a.scope}")
+    if a.permission_mode and a.permission_mode not in PERMISSION_MODES:
+        fail(f"--permission-mode must be one of {', '.join(PERMISSION_MODES)}")
+    exe = os.environ.get("DEV_KIT_CLAUDE") or shutil.which("claude")
+    if not exe:
+        fail("`claude` is not on PATH: run the round in this session instead (plan B, conventions.md §17)", 3)
+    kit = Path(__file__).resolve().parents[3]
+    run = store.dev / "run" / "rounds"
+    run.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    log = run / f"{a.skill}-{a.scope}-{stamp}.log"
+    prompt = f"/dev-kit:{a.skill} {a.scope} --round-child"
+    cmd = [exe, "-p", prompt, "--plugin-dir", str(kit), "--output-format", "json"]
+    mode = a.permission_mode or os.environ.get("DEV_KIT_PERMISSION_MODE")
+    if mode:
+        cmd += ["--permission-mode", mode]
+    env = {**os.environ, "DEV_KIT_PARENT_SESSION": tel.session_id(store.dev), "DEV_KIT_ROUND_CHILD": "1",
+           "CLAUDE_PROJECT_DIR": str(store.root)}
+    before = round_snapshot(store, a.scope)
+    t0 = time.monotonic()
+    try:
+        with log.open("w", encoding="utf-8") as fh:
+            rc = subprocess.run(cmd, cwd=store.root, env=env, stdout=fh, stderr=subprocess.STDOUT,
+                                timeout=a.timeout * 60 if a.timeout else None).returncode
+    except subprocess.TimeoutExpired:
+        rc = 124
+    except OSError as e:
+        fail(f"cannot start the child session: {e}", 3)
+    out = round_summary(store, a.skill, a.scope, before, rc, time.monotonic() - t0, log)
+    tel.safe_emit(store.dev, "round_run", {"skill": a.skill, "scope": a.scope, "outcome": "ok" if rc == 0 else "failed",
+                                           "verdict": out["verdict"], "score": out["score"], "fix_tasks": len(out["fix_tasks"]),
+                                           "tasks_done": len(out["tasks_done"]), "exit_code": rc, "duration_s": out["duration_s"]})
+    print(json.dumps(out, indent=2))
+    if rc != 0:
+        raise SystemExit(1)
 
 
 # ---------------------------------------------------------------- verified facts (.dev/facts.md, conventions.md §2)
@@ -2356,6 +2804,12 @@ def cmd_add_task(store: Store, a: argparse.Namespace) -> None:
     if probs:
         fail("; ".join(probs))
     store.tasks()[tid] = t
+    if a.type == "fix" and t["files"]:
+        back = send_back_ahead(store, a.milestone, t["files"], f"{tid} fixes a file of it")
+        if back:
+            store.log(f"pipeline: {', '.join(back)} back to todo ({tid} in {a.milestone} touches their files)")
+            print(f"note: {', '.join(back)} ran ahead and share files with {tid}: back to todo, redone after the gate of "
+                  f"{a.milestone}", file=sys.stderr)
     if issue is not None:
         link_task(store, a.issue, tid, a.milestone)
     append_task_to_plan(store, store.dev / "plan.md", a.milestone, store.milestones()[a.milestone]["title"], tid, t)
@@ -2502,6 +2956,8 @@ def cmd_add_question(store: Store, a: argparse.Namespace) -> None:
     if options:  # the board shows them as answers to pick (conventions §10, board mode)
         _write_json(question_sidecar(store, qid), store=store, obj={"id": qid, "options": options, "recommended": a.recommended,
                                                    "request": a.request, "answered": False, "at": now()})
+    store.state.setdefault("question_meta", {})[qid] = {"at": now(), "scope": current_milestone(store)}
+    store.save()
     store.log(f"add-question {qid} ({a.skill or '-'}): {a.text}")
     print(qid)
 
@@ -2916,7 +3372,7 @@ def flow_metrics(store: Store, m: str, events: list[dict] | None = None) -> dict
         "fix_tasks": len(fixes), "fixes_per_task": round(len(fixes) / len(planned), 2) if planned else 0.0,
         "deferred_open": len({str(f.get("id")) for f in deferred}),
         "scope_added_after_freeze": sum(1 for v in ts.values() if v.get("scope_after_freeze")),
-        "human_wait_s": None,  # measured from 3.0 phase 3 (pipeline, conventions §19)
+        "human_wait_s": human_wait(events, scopes),  # questions, permissions, checkpoints raised during it (§19)
         "cost_usd": None, "tokens": None, "cost_per_task": None, "orchestration_usd": None, "agents_usd": None,
     }
     try:
@@ -3124,6 +3580,11 @@ def session_cycles(store: Store, period_events: list[dict]) -> list[dict]:
             f = json.loads(p.read_text(encoding="utf-8")) if store.milestones()[m].get("gate") == "passed" else None
         except (OSError, json.JSONDecodeError):
             f = None
+        if f is None and store.milestones()[m].get("gate") == "passed" and not (store.dev / "qa" / m / "flow.json").exists() \
+                and (store.milestones()[m].get("passed_at") or "") < str((store.state.get("migrated") or {}).get("v2_at") or "0"):
+            out.append({"milestone": m, "gate": "passed", "score": store.milestones()[m].get("score"), "no_data": True,
+                        "cycle_grade": None, "cycle_reasons": ["closed before 3.0: no cycle data"]})
+            continue
         f = f or flow_metrics(store, m, all_events)
         g, why = cycle_grade(f)
         out.append({**f, "cycle_grade": g, "cycle_reasons": why})
@@ -4472,9 +4933,12 @@ def stale_report(store: Store) -> dict:
     # are always checked, so a scope change during construction reopens them (conventions.md §19).
     built = any(v.get("status") == "done" for v in store.tasks().values())
     for rname, arts in REVIEW_ARTIFACTS.items():
+        r = (store.state.get("reviews") or {}).get(rname) or {}
+        if r.get("verdict") == "pass" and r.get("stale_reason"):
+            reviews.append({"review": rname, "changed": list(arts), "stale_artifacts": [], "reason": r["stale_reason"]})
+            continue
         if built and rname == "plan":
             continue
-        r = (store.state.get("reviews") or {}).get(rname) or {}
         if r.get("verdict") != "pass" or not r.get("hashes"):
             continue
         changed = [x for x in arts if cur.get(x) is not None and r["hashes"].get(x) != cur[x]]
@@ -4665,6 +5129,7 @@ def cmd_review(store: Store, a: argparse.Namespace) -> None:
         if a.force and (a.note or "").startswith("policy:"):
             check_policy_force(store, "review", a.name, a.scores)
     r["verdict"] = a.value
+    r.pop("stale_reason", None)
     if a.score is not None:
         r["score"] = a.score
     if a.note:
@@ -4793,6 +5258,7 @@ def cmd_checkpoint(store: Store, a: argparse.Namespace) -> None:
     store.save()
     store.log(f"checkpoint {a.target} {decision} by {by}" + (f" ({a.request})" if a.request else ""))
     store.event("checkpoint", target=a.target, transition=decision, round=cp.get("round"))
+    record_wait(store, "checkpoint", cp.get("created_at"), a.target)
     if decision == "confirm":
         print(f"checkpoint {a.target}: confirmed by {by} (version {cp.get('version')})")
     else:
@@ -4840,7 +5306,7 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
                     fail(f"autonomy.{field}: {part} is not an object")
             node[parts[-1]] = parsed
             store_autonomy_object(auto, top, merged)
-        elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy", "ui", "queue", "milestone_size", "ci"):
+        elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy", "ui", "queue", "milestone_size", "ci", "pipeline"):
             if top == "local_deploy" and not isinstance(parsed, dict):
                 parsed = {"mode": val}
             elif top == "model_policy" and not isinstance(parsed, dict):
@@ -4885,7 +5351,7 @@ def store_autonomy_object(auto: dict, top: str, obj: dict) -> None:
         obj = {**DEFAULT_AUTONOMY["local_deploy"], **obj}
     elif top in ("cooldown", "quality"):
         check_autonomy_field(top, obj)
-    elif top in ("queue", "milestone_size", "ci"):
+    elif top in ("queue", "milestone_size", "ci", "pipeline"):
         obj = {**DEFAULT_AUTONOMY[top], **obj}
         check_autonomy_field(top, obj)
     elif top == "ui":
@@ -4931,6 +5397,148 @@ DONE_STEP = ("done", "skipped")
 def has_ui(store: Store) -> bool:
     """False when the design review was recorded n/a (product without a UI, or no new UI in an existing project)."""
     return ((store.state.get("reviews") or {}).get("design") or {}).get("verdict") != "n/a"
+
+
+# ---------------------------------------------------------------- .dev/.gitignore and state versions (conventions.md §2)
+GITIGNORE_BEGIN = "# >>> dev-kit: machine-local files (managed by dev_state.py; put your own rules outside this block)"
+GITIGNORE_END = "# <<< dev-kit"
+GITIGNORE_RULES = [
+    "run/", "preview/", "tmp/", "backup/",        # board, locks, slots, skill stack, worker queue, PIDs; local preview; scratch; backups
+    "telemetry-session", "telemetry.jsonl",        # the session id and the raw session log (exports go to feedback/)
+    "tips-seen.json", "state.json.bak",            # per-user tips; the previous copy of state.json
+    "costs/*", "!costs/prices.json",               # usage caches rebuilt from the transcripts; the prices you edit are kept
+]
+LEGACY_GITIGNORE = {"# written by dev_state.py init", "run/", "preview/", "tmp/", "telemetry-session"}
+
+
+def gitignore_text(old: str) -> str:
+    """The .dev/.gitignore with the kit's block refreshed and every rule of the user kept as it was."""
+    lines = old.splitlines()
+    keep: list[str] = []
+    inside = False
+    legacy = bool(lines) and lines[0].strip() == "# written by dev_state.py init"
+    for ln in lines:
+        if ln.strip() == GITIGNORE_BEGIN:
+            inside = True
+            continue
+        if inside:
+            inside = ln.strip() != GITIGNORE_END
+            continue
+        if legacy and ln.strip() in LEGACY_GITIGNORE:
+            continue  # the 2.x file the kit wrote: its lines are in the block now
+        keep.append(ln)
+    while keep and not keep[-1].strip():
+        keep.pop()
+    while keep and not keep[0].strip():
+        keep.pop(0)
+    block = [GITIGNORE_BEGIN, *GITIGNORE_RULES, GITIGNORE_END]
+    return "\n".join(block + ([""] + keep if keep else [])) + "\n"
+
+
+def stage_gitignore(store: Store) -> bool:
+    gi = store.dev / ".gitignore"
+    old = store.read_text(gi) if store.file_exists(gi) else ""
+    new = gitignore_text(old)
+    if new != old:
+        store.stage(gi, new)
+        return True
+    return False
+
+
+def kit_version() -> str | None:
+    try:
+        return tel.kit_version()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def migrate_state(store: Store) -> None:
+    """state.json from before 3.0 (version 1): a copy is kept in .dev/backup/ before anything changes it, the version
+    goes to 2 and the kit's version is recorded; the plan itself migrates at the next sync-plan (§19). In memory only:
+    the next command that saves writes it."""
+    s = store.state
+    if int(s.get("version") or 1) >= STATE_VERSION:
+        return
+    bdir = store.dev / "backup"
+    try:
+        if not any(bdir.glob("state-v1-*.json")):
+            bdir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            (bdir / f"state-v1-{stamp}.json").write_text(store.path.read_text(encoding="utf-8"), encoding="utf-8")
+            if (store.dev / "plan.md").exists():
+                (bdir / f"plan-v1-{stamp}.md").write_text((store.dev / "plan.md").read_text(encoding="utf-8"), encoding="utf-8")
+    except OSError:
+        pass
+    s["version"] = STATE_VERSION
+    s["migrated"] = {**(s.get("migrated") or {}), "v2_at": now(), "from_kit": s.get("kit_version")}
+    s["needs_release_migration"] = bool(s.get("milestones")) and not s.get("release_plan")
+    s["needs_gitignore"] = True
+
+
+def migrate_releases(store: Store, text: str) -> tuple[str, list[str]] | None:
+    """A plan without `## R<n>` (the 2.x cut model) gets planned releases (§19): the milestones already released go
+    under `## R0 — Released before 3.0` (marked released, every 2.x version and tag kept), the others under
+    `## R1 — <project>`; maintenance milestones under `## R<k> — Maintenance`. None when there is nothing to do."""
+    if any(RELEASE_RE.match(ln.rstrip()) for ln in text.splitlines()):
+        return None
+    milestones, _ = parse_plan(text)
+    if not milestones:
+        return None
+    released = {m for r in store.state.get("releases") or [] if not r.get("hotfix") for m in r.get("milestones") or []}
+    order = list(milestones)
+    lead = []
+    for m in order:
+        if m not in released:
+            break
+        lead.append(m)
+    groups: list[tuple[str, str, list[str]]] = []
+    if lead:
+        groups.append(("R0", "Released before 3.0", lead))
+    n = 1
+    head = next((ln for ln in text.splitlines() if ln.startswith("# ")), "")
+    hm = re.search(r"[—–-]\s*(.+?)\s*$", head)
+    project = (hm.group(1) if hm else None) or store.state.get("project") or "First release"
+    for m in order[len(lead):]:
+        maint = bool(re.search(r"\bmaintenance\b", milestones[m]["title"], re.I))
+        title = "Maintenance" if maint else str(project)
+        if groups and groups[-1][0] != "R0" and groups[-1][1] == title and (not maint or len(groups[-1][2]) < RELEASE_SIZE[1]):
+            groups[-1][2].append(m)
+        else:
+            groups.append((f"R{n}", title, [m]))
+            n += 1
+    first = {g[2][0]: g for g in groups}
+    out = []
+    for ln in text.splitlines():
+        mm = MILESTONE_RE.match(ln.rstrip())
+        if mm and mm.group(1) in first:
+            rid, title, _ = first[mm.group(1)]
+            if out and out[-1].strip():
+                out.append("")
+            out += [f"## {rid} — {title}", ""]
+        out.append(ln)
+    notes = [f"{rid} — {title}: {', '.join(ms)}" for rid, title, ms in groups]
+    if lead:
+        g = release_gate(store, "R0")
+        g.update(status="released", historic=True)
+        vers = []
+        for r in store.state.get("releases") or []:
+            if not r.get("hotfix") and r.get("milestones") and set(r["milestones"]) <= set(lead) and not r.get("release"):
+                r["release"] = "R0"
+                vers.append(r.get("tag") or r.get("version") or "?")
+        g.setdefault("history", []).append({"at": now(), "event": "released", "version": ", ".join(map(str, vers)) or None,
+                                            "note": "released before 3.0"})
+    return "\n".join(out).rstrip("\n") + "\n", notes
+
+
+def append_adr(store: Store, title: str, body: list[str], source: str = "auto") -> str:
+    path = store.dev / "decisions.md"
+    text = store.read_text(path) if store.file_exists(path) else "# Decisions\n"
+    n = max([int(x) for x in re.findall(r"^###\s+ADR-(\d+)", text, re.M)] + [0]) + 1
+    adr = f"ADR-{n:03d}"
+    block = [f"### {adr} — {title} ({source})", f"- date: {today()} · status: accepted · source: {source}", *body]
+    store.stage(path, text.rstrip("\n") + "\n\n" + "\n".join(block) + "\n")
+    return adr
+
 
 
 def migrate_legacy_phase(store: Store) -> None:
@@ -5016,7 +5624,7 @@ def release_status(store: Store, rid: str) -> dict:
     closed = [m for m in mids if live[m] and ms.get(m, {}).get("gate") in ("passed", "skipped")]
     open_ = [m for m in mids if live[m] and m not in closed]
     rs = (store.state.get("release_state") or {}).get(rid) or {}
-    shipped = any(x.get("release") == rid for x in store.state.get("releases") or [])
+    shipped = any(x.get("release") == rid for x in store.state.get("releases") or []) or rs.get("status") == "released"
     if shipped:
         st = "released"
     elif open_ or not closed or store.in_progress() and any(ts[t]["milestone"] in mids for t in store.in_progress()):
@@ -5244,13 +5852,15 @@ def cmd_release_submit(store: Store, a: argparse.Namespace) -> None:
     if a.dossier and not (store.root / a.dossier).exists():
         fail(f"dossier not found: {a.dossier}")
     g = release_gate(store, a.release)
+    resumed = resume_ahead(store, a.release)
     g.update(status="awaiting_approval", submitted_at=now(), dossier=a.dossier or g.get("dossier"))
     g.setdefault("history", []).append({"at": now(), "event": "submitted", "dossier": a.dossier})
     store.save()
     store.log(f"release {a.release} submitted for approval" + (f" ({a.dossier})" if a.dossier else ""))
     store.event("release_gate", scope=a.release, transition="submit")
     queue_notice(store, f"dev-kit: {a.release} waits for your approval")
-    print(f"{a.release}: awaiting approval · approve or reject on the board or with /dev-kit:release")
+    print(f"{a.release}: awaiting approval · approve or reject on the board or with /dev-kit:release"
+          + (f" · resumed ahead: {', '.join(resumed)}" if resumed else ""))
 
 
 def _decision_args(store: Store, a: argparse.Namespace) -> tuple[str, list[str], str | None]:
@@ -5280,6 +5890,7 @@ def cmd_release_decide(store: Store, a: argparse.Namespace) -> None:
         fail(f"{a.release} is {st['status'].replace('_', ' ')}, not awaiting approval")
     decision, feedback, ref = _decision_args(store, a)
     g = release_gate(store, a.release)
+    record_wait(store, "release", g.get("submitted_at"), a.release)
     if decision == "approve":
         g.update(status="approved", decided_at=now())
         g.setdefault("history", []).append({"at": now(), "event": "approved", **({"ref": ref} if ref else {})})
@@ -5326,13 +5937,14 @@ def cmd_release_decide(store: Store, a: argparse.Namespace) -> None:
         fail(f"the edited plan does not parse: {e}")
     for tid in tids:
         store.tasks()[tid]["source"] = f"release:{a.release}"
+    paused = pause_ahead(store, a.release)
     g.update(status=None, rounds=rnd, decided_at=now())
     g.setdefault("history", []).append({"at": now(), "event": "rejected", "milestone": mid, "tasks": tids, **({"ref": ref} if ref else {})})
     store.stage(plan_path, text)
     store.save()
     store.log(f"release {a.release} rejected: {mid} — {title} with {', '.join(tids)}" + (f" ({ref})" if ref else ""))
     store.event("release_gate", scope=a.release, transition="reject", tasks=len(tids))
-    print(f"{a.release}: rejected · {mid} {title}: {', '.join(tids)}")
+    print(f"{a.release}: rejected · {mid} {title}: {', '.join(tids)}" + (f" · paused ahead: {', '.join(paused)}" if paused else ""))
     for w in problems:
         print(f"  warning: {w}")
 
@@ -5348,10 +5960,13 @@ def cmd_release_record(store: Store, a: argparse.Namespace) -> None:
         if st["status"] != "deploying_prod":
             fail(f"{a.release} is {st['status'].replace('_', ' ')}; it is recorded after its approval (release-decide {a.release} --approve)")
         rid, names = a.release, st["closed"]
-    elif not a.hotfix and store.state.get("release_plan"):
-        cur = current_release(store)
+    elif not a.hotfix:
+        cur = current_release(store) if store.state.get("release_plan") else None
         if cur:
             fail(f"releases are planned: record {cur['id']} with --release {cur['id']} after its approval")
+        fail("every release is planned since 3.0 (conventions.md §19): group the milestones under `## R<n>` in plan.md "
+             "(sync-plan does it for an older plan), then release-submit, release-decide --approve and release-record "
+             "--release R<n>; only a hotfix (--hotfix T-nnn) is recorded without approval")
     if rid:
         pass
     elif a.hotfix:
@@ -5369,6 +5984,14 @@ def cmd_release_record(store: Store, a: argparse.Namespace) -> None:
     rel = {"version": a.version, "tag": a.tag or f"v{a.version}", "milestones": names, "at": now()}
     if rid:
         rel["release"] = rid
+        try:
+            evs = tel.read_events(store.dev)[0]
+        except (OSError, ValueError):
+            evs = []
+        scopes = {rid, *names, *(t for t, v in store.tasks().items() if v["milestone"] in names)}
+        store.stage(store.dev / "releases" / rid / "flow.json", json.dumps({
+            "release": rid, "version": a.version, "milestones": names, "at": now(), "human_wait_s": human_wait(evs, scopes),
+            "milestones_wait_s": {m: _flow_field(store, m, "human_wait_s") for m in names}}, indent=2) + "\n")
         g = release_gate(store, rid)
         g.update(status="released")
         g.setdefault("history", []).append({"at": now(), "event": "released", "version": a.version})
@@ -5611,6 +6234,9 @@ def cmd_answer_question(store: Store, a: argparse.Namespace) -> None:
     except (OSError, json.JSONDecodeError):
         q = {"id": a.id}
     _write_json(side, store=store, obj={**q, "answered": True, "answer": answer, "answered_at": now()})
+    meta = (store.state.get("question_meta") or {}).pop(a.id, None) or {}
+    record_wait(store, "question", meta.get("at") or q.get("at"), meta.get("scope"))
+    store.save()
     store.log(f"answer-question {a.id}: {answer}")
     print(f"{a.id} resolved: {answer}")
 
@@ -6138,6 +6764,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--force", action="store_true"); add_risk_flags(s, tier=True)
     s.add_argument("--confirm-frozen", action="store_true", help="add to a milestone frozen for QA (it re-enters the next round)")
     s = sub.add_parser("freeze"); s.set_defaults(fn=cmd_freeze); s.add_argument("milestone")
+    s = sub.add_parser("pipeline"); s.set_defaults(fn=cmd_pipeline)
+    s.add_argument("action", choices=["status", "worktree", "integrate"]); s.add_argument("branch", nargs="?")
+    s.add_argument("--json", action="store_true")
+    s = sub.add_parser("round"); s.set_defaults(fn=cmd_round); s.add_argument("action", choices=["run"])
+    s.add_argument("skill"); s.add_argument("scope"); s.add_argument("--permission-mode")
+    s.add_argument("--timeout", type=int, default=180, help="minutes (default 180)")
     s = sub.add_parser("fact"); s.set_defaults(fn=cmd_fact); s.add_argument("action", choices=["add", "stale", "list"])
     s.add_argument("id", nargs="?"); s.add_argument("--text"); s.add_argument("--evidence"); s.add_argument("--files")
     s.add_argument("--acs"); s.add_argument("--origin"); s.add_argument("--sha"); s.add_argument("--by")
@@ -6273,7 +6905,7 @@ MUTATING = frozenset({
     cmd_add_task, cmd_fix_tasks, cmd_add_question, cmd_answer_question, cmd_plan_apply, cmd_move_task,
     cmd_new_milestone, cmd_reorder, cmd_gate, cmd_review, cmd_artifact, cmd_release_submit, cmd_release_decide,
     cmd_release_record, cmd_set, cmd_deploy, cmd_preview, cmd_add_issue, cmd_issue, cmd_pull_issues, cmd_cooldown,
-    cmd_freeze, cmd_hard_floor, cmd_ci, cmd_debt, cmd_checkpoint, cmd_slot, cmd_challenge, cmd_fact, cmd_lesson,
+    cmd_freeze, cmd_hard_floor, cmd_ci, cmd_debt, cmd_checkpoint, cmd_slot, cmd_challenge, cmd_fact, cmd_lesson, cmd_pipeline,
 })
 
 
@@ -6283,6 +6915,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.fn in MUTATING:
         with store.transaction():
             args.fn(store, args)
+        if getattr(store, "exit_code", 0):  # a refusal whose record (a question, an event) must still be committed
+            sys.exit(store.exit_code)
     else:
         args.fn(store, args)
 

@@ -498,6 +498,10 @@
         {
           "arg": "--skip-gate",
           "meaning": "work past a pending gate (records an ADR and sets the gate skipped)"
+        },
+        {
+          "arg": "--round-child",
+          "meaning": "internal: the milestone runs in a child session started by `dev_state.py round run`"
         }
       ],
       "examples": [
@@ -569,6 +573,10 @@
         {
           "arg": "--full",
           "meaning": "audit everything again, without reusing earlier clean reviews"
+        },
+        {
+          "arg": "--round-child",
+          "meaning": "internal: one round in a child session started by `dev_state.py round run`"
         }
       ],
       "examples": [

@@ -1,0 +1,44 @@
+- 2026-11-23T19:56:22+00:00 init created (phase=conception, language=pt)
+- 2026-11-23T19:56:22+00:00 artifact mark brief
+- 2026-11-23T19:56:22+00:00 artifact mark prd
+- 2026-11-23T19:56:22+00:00 review prd pass score=96
+- 2026-11-23T19:56:22+00:00 artifact mark architecture
+- 2026-11-23T19:56:23+00:00 review design n/a
+- 2026-11-23T19:56:23+00:00 sync-plan +4 milestones, +22 tasks, ~0 updated
+- 2026-11-23T19:56:23+00:00 artifact mark plan
+- 2026-11-23T19:56:23+00:00 review plan pass score=95
+- 2026-11-23T19:56:23+00:00 start T-001 Catalog step 1 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:23+00:00 done T-001 commit=abc1234
+- 2026-11-23T19:56:23+00:00 start T-002 Catalog step 2 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:23+00:00 done T-002 commit=abc1234
+- 2026-11-23T19:56:24+00:00 start T-003 Catalog step 3 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:24+00:00 done T-003 commit=abc1234
+- 2026-11-23T19:56:24+00:00 start T-004 Catalog step 4 tier=balanced arm=haiku/medium
+- 2026-11-23T19:56:24+00:00 done T-004 commit=abc1234
+- 2026-11-23T19:56:24+00:00 start T-005 Catalog step 5 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:24+00:00 done T-005 commit=abc1234
+- 2026-11-23T19:56:24+00:00 start T-006 Catalog step 6 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:25+00:00 done T-006 commit=abc1234
+- 2026-11-23T19:56:25+00:00 gate M1 passed score=95
+- 2026-11-23T19:56:25+00:00 release 1.0.0 (v1.0.0): M1
+- 2026-11-23T19:56:25+00:00 start T-007 Cart step 7 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:25+00:00 done T-007 commit=abc1234
+- 2026-11-23T19:56:25+00:00 start T-008 Cart step 8 tier=balanced arm=haiku/medium
+- 2026-11-23T19:56:25+00:00 done T-008 commit=abc1234
+- 2026-11-23T19:56:25+00:00 start T-009 Cart step 9 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:26+00:00 done T-009 commit=abc1234
+- 2026-11-23T19:56:26+00:00 start T-010 Cart step 10 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:26+00:00 done T-010 commit=abc1234
+- 2026-11-23T19:56:26+00:00 start T-011 Cart step 11 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:26+00:00 done T-011 commit=abc1234
+- 2026-11-23T19:56:26+00:00 start T-012 Cart step 12 tier=balanced arm=haiku/medium
+- 2026-11-23T19:56:26+00:00 done T-012 commit=abc1234
+- 2026-11-23T19:56:26+00:00 gate M2 passed score=95
+- 2026-11-23T19:56:27+00:00 release 1.1.0 (v1.1.0): M2
+- 2026-11-23T19:56:27+00:00 start T-013 Checkout step 13 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:27+00:00 done T-013 commit=abc1234
+- 2026-11-23T19:56:27+00:00 start T-014 Checkout step 14 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:27+00:00 done T-014 commit=abc1234
+- 2026-11-23T19:56:27+00:00 start T-015 Checkout step 15 tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:27+00:00 done T-015 commit=abc1234
+- 2026-11-23T19:56:27+00:00 add-issue I-001 (bug/standard) Price rounding

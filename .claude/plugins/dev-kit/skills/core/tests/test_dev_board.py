@@ -420,12 +420,13 @@ class BoardTest(unittest.TestCase):
     def test_release_plan_draft_is_checked_before_it_is_queued(self):
         self.board("start", check=True)
         port, tok = self.record()["port"], self.record()["token"]
-        for op, text in (({"op": "move_milestone", "milestone": "M1", "release": "R2"}, "no planned releases"),
-                         ({"op": "new_release", "release": "R2"}, "no planned releases"),
-                         ({"op": "drop_release", "release": "R1"}, "no planned releases")):
+        # 3.0: the plan always has releases (sync-plan put every milestone in R1); an invalid grouping is refused
+        for op, text in (({"op": "move_milestone", "milestone": "M1", "release": "R3"}, "R3"),
+                         ({"op": "new_release", "release": "R2"}, "R2 would hold 0 milestones"),
+                         ({"op": "drop_release", "release": "R1"}, "R1")):
             code, d = post(port, "/api/inbox", {"action": "plan_draft", "args": {"ops": [op]}}, tok)
             self.assertEqual(code, 422)
-            self.assertTrue(any(text in e or "does not exist" in e for e in d["errors"]), d["errors"])
+            self.assertTrue(any(text in e for e in d["errors"]), d["errors"])
 
     def test_approval_decisions(self):
         sys.path.insert(0, str(CORE / "scripts"))

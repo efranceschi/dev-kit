@@ -2,6 +2,28 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.0.0-alpha.4 — 2026-11-23
+
+Third phase of 3.0 (flow): one release model, every release planned and approved; QA rounds and milestone builds in a child session with a clean context; work that goes on while a person decides; and the migration of 2.x projects.
+
+### Breaking
+- **Every release is planned** (item 5, conventions §19). `sync-plan` groups a plan without `## R<n>`; `release-record` without `--release R<n>` (after `release-decide --approve`) is refused, except `--hotfix T-nnn`; `--milestones` is gone. `plan` always writes `## R<n>` (a single release is one `R1`), and maintenance mode is `## R<k> — Maintenance`.
+- **Migration of 2.x projects** (state version 2). The first command that reads a 2.x `state.json` copies it and `plan.md` to `.dev/backup/`. The next `sync-plan` puts the released milestones under `## R0 — Released before 3.0` (every 2.x version and tag kept), the others under `## R1 — <project>` (maintenance milestones under `## R<k> — Maintenance`), records an ADR (`auto`) and makes `review plan` stale. **When that review passes, Confirm plan holds every milestone not started yet until you confirm it** (the milestone in progress goes on).
+- `.dev/.gitignore` now has a managed block (conventions §2): besides `run/`, `preview/` and `tmp/` it ignores `backup/`, the raw session log `telemetry.jsonl`, `tips-seen.json`, `state.json.bak` and `costs/*` (except `prices.json`). Your own rules outside the block are kept; files git already tracks are listed once to `git rm --cached`.
+
+### Added
+- Rounds in a child session (item 1a, conventions §17): `DS round run <qa|implement> <M> [--permission-mode MODE] [--timeout MIN]` runs `claude -p "/dev-kit:<skill> <M> --round-child" --plugin-dir <kit>` with a clean context and prints a JSON summary (`verdict`, `score`, `fix_tasks`, `tasks_done`, `deferred`, `gate`, `cost`, `duration_s`, `report`, `next`); the child logs into the parent's telemetry session (`parent_session`) and its permission requests go through Needs you. `autopilot` uses it for every QA round and every milestone build; without `claude` on PATH (exit 3) it falls back to plan B (`--milestones 1`). `qa` and `implement` take `--round-child`.
+- Pipeline (item 4, `autonomy.pipeline = {releases_ahead: 1, milestone_overlap: true}`): while a release waits for approval, the next release's first milestone runs on `dev-kit/R<n+1>`; while a milestone is in QA, the next milestone's independent tasks (no dependency on it, no file in common, not `shared`) run on `dev-kit/M<n+1>`. `next --json` carries `branch`/`ahead_of`, `start` records them; `DS pipeline status|worktree|integrate`. Nothing ahead reaches the main branch before what it waits for is released or gated; `integrate` rebases (a conflict is a question in Needs you), invalidates the ledger of the files the rebase changed, sends gated milestones back to QA on the delta and fast-forwards. A rejection blocks the work ahead until the release is submitted again; a QA fix that touches a file of a task run ahead sends it back to `todo` (`redo_after`).
+- `human_wait_s` is measured: every answer to an item of Needs you (question, permission, checkpoint, release approval) logs a `human_wait` event; `qa/<M>/flow.json` and the new `.dev/releases/R<n>/flow.json` sum it. Not shown on the board.
+- Telemetry events `round_run`, `pipeline`, `human_wait`, `migration`; common key `parent_session`.
+
+### Fixed
+- `sync-plan` warns "no exit_check" only for milestones still open, and says when the first `exit_check` turns the checks (and the hard floor) on for the whole project, listing the open milestones without one.
+- Feedback shows "no data" for the cycle of a milestone closed before 3.0, never zeros, and those milestones no longer cap the `qa` grade.
+
+### Migration
+- Run `DS sync-plan` once after updating (any skill that syncs the plan does it), review the release grouping with `/dev-kit:review plan`, then confirm the plan. Tests: `test_v3_migration.py` runs this on three projects written by 2.6.1.
+
 ## 3.0.0-alpha.3 — 2026-11-23
 
 Four items added to the 3.0 specification, delivered before phase 3: blocking findings are challenged before they cost a fix round, what agents verify is kept as facts, implementers are fenced to their task's files by a hook, and each role can learn method lessons the user approves.

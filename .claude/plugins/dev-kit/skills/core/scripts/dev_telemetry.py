@@ -199,6 +199,11 @@ def session_id(dev: Path, rotate: bool = False) -> str:
 def emit(dev: Path, event: str, fields: dict, rotate_session: bool = False) -> dict:
     """Validate and append one event. Raises ValueError for anything outside the allowlist."""
     deny = denylist(dev)
+    parent = os.environ.get("DEV_KIT_PARENT_SESSION") or ""
+    if re.fullmatch(r"[0-9a-f]{8}", parent):
+        # a round child session (dev_state.py round run, conventions.md §17): it logs into its parent's session
+        fields = {**fields, "parent_session": parent}
+        rotate_session = False
     clean = validate(event, fields, deny)
     rec = {"v": VERSION, "ts": now(), "session": session_id(dev, rotate_session), "kit": kit_version(), "event": event, **clean}
     dev.mkdir(parents=True, exist_ok=True)
@@ -565,8 +570,9 @@ def stage_report(events: list[dict], state: dict, cycles: list[dict] | None = No
             if fb:
                 score += fb
                 reasons.append(f"feedback ({'+' if fb > 0 else ''}{fb})")
-            if s == "qa" and cycles:
-                worst = min(cycles, key=lambda c: c["cycle_grade"])
+            graded = [c for c in cycles or [] if c.get("cycle_grade") is not None]
+            if s == "qa" and graded:
+                worst = min(graded, key=lambda c: c["cycle_grade"])
                 if worst["cycle_grade"] < score:
                     reasons.append(f"cycle {worst['milestone']}: " + ", ".join(worst["cycle_reasons"]) + f" (cap {worst['cycle_grade']})")
                     score = worst["cycle_grade"]
@@ -588,7 +594,7 @@ def stage_report(events: list[dict], state: dict, cycles: list[dict] | None = No
             "general_feedback": {k: v for k, v in general.items() if v},
             "cycles": [{k: c.get(k) for k in ("milestone", "gate", "score", "qa_rounds", "fix_tasks", "fixes_per_task",
                                               "deferred_open", "cycle_time_s", "working_time_s", "cost_usd", "cost_per_task",
-                                              "scope_added_after_freeze", "human_wait_s", "cycle_grade", "cycle_reasons")}
+                                              "scope_added_after_freeze", "human_wait_s", "cycle_grade", "cycle_reasons", "no_data")}
                        for c in cycles or []],
             "orchestration_tokens": (tokens or {}).get("orchestration", {}).get("tokens") if tokens is not None else None}
 
@@ -628,6 +634,10 @@ def render_report(rep: dict) -> str:
         lines.append(f"{r['label']:<32}{g:>6}  {' · '.join(r['reasons'])}")
     lines.append(f"{'overall':<32}{'—' if rep['overall'] is None else rep['overall']:>6}")
     for c in rep.get("cycles") or []:
+        if c.get("no_data"):
+            lines.append(f"{c['milestone']}: final state {c['score'] if c.get('score') is not None else '—'} · cycle: no data "
+                         "(closed before 3.0)")
+            continue
         lines.append(f"{c['milestone']}: final state {c['score'] if c.get('score') is not None else '—'} · cycle: "
                      f"{c['qa_rounds']} rounds, {c['fix_tasks']} fixes, {c['deferred_open']} deferred"
                      + (f", {c['scope_added_after_freeze']} after freeze" if c.get("scope_added_after_freeze") else "")

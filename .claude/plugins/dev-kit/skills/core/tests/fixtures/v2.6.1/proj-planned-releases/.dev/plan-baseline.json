@@ -1,0 +1,174 @@
+{
+ "T-001": {
+  "milestone": "M1",
+  "title": "Catalog step 1",
+  "deps": [],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-002": {
+  "milestone": "M1",
+  "title": "Catalog step 2",
+  "deps": [
+   "T-001"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-003": {
+  "milestone": "M1",
+  "title": "Catalog step 3",
+  "deps": [
+   "T-002"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-004": {
+  "milestone": "M1",
+  "title": "Catalog step 4",
+  "deps": [
+   "T-003"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-005": {
+  "milestone": "M1",
+  "title": "Catalog step 5",
+  "deps": [
+   "T-004"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-006": {
+  "milestone": "M2",
+  "title": "Cart step 6",
+  "deps": [],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-007": {
+  "milestone": "M2",
+  "title": "Cart step 7",
+  "deps": [
+   "T-006"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-008": {
+  "milestone": "M2",
+  "title": "Cart step 8",
+  "deps": [
+   "T-007"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-009": {
+  "milestone": "M2",
+  "title": "Cart step 9",
+  "deps": [
+   "T-008"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-010": {
+  "milestone": "M2",
+  "title": "Cart step 10",
+  "deps": [
+   "T-009"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-011": {
+  "milestone": "M3",
+  "title": "Checkout step 11",
+  "deps": [],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-012": {
+  "milestone": "M3",
+  "title": "Checkout step 12",
+  "deps": [
+   "T-011"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-013": {
+  "milestone": "M3",
+  "title": "Checkout step 13",
+  "deps": [
+   "T-012"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-014": {
+  "milestone": "M3",
+  "title": "Checkout step 14",
+  "deps": [
+   "T-013"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-015": {
+  "milestone": "M3",
+  "title": "Checkout step 15",
+  "deps": [
+   "T-014"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-016": {
+  "milestone": "M4",
+  "title": "Accounts step 16",
+  "deps": [],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-017": {
+  "milestone": "M4",
+  "title": "Accounts step 17",
+  "deps": [
+   "T-016"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-018": {
+  "milestone": "M4",
+  "title": "Accounts step 18",
+  "deps": [
+   "T-017"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-019": {
+  "milestone": "M4",
+  "title": "Accounts step 19",
+  "deps": [
+   "T-018"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ },
+ "T-020": {
+  "milestone": "M4",
+  "title": "Accounts step 20",
+  "deps": [
+   "T-019"
+  ],
+  "type": "feature",
+  "recorded_at": "2026-11-23T19:56:28+00:00"
+ }
+}

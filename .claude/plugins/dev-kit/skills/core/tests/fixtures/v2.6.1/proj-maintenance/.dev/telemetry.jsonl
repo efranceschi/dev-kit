@@ -1,0 +1,10 @@
+{"v": 1, "ts": "2026-11-23T19:56:34Z", "session": "c3ec1b9f", "kit": "2.6.1", "event": "review", "scope": "prd", "value": "na", "round": 0, "forced": false}
+{"v": 1, "ts": "2026-11-23T19:56:34Z", "session": "c3ec1b9f", "kit": "2.6.1", "event": "review", "scope": "design", "value": "na", "round": 0, "forced": false}
+{"v": 1, "ts": "2026-11-23T19:56:34Z", "session": "c3ec1b9f", "kit": "2.6.1", "event": "review", "scope": "plan", "value": "na", "round": 0, "forced": false}
+{"v": 1, "ts": "2026-11-23T19:56:34Z", "session": "c3ec1b9f", "kit": "2.6.1", "event": "task", "task": "T-001", "transition": "add", "type": "fix", "milestone": "M7"}
+{"v": 1, "ts": "2026-11-23T19:56:35Z", "session": "c3ec1b9f", "kit": "2.6.1", "event": "task", "task": "T-001", "transition": "start", "type": "fix", "milestone": "M7", "parallel": false, "tier": "balanced", "risk_score": 1}
+{"v": 1, "ts": "2026-11-23T19:56:35Z", "session": "c3ec1b9f", "kit": "2.6.1", "event": "route", "context": "task:balanced:backend:fix", "rule_tier": "balanced", "arm": "sonnet.medium", "reason_code": "rule", "explore": false}
+{"v": 1, "ts": "2026-11-23T19:56:35Z", "session": "c3ec1b9f", "kit": "2.6.1", "event": "task", "task": "T-001", "transition": "done", "type": "fix", "milestone": "M7"}
+{"v": 1, "ts": "2026-11-23T19:56:35Z", "session": "c3ec1b9f", "kit": "2.6.1", "event": "gate", "scope": "M7", "value": "passed", "score": 95, "qa_runs": 0, "forced": false}
+{"v": 1, "ts": "2026-11-23T19:56:35Z", "session": "c3ec1b9f", "kit": "2.6.1", "event": "tip", "tip": "gate-cooldown", "context": "gate_passed"}
+{"v": 1, "ts": "2026-11-23T19:56:35Z", "session": "c3ec1b9f", "kit": "2.6.1", "event": "task", "task": "T-002", "transition": "add", "type": "fix", "milestone": "M8"}

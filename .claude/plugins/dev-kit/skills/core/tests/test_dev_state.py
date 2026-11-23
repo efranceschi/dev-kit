@@ -455,7 +455,7 @@ class TestLifecycle(Base):
         self.assertEqual(rel["milestones"], ["M1"])
         sub = {x["key"]: x for x in self.phases()["construction"]["steps"]}
         self.assertEqual((sub["milestones"]["state"], sub["milestones"]["count"]), ("doing", "1/2"))
-        self.assertEqual((sub["release"]["state"], sub["release"]["count"]), ("doing", "1"))  # M2 not started: can ship now
+        self.assertEqual((sub["release"]["state"], sub["release"]["count"]), ("todo", "1"))  # 3.0: R1 ships M1 and M2 together
         self.assertEqual(self.run_state("status", "--next").stdout.strip(), "/dev-kit:implement")  # M2 first
         self.run_state("done", "T-003", "--force")
         self.run_state("gate", "M2", "passed", "--score", "90")
@@ -472,12 +472,15 @@ class TestLifecycle(Base):
         self.assertEqual((sub["milestones"]["state"], sub["milestones"]["count"]), ("done", "2/2"))
         self.assertEqual((sub["release"]["state"], sub["release"]["count"]), ("doing", "2"))
         self.assertIn("M1–M2 waiting", sub["release"]["note"])
-        self.assertIn("M1, M2", self.run_state("release-record", "--version", "1.0.0").stdout)
+        self.run_state("release-record", "--version", "1.0.0", expect=1)  # 3.0: every release is planned and approved
+        self.run_state("release-submit", "R1")
+        self.run_state("release-decide", "R1", "--approve")
+        self.assertIn("M1, M2", self.run_state("release-record", "--version", "1.0.0", "--release", "R1").stdout)
         sub = {x["key"]: x for x in self.phases()["construction"]["steps"]}
         self.assertEqual((sub["release"]["state"], sub["release"]["count"]), ("done", None))
         self.assertEqual(self.state()["phase"], "stable")
         self.assertEqual(self.state()["releases"][0]["tag"], "v1.0.0")
-        self.run_state("release-record", "--version", "1.0.1", expect=1)  # nothing left to release
+        self.run_state("release-record", "--version", "1.0.1", "--release", "R1", expect=1)  # nothing left to release
         self.run_state("release-record", "--version", "1.0.1", "--hotfix", "T-003")
 
     def test_maintenance_project_is_stable_until_an_issue_arrives(self) -> None:
@@ -593,8 +596,8 @@ class TestPlannedReleases(Base):
         self.assertIn("release R1 has 7 milestones", self.run_state("sync-plan").stdout)
         (self.root / ".dev" / "plan.md").write_text(RPLAN.replace("## R1 — Sign-up journey\n", "").replace("## R2 — Payments\n", ""), encoding="utf-8")
         self.run_state("sync-plan")
-        self.assertNotIn("release_plan", self.state())  # no release heading: back to the implicit next release
-        self.assertNotIn("release", self.state()["milestones"]["M1"])
+        self.assertEqual(self.state()["release_plan"][0]["id"], "R1")  # 3.0: no release heading → all in R1
+        self.assertEqual(self.state()["milestones"]["M1"]["release"], "R1")
 
     def test_release_gate_from_submission_to_stable(self) -> None:
         self.assertEqual(self.rel("R1")["status"], "in_progress")
@@ -612,7 +615,7 @@ class TestPlannedReleases(Base):
         (self.root / ".dev" / "releases" / "R1" / "dossier.md").write_text("# R1\n", encoding="utf-8")
         self.run_state("release-submit", "R1", "--dossier", ".dev/releases/R1/dossier.md")
         self.assertEqual(self.rel("R1")["status"], "awaiting_approval")
-        self.assertEqual(self.nxt(), "/dev-kit:release")
+        self.assertEqual(self.nxt(), "/dev-kit:implement")  # 3.0 pipeline: R2 starts ahead on dev-kit/R2 while R1 waits
         self.assertIn("Needs your approval: R1", self.run_state("status").stdout)
         sub = {x["key"]: x for x in self.lifecycle()["lifecycle"]["phases"][2]["steps"]}
         self.assertEqual((sub["release"]["state"], sub["release"]["count"]), ("review", "R1"))
@@ -735,10 +738,11 @@ class TestPlannedReleases(Base):
         out = self.apply([{"op": "move_milestone", "milestone": "M3", "release": "R1"}], 1).stdout
         self.assertIn("T-003 depends on T-002", out)
 
-    def test_plan_without_releases_is_not_grouped_here(self) -> None:
+    def test_plan_without_releases_is_grouped_in_r1(self) -> None:
         (self.root / ".dev" / "plan.md").write_text(RPLAN.replace("## R1 — Sign-up journey\n", "").replace("## R2 — Payments\n", ""), encoding="utf-8")
-        self.run_state("sync-plan")
-        self.assertIn("no planned releases", self.apply([{"op": "new_release", "release": "R1"}], 1).stdout)
+        self.assertIn("every milestone now belongs to a planned release", self.run_state("sync-plan").stdout)  # 3.0: one model
+        self.assertIn("## R1 — ", (self.root / ".dev" / "plan.md").read_text(encoding="utf-8"))
+        self.assertIn("the new release must be R2", self.apply([{"op": "new_release", "release": "R1"}], 1).stdout)
 
 
 class TestDetectStack(unittest.TestCase):
@@ -1513,7 +1517,7 @@ class TestBoardPlanEdits(Base):
         self.apply([{"op": "new_milestone", "milestone": "M3", "title": "Reports"},
                     {"op": "move_task", "task": "T-003", "milestone": "M3"}])
         s = self.state()
-        self.assertEqual(s["milestones"]["M3"], {"title": "Reports", "gate": "pending", "qa_runs": 0})
+        self.assertEqual(s["milestones"]["M3"], {"title": "Reports", "gate": "pending", "qa_runs": 0, "release": "R1"})
         self.assertEqual(s["tasks"]["T-003"]["milestone"], "M3")
         text = self.plan.read_text()
         self.assertLess(text.index("## M2 — Dashboard"), text.index("## M3 — Reports"))
@@ -1592,7 +1596,10 @@ class TestBoardPlanEdits(Base):
             self.run_state("done", t, "--force")
         for m in ("M1", "M2"):
             self.run_state("gate", m, "passed", "--score", "90")
-        self.run_state("release-record", "--version", "1.0.0")
+        self.run_state("release-record", "--version", "1.0.0", expect=1)  # 3.0: no release without approval
+        self.run_state("release-submit", "R1")
+        self.run_state("release-decide", "R1", "--approve")
+        self.run_state("release-record", "--version", "1.0.0", "--release", "R1")
         self.assertEqual(self.state()["phase"], "stable")
         self.run_state("add-issue", "--type", "improvement", "--class", "standard", "--title", "Export")
         self.assertEqual((self.state()["phase"], self.state()["step"]), ("construction", "issues"))

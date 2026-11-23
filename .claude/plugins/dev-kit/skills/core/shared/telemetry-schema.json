@@ -2,6 +2,7 @@
   "$comment": "Allowed keys per telemetry event (conventions.md \u00a713). dev_telemetry.py validates every event against this file; skills reference it instead of listing keys. Kinds: num, bool, tok (id or short lowercase token), counts, dims, delta, mtok, numdict, feedback.",
   "version": 1,
   "common": {
+    "parent_session": "tok",
     "duration_s": "num",
     "round": "num",
     "feedback": "feedback"
@@ -251,6 +252,27 @@
     "fact": {
       "transition": "tok",
       "origin": "tok"
+    },
+    "round_run": {
+      "skill": "tok",
+      "scope": "tok",
+      "outcome": "tok",
+      "verdict": "tok",
+      "score": "num",
+      "fix_tasks": "num",
+      "tasks_done": "num",
+      "exit_code": "num"
+    },
+    "pipeline": {
+      "transition": "tok",
+      "requalify": "num"
+    },
+    "human_wait": {
+      "scope": "tok",
+      "kind": "tok"
+    },
+    "migration": {
+      "transition": "tok"
     },
     "lesson": {
       "agent": "tok",

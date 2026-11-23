@@ -72,7 +72,9 @@ class WorkerTest(unittest.TestCase):
             run("gate", f"M{step[-1]}", "passed", "--score", "95")
         seen.add(check("release"))
         run("review", "docs", "pass", "--score", "95")
-        run("release-record", "--version", "1.0.0")
+        run("release-submit", "R1")
+        run("release-decide", "R1", "--approve")
+        run("release-record", "--version", "1.0.0", "--release", "R1")
         seen.add(check("stable"))
         (dev / "prd.md").write_text("# PRD v2\n", encoding="utf-8")
         seen.add(check("reopened"))
@@ -418,7 +420,9 @@ class WorkerTest(unittest.TestCase):
         ds("done", "T-002")
         ds("gate", "M2", "passed", "--score", "95")
         ds("review", "docs", "pass", "--score", "95")
-        ds("release-record", "--version", "1.0.0")
+        ds("release-submit", "R1")
+        ds("release-decide", "R1", "--approve")
+        ds("release-record", "--version", "1.0.0", "--release", "R1")
         self.assertEqual(dw.continue_next(self.root)[1], "the next step is /dev-kit:backlog, which is yours to start")
 
     def test_listener_starts_continuous_steps_when_idle(self):

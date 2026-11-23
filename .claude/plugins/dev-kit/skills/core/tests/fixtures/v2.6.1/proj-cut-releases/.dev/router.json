@@ -1,0 +1,314 @@
+{
+  "contexts": {
+    "task:balanced:backend:feature": {
+      "cooldown": 0,
+      "offset": 0,
+      "streak_fail": 0
+    }
+  },
+  "learned": [
+    "M1",
+    "M2"
+  ],
+  "mistakes": [],
+  "norms": {
+    "s": 1800.0,
+    "usd": 2.0
+  },
+  "records": {
+    "T-001#final": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:23+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-001#final",
+      "kind": "task",
+      "milestone": "M1",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-001",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-002#final": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:23+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-002#final",
+      "kind": "task",
+      "milestone": "M1",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-002",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-003#final": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:24+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-003#final",
+      "kind": "task",
+      "milestone": "M1",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-003",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-004#final": {
+      "arm": "haiku/medium",
+      "at": "2026-11-23T19:56:24+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-004#final",
+      "kind": "task",
+      "milestone": "M1",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-004",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-005#final": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:24+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-005#final",
+      "kind": "task",
+      "milestone": "M1",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-005",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-006#final": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:25+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-006#final",
+      "kind": "task",
+      "milestone": "M1",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-006",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-007#final": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:25+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-007#final",
+      "kind": "task",
+      "milestone": "M2",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-007",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-008#final": {
+      "arm": "haiku/medium",
+      "at": "2026-11-23T19:56:25+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-008#final",
+      "kind": "task",
+      "milestone": "M2",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-008",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-009#final": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:26+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-009#final",
+      "kind": "task",
+      "milestone": "M2",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-009",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-010#final": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:26+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-010#final",
+      "kind": "task",
+      "milestone": "M2",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-010",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-011#final": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:26+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-011#final",
+      "kind": "task",
+      "milestone": "M2",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-011",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-012#final": {
+      "arm": "haiku/medium",
+      "at": "2026-11-23T19:56:26+00:00",
+      "context": "task:balanced:backend:feature",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-012#final",
+      "kind": "task",
+      "milestone": "M2",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-012",
+      "tier": "balanced",
+      "usd": null
+    },
+    "T-013#0.0": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:27Z",
+      "context": "task:balanced:backend:feature",
+      "fails": 0,
+      "key": "T-013#0.0",
+      "kind": "task",
+      "milestone": "M3",
+      "outcome": "done",
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "task": "T-013"
+    },
+    "T-014#0.0": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:27Z",
+      "context": "task:balanced:backend:feature",
+      "fails": 0,
+      "key": "T-014#0.0",
+      "kind": "task",
+      "milestone": "M3",
+      "outcome": "done",
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "task": "T-014"
+    },
+    "T-015#0.0": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:27Z",
+      "context": "task:balanced:backend:feature",
+      "fails": 0,
+      "key": "T-015#0.0",
+      "kind": "task",
+      "milestone": "M3",
+      "outcome": "done",
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "task": "T-015"
+    }
+  },
+  "version": 1,
+  "weight_log": [],
+  "weights": {}
+}

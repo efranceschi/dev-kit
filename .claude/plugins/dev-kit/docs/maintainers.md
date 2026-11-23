@@ -55,7 +55,9 @@ How the plugin is built, tested and documented. Users do not need this page.
     tests/                       lint_suite.py, test_dev_state.py, test_dev_state_gaps.py, test_dev_board.py,
                                  test_dev_cost.py, test_dev_docs.py, test_dev_score.py, test_dev_ledger.py, test_dev_spec.py,
                                  test_dev_ui.py, test_dev_worker.py, test_dev_router.py,
-                                 test_v3_foundation.py, test_v3_quality.py, test_v3_roles.py (3.0 acceptance criteria, one file per phase)
+                                 test_v3_foundation.py, test_v3_quality.py, test_v3_roles.py, test_v3_flow.py (3.0 acceptance criteria, one file
+                                 per phase), test_v3_migration.py on fixtures/v2.6.1/ (2.6.1 projects written by the 2.6.1
+                                 scripts; fixtures/v2.6.1/build_fixture_261.py rebuilds them)
 ```
 
 Requirements: Python 3.10+ (standard library only) on Linux or macOS. Process checks (`cleanup`, board liveness) read `/proc` and are best effort on macOS; the board server uses `fcntl` and does not run on native Windows (use WSL).

@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "project": "proj-maintenance",
+  "language": "pt",
+  "phase": "conception",
+  "step": "interview",
+  "autonomy": {
+    "level": "high",
+    "decide_alone": [
+      "library_choice",
+      "file_structure",
+      "naming",
+      "test_strategy",
+      "ui_details",
+      "minor_scope_tradeoffs",
+      "dev_tooling",
+      "data_model_details"
+    ],
+    "always_ask": [
+      "paid_services",
+      "delete_data",
+      "public_exposure",
+      "scope_change_major",
+      "security_model_change",
+      "credentials",
+      "model_escalation"
+    ],
+    "max_fix_rounds_per_gate": 3,
+    "max_review_rounds": 3,
+    "model_policy": {
+      "mode": "ask",
+      "tiers": {},
+      "risk_tiers": "apply",
+      "risk_weights": {},
+      "router": {
+        "mode": "apply",
+        "balance": "balanced",
+        "budget_usd_per_milestone": null
+      }
+    },
+    "pause_policy": {
+      "dirty_tree": {
+        "action": "ask"
+      }
+    },
+    "on_park": "stop_when_idle",
+    "notify_on_park": false,
+    "local_deploy": {
+      "mode": "off",
+      "port": null,
+      "notify": false
+    },
+    "issue_buffer_pct": 20,
+    "cooldown": {
+      "enabled": false,
+      "max_tasks": 5
+    },
+    "tips": "on",
+    "ui": {
+      "offered": false,
+      "spinner_tips": false,
+      "statusline": false,
+      "title": true,
+      "notify": false
+    },
+    "task_checks": "ui",
+    "incremental": {
+      "enabled": true,
+      "spot_check_pct": 10,
+      "full_on_last_gate": false
+    },
+    "production": {
+      "when": "none",
+      "method": null,
+      "host": null,
+      "targets": [],
+      "smoke": [],
+      "prerequisites": []
+    },
+    "task_time_budget_min": 30,
+    "commit_per_task": true,
+    "may_install_deps": true,
+    "may_run_servers": true,
+    "may_push": false,
+    "quality": {
+      "min_overall": 85,
+      "min_dimension": 70,
+      "dimension_min": {
+        "security": 90,
+        "tests": 80,
+        "spec": 85,
+        "a11y": 80
+      },
+      "review_min_overall": 80,
+      "low_cap": 10,
+      "weights": {
+        "code": 15,
+        "security": 15,
+        "tests": 15,
+        "spec": 15,
+        "ux": 8,
+        "a11y": 8,
+        "visual": 6,
+        "copy": 3,
+        "performance": 6,
+        "data": 4,
+        "operations": 3,
+        "dependencies": 2,
+        "docs": 5,
+        "design": 10,
+        "requirements": 10
+      }
+    }
+  },
+  "stack": {},
+  "reviews": {
+    "prd": {
+      "rounds": 0,
+      "verdict": "n/a",
+      "note": "maintenance mode",
+      "at": "2026-11-23T19:56:34+00:00"
+    },
+    "design": {
+      "rounds": 0,
+      "verdict": "n/a",
+      "note": "maintenance mode",
+      "at": "2026-11-23T19:56:34+00:00"
+    },
+    "plan": {
+      "rounds": 0,
+      "verdict": "n/a",
+      "note": "maintenance mode",
+      "at": "2026-11-23T19:56:34+00:00"
+    }
+  },
+  "milestones": {
+    "M7": {
+      "title": "Maintenance",
+      "gate": "passed",
+      "qa_runs": 0,
+      "passed_at": "2026-11-23T19:56:35+00:00",
+      "score": 95
+    },
+    "M8": {
+      "title": "Maintenance",
+      "gate": "pending",
+      "qa_runs": 0
+    }
+  },
+  "tasks": {
+    "T-001": {
+      "title": "Fix rounding",
+      "milestone": "M7",
+      "type": "fix",
+      "status": "done",
+      "deps": [],
+      "acceptance": [],
+      "test_notes": "",
+      "files": [
+        "src/price.py"
+      ],
+      "commit": "abc1234",
+      "blocked_reason": null,
+      "source": null,
+      "started_at": "2026-11-23T19:56:35+00:00",
+      "done_at": "2026-11-23T19:56:35+00:00",
+      "tier": {
+        "rule": "balanced",
+        "score": 1,
+        "source": "rule",
+        "rule_arm": "sonnet/medium",
+        "arm": "sonnet/medium",
+        "routed": false,
+        "context": "task:balanced:backend:fix",
+        "signals": [
+          "base"
+        ],
+        "at": "2026-11-23T19:56:35+00:00"
+      }
+    },
+    "T-002": {
+      "title": "Fix tax label",
+      "milestone": "M8",
+      "type": "fix",
+      "status": "todo",
+      "deps": [],
+      "acceptance": [],
+      "test_notes": "",
+      "files": [
+        "src/tax.py"
+      ],
+      "commit": null,
+      "blocked_reason": null,
+      "source": null,
+      "started_at": null,
+      "done_at": null
+    }
+  },
+  "next_task_id": 3,
+  "next_question_id": 1,
+  "created_at": "2026-11-23T19:56:34+00:00",
+  "updated_at": "2026-11-23T19:56:35+00:00",
+  "brownfield": {
+    "mode": "maintenance",
+    "baseline_ref": "v2.3.0",
+    "first_milestone": 7
+  },
+  "issues": {},
+  "reopened": true,
+  "releases": [
+    {
+      "version": "2.3.1",
+      "tag": "v2.3.1",
+      "milestones": [
+        "M7"
+      ],
+      "at": "2026-11-23T19:56:35+00:00"
+    }
+  ]
+}

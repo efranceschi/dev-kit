@@ -1,0 +1,43 @@
+{
+  "contexts": {
+    "task:balanced:backend:fix": {
+      "cooldown": 0,
+      "offset": 0,
+      "streak_fail": 0
+    }
+  },
+  "learned": [
+    "M7"
+  ],
+  "mistakes": [],
+  "norms": {
+    "s": 1800.0,
+    "usd": 2.0
+  },
+  "records": {
+    "T-001#final": {
+      "arm": "sonnet/medium",
+      "at": "2026-11-23T19:56:35+00:00",
+      "context": "task:balanced:backend:fix",
+      "escape": false,
+      "fails": 0,
+      "floor": false,
+      "key": "T-001#final",
+      "kind": "task",
+      "milestone": "M7",
+      "retro": false,
+      "rounds": 0,
+      "rule_arm": "sonnet/medium",
+      "s": null,
+      "signals": [
+        "base"
+      ],
+      "task": "T-001",
+      "tier": "balanced",
+      "usd": null
+    }
+  },
+  "version": 1,
+  "weight_log": [],
+  "weights": {}
+}

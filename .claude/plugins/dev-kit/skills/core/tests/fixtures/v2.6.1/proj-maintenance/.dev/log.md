@@ -1,0 +1,11 @@
+- 2026-11-23T19:56:34+00:00 init created (phase=conception, language=pt)
+- 2026-11-23T19:56:34+00:00 sync-plan +1 milestones, +0 tasks, ~0 updated
+- 2026-11-23T19:56:34+00:00 review prd n/a
+- 2026-11-23T19:56:34+00:00 review design n/a
+- 2026-11-23T19:56:34+00:00 review plan n/a
+- 2026-11-23T19:56:34+00:00 add-task T-001 [M7] (fix) Fix rounding source=-
+- 2026-11-23T19:56:35+00:00 start T-001 Fix rounding tier=balanced arm=sonnet/medium
+- 2026-11-23T19:56:35+00:00 done T-001 commit=abc1234
+- 2026-11-23T19:56:35+00:00 gate M7 passed score=95
+- 2026-11-23T19:56:35+00:00 release 2.3.1 (v2.3.1): M7
+- 2026-11-23T19:56:35+00:00 add-task T-002 [M8] (fix) Fix tax label source=-
