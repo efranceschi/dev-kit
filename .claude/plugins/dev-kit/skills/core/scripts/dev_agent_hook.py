@@ -25,7 +25,8 @@ Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit, Permis
   (conventions.md §13), written here so no skill has to: agent, model and effort (from the kit agent's frontmatter,
   or the model the Agent call asked for), the skill running it (innermost open skill in .dev/run/skills.json),
   scope (the `Scope:` line of the prompt, read at PreToolUse and kept as a token only), round (a milestone's QA
-  round), duration and tokens (from the subagent's own transcript).
+  round), duration and tokens (from the subagent's own transcript). The `Slot:` line binds the agent id to its slot
+  in .dev/run/agent-slots.json, for the file fence (dev_fence.py, conventions.md §17).
 
 Privacy: only ids, the agent type and the subagent transcript's path are kept; prompts, messages and tool data in the payload are ignored, except
 the tool and target of a permission request while it waits on the board.
@@ -82,6 +83,7 @@ def subagent_transcript(payload: dict) -> str | None:
     return str(p)
 
 
+SLOT_RE = re.compile(r"(?m)^\s*Slot:\s*(\d{1,3})\b")
 SCOPE_RE = re.compile(r"(?m)^\s*Scope:\s*(T-\d{1,5}|M\d{1,3}(?:\.\d{1,2})?|hotfix-T-\d{1,5})\b")
 AGENT_TOOLS = ("Agent", "Task")
 KIT_DIR = Path(__file__).resolve().parents[3]
@@ -116,6 +118,9 @@ def note_pending(dev: Path, payload: dict) -> None:
     rec = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "session": tok(payload.get("session_id")),
            "agent": tok(ti.get("subagent_type") or "general-purpose"), "scope": m.group(1) if m else None,
            "model": tok(ti.get("model")).lower() or None}
+    sl = SLOT_RE.search(str(ti.get("prompt") or ""))
+    if sl:
+        rec["slot"] = int(sl.group(1))
     p = pending_path(dev)
     p.parent.mkdir(exist_ok=True)
     lines = p.read_text(encoding="utf-8").splitlines()[-50:] if p.exists() else []
@@ -162,6 +167,22 @@ def _secs(a: str, b: str) -> float | None:
         return None
 
 
+def bind_slot(dev: Path, aid: str, slot: object, agent: object, scope: object) -> None:
+    """.dev/run/agent-slots.json: agent id -> its `Slot:` (when the prompt had one), agent and scope."""
+    p = dev / "run" / "agent-slots.json"
+    try:
+        cur = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        cur = {}
+    if not isinstance(cur, dict):
+        cur = {}
+    cur[aid] = {"slot": slot, "agent": agent, "scope": scope, "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    cur = dict(list(cur.items())[-200:])
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cur, indent=1), encoding="utf-8")
+    tmp.replace(p)
+
+
 def emit_agent_event(dev: Path, event: str, payload: dict) -> None:
     """agent_spawn at SubagentStart, agent_end at SubagentStop, in the session log (never fails the hook)."""
     import dev_telemetry as tel
@@ -190,6 +211,8 @@ def emit_agent_event(dev: Path, event: str, payload: dict) -> None:
             fields["scope"] = tel.scope_token(fields["scope"])
         # remember what the spawn said, for the end event
         payload["_spawn"] = fields
+        if aid:  # the file fence (dev_fence.py) finds the agent's slot by its id
+            bind_slot(dev, aid, pend.get("slot"), fields.get("agent"), fields.get("scope"))
         tel.safe_emit(dev, "agent_spawn", fields)
         return
     spawn = next((e for e in reversed(tel.read_events(dev)[0]) if e["event"] == "agent_spawn" and e.get("agent_id") == aid), {}) if aid else {}

@@ -584,12 +584,41 @@ def stage_report(events: list[dict], state: dict, cycles: list[dict] | None = No
         })
     graded = [r["score"] for r in out if r["ran"]]
     return {"stages": out, "overall": round(sum(graded) / len(graded)) if graded else None,
+            "fence_denials": fence_denials(events), "disputes": dispute_rates(events),
             "general_feedback": {k: v for k, v in general.items() if v},
             "cycles": [{k: c.get(k) for k in ("milestone", "gate", "score", "qa_rounds", "fix_tasks", "fixes_per_task",
                                               "deferred_open", "cycle_time_s", "working_time_s", "cost_usd", "cost_per_task",
                                               "scope_added_after_freeze", "human_wait_s", "cycle_grade", "cycle_reasons")}
                        for c in cycles or []],
             "orchestration_tokens": (tokens or {}).get("orchestration", {}).get("tokens") if tokens is not None else None}
+
+
+def fence_denials(events: list[dict]) -> dict[str, int]:
+    """Edits the file fence denied, per task (a sign of `files:` planned too narrow, conventions.md §17)."""
+    out: dict[str, int] = {}
+    for e in events:
+        if e["event"] == "fence_deny":
+            k = str(e.get("scope") or "-")
+            out[k] = out.get(k, 0) + 1
+    return out
+
+
+def dispute_rates(events: list[dict]) -> dict[str, dict]:
+    """Per auditor: challenged findings, disputed ones and the rate, overall and per milestone (conventions.md §7)."""
+    out: dict[str, dict] = {}
+    for e in events:
+        if e["event"] != "challenge" or not e.get("auditor"):
+            continue
+        r = out.setdefault(e["auditor"], {"challenged": 0, "disputed": 0, "by_scope": {}})
+        sc = r["by_scope"].setdefault(str(e.get("scope") or "-"), {"challenged": 0, "disputed": 0})
+        r["challenged"] += 1
+        sc["challenged"] += 1
+        if e.get("verdict") == "dispute":
+            r["disputed"] += 1
+            sc["disputed"] += 1
+    for r in out.values():
+        r["rate"] = round(r["disputed"] / r["challenged"], 2) if r["challenged"] else 0.0
+    return out
 
 
 def render_report(rep: dict) -> str:
@@ -605,4 +634,8 @@ def render_report(rep: dict) -> str:
                      + (f", {round(c['cycle_time_s'] / 3600, 1)} h" if c.get("cycle_time_s") else "")
                      + (f", US$ {c['cost_usd']:.2f}" if c.get("cost_usd") is not None else "")
                      + f" · cycle grade {c['cycle_grade']}")
+    if rep.get("fence_denials"):
+        lines.append("fence denials: " + ", ".join(f"{k} {v}" for k, v in sorted(rep["fence_denials"].items())))
+    for aud, r in sorted((rep.get("disputes") or {}).items()):
+        lines.append(f"disputes: {aud} {r['disputed']}/{r['challenged']} ({round(100 * r['rate'])}%)")
     return "\n".join(lines)

@@ -22,6 +22,14 @@ Subcommands
   start T       mark task in_progress
   done T        mark task done (optionally --commit SHA)
   block T       mark task blocked (--reason; --blocked-by I-nnn pauses it until the replan of that scope change)
+  fact ACTION   add --text --evidence --origin [--files --acs --sha] | stale K-nnn --by --evidence | list [--files
+                --acs --all --json]: verified facts in .dev/facts.md (secrets and personal data refused), conventions §2
+  lesson ACTION add AGENT "<text>" | rm AGENT N | show AGENT | list | suggest | dismiss AGENT SIGNAL: lessons of
+                method per role in .dev/lessons/ (at most 8 each), conventions §13
+  challenger M F   who challenges a critical/high finding: another role, or another model family (--json)
+  challenge record M --from FILE  a challenger's verdict (agree | dispute | refine, with evidence), conventions §7
+  slot ACTION N open --task T-nnn [--allow PATH] | close | show | check --since SHA: the file fence of an agent
+                slot (dev_fence.py enforces it as a hook; check fails an integration that touched a file outside)
   affected      pending tasks whose acceptance cites changed ACs (--acs AC-4,AC-7 [--json]), conventions §15
   unblock T     blocked -> todo
   drop T        drop a task removed by a replan (--reason); it no longer counts for milestones or release
@@ -1754,6 +1762,465 @@ def cmd_affected(store: Store, a: argparse.Namespace) -> None:
     print(f"{len(rows)} task(s): pause them until the replan (recommended: `block T-nnn --blocked-by I-nnn`) or continue")
 
 
+# ---------------------------------------------------------------- challenge of blocking findings (conventions.md §7)
+# A different role that covers the finding's dimension; None = the same role on a model of another family.
+CHALLENGER_FOR = {"code": "test-auditor", "security": "code-reviewer", "tests": "code-reviewer", "spec": "test-auditor",
+                  "performance": "code-reviewer", "data": "code-reviewer", "operations": "code-reviewer",
+                  "dependencies": "security-auditor", "a11y": "visual-reviewer", "visual": "a11y-auditor",
+                  "ux": "a11y-auditor", "copy": "usability-auditor", "docs": None, "design": None, "requirements": None}
+OTHER_FAMILY = {"opus": "sonnet", "sonnet": "opus", "haiku": "sonnet", "fable": "opus"}
+CHALLENGE_VERDICTS = ("agree", "dispute", "refine")
+
+
+def _family(model: object) -> str:
+    m = str(model or "").lower()
+    return next((f for f in OTHER_FAMILY if f in m), m or "inherit")
+
+
+def finding_of(store: Store, m: str, fid: str) -> dict:
+    path = store.dev / "qa" / m / "findings.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        fail(f"no consolidated findings at {path} (run dev_score.py consolidate first)")
+    items = (data.get("findings") or []) + (data.get("disputed") or []) if isinstance(data, dict) else data
+    f = next((x for x in items if isinstance(x, dict) and x.get("id") == fid), None)
+    if f is None:
+        fail(f"{fid} is not in {path}")
+    return f
+
+
+def author_model(store: Store, m: str, auditor: str) -> str:
+    """The model the auditor ran on this round: the session log's agent_spawn, else its frontmatter."""
+    try:
+        for e in reversed(tel.read_events(store.dev)[0]):
+            if e["event"] == "agent_spawn" and e.get("agent") == auditor and e.get("scope") == m and e.get("model"):
+                return str(e["model"])
+    except (OSError, ValueError):
+        pass
+    import dev_agent_hook
+    return dev_agent_hook.agent_meta(auditor).get("model") or "inherit"
+
+
+def pick_challenger(store: Store, m: str, f: dict) -> dict:
+    import dev_agent_hook
+    auditor = str(f.get("auditor") or "")
+    amodel = author_model(store, m, auditor)
+    role = CHALLENGER_FOR.get(str(f.get("dimension") or ""))
+    if role and role != auditor:
+        meta = dev_agent_hook.agent_meta(role)
+        return {"agent": role, "model": meta.get("model") or "inherit", "effort": meta.get("effort") or "high",
+                "why": f"another role covering {f.get('dimension')}"}
+    model = OTHER_FAMILY.get(_family(amodel), "opus" if _family(amodel) != "opus" else "sonnet")
+    return {"agent": auditor, "model": model, "effort": "high", "why": f"same role on another model family ({amodel} -> {model})"}
+
+
+def cmd_challenger(store: Store, a: argparse.Namespace) -> None:
+    """Who challenges a critical/high finding (§7): never the author's agent+model."""
+    store.load()
+    f = finding_of(store, a.milestone, a.finding)
+    ch = pick_challenger(store, a.milestone, f)
+    out = {"finding": a.finding, "dimension": f.get("dimension"), "severity": f.get("severity"),
+           "author": {"agent": f.get("auditor"), "model": author_model(store, a.milestone, str(f.get("auditor") or ""))},
+           "challenger": ch, "output": f".dev/qa/{a.milestone}/challenges/{a.finding}.json"}
+    if a.json:
+        print(json.dumps(out, indent=2))
+    else:
+        print(f"{a.finding} ({f.get('severity')} {f.get('dimension')}, by {f.get('auditor')}): challenge with {ch['agent']} on "
+              f"{ch['model']} / {ch['effort']} ({ch['why']}) · Output file: {out['output']}")
+
+
+def files_fp(store: Store, files: list[str]) -> str:
+    h = hashlib.sha256()
+    for f in sorted(set(files)):
+        p = store.root / f
+        h.update(f.encode() + b"\0")
+        try:
+            h.update(p.read_bytes())
+        except OSError:
+            h.update(b"<missing>")
+    return h.hexdigest()[:16]
+
+
+def challenges_path(store: Store, m: str) -> Path:
+    return store.dev / "qa" / m / "challenges.json"
+
+
+def cmd_challenge(store: Store, a: argparse.Namespace) -> None:
+    """Record a challenger's answer (§7): {"finding": "F-003", "verdict": "agree|dispute|refine", "evidence": "<command and
+    output, or file:line>", "refined": {"severity": "medium"}, "challenger": "<agent>", "model": "<model>"}. Stored in
+    .dev/qa/<M>/challenges.json with a fingerprint of the cited files; dev_score.py --challenges applies it while
+    those files are unchanged. A disputed critical security finding keeps blocking and asks the user."""
+    store.load()
+    if a.milestone not in store.milestones() and a.milestone != "release":
+        fail(f"unknown milestone {a.milestone}")
+    try:
+        raw = json.loads(Path(a.from_file).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        fail(f"cannot read the challenge: {e}")
+    if not isinstance(raw, dict):
+        fail("the challenge must be a JSON object")
+    fid = str(raw.get("finding") or "")
+    f = finding_of(store, a.milestone, fid)
+    verdict = raw.get("verdict")
+    if verdict not in CHALLENGE_VERDICTS:
+        fail(f"verdict must be one of {', '.join(CHALLENGE_VERDICTS)}")
+    evidence = str(raw.get("evidence") or "").strip()
+    if len(evidence) < 8:
+        fail("evidence is required: the command and a summary of its output, or file:line")
+    refined = raw.get("refined") if isinstance(raw.get("refined"), dict) else {}
+    if verdict == "refine" and str(refined.get("severity") or "") not in ("critical", "high", "medium", "low"):
+        fail("refine needs refined.severity (critical, high, medium or low)")
+    agent, model = str(raw.get("challenger") or ""), str(raw.get("model") or "")
+    amodel = author_model(store, a.milestone, str(f.get("auditor") or ""))
+    if not agent:
+        fail("challenger is required (the agent that answered)")
+    if agent == f.get("auditor") and _family(model) == _family(amodel):
+        fail(f"the challenger cannot be the author's own agent and model ({agent} on {amodel}); use `challenger {a.milestone} {fid}`")
+    files = [x for x in ([f.get("file")] + list(f.get("files") or [])) if x]
+    rec = {"finding": fid, "original_id": f.get("original_id") or fid, "auditor": f.get("auditor"), "dimension": f.get("dimension"),
+           "severity": f.get("severity"), "title": f.get("title"), "file": f.get("file"), "line": f.get("line"),
+           "verdict": verdict, "evidence": evidence[:2000], "refined": refined or None, "challenger": agent, "model": model or None,
+           "author_evidence": str(f.get("evidence") or "")[:2000] or None, "files": files, "files_fp": files_fp(store, files), "at": now()}
+    qid = None
+    if verdict == "dispute" and f.get("dimension") == "security" and f.get("severity") == "critical":
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            cmd_add_question(store, argparse.Namespace(
+                text=f"Disputed security finding {fid} ({f.get('title')}): keep the block? Challenger's evidence: {evidence[:300]}",
+                skill="qa", assumption="keep blocking (recommended)", impact="a real critical security flaw would ship",
+                options="keep blocking|release it", recommended="keep blocking", request=None))
+        qid = buf.getvalue().strip()
+        rec["question"] = qid
+    path = challenges_path(store, a.milestone)
+    try:
+        allc = json.loads(store.read_text(path)) if store.file_exists(path) else {}
+    except (OSError, json.JSONDecodeError):
+        allc = {}
+    allc[fid] = rec
+    store.stage(path, json.dumps(allc, indent=2, ensure_ascii=False) + "\n")
+    store.save()
+    store.event("challenge", scope=a.milestone, finding=fid, auditor=tel.scope_token(f.get("auditor") or "-"),
+                challenger=tel.scope_token(agent), model=tel.scope_token(model) if model else None, verdict=verdict,
+                dimension=f.get("dimension"), severity=f.get("severity"))
+    store.log(f"challenge {a.milestone} {fid}: {verdict} by {agent}")
+    effect = {"agree": "stays blocking (fix task)", "refine": f"rewritten as {refined.get('severity')}",
+              "dispute": "not scored and no fix task; listed under Contested (counts toward the debt cap)"}[verdict]
+    if qid:
+        effect = f"still blocking: a disputed critical security finding is the user's decision ({qid} in Needs you)"
+    print(f"{a.milestone} {fid}: {verdict} · {effect}")
+
+
+# ---------------------------------------------------------------- verified facts (.dev/facts.md, conventions.md §2)
+# Same high-signal patterns as checklists/security-secrets.md, plus personal data (e-mail, CPF, card-like numbers).
+SECRET_PATTERNS = [
+    re.compile(r"AKIA[0-9A-Z]{16}"), re.compile(r"-----BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"),
+    re.compile(r"sk_live_[0-9a-zA-Z]{10,}"), re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"), re.compile(r"ghp_[A-Za-z0-9]{36}"),
+    re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"), re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\."),
+    re.compile(r"(?i)(password|passwd|secret|token|api[_-]?key)\s*[:=]\s*[\"']?[^\s\"']{8,}"),
+]
+PII_PATTERNS = [re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b"), re.compile(r"\b(?:\d[ -]?){13,19}\b")]
+
+
+def sensitive(text: str) -> str | None:
+    for rx in SECRET_PATTERNS:
+        if rx.search(text):
+            return "a secret (security-secrets.md patterns)"
+    for rx in PII_PATTERNS:
+        if rx.search(text):
+            return "personal data"
+    return None
+
+
+def facts(store: Store) -> dict:
+    return store.state.setdefault("facts", {})
+
+
+def write_facts_md(store: Store) -> None:
+    out = ["# Verified facts", "", "> Generated by `dev_state.py fact` (conventions.md §2); never edit by hand. One fact per line, with "
+           "its evidence and the commit it was verified on. A fact proven wrong is struck through, never deleted.", ""]
+    for k, f in sorted(facts(store).items(), key=lambda kv: int(kv[0][2:])):
+        tags = (f" [files: {', '.join(f['files'])}]" if f.get("files") else "") + (f" [acs: {', '.join(f['acs'])}]" if f.get("acs") else "")
+        line = f"{k} {f['text']} — evidence: {f['evidence']} @{f.get('sha') or '-'} — {f['date']}, {f['origin']}{tags}"
+        st = f.get("stale")
+        out.append(f"- ~~{line}~~ → contradicted by {st['by']} ({st['evidence']}, {st['date']})" if st else f"- {line}")
+    store.stage(store.dev / "facts.md", "\n".join(out) + "\n")
+
+
+def facts_for(store: Store, files: list[str], acs: list[str], limit: int = 10) -> list[tuple[str, dict]]:
+    """Live facts whose files or ACs cross these (a folder tag covers what is under it), newest first."""
+    want_acs = {x.upper() for a in acs for x in re.findall(r"\bAC-\d+\b", str(a), re.I)}
+    fs = [f.strip().strip("/") for f in files if f.strip()]
+    hits = []
+    for k, f in (store.state.get("facts") or {}).items():
+        if f.get("stale"):
+            continue
+        ff = [x.strip("/") for x in f.get("files") or []]
+        if any(x == y or x.startswith(y + "/") or y.startswith(x + "/") for x in ff for y in fs) or (set(f.get("acs") or []) & want_acs):
+            hits.append((k, f))
+    return sorted(hits, key=lambda kv: (kv[1].get("at") or "", int(kv[0][2:])), reverse=True)[:limit]
+
+
+def cmd_fact(store: Store, a: argparse.Namespace) -> None:
+    """add --text --evidence [--files] [--acs] --origin [--sha] | stale K-nnn --by --evidence | list [--files] [--acs] [--all] [--json]."""
+    store.load()
+    split = lambda v: [x.strip() for x in re.split(r"[,\s]+", v or "") if x.strip()]  # noqa: E731
+    if a.action == "add":
+        text, ev = (a.text or "").strip(), (a.evidence or "").strip()
+        if not text:
+            fail("fact add needs --text")
+        if not ev:
+            fail("a fact needs --evidence: file:line or the command that shows it")
+        why = sensitive(text + " " + ev)
+        if why:
+            fail(f"refused: the fact or its evidence contains {why}; write the fact without it")
+        if not a.origin or not re.fullmatch(r"(T-\d{1,5}|F-\d{1,5}|I-\d{1,5}|qa/M\d+(?:\.\d+)?(?: R\d+)?|M\d+(?:\.\d+)?|release|user)", a.origin):
+            fail("--origin is T-nnn, F-nnn, I-nnn, qa/<M> R<n>, release or user")
+        n = int(store.state.get("next_fact_id", 1))
+        store.state["next_fact_id"] = n + 1
+        fid = f"K-{n:03d}"
+        acs = [x.upper() for x in split(a.acs)]
+        if any(not re.fullmatch(r"AC-\d+", x) for x in acs):
+            fail("--acs takes AC ids")
+        facts(store)[fid] = {"text": text.replace("\n", " ")[:400], "evidence": ev.replace("\n", " ")[:300],
+                             "sha": (a.sha or _git(store, "rev-parse", "--short", "HEAD") or "")[:12] or None, "date": today(),
+                             "at": now(), "origin": a.origin, "files": split(a.files), "acs": acs}
+        write_facts_md(store)
+        store.save()
+        store.event("fact", transition="add", origin={"T": "task", "F": "finding", "I": "issue", "q": "qa", "M": "milestone"}.get(a.origin[0], a.origin))
+        print(fid)
+        return
+    if a.action == "stale":
+        if not a.id or a.id not in facts(store):
+            fail(f"unknown fact {a.id}")
+        if not a.by or not (a.evidence or "").strip():
+            fail("fact stale needs --by <origin> and --evidence")
+        if sensitive(a.evidence):
+            fail("refused: the evidence contains a secret or personal data")
+        facts(store)[a.id]["stale"] = {"by": a.by, "evidence": a.evidence.strip()[:300], "date": today(), "at": now()}
+        write_facts_md(store)
+        store.save()
+        store.event("fact", transition="stale")
+        print(f"{a.id} struck through: contradicted by {a.by}")
+        return
+    rows = facts_for(store, split(a.files), split(a.acs), limit=10 ** 6) if (a.files or a.acs) else \
+        sorted(facts(store).items(), key=lambda kv: int(kv[0][2:]))
+    if not a.all:
+        rows = [(k, f) for k, f in rows if not f.get("stale")]
+    if a.json:
+        print(json.dumps([{"id": k, **f} for k, f in rows], indent=2, ensure_ascii=False))
+        return
+    for k, f in rows:
+        print(f"{k}{' (stale)' if f.get('stale') else ''} {f['text']} — {f['evidence']} @{f.get('sha') or '-'}")
+
+
+# ---------------------------------------------------------------- lessons of method per role (conventions.md §13)
+LESSON_MAX = 8
+AGENT_NAME = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
+
+
+def lessons_path(store: Store, agent: str) -> Path:
+    return store.dev / "lessons" / f"{agent}.md"
+
+
+def lesson_lines(store: Store, agent: str) -> list[str]:
+    p = lessons_path(store, agent)
+    try:
+        text = store.read_text(p) if store.file_exists(p) else ""
+    except OSError:
+        return []
+    return [ln[2:].strip() for ln in text.splitlines() if ln.startswith("- ")]
+
+
+def kit_agent_names() -> set[str]:
+    d = Path(__file__).resolve().parents[3] / "agents"
+    return {p.stem for p in d.glob("*.md")}
+
+
+def write_lessons(store: Store, agent: str, lines: list[str]) -> None:
+    body = [f"# Lessons for {agent}", "", "> Method only, never project facts (those go to .dev/facts.md). Added with the user's "
+            f"confirmation by `dev_state.py lesson add`; at most {LESSON_MAX}. The kit adds them to every prompt of this agent.", ""]
+    store.stage(lessons_path(store, agent), "\n".join(body + [f"- {x}" for x in lines]) + "\n")
+
+
+def lesson_suggestions(store: Store) -> list[dict]:
+    """Method failures the session log shows per agent (conventions.md §13): a dispute rate above 40% in two or more
+    milestones, fixes that did not hold, fence denials, repeated escalations. Each cites its evidence."""
+    try:
+        events = tel.read_events(store.dev)[0]
+    except (OSError, ValueError):
+        return []
+    have = {a: lesson_lines(store, a) for a in kit_agent_names()}
+    dismissed = set(store.state.get("lessons_dismissed") or [])
+    out = []
+    rates = tel.dispute_rates(events)
+    for aud, r in sorted(rates.items()):
+        hot = [sc for sc, x in r["by_scope"].items() if x["challenged"] and x["disputed"] / x["challenged"] > 0.4]
+        if len(hot) >= 2:
+            out.append({"agent": aud, "signal": "dispute_rate", "text": "Reproduce the failure (a test run or file:line evidence) "
+                        "before reporting a high or critical finding; report a suspicion as medium with confidence low.",
+                        "evidence": f"{r['disputed']}/{r['challenged']} findings disputed; above 40% in {', '.join(sorted(hot))}"})
+    deny: dict[str, int] = {}
+    for e in events:
+        if e["event"] == "fence_deny":
+            deny[e.get("agent") or "implementer"] = deny.get(e.get("agent") or "implementer", 0) + 1
+    for ag, n in sorted(deny.items()):
+        if n >= 3:
+            out.append({"agent": ag, "signal": "fence_deny", "text": "Read the task's files: list first; when the change needs "
+                        "another file, stop and report the dependency instead of editing around the fence.",
+                        "evidence": f"{n} edits outside the task's files denied"})
+    reopened = sum(1 for e in events if e["event"] == "task" and e.get("transition") == "reopen")
+    if reopened >= 2:
+        out.append({"agent": "implementer", "signal": "fix_not_held", "text": "Before reporting a fix done, re-run the auditor's "
+                    "reproduction or the test that showed the finding, not only the unit tests you wrote.",
+                    "evidence": f"{reopened} fix tasks reopened because the finding was still open"})
+    esc: dict[str, int] = {}
+    for e in events:
+        if e["event"] == "escalation" and e.get("agent"):
+            esc[e["agent"]] = esc.get(e["agent"], 0) + 1
+    for ag, n in sorted(esc.items()):
+        if n >= 3:
+            out.append({"agent": ag, "signal": "escalations", "text": "Read the whole scope list and the previous findings before "
+                        "judging; say what you could not verify instead of guessing.", "evidence": f"{n} model escalations"})
+    return [x for x in out if x["text"] not in have.get(x["agent"], []) and f"{x['agent']}:{x['signal']}" not in dismissed]
+
+
+def cmd_lesson(store: Store, a: argparse.Namespace) -> None:
+    """add AGENT "<text>" (the user's confirmation) | rm AGENT N | show AGENT (the block skills add to its prompt) |
+    list [--json] | suggest [--json] | dismiss AGENT SIGNAL. add and dismiss take --request P-nnn (the board's decision)."""
+    store.load()
+    if a.action in ("add", "rm", "show", "dismiss") and (not a.agent or not AGENT_NAME.match(a.agent)):
+        fail("give the agent's name (e.g. code-reviewer)")
+    if a.request:
+        import dev_worker as dw
+        x = dw.item(store.root, a.request)
+        if x is None or x.get("action") != "lesson_decision":
+            fail(f"{a.request} is not a lesson decision from the board")
+        args = x["args"]
+        if args.get("agent") != a.agent:
+            fail(f"{a.request} is about {args.get('agent')}, not {a.agent}")
+        if a.action == "add":
+            a.rest = [args.get("text") or ""]
+        elif a.action == "dismiss":
+            a.rest = [args.get("signal") or ""]
+    if a.action == "add":
+        text = " ".join(a.rest).strip()
+        if not text:
+            fail('lesson add needs the text: lesson add <agent> "<method lesson>"')
+        if a.agent not in kit_agent_names():
+            fail(f"unknown agent {a.agent}")
+        if sensitive(text):
+            fail("refused: a lesson is method only; it contains a secret or personal data")
+        cur = lesson_lines(store, a.agent)
+        if len(cur) >= LESSON_MAX:
+            fail(f"{a.agent} already has {LESSON_MAX} lessons: consolidate them first (merge similar ones with `lesson rm` and one "
+                 "`lesson add`), /dev-kit:feedback proposes the consolidation")
+        write_lessons(store, a.agent, cur + [text.replace("\n", " ")[:300]])
+        store.event("lesson", agent=a.agent, transition="add")
+        store.log(f"lesson add {a.agent}")
+        print(f"{a.agent}: lesson {len(cur) + 1} of {LESSON_MAX} added")
+        return
+    if a.action == "rm":
+        cur = lesson_lines(store, a.agent)
+        try:
+            i = int(a.rest[0]) - 1
+            assert 0 <= i < len(cur)
+        except (IndexError, ValueError, AssertionError):
+            fail(f"lesson rm {a.agent} <n>, n from 1 to {len(cur)}")
+        cur.pop(i)
+        write_lessons(store, a.agent, cur)
+        store.event("lesson", agent=a.agent, transition="rm")
+        print(f"{a.agent}: {len(cur)} lesson(s) left")
+        return
+    if a.action == "dismiss":
+        sig = (a.rest or [""])[0]
+        store.state.setdefault("lessons_dismissed", []).append(f"{a.agent}:{sig}")
+        store.save()
+        print(f"{a.agent}: suggestion {sig} dismissed")
+        return
+    if a.action == "show":
+        ls = lesson_lines(store, a.agent)
+        if ls:
+            print(f"Lessons for this role in this project (.dev/lessons/{a.agent}.md):\n" + "\n".join(f"  - {x}" for x in ls))
+        return
+    if a.action == "suggest":
+        sug = lesson_suggestions(store)
+        if a.json:
+            print(json.dumps(sug, indent=2))
+        else:
+            for x in sug:
+                print(f"{x['agent']} ({x['signal']}): {x['text']} · evidence: {x['evidence']}")
+        return
+    allx = {ag: lesson_lines(store, ag) for ag in sorted(kit_agent_names())}
+    allx = {k: v for k, v in allx.items() if v}
+    if a.json:
+        print(json.dumps(allx, indent=2))
+    else:
+        for ag, ls in allx.items():
+            print(f"{ag}: " + " | ".join(ls))
+
+
+# ---------------------------------------------------------------- slots and the file fence (conventions.md §17)
+
+def slot_path(store: Store, n: int) -> Path:
+    return store.dev / "run" / "slots" / f"{n}.json"
+
+
+def cmd_slot(store: Store, a: argparse.Namespace) -> None:
+    """The fence of one agent slot. open N --task T-nnn [--allow PATH…] [--agent NAME]: the files the agent of slot
+    N may edit (the task's `files:`, their tests, changelog.d/, docs/setup.d/ and the .dev/ paths given); dev_fence.py
+    enforces it as a PreToolUse hook. close N. show N. check N --since SHA [--cwd DIR]: the files changed since SHA
+    (committed or not) that fall outside the fence; exit 1 when there is one (the integration check)."""
+    import dev_fence
+    store.load()
+    path = slot_path(store, a.n)
+    if a.action == "open":
+        files: list[str] = []
+        if a.task:
+            t = store.task(a.task)
+            files = list(t.get("files") or [])
+        allow = [x.strip() for x in a.allow or [] if x.strip()]
+        if a.task:
+            allow.append(f".dev/qa/{a.task}/")
+        if not files and not allow:
+            fail("slot open needs --task (its files) or --allow")
+        rec = {"slot": a.n, "task": a.task, "agent": a.agent, "files": files, "allow": allow, "opened_at": now()}
+        store.stage(path, json.dumps(rec, indent=2) + "\n")
+        store.log(f"slot {a.n} open" + (f" for {a.task}" if a.task else ""))
+        print(f"slot {a.n}: fence on {', '.join(files + allow) or '-'}" + (" (+ their tests, changelog.d/, docs/setup.d/)" if files else ""))
+        return
+    try:
+        rec = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        fail(f"slot {a.n} is not open")
+    if a.action == "close":
+        rec["closed_at"] = now()
+        store.stage(path, json.dumps(rec, indent=2) + "\n")
+        print(f"slot {a.n} closed")
+        return
+    if a.action == "show":
+        print(json.dumps(rec, indent=2))
+        return
+    if not a.since:
+        fail("slot check needs --since <sha>")
+    cwd = Path(a.cwd) if a.cwd else store.root
+    try:
+        diff = subprocess.run(["git", "-C", str(cwd), "diff", "--name-only", a.since], capture_output=True, text=True, timeout=30)
+        new = subprocess.run(["git", "-C", str(cwd), "ls-files", "--others", "--exclude-standard"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        fail(f"git failed: {e}")
+    if diff.returncode != 0:
+        fail(f"git diff {a.since} failed: {diff.stderr.strip()}")
+    changed = sorted({x for x in (diff.stdout + "\n" + new.stdout).splitlines() if x.strip()})
+    outside = [f for f in changed if not f.startswith(".dev/") and not dev_fence.allowed(rec, f)]
+    if outside:
+        tel.safe_emit(store.dev, "fence_deny", {"agent": tel.scope_token(rec.get("agent") or "implementer"), "scope": rec.get("task"),
+                                                "tool": "diff", "reason": "outside_files"})  # logged even though the command fails
+        print(f"slot {a.n} ({rec.get('task') or '-'}): {len(outside)} file(s) outside the fence: {', '.join(outside)}")
+        print("integration refused: revert them, or record the dependency and replan the task's files")
+        raise SystemExit(1)
+    print(f"slot {a.n} ({rec.get('task') or '-'}): {len(changed)} changed file(s), all inside the fence")
+
+
 def cmd_unblock(store: Store, a: argparse.Namespace) -> None:
     store.load()
     t = store.task(a.task)
@@ -3130,6 +3597,13 @@ def cmd_brief(store: Store, a: argparse.Namespace) -> None:
     if hist:
         out += ["", f"Previous attempt ({hist.get('result')}, {hist.get('at')}): {hist.get('note') or '-'}"
                 + (f" · its work is on {hist['ref']}: start from it, do not redo what it finished" if hist.get("ref") else "")]
+    known = facts_for(store, t.get("files") or [], t.get("acceptance") or [])
+    if known:
+        out += ["", "Verified facts (.dev/facts.md; trust them, and record what you verify with `dev_state.py fact add`):"]
+        out += [f"  - {k} {f['text']} (evidence: {f['evidence']} @{f.get('sha') or '-'})" for k, f in known]
+    lessons = lesson_lines(store, "implementer")
+    if lessons:
+        out += ["", "Lessons for this role in this project (.dev/lessons/implementer.md):"] + [f"  - {x}" for x in lessons]
     r = safe_route(store, a.task)
     if r:
         out += ["", risk.tier_line(r), router.route_line(r)]
@@ -3745,11 +4219,13 @@ def deferred_findings(store: Store) -> list[dict]:
             except (OSError, json.JSONDecodeError):
                 continue
             items = (data.get("deferred") or []) if isinstance(data, dict) else []
+            items += [{**f, "disputed": True} for f in ((data.get("disputed") or []) if isinstance(data, dict) else [])]  # §7
             items += [f for f in ((data.get("findings") or []) if isinstance(data, dict) else data)
                       if isinstance(f, dict) and str(f.get("severity")) in ("medium", "low")]
             for f in items:
                 if isinstance(f, dict) and not f.get("legacy") and f.get("status") != "closed":
-                    out.append({"scope": scope_dir.name, "id": f.get("id"), "severity": f.get("severity"), "title": f.get("title")})
+                    out.append({"scope": scope_dir.name, "id": f.get("id"), "severity": f.get("severity"), "title": f.get("title"),
+                                **({"disputed": True} if f.get("disputed") else {})})
     return out
 
 
@@ -4097,6 +4573,16 @@ def xref_report(store: Store) -> dict:
     for tid, d in unjust:
         notes.append(f"unjustified_dep: {tid} depends on {d} with no consumes, no common file, not shared and no dep_reasons entry "
                      "(remove the dependency, or add consumes or dep_reasons)")
+    try:
+        denied: dict[str, int] = {}
+        for e in tel.read_events(store.dev)[0]:
+            if e["event"] == "fence_deny" and re.fullmatch(r"T-\d+", str(e.get("scope") or "")):
+                denied[e["scope"]] = denied.get(e["scope"], 0) + 1
+        for tid, n in sorted(denied.items()):
+            notes.append(f"fence_denied: {tid} was denied {n} edit(s) outside its files (its files: may be incomplete; "
+                         "plan the next tasks of that area with the files they really touch)")
+    except (OSError, ValueError):
+        pass
     paths = critical_paths(store.tasks())
     for mid, e in paths.items():
         if e["tasks"] >= 3 and e["critical_path"] * 2 > e["tasks"]:
@@ -4249,8 +4735,16 @@ def checkpoint_needs(store: Store) -> list[dict]:
 
 
 def all_needs(store: Store) -> list[dict]:
-    """Needs-you items the state derives (checkpoints, deferred debt, the issue queue), in that order."""
-    return checkpoint_needs(store) + debt_needs(store) + queue_needs(store)
+    """Needs-you items the state derives (checkpoints, deferred debt, proposed lessons, the issue queue), in that order."""
+    return checkpoint_needs(store) + debt_needs(store) + lesson_needs(store) + queue_needs(store)
+
+
+def lesson_needs(store: Store) -> list[dict]:
+    """The Needs-you items for proposed lessons of method (§13): each one the user approves or dismisses."""
+    try:
+        return [{"kind": "lesson", **x, "actions": ["approve", "dismiss"]} for x in lesson_suggestions(store)]
+    except Exception:  # noqa: BLE001 - a status read never fails on the session log
+        return []
 
 
 def cmd_checkpoint(store: Store, a: argparse.Namespace) -> None:
@@ -5644,6 +6138,20 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--force", action="store_true"); add_risk_flags(s, tier=True)
     s.add_argument("--confirm-frozen", action="store_true", help="add to a milestone frozen for QA (it re-enters the next round)")
     s = sub.add_parser("freeze"); s.set_defaults(fn=cmd_freeze); s.add_argument("milestone")
+    s = sub.add_parser("fact"); s.set_defaults(fn=cmd_fact); s.add_argument("action", choices=["add", "stale", "list"])
+    s.add_argument("id", nargs="?"); s.add_argument("--text"); s.add_argument("--evidence"); s.add_argument("--files")
+    s.add_argument("--acs"); s.add_argument("--origin"); s.add_argument("--sha"); s.add_argument("--by")
+    s.add_argument("--all", action="store_true"); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("lesson"); s.set_defaults(fn=cmd_lesson)
+    s.add_argument("action", choices=["add", "rm", "show", "list", "suggest", "dismiss"]); s.add_argument("agent", nargs="?")
+    s.add_argument("rest", nargs="*"); s.add_argument("--request"); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("challenger"); s.set_defaults(fn=cmd_challenger); s.add_argument("milestone"); s.add_argument("finding")
+    s.add_argument("--json", action="store_true")
+    s = sub.add_parser("challenge"); s.set_defaults(fn=cmd_challenge); s.add_argument("action", choices=["record"])
+    s.add_argument("milestone"); s.add_argument("--from", dest="from_file", required=True)
+    s = sub.add_parser("slot"); s.set_defaults(fn=cmd_slot); s.add_argument("action", choices=["open", "close", "show", "check"])
+    s.add_argument("n", type=int); s.add_argument("--task"); s.add_argument("--agent"); s.add_argument("--allow", action="append")
+    s.add_argument("--since"); s.add_argument("--cwd")
     s = sub.add_parser("affected"); s.set_defaults(fn=cmd_affected); s.add_argument("--acs", required=True); s.add_argument("--json", action="store_true")
     s = sub.add_parser("hard-floor"); s.set_defaults(fn=cmd_hard_floor); s.add_argument("milestone")
     s.add_argument("--from", dest="from_file", required=True, help="JSON file of the checks (- for stdin)")
@@ -5765,7 +6273,7 @@ MUTATING = frozenset({
     cmd_add_task, cmd_fix_tasks, cmd_add_question, cmd_answer_question, cmd_plan_apply, cmd_move_task,
     cmd_new_milestone, cmd_reorder, cmd_gate, cmd_review, cmd_artifact, cmd_release_submit, cmd_release_decide,
     cmd_release_record, cmd_set, cmd_deploy, cmd_preview, cmd_add_issue, cmd_issue, cmd_pull_issues, cmd_cooldown,
-    cmd_freeze, cmd_hard_floor, cmd_ci, cmd_debt, cmd_checkpoint,
+    cmd_freeze, cmd_hard_floor, cmd_ci, cmd_debt, cmd_checkpoint, cmd_slot, cmd_challenge, cmd_fact, cmd_lesson,
 })
 
 

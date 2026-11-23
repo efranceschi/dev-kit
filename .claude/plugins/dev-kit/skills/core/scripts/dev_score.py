@@ -34,6 +34,12 @@ Scoring rule (reproducible, no judgement involved)
   legacy: findings with "legacy": true (existing projects: a problem already present at the brownfield
           baseline and not made worse by the scope) never score or block; they are listed in "legacy"
           so the orchestrator registers them as issues
+  challenges (--challenges .dev/qa/<M>/challenges.json, from `dev_state.py challenge record`): a critical/high
+          finding another role or model disputed with evidence does not score and gets no fix task (listed as
+          "disputed"), except a critical security finding, which keeps blocking; refine rewrites the severity;
+          a challenge holds only while the files it judged are unchanged
+  exit_check: spec-tracer's "exit_check" {"result": "pass"|"fail", "checks": [...]} becomes "exit"; a fail fails
+          the verdict (never a partial score)
   overall = weighted average of the dimensions that ran (weights from .dev/state.json autonomy.quality.weights)
 
 Verdict = pass only when ALL hold
@@ -48,6 +54,7 @@ Output: table on stdout, JSON in --out (default: next to the first input, scores
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -304,8 +311,67 @@ def load_previous(path: Path) -> list[dict]:
     return [f for f in items if isinstance(f, dict) and not f.get("legacy") and not f.get("out_of_scope")]
 
 
+def files_fp(root: Path, files: list[str]) -> str:
+    """Same fingerprint as dev_state.files_fp: a challenge holds while the files it judged are unchanged."""
+    h = hashlib.sha256()
+    for f in sorted(set(files)):
+        h.update(f.encode() + b"\0")
+        try:
+            h.update((root / f).read_bytes())
+        except OSError:
+            h.update(b"<missing>")
+    return h.hexdigest()[:16]
+
+
+def load_challenges(path: Path | None, root: Path) -> list[dict]:
+    """Challenges recorded by `dev_state.py challenge record` whose cited files did not change since (§7)."""
+    if path is None or not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    out = []
+    for c in (data.values() if isinstance(data, dict) else data):
+        if isinstance(c, dict) and c.get("verdict") in ("agree", "dispute", "refine"):
+            if c.get("files_fp") and files_fp(root, c.get("files") or []) != c["files_fp"]:
+                continue  # the code changed: the finding is judged again
+            out.append(c)
+    return out
+
+
+def apply_challenges(dims: dict, challenges: list[dict]) -> tuple[list[dict], list[dict]]:
+    """agree: marked; refine: new severity; dispute: out of the score (listed as disputed), except a critical
+    security finding, which keeps blocking. Returns (disputed, disputed security findings kept)."""
+    disputed, kept_sec = [], []
+    for d, entry in dims.items():
+        keep = []
+        for f in entry["findings"]:
+            c = next((c for c in challenges if c.get("dimension") == d and (
+                (str(c.get("original_id")) == str(f.get("id")) and c.get("auditor") == f.get("_auditor"))
+                or dedupe_key(c) == dedupe_key(f))), None)
+            if c is None:
+                keep.append(f)
+                continue
+            f = {**f, "challenged": c["verdict"], "challenge_evidence": c.get("evidence"), "challenger": c.get("challenger")}
+            if c["verdict"] == "refine":
+                f["severity_reported"] = severity(f)
+                f["severity"] = (c.get("refined") or {}).get("severity") or f["severity"]
+                keep.append(f)
+            elif c["verdict"] == "dispute":
+                if d == "security" and severity(f) == "critical":
+                    kept_sec.append(f)
+                    keep.append(f)
+                else:
+                    disputed.append({**f, "dimension": d})
+            else:
+                keep.append(f)
+        entry["findings"] = keep
+    return disputed, kept_sec
+
+
 def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous: list[dict] | None = None,
-             keep: dict | None = None) -> dict:
+             keep: dict | None = None, challenges: list[dict] | None = None) -> dict:
     dims: dict[str, dict] = {}
     problems: list[str] = []
     marks: dict[str, dict[str, str]] = {}  # dimension -> previous id -> closed|open
@@ -357,6 +423,7 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
                 cur = marks.setdefault(dim, {}).get(pv["id"])
                 # "open" from any auditor wins over "closed"
                 marks[dim][pv["id"]] = "open" if "open" in (state, cur) else "closed"
+    disputed, kept_sec = apply_challenges(dims, challenges) if challenges else ([], [])
     low_cap = quality.get("low_cap")
     delta = None
     conv_prev: dict[str, int] = {}
@@ -437,6 +504,8 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
         if exit_res["result"] == "fail":
             failed = [str(c.get("check")) for c in exit_res["checks"] if c.get("result") != "pass"]
             reasons.append("exit_check failed" + (f": {', '.join(failed)}" if failed else ""))
+    for f in kept_sec:
+        reasons.append(f"security critical {f.get('id')} disputed: it keeps blocking until the user decides (Needs you)")
     reasons += problems
     if not dims:
         reasons.append("no valid auditor results")
@@ -453,11 +522,14 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
         deferred_all += [{**f, "dimension": d} for f in v.pop("_deferred", None) or []]
     if keep is not None:
         keep["findings"], keep["deferred"] = kept_all, deferred_all
+        keep["disputed"] = disputed
     return {
         "scope": scope, "kind": kind, "overall": overall, "cutoff": cut,
         "dimensions": dims, "blockers": blockers, "problems": problems,
         "verdict": "pass" if not reasons else "fail", "reasons": reasons,
         **({"exit": exit_res} if exit_res is not None else {}),
+        **({"disputed": [{k: f.get(k) for k in ("id", "dimension", "severity", "title", "file", "line", "challenger")} for f in disputed]}
+           if disputed else {}),
         **({"delta": delta} if delta is not None else {}),
         **({"convergence": convergence} if convergence is not None else {}),
         **({"conflicts": conflicts} if conflicts else {}),
@@ -483,6 +555,8 @@ def render(res: dict) -> str:
                      + (" · converged" if cv["converged"] else ""))
     for c in res.get("conflicts", []):
         lines.append(f"conflict: {c['dimension']} {c['id']} contradicts {c['contradicts']} (capped at medium; settle with an ADR)")
+    for f in res.get("disputed") or []:
+        lines.append(f"disputed: {f['dimension']} {f['id']} ({f['severity']}) by {f.get('challenger')}: not scored, no fix task (Contested)")
     if res.get("legacy"):
         lines.append(f"legacy: {len(res['legacy'])} pre-existing finding(s) not scored (register them as issues)")
     if res.get("exit"):
@@ -498,7 +572,7 @@ def render(res: dict) -> str:
 
 PUBLIC_KEYS = ("id", "severity", "category", "title", "file", "files", "line", "evidence", "failure_scenario",
                "recommendation", "acceptance_ref", "task_ref", "effort", "confidence", "partial", "in_change",
-               "contradicts", "severity_reported")
+               "contradicts", "severity_reported", "challenged", "challenge_evidence", "challenger")
 
 
 def _public(f: dict) -> dict:
@@ -514,26 +588,28 @@ def _public(f: dict) -> dict:
 
 
 def consolidate(inputs: list[Path], quality: dict, kind: str, scope: str, previous: list[dict] | None,
-                round_n: int) -> dict:
+                round_n: int, challenges: list[dict] | None = None) -> dict:
     """The consolidated findings of a round (qa §3.3): previous findings still open keep their id (auditors mark
     them by id in the next round), new scored findings get the next free ids, new lows and out-of-change findings
     are listed as deferred, legacy ones are left out (they become issues)."""
     keep: dict = {}
-    res = evaluate(inputs, quality, kind, scope, previous, keep)
+    res = evaluate(inputs, quality, kind, scope, previous, keep, challenges)
     if previous is None:  # round 1: merge_findings already merged duplicates per dimension
         keep["deferred"] = []
     used = {str(f.get("id")) for f in keep["findings"] if f.get("_previous")}
     nums = [int(m.group(1)) for x in used for m in [re.match(r"F-(\d+)$", x)] if m]
     nxt = max(nums, default=0) + 1
     order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-    findings = []
-    for f in sorted(keep["findings"], key=lambda f: (not f.get("_previous"), order.get(severity(f), 4), str(f.get("file")), str(f.get("line")))):
+    findings, disputed = [], []
+    pool = keep["findings"] + [{**f, "_disputed": True} for f in keep.get("disputed") or []]
+    for f in sorted(pool, key=lambda f: (not f.get("_previous"), order.get(severity(f), 4), str(f.get("file")), str(f.get("line")))):
         pf = _public(f)
         if not f.get("_previous"):
             pf["original_id"] = f.get("id")
             pf["id"] = f"F-{nxt:03d}"
             nxt += 1
-        findings.append(pf)
+        # disputed findings keep their place in the numbering (ids stay stable when a challenge lands)
+        (disputed if f.get("_disputed") else findings).append(pf)
     deferred = []
     for f in keep["deferred"]:
         pf = _public(f)
@@ -552,7 +628,7 @@ def consolidate(inputs: list[Path], quality: dict, kind: str, scope: str, previo
                 g["same_as"] = [x["id"] for x in group if x is not g]
     carried = sorted(a for d, v in res["dimensions"].items() if v.get("carried") for a in v["auditors"])
     return {"scope": scope, "kind": kind, "round": round_n, "verdict": res["verdict"], "overall": res["overall"],
-            "findings": findings, "deferred": deferred, "legacy": res.get("legacy", []), "carried": carried,
+            "findings": findings, "deferred": deferred, "disputed": disputed, "legacy": res.get("legacy", []), "carried": carried,
             "delta": res.get("delta"), "convergence": res.get("convergence")}
 
 
@@ -632,14 +708,16 @@ def cmd_consolidate(a: argparse.Namespace) -> int:
         except (OSError, ValueError, json.JSONDecodeError) as e:
             print(f"dev_score: cannot read --previous: {e}", file=sys.stderr)
             return 2
-    res = consolidate(paths, load_quality(Path(a.root).resolve()), a.kind, a.scope, previous, a.round)
+    root = Path(a.root).resolve()
+    chal = load_challenges(Path(a.challenges), root) if a.challenges else None
+    res = consolidate(paths, load_quality(root), a.kind, a.scope, previous, a.round, chal)
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     text = json.dumps(res, indent=2, ensure_ascii=False) + "\n"
     (out / "findings.json").write_text(text, encoding="utf-8")
     (out / f"findings-round-{a.round}.json").write_text(text, encoding="utf-8")
     print(f"{a.scope} round {a.round}: {len(res['findings'])} finding(s) ({sum(1 for f in res['findings'] if f.get('previous'))} still open from before), "
-          f"{len(res['deferred'])} deferred, {len(res['legacy'])} legacy, carried: {', '.join(res['carried']) or 'none'} "
+          f"{len(res['deferred'])} deferred, {len(res['disputed'])} disputed, {len(res['legacy'])} legacy, carried: {', '.join(res['carried']) or 'none'} "
           f"-> {out / 'findings.json'}, findings-round-{a.round}.json")
     return 0
 
@@ -694,6 +772,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--json", action="store_true", help="print JSON instead of the table")
     s.add_argument("--previous", help="consolidated findings of the previous round (delta mode)")
     s.add_argument("--round", type=int, help="round number, for the session log")
+    s.add_argument("--challenges", help="challenges.json of dev_state.py challenge record (disputed findings do not score)")
     s.add_argument("inputs", nargs="+")
     c = sub.add_parser("check")
     c.add_argument("--fix", action="store_true", help="write the normalised result back to each file")
@@ -702,7 +781,7 @@ def main(argv: list[str] | None = None) -> int:
     k = sub.add_parser("consolidate")
     k.add_argument("--scope", required=True); k.add_argument("--kind", choices=["gate", "review"], default="gate")
     k.add_argument("--round", type=int, required=True); k.add_argument("--out-dir", required=True)
-    k.add_argument("--root", default="."); k.add_argument("--previous"); k.add_argument("inputs", nargs="+")
+    k.add_argument("--root", default="."); k.add_argument("--previous"); k.add_argument("--challenges"); k.add_argument("inputs", nargs="+")
     e = sub.add_parser("select")
     e.add_argument("--previous", required=True); e.add_argument("--auditors", required=True)
     e.add_argument("--since"); e.add_argument("--changed-from"); e.add_argument("--root", default=".")
@@ -730,7 +809,8 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError, json.JSONDecodeError) as e:
             print(f"dev_score: cannot read --previous: {e}", file=sys.stderr)
             return 2
-    res = evaluate(paths, quality, a.kind, a.scope, previous)
+    res = evaluate(paths, quality, a.kind, a.scope, previous,
+                   challenges=load_challenges(Path(a.challenges), Path(a.root).resolve()) if a.challenges else None)
     out = Path(a.out) if a.out else paths[0].parent / "scores.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(res, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

@@ -1,6 +1,6 @@
 ---
 name: feedback
-description: Evaluation of a dev-kit work session for the user or for the dev-kit author - reads the structured session log (.dev/telemetry.jsonl), grades every stage 0-100 with a fixed formula and its reasons, and writes a timestamped report (what worked, what failed, prioritised suggestions for the kit) plus the matching data export, without any project data. Use when the user asks for the session's feedback, how the run went, an evaluation of the dev-kit, or a report to send to the kit's author. Read-only.
+description: Evaluation of a dev-kit work session for the user or for the dev-kit author - reads the structured session log (.dev/telemetry.jsonl), grades every stage 0-100 with a fixed formula and its reasons, and writes a timestamped report (what worked, what failed, prioritised suggestions for the kit) plus the matching data export, without any project data, and proposes lessons of method per role for the user to approve. Use when the user asks for the session's feedback, how the run went, an evaluation of the dev-kit, or a report to send to the kit's author. Changes nothing else.
 argument-hint: "[--all | --since YYYY-MM-DD]"
 allowed-tools: Read, Write, Bash, Grep, Glob
 ---
@@ -27,15 +27,17 @@ This skill only reads the log and writes two files under `.dev/feedback/`. It do
    - **Comments by stage:** for each stage that ran, "What worked" and "What went wrong", in short bullets based only on the data (rounds, score sequence such as `40 → 47`, forced passes and by whom, errors by code, agents without JSON, durations, tokens) and on the recorded feedback notes of that stage. Quote feedback notes as they are. Do not invent events, do not speculate about causes the log does not show.
    - **Where the cost went:** the 3 most expensive stages and the 3 most expensive agents, with share of the total and the main driver (output on a large model, cache reads of long runs, many rounds); say it is an API-equivalent estimate.
    - **Prioritised suggestions for the kit:** at most 7, ordered by impact: first the `improve` and `failed` notes that repeat across agents or stages, then the lowest-graded stages with the reason that cost the most points. Each one says what to change in the dev-kit (skill, agent prompt, checklist, script, formula), not in the project.
+   - **Lessons per role** (`conventions.md` §13): the lessons `DS lesson list --json` holds (approved by the user) and the proposals of `DS lesson suggest --json`, each with its evidence (counts and ids only). Method failures that repeat across projects are what the author fixes in the agent's prompt.
    - **How the grades are computed:** one line pointing to `conventions.md` §13.
 4. **Privacy check before saving:** the report may only use what the export allows: stage and agent names, models, numbers, ids, codes and the recorded notes. For every sentence you wrote yourself, make sure it has no project name, product terms, entity names, file paths, URLs or people. If in doubt, rewrite it generically ("the PRD review" instead of the feature it discussed).
 5. Write the matching data file: `DS telemetry export --stamp <stamp> <period args>` (→ `.dev/feedback/telemetry-export-<stamp>.json`, never overwriting).
-6. Log `skill_end` with `status` ok (the script measures the duration).
-6b. End with one tip from `DS tip feedback` on its own line (skip if empty).
-7. Show the user, in their language: the grades table, the top 3 suggestions, the two file paths, and a reminder to review both files before sending them to the dev-kit author (nothing is sent automatically).
+6. **Propose the lessons** of `DS lesson suggest --json`, one AskUserQuestion per proposal: "Add this lesson for <agent>?" with Add (recommended), Edit and Dismiss. Add → `DS lesson add <agent> "<text>"`; Edit → ask for the text, then add it; Dismiss → `DS lesson dismiss <agent> <signal>`. When the agent already has 8, propose a consolidation instead (merge similar ones with `lesson rm` and one `lesson add`). Under board mode these questions go to the board (the proposals are already in Needs you).
+7. Log `skill_end` with `status` ok (the script measures the duration).
+7b. End with one tip from `DS tip feedback` on its own line (skip if empty).
+8. Show the user, in their language: the grades table, the top 3 suggestions, the two file paths, and a reminder to review both files before sending them to the dev-kit author (nothing is sent automatically).
 
 ## Rules
-- Read-only apart from the two files in `.dev/feedback/` and the two log events of this skill.
+- Read-only apart from the two files in `.dev/feedback/`, the lessons the user approves in step 6 and the two log events of this skill.
 - Never change a grade, and never add data that is not in the log.
 - Never include project content; the export already excludes it, and the report must not reintroduce it.
 

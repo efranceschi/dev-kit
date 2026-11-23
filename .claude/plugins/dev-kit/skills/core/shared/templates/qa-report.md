@@ -30,6 +30,11 @@ Auditors skipped: {{auditor — reason}}.
 | id | severity | title | file:line | action |
 |---|---|---|---|---|
 
+## Contested
+Critical/high findings another role or model disputed with evidence (`findings.json` → `disputed`): not scored, no fix task, counted toward the deferred debt cap. A disputed critical security finding stays under Blocking and waits for the user's answer.
+| id | severity | title | file:line | auditor's evidence | challenger and evidence |
+|---|---|---|---|---|---|
+
 ## Deferred findings
 New lows of this round and mediums not turned into tasks; promote with `/dev-kit:issue --from <F-id> {{scope}}`.
 

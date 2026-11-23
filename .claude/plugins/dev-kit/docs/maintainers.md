@@ -41,6 +41,8 @@ How the plugin is built, tested and documented. Users do not need this page.
     scripts/dev_docs.py          generated docs and /dev-kit:help answers
     scripts/dev_detect_stack.py  stack detection (manifests, manifests in subfolders, source files); --tools: QA tooling
     scripts/dev_board.py         local board server for /dev-kit:board (page in shared/board/)
+    scripts/dev_fence.py         PreToolUse hook: the file fence of a slotted kit agent (edits outside its task's files) and
+                                 the git commands no kit agent may run (conventions §17); `dev_state.py slot` opens the slot
     scripts/dev_agent_hook.py    hook handler: board's live agents (.dev/run/agents.jsonl), session title, notifications
     scripts/dev_ui.py            Claude Code interface: spinner tips and status line in .claude/settings.local.json
     scripts/dev_statusline.py    the status line itself (read-only, one line, silent outside a dev-kit project)
@@ -53,7 +55,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     tests/                       lint_suite.py, test_dev_state.py, test_dev_state_gaps.py, test_dev_board.py,
                                  test_dev_cost.py, test_dev_docs.py, test_dev_score.py, test_dev_ledger.py, test_dev_spec.py,
                                  test_dev_ui.py, test_dev_worker.py, test_dev_router.py,
-                                 test_v3_foundation.py, test_v3_quality.py (3.0 acceptance criteria, one file per phase)
+                                 test_v3_foundation.py, test_v3_quality.py, test_v3_roles.py (3.0 acceptance criteria, one file per phase)
 ```
 
 Requirements: Python 3.10+ (standard library only) on Linux or macOS. Process checks (`cleanup`, board liveness) read `/proc` and are best effort on macOS; the board server uses `fcntl` and does not run on native Windows (use WSL).

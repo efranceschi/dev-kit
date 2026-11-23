@@ -11,7 +11,8 @@
       {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"", "timeout": 660}]}
     ],
     "PreToolUse": [
-      {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]}
+      {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]},
+      {"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash", "hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_fence.py\""}]}
     ],
     "SubagentStart": [
       {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]}

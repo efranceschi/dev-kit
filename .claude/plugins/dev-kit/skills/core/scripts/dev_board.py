@@ -915,6 +915,10 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "log": sorted(log_tail(_read(store.dev / "log.md")) + live_feed(events), key=lambda r: _ts(r.get("at")), reverse=True)[:LOG_TAIL],
         "costs": costs,
         "decisions": decisions_list(_read(store.dev / "decisions.md")),
+        # verified facts (conventions.md §2), newest first; a stale one stays with what contradicted it
+        "facts": [{"id": k, **{x: f.get(x) for x in ("text", "evidence", "sha", "date", "origin", "files", "acs", "stale")}}
+                  for k, f in sorted((s.get("facts") or {}).items(), key=lambda kv: int(kv[0][2:]) if kv[0][2:].isdigit() else 0,
+                                     reverse=True) if isinstance(f, dict)],
         "docs": docs_list(root),
         "milestone_costs": {m: {k: v.get(k) for k in ("usd", "usd_complete", "tokens", "partial")}
                             for m, v in ms_costs.items() if isinstance(v, dict)},

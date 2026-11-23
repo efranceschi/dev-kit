@@ -1089,7 +1089,8 @@
     const allNeeds = b.needs || [];
     const cneeds = allNeeds.filter((x) => x.kind === "checkpoint");
     const dneeds = allNeeds.filter((x) => x.kind === "debt_over_cap");
-    const qneeds = allNeeds.filter((x) => x.kind !== "checkpoint" && x.kind !== "debt_over_cap");
+    const lneeds = allNeeds.filter((x) => x.kind === "lesson");
+    const qneeds = allNeeds.filter((x) => !["checkpoint", "debt_over_cap", "lesson"].includes(x.kind));
     const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length + waitingRel.length + allNeeds.length;
     // which phase each item belongs to: the tabs show the count, the rows a tag that opens the phase
     const cpPrd = cneeds.filter((x) => x.target === "prd").length;
@@ -1114,6 +1115,7 @@
         h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))), "", false, "construction") : null,
       cneeds.length ? listBlock("Confirm before building", cneeds.map(checkpointRow), "", false, cpPrd ? "conception" : "planning") : null,
       dneeds.length ? listBlock("Deferred debt above the cap", dneeds.map(debtRow), "", false, "construction") : null,
+      lneeds.length ? listBlock("Proposed lessons", lneeds.map(lessonRow), "", false, "construction") : null,
       qneeds.length ? listBlock("Issue queue", qneeds.map(queueNeedRow), "", false, "planning") : null,
       hot.length ? listBlock("Open hotfixes", hot.map((id) => h("li", {}, issueId(id),
         h("span", { text: (data.tasks[id] || (b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))), "", false, "construction") : null,
@@ -1160,6 +1162,24 @@
       h("button", { type: "button", class: "btn btn-sm", text: "Promote to issues", title: "Choose which findings become standard issues", onclick: () => send("promote", "Claude Code lists the findings to promote.") }),
       h("button", { type: "button", class: "btn btn-sm", text: "Accept formally", title: "An ADR lists the accepted findings", onclick: () => send("accept", "Claude Code records the ADR.") }),
       h("button", { type: "button", class: "btn btn-sm", text: "Use the next cool-down", title: "Cool-down is turned on for the next milestone with these items", onclick: () => send("cooldown", "Cool-down turned on for the next milestone.") })));
+  }
+  /** Needs you › a proposed lesson of method for one agent (conventions §13), with the evidence that raised it: approve
+   * (the text can be edited first) or dismiss. An approved lesson goes into every prompt of that agent. */
+  const lessonDrafts = {};
+  function lessonRow(x) {
+    const key = `${x.agent}:${x.signal}`;
+    const head = [h("span", { class: "id", text: x.agent }), h("span", { text: x.text }), h("span", { class: "sub", text: `Why: ${x.evidence}` })];
+    if (!actionsOn()) return h("li", {}, ...head, h("span", { class: "sub" }, "Decide in Claude Code with ", cmd("/dev-kit:feedback")));
+    const sent = inbox().open.find((r) => r.action === "lesson_decision" && r.args && `${r.args.agent}:${r.args.signal}` === key);
+    if (sent) return h("li", {}, ...head, h("div", { class: "sub answer-sent", text: `Sent (${sent.id}): ${sent.args.decision}.` }));
+    const ta = h("textarea", { maxlength: "300", rows: "2", class: "answer-input", "aria-label": `Lesson for ${x.agent}` });
+    ta.value = lessonDrafts[key] !== undefined ? lessonDrafts[key] : x.text;
+    ta.addEventListener("input", () => { lessonDrafts[key] = ta.value; });
+    const send = (args, what) => queue("lesson_decision", { agent: x.agent, signal: x.signal, ...args }).then(() => { delete lessonDrafts[key]; toast(what); }).catch(() => {});
+    return h("li", {}, ...head, h("div", { class: "sub answer", role: "group", "aria-label": `Lesson for ${x.agent}` },
+      h("span", { class: "answer-free" }, ta,
+        h("button", { type: "button", class: "btn btn-sm btn-primary", text: "Approve", onclick: () => { const v = ta.value.trim(); if (v) send({ decision: "approve", text: v }, "Claude Code adds the lesson."); else ta.focus(); } }),
+        h("button", { type: "button", class: "btn btn-sm", text: "Dismiss", onclick: () => send({ decision: "dismiss" }, "Suggestion dismissed.") }))));
   }
   /** Needs you › the issue queue (conventions §15): above the limit, or an issue waiting too long. Every action is a
    * plan draft the user sends; nothing changes the plan by itself. */
@@ -1499,6 +1519,28 @@
     fill($("conc-adrs"), adrs.length ? [h("ul", { class: "list" }, adrs.slice(0, SHOWN).map(adrLi)),
       adrs.length > SHOWN ? h("details", { class: "more-list" }, h("summary", { text: `Show ${adrs.length - SHOWN} older` }), h("ul", { class: "list" }, adrs.slice(SHOWN).map(adrLi))) : null]
       : h("div", { class: "empty", text: "No decision recorded yet. The interview and architecture write them." }));
+    renderFacts();
+  }
+  /** Conception › Facts (conventions §2): verified facts with their evidence, newest first; a contradicted one stays,
+   * struck through, with what contradicted it. The search filters by text, file or AC. */
+  let factQuery = "";
+  function renderFacts() {
+    const all = data.facts || [];
+    $("conc-facts-sub").textContent = all.length ? `${plural(all.filter((f) => !f.stale).length, "fact")} from .dev/facts.md, newest first` : "From .dev/facts.md";
+    const q = factQuery.trim().toLowerCase();
+    const hit = (f) => !q || [f.id, f.text, f.evidence, ...(f.files || []), ...(f.acs || [])].some((v) => String(v || "").toLowerCase().includes(q));
+    const li = (f) => h("li", { class: f.stale ? "muted" : null }, hasDoc("facts.md") ? docLink("facts.md", f.id, f.id, "id") : h("span", { class: "id", text: f.id }),
+      f.stale ? h("s", { text: f.text }) : h("span", { text: f.text }),
+      h("span", { class: "sub", text: `Evidence: ${f.evidence}${f.sha ? ` @${f.sha}` : ""} · ${f.date || ""} · ${f.origin || ""}` }),
+      (f.files || []).length || (f.acs || []).length ? h("span", { class: "q-tags" }, ...(f.files || []).map((x) => h("span", { class: "chip", text: x })), ...(f.acs || []).map((x) => h("span", { class: "chip", text: x }))) : null,
+      f.stale ? h("span", { class: "sub bad", text: `Contradicted by ${f.stale.by}: ${f.stale.evidence}` }) : null);
+    const input = h("input", { type: "search", class: "answer-input", placeholder: "Search facts, files, ACs", "aria-label": "Search facts" });
+    input.value = factQuery;
+    const list = h("ul", { class: "list" });
+    const paint = () => fill(list, all.filter(hit).map(li));
+    input.addEventListener("input", () => { factQuery = input.value; paint(); });
+    paint();
+    fill($("conc-facts"), all.length ? [input, list] : h("div", { class: "empty", text: "No fact recorded yet. Agents record what they verify with evidence." }));
   }
 
   // the CSP forbids style attributes: the width goes through the CSSOM
@@ -1641,6 +1683,7 @@
     if (x.action === "release_decision") return `${a.decision === "approve" ? "Approve" : "Reject"} ${a.release}`;
     if (x.action === "checkpoint") return `${a.decision === "confirm" ? "Confirm" : "Ask for changes in"} ${a.target === "prd" ? "the PRD" : "the plan"}`;
     if (x.action === "debt_decision") return `Deferred debt: ${a.decision}`;
+    if (x.action === "lesson_decision") return `Lesson for ${a.agent}: ${a.decision}`;
     return x.action;
   }
   const REQ_WORD = { pending: "waiting", running: "running", needs_input: "needs your answer", done: "done", failed: "failed", cancelled: "cancelled", stale: "stopped" };
@@ -2464,7 +2507,7 @@
 
   const ddlg = $("doc-dialog");
   const DOC_NAME = { "brief.md": "Brief", "prd.md": "PRD", "architecture.md": "Architecture", "design/ux-flows.md": "UX flows", "design/ui-spec.md": "UI spec",
-    "plan.md": "Plan", "decisions.md": "Decisions", "open-questions.md": "Open questions", "issues.md": "Issues", "log.md": "Log" };
+    "plan.md": "Plan", "decisions.md": "Decisions", "facts.md": "Facts", "open-questions.md": "Open questions", "issues.md": "Issues", "log.md": "Log" };
   let docStack = [];          // documents opened from inside the drawer: "Back" walks them
   let docOrigin = null;       // element the drawer was opened from: focus returns there
   const hasDoc = (p) => (data.docs || []).includes(p);

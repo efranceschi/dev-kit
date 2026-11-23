@@ -340,11 +340,21 @@ def validate(action: object, args: object) -> dict:
         if out["decision"] not in ("promote", "accept", "cooldown"):
             errors.append("decision must be promote, accept or cooldown")
         out["note"] = clean(args.get("note"), "note", 2000, errors, required=False, multiline=True)
+    elif action == "lesson_decision":
+        # a proposed lesson of method for one agent (conventions.md §13): the user approves it (maybe edited) or dismisses it
+        out["agent"] = _pattern(args.get("agent"), "agent", r"^[a-z][a-z0-9-]{1,40}$", errors)
+        out["signal"] = _pattern(args.get("signal"), "signal", r"^[a-z_]{2,30}$", errors)
+        out["decision"] = args.get("decision")
+        if out["decision"] not in ("approve", "dismiss"):
+            errors.append("decision must be approve or dismiss")
+        out["text"] = clean(args.get("text"), "text", 300, errors, required=out["decision"] == "approve")
     else:
-        raise Invalid(["action must be one of run, issue_new, answer_question, plan_draft, release_decision, checkpoint, debt_decision"])
+        raise Invalid(["action must be one of run, issue_new, answer_question, plan_draft, release_decision, checkpoint, debt_decision, "
+                       "lesson_decision"])
     allowed = {"run": {"command"}, "issue_new": {"title", "type", "note"}, "answer_question": {"question", "option", "answer"},
                "plan_draft": {"ops", "base"}, "release_decision": {"release", "decision", "feedback"},
-               "checkpoint": {"target", "decision", "feedback"}, "debt_decision": {"decision", "note"}}[action]  # type: ignore[index]
+               "checkpoint": {"target", "decision", "feedback"}, "debt_decision": {"decision", "note"},
+               "lesson_decision": {"agent", "signal", "decision", "text"}}[action]  # type: ignore[index]
     extra = set(args) - allowed
     if extra:
         errors.append(f"unknown field {sorted(extra)[0]}")
@@ -903,7 +913,8 @@ def describe(x: dict) -> str:
             "plan_draft": f"plan draft ({len(a.get('ops') or [])} change(s))",
             "release_decision": f"{a.get('decision')} {a.get('release')}",
             "checkpoint": f"{a.get('decision')} {a.get('target')}",
-            "debt_decision": f"deferred debt: {a.get('decision')}"}.get(x.get("action"), x.get("action"))
+            "debt_decision": f"deferred debt: {a.get('decision')}",
+            "lesson_decision": f"lesson for {a.get('agent')}: {a.get('decision')}"}.get(x.get("action"), x.get("action"))
     return f"{x['id']} {x['status']}: {what}"
 
 

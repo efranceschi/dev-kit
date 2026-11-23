@@ -28,6 +28,9 @@ Preview / staging link or local run command (from the local preview of conventio
 ## Quality and security
 Release audit overall score vs cut-off and every dimension (`.dev/qa/release/scores.json`), security findings left (none blocking), dependency and licence notes, test suite result, smoke results.
 
+## Facts verified in this release
+The facts `dev_state.py fact list --json` recorded since the last release (K-id, the fact, its evidence), and the ones struck through as contradicted. "None" when there are none.
+
 ## Risks and known limitations
 Open questions, medium/low findings deferred, decisions taken autonomously in this release (ADR ids) the reviewer should look at, and what the production deploy will change (migrations, new env vars by name).
 

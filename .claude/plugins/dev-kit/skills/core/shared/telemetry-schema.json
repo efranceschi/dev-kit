@@ -231,6 +231,30 @@
       "target": "tok",
       "transition": "tok",
       "round": "num"
+    },
+    "fence_deny": {
+      "agent": "tok",
+      "scope": "tok",
+      "tool": "tok",
+      "reason": "tok"
+    },
+    "challenge": {
+      "scope": "tok",
+      "finding": "tok",
+      "auditor": "tok",
+      "challenger": "tok",
+      "model": "tok",
+      "verdict": "tok",
+      "dimension": "tok",
+      "severity": "tok"
+    },
+    "fact": {
+      "transition": "tok",
+      "origin": "tok"
+    },
+    "lesson": {
+      "agent": "tok",
+      "transition": "tok"
     }
   }
 }

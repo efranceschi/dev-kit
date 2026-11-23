@@ -2,6 +2,24 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.0.0-alpha.3 — 2026-11-23
+
+Four items added to the 3.0 specification, delivered before phase 3: blocking findings are challenged before they cost a fix round, what agents verify is kept as facts, implementers are fenced to their task's files by a hook, and each role can learn method lessons the user approves.
+
+### Breaking
+- With plugin hooks on, a kit agent spawned with a `Slot:` whose slot is open (`DS slot open N --task T-xxx`) cannot Edit/Write outside the task's `files:` (their tests by name, `changelog.d/`, `docs/setup.d/` and the slot's `.dev/` outputs allowed), and no kit agent may run `git commit --no-verify`, `git push --force`, `git rebase` or `git reset --hard` (conventions §17).
+- `implement --parallel` runs `DS slot check N --since <base>` before merging a worktree: a changed file outside the task fails the integration.
+
+### Added
+- Challenge of blocking findings (item 17, conventions §7): `DS challenger <M> <F-id> [--json]` picks a challenger that is never the author's agent and model (another role covering the dimension, or the same role on another model family); `DS challenge record <M> --from <json>` stores agree / dispute / refine with evidence in `.dev/qa/<M>/challenges.json`, fingerprinted by the cited files. `dev_score.py score|consolidate --challenges` applies it: a disputed finding is not scored, gets no fix task, is listed as **Contested** (new section of the QA report) with both evidences and counts toward the debt cap; refine rewrites the severity. A disputed critical security finding keeps blocking and opens a question ("keep blocking" recommended). Changing the judged files reopens the finding. Prompt `shared/prompts/challenge.md`; qa and release run it before making fix tasks; `DS telemetry report` shows the dispute rate per auditor.
+- Verified facts (item 18, conventions §2): `DS fact add --text --evidence --origin [--files --acs --sha]`, `fact stale K-nnn --by --evidence`, `fact list [--files --acs --all --json]`, generating `.dev/facts.md` (ids `K-001`…). No evidence, a secret or personal data is refused; a contradicted fact stays, struck through. `brief` lists up to 10 live facts tagged with the task's files or ACs; qa gives auditors the facts of their files; implementer and auditor outputs gain `facts` (and `facts_contradicted`), recorded by the orchestrator; the release dossier lists the release's facts; the board shows them under Conception › Facts with search.
+- File fence (item 19, conventions §17): new hook script `dev_fence.py` (PreToolUse of Edit, Write, MultiEdit, NotebookEdit and Bash); `DS slot open|close|show|check`; the agent hook binds each subagent to the `Slot:` of its prompt (`.dev/run/agent-slots.json`); every denial is a `fence_deny` event, shown in `DS xref` and the telemetry report.
+- Lessons per role (item 20, conventions §13): `.dev/lessons/<agent>.md`, at most 8 each; `DS lesson add|rm|show|list|suggest|dismiss` (add and dismiss take `--request P-nnn`). `lesson suggest` proposes one with its evidence for an auditor disputed above 40% in two milestones, 3+ fence denials, 2+ reopened fixes or 3+ escalations; each is a Needs-you item (**Proposed lessons**: approve, possibly edited, or dismiss; board request `lesson_decision`). `brief` includes the implementer's lessons and every skill that spawns a kit agent adds `lesson show <agent>`; `feedback` proposes them and lists them in its report.
+- Telemetry events `fence_deny`, `challenge`, `fact`, `lesson`.
+
+### Migration
+- Nothing to do: without `slot open` no agent is fenced (only the four git commands are denied for kit agents), projects without challenges score as before, and `facts.md` and `lessons/` appear on first use.
+
 ## 3.0.0-alpha.2 — 2026-11-23
 
 Second phase of 3.0 (quality and process gates): an executable exit check, a deterministic floor with CI as the verdict, a cap on deferred debt, the user's confirmation of the PRD and the plan, scope changes that reach the milestone being built, and a size range for milestones.

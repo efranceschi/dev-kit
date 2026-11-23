@@ -41,6 +41,9 @@ Use exactly these key names and values: `state` (not `status`) in `previous`, th
   "previous": [
     {"id": "F-003", "state": "closed | open", "partial": "true when open but partly fixed (optional)", "evidence": "how you verified it"}
   ],
+  "facts": [
+    {"text": "a fact about the project you verified (optional)", "evidence": "file:line or the command that shows it", "files": ["src/..."]}
+  ],
   "kit_feedback": {
     "worked": [{"area": "qa", "note": "≤140 chars about the dev-kit"}],
     "failed": [],
@@ -62,6 +65,8 @@ Document reviews in delta mode (prd, design, plan, docs; your prompt then also g
 - Review the **changed text** and what it directly affects (a renamed entity, an edited AC and the tasks, screens or metrics that cite it). Do not re-read the whole document looking for new defects: the first round did that.
 - Mark every new finding `"in_change": true` (in or caused by the changed text) or `false` (in text the revision did not touch). A `false` finding below `critical` is recorded but does not score: it waits for a later revision instead of resetting this one.
 - Before recommending a change, check the previous findings: if your recommendation would undo or reverse one that was applied (the earlier fix caused the problem you see), set `"contradicts": "F-nnn"` and explain the trade-off in `recommendation`. Such a finding is capped at `medium`, and the orchestrator settles the trade-off with an ADR instead of starting another round.
+
+`facts` (optional, at most 5): what you **verified** about the project while auditing and the next agent would otherwise rediscover (a limit, how a module behaves, a command that works), each with its evidence; never a suspicion, never a finding, never a secret or personal data. The orchestrator records them in `.dev/facts.md` (`conventions.md` §2). The facts your prompt lists are already verified: trust them unless the code you read contradicts one, and then say so in `notes` with the evidence.
 
 `kit_feedback` (optional): at most 3 items per list, each with an `area` from the list in `conventions.md` §13 (e.g. qa, review, implement, scoring, isolation, prompts, scripts, other) and a `note` of at most 140 characters about **the dev-kit itself** (your instructions, checklists, tools, isolation): never about the project, and never with file paths, URLs, names or data from the project.
 
