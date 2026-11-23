@@ -40,7 +40,7 @@ Subcommands
   unblock T     blocked -> todo
   drop T        drop a task removed by a replan (--reason); it no longer counts for milestones or release
   task-decide T unblock|skip|drop|run [--note] [--request P-nnn]: Needs-you decision on a blocked task or a hotfix
-  flag list|set release_R<n> on|off [--rollback]: release flags (autonomy.release_flags, §12)
+  flag list|set release_R<n> on|off [--rollback]: release flags (autonomy.release_flags, §21)
   prod-check    run the production health check once (--due: only when its interval passed); a failure opens an
                 expedite issue (one per check) and a Needs-you item
   qa-decide M continue|accept|replan [--rounds N] [--note] [--request P-nnn]: QA rounds used up
@@ -181,7 +181,7 @@ DEFAULT_AUTONOMY = {
     # the board's server starts a headless worker session itself (`claude -p "/dev-kit:worker"`) when a request waits
     # and no session takes requests (§17); permission_mode is passed to it, timeout_min ends a run that hangs
     "board_executor": {"auto": True, "permission_mode": "default", "timeout_min": 180},
-    # feature flags per planned release (conventions.md §12): off by default; when on, every release R<n> has the
+    # feature flags per planned release (conventions.md §21): off by default; when on, every release R<n> has the
     # flag release_R<n>, its feature tasks wrap the new behaviour in it, approved milestones go to production with the
     # flag off (production.when per_milestone_flagged), and approving the release turns it on. provider = how the
     # project switches a flag (env var, config file, a flag service), recorded by architecture
@@ -1077,7 +1077,7 @@ def parse_plan(text: str) -> tuple[dict, dict]:
                 task["shared"] = val.strip().lower() not in ("", "no", "false", "0")
             elif key == "flag":
                 if val.strip():
-                    task["flag"] = val.strip()  # the release flag that wraps the new behaviour (§12)
+                    task["flag"] = val.strip()  # the release flag that wraps the new behaviour (§21)
             elif key == "dep_reasons":
                 if val.strip():
                     task["dep_reasons"] = val.strip()  # why each dependency is needed, `T-nnn=<text>; T-mmm=<text>`, §4
@@ -6315,7 +6315,7 @@ def cmd_release_record(store: Store, a: argparse.Namespace) -> None:
               else f"Remove flag {flag_name(rid)}: added to the next release once it is planned")
 
 
-# --------------------------------------------------------------------------- release flags (conventions.md §12)
+# --------------------------------------------------------------------------- release flags (conventions.md §21)
 def flags_cfg(store: Store) -> dict:
     return {**DEFAULT_AUTONOMY["release_flags"], **((store.state.get("autonomy") or {}).get("release_flags") or {})}
 
@@ -6348,7 +6348,7 @@ def flag_problems(store: Store) -> list[str]:
         if not rid or t.get("type") != "feature" or t.get("status") in FINISHED or t.get("lane") == "hotfix":
             continue
         if t.get("flag") != flag_name(rid):
-            out.append(f"{tid}: feature task of {rid} without `flag: {flag_name(rid)}` (release flags are on, §12)"
+            out.append(f"{tid}: feature task of {rid} without `flag: {flag_name(rid)}` (release flags are on, §21)"
                        if not t.get("flag") else f"{tid}: flag {t['flag']} is not the flag of its release ({flag_name(rid)})")
     return out
 
@@ -6426,7 +6426,7 @@ def flag_cleanup_task(store: Store, rid: str) -> str | None:
     return tid
 
 
-# --------------------------------------------------------------------------- production health (conventions.md §12)
+# --------------------------------------------------------------------------- production health (conventions.md §21)
 HEALTH_FILE = "prod-health.json"
 HEALTH_KEEP = 30
 

@@ -20,6 +20,8 @@ Checks
   - every skill has a telemetry stage, and the feedback areas listed in conventions §13 match dev_telemetry.py
   - every "conventions.md §N" reference points to an existing section
   - no skill tells the model to invoke a skill marked disable-model-invocation
+  - no skill measures time or agents by hand (log a duration, note a start time, count the agents it spawned):
+    the scripts and hooks measure
 Exit 0 when clean, 1 on any error.
 """
 from __future__ import annotations
@@ -312,7 +314,9 @@ def contract_checks(claude: Path, core: Path, skill_files: list[Path], agent_fil
     check_commands(claude, core, md_files, err)
 
     # scripts and hooks measure, skills do not (conventions §13): no skill logs durations or agent events itself
-    manual = re.compile(r"`?(agent_spawn|agent_end)`?|duration_s")
+    manual = re.compile(r"`?(agent_spawn|agent_end)`?|duration_s|\b(note|record|write down|measure|track|time|log|compute|calculate"
+                        r"|sum|count)\b[^.\n]{0,50}\b(start(ing)? time|end time|elapsed|duration|how long|wall[- ]clock"
+                        r"|minutes? (it|they) took|agents? (you )?spawn(ed)?|number of agents)\b", re.I)
     for sf in skill_files:
         for i, line in enumerate(sf.read_text(encoding="utf-8").splitlines(), 1):
             if manual.search(line):

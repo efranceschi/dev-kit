@@ -46,7 +46,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     scripts/dev_agent_hook.py    hook handler: board's live agents (.dev/run/agents.jsonl), session title, notifications
     scripts/dev_ui.py            Claude Code interface: spinner tips and status line in .claude/settings.local.json
     scripts/dev_statusline.py    the status line itself (read-only, one line, silent outside a dev-kit project)
-    shared/conventions.md        the rules every skill and agent follows (§0–§20)
+    shared/conventions.md        the rules every skill and agent follows (§0–§21)
     shared/onboarding.md         adoption of an existing codebase (run by start)
     shared/help.json             catalog for help and the generated docs (English only)
     shared/tips.json             contextual tips (English only)
@@ -56,7 +56,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     tests/                       lint_suite.py, test_dev_state.py, test_dev_state_gaps.py, test_dev_board.py,
                                  test_dev_cost.py, test_dev_docs.py, test_dev_score.py, test_dev_ledger.py, test_dev_spec.py,
                                  test_dev_ui.py, test_dev_worker.py, test_dev_router.py,
-                                 test_v3_foundation.py, test_v3_quality.py, test_v3_roles.py, test_v3_flow.py, test_v3_board.py, test_v3_ops.py (3.0 acceptance criteria, one file
+                                 test_v3_foundation.py, test_v3_quality.py, test_v3_roles.py, test_v3_flow.py, test_v3_board.py, test_v3_ops.py, test_v3_cross.py (3.0 acceptance criteria, one file
                                  per phase), test_v3_migration.py on fixtures/v2.6.1/ (2.6.1 projects written by the 2.6.1
                                  scripts; fixtures/v2.6.1/build_fixture_261.py rebuilds them)
 ```

@@ -2,12 +2,24 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.0.0-alpha.8 — 2026-11-23
+
+Cross-cutting changes of the 3.0 specification.
+
+### Changed
+- conventions.md gets §21 "Release flags and production health": the rules of `autonomy.release_flags` and `production.health` moved there from §12, which now points to it; every reference was updated.
+- `/dev-kit:settings` exposes every `autonomy.*` key, the older ones included (`decide_alone`/`always_ask`, `on_park`/`notify_on_park`, `task_time_budget_min`, `commit_per_task`).
+- The lint rejects a skill that measures time or agents by hand in prose (note a start time, log how long something took, count the agents it spawned), not only one that names `agent_spawn`/`duration_s`.
+
+### Tests
+- `test_v3_cross.py`: every autonomy key is in settings, the lint catches manual measuring on a copy of the kit, and §21 holds the flags and the health check.
+
 ## 3.0.0-alpha.7 — 2026-11-23
 
 Fifth phase of 3.0 (operations, item 12): release flags separate the deploy from the release, and production health becomes feedback instead of silence.
 
 ### Added
-- **Release flags** (`autonomy.release_flags` `{"enabled": false, "provider": null}`, conventions §12). `architecture` records the mechanism (env var, config file, flag service) and turns them on; `sync-plan` creates `release_R<n>` (off) for every release not released and warns about a `feature` task of R<n> without `flag: release_R<n>` (new task field, §4); `plan` writes the field and `code-reviewer` checks that the new behaviour runs only with the flag on.
+- **Release flags** (`autonomy.release_flags` `{"enabled": false, "provider": null}`, conventions §21). `architecture` records the mechanism (env var, config file, flag service) and turns them on; `sync-plan` creates `release_R<n>` (off) for every release not released and warns about a `feature` task of R<n> without `flag: release_R<n>` (new task field, §4); `plan` writes the field and `code-reviewer` checks that the new behaviour runs only with the flag on.
 - `production.when` `per_milestone_flagged` (needs release flags): each milestone goes to production after its gate with its release's flag off; `DS deploy` records the flag's state with the deploy and refuses a flag turned on before its release is approved.
 - `DS flag list [--json]` and `DS flag set release_R<n> on|off|removed [--rollback] [--note]`. Approving a flagged release prints the switch to make; `release` turns the flag on in production, runs the smoke checks, then records `flag set … on` and the release. `deploy --rollback R<n>` turns it off without a redeploy (`--rollback` in its history).
 - Once a flagged release is recorded, a `chore` task "Remove flag release_R<n>" goes into the first open milestone of the next release (`source: flag:release_R<n>`); with no next release yet, the next `sync-plan` adds it.
