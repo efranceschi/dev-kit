@@ -1,0 +1,216 @@
+{
+  "$comment": "Allowed keys per telemetry event (conventions.md \u00a713). dev_telemetry.py validates every event against this file; skills reference it instead of listing keys. Kinds: num, bool, tok (id or short lowercase token), counts, dims, delta, mtok, numdict, feedback.",
+  "version": 1,
+  "common": {
+    "duration_s": "num",
+    "round": "num",
+    "feedback": "feedback"
+  },
+  "events": {
+    "agent_end": {
+      "agent": "tok",
+      "model": "tok",
+      "effort": "tok",
+      "slot": "num",
+      "scope": "tok",
+      "status": "tok",
+      "tier": "tok",
+      "risk_score": "num",
+      "tokens": "num",
+      "tokens_in": "num",
+      "tokens_out": "num",
+      "cache_read": "num",
+      "cache_write": "num",
+      "findings": "counts",
+      "parsable": "bool",
+      "skill": "tok",
+      "agent_id": "tok",
+      "source": "tok",
+      "parent_session": "tok"
+    },
+    "agent_result": {
+      "agent": "tok",
+      "scope": "tok",
+      "slot": "num",
+      "parsable": "bool",
+      "findings": "counts",
+      "status": "tok"
+    },
+    "agent_spawn": {
+      "agent": "tok",
+      "model": "tok",
+      "effort": "tok",
+      "slot": "num",
+      "scope": "tok",
+      "background": "bool",
+      "tier": "tok",
+      "risk_score": "num",
+      "skill": "tok",
+      "agent_id": "tok",
+      "source": "tok",
+      "parent_session": "tok"
+    },
+    "cleanup": {
+      "killed": "num",
+      "stale_files": "num",
+      "skipped": "num"
+    },
+    "config": {
+      "key": "tok",
+      "value": "tok"
+    },
+    "cost": {
+      "usd": "num",
+      "tokens": "num",
+      "requests": "num",
+      "period": "tok",
+      "stages": "numdict"
+    },
+    "deploy": {
+      "scope": "tok",
+      "env": "tok",
+      "status": "tok",
+      "commits_behind": "num",
+      "migrations_behind": "num"
+    },
+    "error": {
+      "component": "tok",
+      "code": "tok",
+      "skill": "tok",
+      "agent": "tok"
+    },
+    "escalation": {
+      "agent": "tok",
+      "from": "mtok",
+      "to": "mtok",
+      "consent": "tok"
+    },
+    "flow": {
+      "scope": "tok",
+      "cycle_time_s": "num",
+      "working_time_s": "num",
+      "qa_rounds": "num",
+      "fix_tasks": "num",
+      "fixes_per_task": "num",
+      "deferred_open": "num",
+      "cost_usd": "num",
+      "tokens": "num",
+      "cost_per_task": "num",
+      "orchestration_usd": "num",
+      "agents_usd": "num",
+      "scope_added_after_freeze": "num",
+      "human_wait_s": "num",
+      "tasks": "num"
+    },
+    "gate": {
+      "scope": "tok",
+      "value": "tok",
+      "score": "num",
+      "forced": "bool",
+      "force_source": "tok",
+      "qa_runs": "num"
+    },
+    "issue": {
+      "issue": "tok",
+      "type": "tok",
+      "class": "tok",
+      "transition": "tok",
+      "severity": "tok",
+      "origin": "tok"
+    },
+    "ledger": {
+      "scope": "tok",
+      "review": "num",
+      "reuse": "num",
+      "spot": "num",
+      "no_cache": "bool"
+    },
+    "pause": {
+      "point": "tok",
+      "action": "tok",
+      "outcome": "tok"
+    },
+    "preview": {
+      "scope": "tok",
+      "mode": "tok",
+      "status": "tok"
+    },
+    "release_gate": {
+      "scope": "tok",
+      "transition": "tok",
+      "tasks": "num"
+    },
+    "review": {
+      "scope": "tok",
+      "value": "tok",
+      "score": "num",
+      "forced": "bool",
+      "force_source": "tok"
+    },
+    "route": {
+      "context": "tok",
+      "rule_tier": "tok",
+      "arm": "tok",
+      "reason_code": "tok",
+      "explore": "bool",
+      "agent": "tok"
+    },
+    "scope": {
+      "milestone": "tok",
+      "task": "tok",
+      "transition": "tok"
+    },
+    "score": {
+      "scope": "tok",
+      "kind": "tok",
+      "overall": "num",
+      "cutoff": "num",
+      "verdict": "tok",
+      "dimensions": "dims",
+      "delta": "delta",
+      "blockers": "num",
+      "auditors": "num",
+      "converged": "bool",
+      "conflicts": "num"
+    },
+    "session_feedback": {
+      "trigger": "tok"
+    },
+    "session_start": {
+      "trigger": "tok",
+      "brownfield": "bool",
+      "mode": "tok"
+    },
+    "skill_end": {
+      "skill": "tok",
+      "args_kind": "tok",
+      "scope": "tok",
+      "status": "tok",
+      "parent_session": "tok"
+    },
+    "skill_start": {
+      "skill": "tok",
+      "args_kind": "tok",
+      "scope": "tok",
+      "parent_session": "tok"
+    },
+    "task": {
+      "task": "tok",
+      "transition": "tok",
+      "type": "tok",
+      "milestone": "tok",
+      "parallel": "bool",
+      "tier": "tok",
+      "risk_score": "num"
+    },
+    "telemetry_gap": {
+      "kind": "tok",
+      "skill": "tok",
+      "scope": "tok"
+    },
+    "tip": {
+      "tip": "tok",
+      "context": "tok"
+    }
+  }
+}

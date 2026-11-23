@@ -616,21 +616,21 @@ class TestPlannedReleases(Base):
         self.run_state("release-decide", "R1", "--reject", expect=1)  # feedback required
         out = self.run_state("release-decide", "R1", "--reject", "--feedback", "Unclear duplicate-email error",
                              "--feedback", "Button hidden on mobile").stdout
-        self.assertIn("M4 R1 · Fixes: T-004, T-005", out)
+        self.assertIn("M2.1 R1 · Fixes 1: T-004, T-005", out)
         s = self.state()
-        self.assertEqual(s["release_plan"][0]["milestones"], ["M1", "M2", "M4"])
+        self.assertEqual(s["release_plan"][0]["milestones"], ["M1", "M2", "M2.1"])
         self.assertEqual((s["tasks"]["T-004"]["type"], s["tasks"]["T-004"]["source"]), ("fix", "release:R1"))
         self.assertEqual(s["tasks"]["T-004"]["acceptance"], ["Unclear duplicate-email error"])
         plan = (self.root / ".dev" / "plan.md").read_text(encoding="utf-8")
-        self.assertLess(plan.index("## M4 — R1 · Fixes"), plan.index("## R2 — Payments"))
+        self.assertLess(plan.index("## M2.1 — R1 · Fixes 1"), plan.index("## R2 — Payments"))
         self.assertEqual(self.rel("R1")["status"], "in_progress")
         self.assertEqual(self.run_state("next").stdout.split()[0], "T-004")
-        self.close(("M4", ["T-004", "T-005"]))
+        self.close(("M2.1", ["T-004", "T-005"]))
         self.run_state("release-submit", "R1")
         self.run_state("release-decide", "R1", "--approve")
         self.assertEqual(self.rel("R1")["status"], "deploying_prod")
         self.assertIn("R1 · Fixes", plan)
-        self.assertIn("M1, M2, M4", self.run_state("release-record", "--version", "1.0.0", "--release", "R1").stdout)
+        self.assertIn("M1, M2, M2.1", self.run_state("release-record", "--version", "1.0.0", "--release", "R1").stdout)
         self.assertEqual(self.rel("R1")["status"], "released")
         self.assertEqual(self.state()["releases"][-1]["release"], "R1")
         self.assertEqual(self.run_state("next").stdout.split()[0], "T-003")  # R2 may start now
@@ -1382,7 +1382,7 @@ class TestIssues(Base):
     def test_pull_respects_buffer_and_order_and_never_creates_milestones(self) -> None:
         before = self.milestones()
         for title, cls, sev in (("low polish", "intangible", "low"), ("medium bug", "standard", "medium"),
-                                ("high bug", "standard", "high"), ("another", "standard", "low")):
+                                ("high bug", "standard", "high"), ("another", "standard", "medium")):
             self.add("--type", "bug" if "bug" in title else "improvement", "--class", cls, "--title", title, "--severity", sev)
         out = self.run_state("pull-issues", "M2").stdout     # M2 has 1 planned task -> ceil(20%) = 1
         self.assertIn("pulled 1: I-003", out)                # standard, highest severity first
@@ -1438,7 +1438,7 @@ class TestIssues(Base):
         self.assertIn("Issues: 0 hotfix · 1 queued (1 standard)", self.run_state("status").stdout)
 
     def test_telemetry_issue_event_has_no_title(self) -> None:
-        self.add("--type", "bug", "--class", "standard", "--title", "Zquxv broken", "--severity", "low")
+        self.add("--type", "bug", "--class", "standard", "--title", "Zquxv broken", "--severity", "medium")
         log = (self.root / ".dev" / "telemetry.jsonl").read_text(encoding="utf-8")
         self.assertIn('"event": "issue"', log)
         self.assertIn('"issue": "I-001"', log)
@@ -1476,7 +1476,7 @@ class TestTips(Base):
         js = json.loads(self.run_state("tip", "status", "--json").stdout)
         self.assertEqual(set(js), {"id", "text", "command"})
         self.run_state("tip", "status", "--lang", "pt-BR", expect=2)  # no language option: tips are English
-        self.assertIn("💡", self.run_state("add-issue", "--type", "bug", "--class", "standard", "--title", "t", "--severity", "low").stdout)
+        self.assertIn("💡", self.run_state("add-issue", "--type", "bug", "--class", "standard", "--title", "t", "--severity", "medium").stdout)
 
 
 class TestBoardPlanEdits(Base):
@@ -1603,7 +1603,7 @@ class TestBoardPlanEdits(Base):
         out = json.loads(self.run_state("plan-apply", "--draft", x["id"], "--json").stdout)
         self.assertTrue(out["ok"] and out["applied"] and out["state_changed_since_draft"])
         self.assertEqual(out["changes"], ["T-003 M2 → M1"])
-        self.run_state("plan-apply", "--draft", "R-404", expect=1)
+        self.run_state("plan-apply", "--draft", "P-404", expect=1)
         self.run_state("plan-apply", "--ops", "[]", expect=1)
         self.run_state("plan-apply", expect=1)
 
@@ -1615,10 +1615,10 @@ class TestQuestionsWithOptions(Base):
 
     def test_options_and_answer(self) -> None:
         qid = self.run_state("add-question", "Which database?", "--options", "Postgres|SQLite", "--recommended", "Postgres",
-                             "--request", "R-004").stdout.strip()
+                             "--request", "P-004").stdout.strip()
         side = json.loads((self.root / ".dev" / "run" / "questions" / f"{qid}.json").read_text())
         self.assertEqual((side["options"], side["recommended"], side["request"], side["answered"]),
-                         (["Postgres", "SQLite"], "Postgres", "R-004", False))
+                         (["Postgres", "SQLite"], "Postgres", "P-004", False))
         self.assertIn("Open questions: 1", self.run_state("status").stdout)
         self.run_state("answer-question", qid, "--answer", "SQLite | for now", "--ref", "ADR-007")
         text = (self.root / ".dev" / "open-questions.md").read_text()

@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 VERSION = 1
-ID_RE = re.compile(r"^(T-\d{1,5}|M\d{1,3}|R\d{1,3}|F-\d{1,5}|Q-\d{1,5}|ADR-\d{1,5}|I-\d{1,5})$")
+ID_RE = re.compile(r"^(T-\d{1,5}|M\d{1,3}(?:\.\d{1,2})?|R\d{1,3}|F-\d{1,5}|Q-\d{1,5}|ADR-\d{1,5}|I-\d{1,5})$")
 TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,39}$")
 
 COUNTS = {"critical", "high", "medium", "low"}
@@ -32,40 +32,13 @@ FEEDBACK_AREAS = {"start", "interview", "prd", "architecture", "design", "plan",
                   "cost", "autopilot", "other"}
 FEEDBACK_LISTS = ("worked", "failed", "improve")
 
-# key -> kind: "num", "bool", "tok" (token or id), "counts", "dims", "delta", "mtok" ({"model","effort"}), "feedback"
-COMMON = {"duration_s": "num", "round": "num", "feedback": "feedback"}
-SCHEMA: dict[str, dict[str, str]] = {
-    "session_start": {"trigger": "tok", "brownfield": "bool", "mode": "tok"},
-    "skill_start": {"skill": "tok", "args_kind": "tok", "scope": "tok"},
-    "skill_end": {"skill": "tok", "args_kind": "tok", "scope": "tok", "status": "tok"},
-    "agent_spawn": {"agent": "tok", "model": "tok", "effort": "tok", "slot": "num", "scope": "tok", "background": "bool",
-                    "tier": "tok", "risk_score": "num"},
-    "agent_end": {"agent": "tok", "model": "tok", "effort": "tok", "slot": "num", "scope": "tok", "status": "tok",
-                  "tier": "tok", "risk_score": "num",
-                  "tokens": "num", "tokens_in": "num", "tokens_out": "num", "cache_read": "num", "cache_write": "num",
-                  "findings": "counts", "parsable": "bool"},
-    "cost": {"usd": "num", "tokens": "num", "requests": "num", "period": "tok", "stages": "numdict"},
-    "score": {"scope": "tok", "kind": "tok", "overall": "num", "cutoff": "num", "verdict": "tok",
-              "dimensions": "dims", "delta": "delta", "blockers": "num", "auditors": "num",
-              "converged": "bool", "conflicts": "num"},
-    "gate": {"scope": "tok", "value": "tok", "score": "num", "forced": "bool", "force_source": "tok", "qa_runs": "num"},
-    "review": {"scope": "tok", "value": "tok", "score": "num", "forced": "bool", "force_source": "tok"},
-    "task": {"task": "tok", "transition": "tok", "type": "tok", "milestone": "tok", "parallel": "bool",
-             "tier": "tok", "risk_score": "num"},
-    "route": {"context": "tok", "rule_tier": "tok", "arm": "tok", "reason_code": "tok", "explore": "bool", "agent": "tok"},
-    "pause": {"point": "tok", "action": "tok", "outcome": "tok"},
-    "escalation": {"agent": "tok", "from": "mtok", "to": "mtok", "consent": "tok"},
-    "preview": {"scope": "tok", "mode": "tok", "status": "tok"},
-    "deploy": {"scope": "tok", "env": "tok", "status": "tok", "commits_behind": "num", "migrations_behind": "num"},
-    "release_gate": {"scope": "tok", "transition": "tok", "tasks": "num"},
-    "cleanup": {"killed": "num", "stale_files": "num", "skipped": "num"},
-    "config": {"key": "tok", "value": "tok"},
-    "issue": {"issue": "tok", "type": "tok", "class": "tok", "transition": "tok", "severity": "tok", "origin": "tok"},
-    "tip": {"tip": "tok", "context": "tok"},
-    "error": {"component": "tok", "code": "tok", "skill": "tok", "agent": "tok"},
-    "session_feedback": {"trigger": "tok"},
-    "ledger": {"scope": "tok", "review": "num", "reuse": "num", "spot": "num", "no_cache": "bool"},
-}
+# key -> kind: "num", "bool", "tok" (token or id), "counts", "dims", "delta", "mtok" ({"model","effort"}), "feedback".
+# The allowlist lives in shared/telemetry-schema.json (one source for the scripts, the skills and the docs).
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / "shared" / "telemetry-schema.json"
+_DOC = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+COMMON: dict[str, str] = _DOC["common"]
+SCHEMA: dict[str, dict[str, str]] = _DOC["events"]
+NULLABLE = {"duration_s"}  # recorded as null when the script could not measure it (telemetry_gap)
 
 PATH_RE = re.compile(r"[/\\]|\b\w+\.(py|ts|tsx|js|jsx|md|json|ya?ml|toml|sql|sh|css|html|go|rs|java|rb|php|cs)\b", re.I)
 URL_RE = re.compile(r"https?://|www\.|\b[a-z0-9-]+\.(com|org|net|io|dev|app|br)\b", re.I)
@@ -198,9 +171,12 @@ def validate(event: str, fields: dict, deny: set[str]) -> dict:
     out = {}
     for k, v in fields.items():
         if v is None:
+            if k in NULLABLE and k in allowed:
+                out[k] = None
             continue
         if k not in allowed:
-            raise ValueError(f"key {k!r} is not allowed in {event} events")
+            raise ValueError(f"key {k!r} is not allowed in {event} events; accepted keys: {', '.join(sorted(allowed))}"
+                             f" (shared/telemetry-schema.json)")
         out[k] = check_field(k, allowed[k], v, deny)
     return out
 
@@ -238,6 +214,93 @@ def safe_emit(dev: Path, event: str, fields: dict) -> None:
             emit(dev, event, fields)
     except (ValueError, OSError):
         pass
+
+
+# ---------------------------------------------------------------- skill clock (.dev/run/skills.json)
+# Durations are measured by the scripts, never reported by the skills (conventions.md §13): skill_start pushes the
+# start time on a stack per session and skill+scope, skill_end pops it. The hooks read the innermost open skill to
+# tell which skill an agent ran under.
+
+def claude_session() -> str:
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CLAUDE_SESSION_ID") or ""
+    return re.sub(r"[^A-Za-z0-9_-]", "", sid)[:64] or "-"
+
+
+def _epoch(ts: str) -> float | None:
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _skills_file(dev: Path) -> Path:
+    return dev / "run" / "skills.json"
+
+
+def _rw_skills(dev: Path, fn):
+    """Read-modify-write of skills.json under an exclusive lock; fn(dict) -> result."""
+    import fcntl
+    p = _skills_file(dev)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p.with_suffix(".lock"), "a+") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        res = fn(data)
+        tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(tmp, p)
+        return res
+
+
+def skill_key(skill: object, scope: object, session: str | None = None) -> str:
+    return f"{session or claude_session()}|{skill or '-'}|{scope or '-'}"
+
+
+def skill_clock(dev: Path, kind: str, skill: object, scope: object, session: str | None = None) -> float | None:
+    """skill_start: push now and return None. skill_end: pop and return the seconds since the matching start,
+    or None when there is no start (the caller records a telemetry_gap)."""
+    key, ts = skill_key(skill, scope, session), now()
+
+    def fn(data: dict):
+        stack = data.setdefault(key, [])
+        if kind == "skill_start":
+            stack.append(ts)
+            if len(stack) > 20:
+                del stack[:-20]
+            return None
+        if not stack:
+            data.pop(key, None)
+            return None
+        start = stack.pop()
+        if not stack:
+            data.pop(key, None)
+        a, b = _epoch(start), _epoch(ts)
+        return None if a is None or b is None else max(0, round(b - a))
+
+    try:
+        return _rw_skills(dev, fn)
+    except OSError:
+        return None
+
+
+def open_skills(dev: Path) -> list[dict]:
+    """Skills running now (started, not ended), newest last: [{"session","skill","scope","started_at"}]."""
+    try:
+        data = json.loads(_skills_file(dev).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    out = []
+    for k, starts in (data.items() if isinstance(data, dict) else []):
+        parts = k.split("|")
+        if len(parts) == 3 and isinstance(starts, list):
+            for st in starts:
+                out.append({"session": parts[0], "skill": parts[1], "scope": None if parts[2] == "-" else parts[2], "started_at": st})
+    return sorted(out, key=lambda x: str(x["started_at"]))
 
 
 def scope_token(scope: object) -> str:
@@ -378,7 +441,7 @@ AGENT_STAGE = {"implementer": "implement", "architect": "architecture", "require
 
 def scope_stage(scope: object) -> str | None:
     s = str(scope or "")
-    if re.fullmatch(r"M\d+", s) or re.fullmatch(r"(?i)T-\d+", s) or s.lower().startswith("hotfix-"):
+    if re.fullmatch(r"M\d+(?:\.\d+)?", s) or re.fullmatch(r"(?i)T-\d+", s) or s.lower().startswith("hotfix-"):
         return "qa"
     return {"prd": "prd", "design": "design", "plan": "plan", "ux": "usability", "docs": "docs_release",
             "release": "docs_release"}.get(s)
@@ -392,7 +455,7 @@ def stage_of(e: dict) -> str | None:
         return SKILL_STAGE.get(e.get("skill", ""), None)
     if ev in ("score", "gate", "review"):
         return scope_stage(e.get("scope"))
-    if ev in ("agent_spawn", "agent_end"):
+    if ev in ("agent_spawn", "agent_end", "agent_result"):
         return scope_stage(e.get("scope")) or AGENT_STAGE.get(e.get("agent", ""))
     if ev in ("task", "route"):
         return "implement"
@@ -411,8 +474,11 @@ def stage_of(e: dict) -> str | None:
     return None
 
 
-def stage_report(events: list[dict], state: dict) -> dict:
-    """Deterministic grade per stage (conventions.md §13), with the reasons that produced it."""
+def stage_report(events: list[dict], state: dict, cycles: list[dict] | None = None, tokens: dict | None = None) -> dict:
+    """Deterministic grade per stage (conventions.md §13), with the reasons that produced it.
+    cycles: the milestones the period touched, over their whole history (dev_state.session_cycles); the qa stage
+    is capped by the lowest cycle grade, so a gate passed after many rounds and fixes is not graded 100.
+    tokens: tokens per stage from the transcripts (dev_cost.stage_tokens), the same source as the cost report."""
     max_rounds = int((state.get("autonomy") or {}).get("max_fix_rounds_per_gate", 3))
     max_review = int((state.get("autonomy") or {}).get("max_review_rounds", max_rounds))
     review_scopes: set[str] = set()
@@ -437,6 +503,8 @@ def stage_report(events: list[dict], state: dict) -> dict:
             x["tokens"] += e.get("tokens", 0) or 0
             if e.get("parsable") is False:
                 x["unparsable"] += 1
+        elif ev == "agent_result" and e.get("parsable") is False:
+            x["unparsable"] += 1
         elif ev == "skill_end":
             x["duration_s"] += e.get("duration_s", 0) or 0
             stt = e.get("status", "ok")
@@ -497,6 +565,11 @@ def stage_report(events: list[dict], state: dict) -> dict:
             if fb:
                 score += fb
                 reasons.append(f"feedback ({'+' if fb > 0 else ''}{fb})")
+            if s == "qa" and cycles:
+                worst = min(cycles, key=lambda c: c["cycle_grade"])
+                if worst["cycle_grade"] < score:
+                    reasons.append(f"cycle {worst['milestone']}: " + ", ".join(worst["cycle_reasons"]) + f" (cap {worst['cycle_grade']})")
+                    score = worst["cycle_grade"]
             if any(v == "fail" for v in x["final"].values()):
                 if score > 60:
                     reasons.append("not passed yet (cap 60)")
@@ -504,13 +577,19 @@ def stage_report(events: list[dict], state: dict) -> dict:
             score = max(0, min(100, score))
         out.append({
             "stage": s, "label": STAGE_LABEL[s], "ran": ran, "score": score if ran else None, "reasons": reasons,
-            "agents": x["agents"], "duration_s": x["duration_s"], "tokens": x["tokens"],
+            "agents": x["agents"], "duration_s": x["duration_s"],
+            "tokens": (tokens.get(s) or {}).get("tokens", 0) if tokens is not None else x["tokens"],
             "rounds": x["rounds"], "scores": x["scores"], "errors": x["errors"],
             "feedback": {k: v for k, v in x["feedback"].items() if v},
         })
     graded = [r["score"] for r in out if r["ran"]]
     return {"stages": out, "overall": round(sum(graded) / len(graded)) if graded else None,
-            "general_feedback": {k: v for k, v in general.items() if v}}
+            "general_feedback": {k: v for k, v in general.items() if v},
+            "cycles": [{k: c.get(k) for k in ("milestone", "gate", "score", "qa_rounds", "fix_tasks", "fixes_per_task",
+                                              "deferred_open", "cycle_time_s", "working_time_s", "cost_usd", "cost_per_task",
+                                              "scope_added_after_freeze", "human_wait_s", "cycle_grade", "cycle_reasons")}
+                       for c in cycles or []],
+            "orchestration_tokens": (tokens or {}).get("orchestration", {}).get("tokens") if tokens is not None else None}
 
 
 def render_report(rep: dict) -> str:
@@ -519,4 +598,11 @@ def render_report(rep: dict) -> str:
         g = "—" if r["score"] is None else str(r["score"])
         lines.append(f"{r['label']:<32}{g:>6}  {' · '.join(r['reasons'])}")
     lines.append(f"{'overall':<32}{'—' if rep['overall'] is None else rep['overall']:>6}")
+    for c in rep.get("cycles") or []:
+        lines.append(f"{c['milestone']}: final state {c['score'] if c.get('score') is not None else '—'} · cycle: "
+                     f"{c['qa_rounds']} rounds, {c['fix_tasks']} fixes, {c['deferred_open']} deferred"
+                     + (f", {c['scope_added_after_freeze']} after freeze" if c.get("scope_added_after_freeze") else "")
+                     + (f", {round(c['cycle_time_s'] / 3600, 1)} h" if c.get("cycle_time_s") else "")
+                     + (f", US$ {c['cost_usd']:.2f}" if c.get("cost_usd") is not None else "")
+                     + f" · cycle grade {c['cycle_grade']}")
     return "\n".join(lines)

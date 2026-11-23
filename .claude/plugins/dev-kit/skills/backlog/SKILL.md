@@ -28,6 +28,8 @@ Read-only: this skill changes nothing.
    - **Deferred findings:** count by severity and the 5 most relevant (scope, id, severity, title).
    - **Deploy:** the `Production:` drift line(s).
    - **Warnings:** e.g. expedite overused.
+   - **Needs you** (`needs` in the JSON): "queue above the limit" with the milestone of the queue it would plan (`M<n> — Issues`, the issues it would take), and issues aging without being scheduled (schedule in the next milestone, park, or won't fix). These are offers: nothing changes until the user picks one (on the board, or here: the queue milestone through `/dev-kit:plan` or a plan draft; park with `DS issue I-nnn --status parked`).
+   - **Parked:** count and ids (`parked`); they never enter a milestone until scheduled.
 3. **Suggested next step:** one or two lines, recommended option first with the reason, chosen in this order: open hotfix → `/dev-kit:implement <task>`; blocked tasks or parked questions → `/dev-kit:interview --gaps`; milestone in progress → `/dev-kit:implement` (or `/dev-kit:autopilot`); a relevant deferred finding → `/dev-kit:issue --from <F-id> <scope>`; maintenance mode with queued issues → `/dev-kit:issue --schedule <I-id> <open maintenance milestone>`; production behind → `/dev-kit:deploy`.
 4. Log `skill_end`. End with one tip from `DS tip backlog` (or `DS tip expedite_overuse` when that warning is present), on its own line; skip if empty. (`DS backlog --json` prints no tip, so this is the only one.)
 

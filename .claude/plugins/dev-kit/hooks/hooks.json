@@ -2,22 +2,25 @@
   "modules": ["./status-pane.tsx"],
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"" } ] }
+      {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]}
     ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"" } ] }
+      {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]}
     ],
     "PermissionRequest": [
-      { "hooks": [ { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"", "timeout": 660 } ] }
+      {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"", "timeout": 660}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]}
     ],
     "SubagentStart": [
-      { "hooks": [ { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"" } ] }
+      {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]}
     ],
     "SubagentStop": [
-      { "hooks": [ { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"" } ] }
+      {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]}
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"" } ] }
+      {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]}
     ]
   }
 }

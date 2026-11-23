@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -39,9 +40,12 @@ class Base(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def sh(self, script: Path, *args: str, expect: int = 0) -> subprocess.CompletedProcess:
+    def sh(self, script: Path, *args: str, expect: int = 0, at: str | None = None) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in os.environ.items() if k != "DEV_KIT_NOW"}
+        if at:
+            env["DEV_KIT_NOW"] = at  # pinned clock: the script measures skill durations itself
         proc = subprocess.run([sys.executable, "-I", str(script), "--root", str(self.root), *args],
-                              capture_output=True, text=True, cwd=self.root)
+                              capture_output=True, text=True, cwd=self.root, env=env)
         self.assertEqual(proc.returncode, expect, msg=f"{args}\n{proc.stdout}\n{proc.stderr}")
         return proc
 
@@ -125,7 +129,8 @@ class TestTime(Base):
                        line("q4", "claude-sonnet-5-5", "2026-11-18T11:10:00Z", agent_id="a2"))
         self.write_sub("a3", "test-auditor", line("q5", "claude-sonnet-5-5", "2026-11-18T12:00:00Z", agent_id="a3") +
                        line("q6", "claude-sonnet-5-5", "2026-11-18T12:30:00Z", agent_id="a3"))
-        self.sh(STATE, "event", "skill_end", "--set", "skill=qa", "--set", "status=ok", "--set", "duration_s=2400")
+        self.sh(STATE, "event", "skill_start", "--set", "skill=qa", at="2026-11-18T12:00:00Z")
+        self.sh(STATE, "event", "skill_end", "--set", "skill=qa", "--set", "status=ok", at="2026-11-18T12:40:00Z")
         (self.root / "src").mkdir()
         (self.root / "src" / "a.py").write_text("x = 1\n")
         self.sh(STATE, "ledger", "plan", "--prefix", "audit:code", "--files", "src/a.py")

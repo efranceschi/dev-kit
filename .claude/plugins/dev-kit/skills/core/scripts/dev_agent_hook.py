@@ -21,6 +21,12 @@ Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit, Permis
   until answered), the hook waits up to 10 minutes for Allow, Allow for this session or Deny, and answers Claude
   Code with it; no answer is a denial. Anywhere else it returns nothing and Claude Code's own prompt applies.
 
+- PreToolUse (Agent tool), SubagentStart, SubagentStop: the session log's agent_spawn / agent_end events
+  (conventions.md §13), written here so no skill has to: agent, model and effort (from the kit agent's frontmatter,
+  or the model the Agent call asked for), the skill running it (innermost open skill in .dev/run/skills.json),
+  scope (the `Scope:` line of the prompt, read at PreToolUse and kept as a token only), round (a milestone's QA
+  round), duration and tokens (from the subagent's own transcript).
+
 Privacy: only ids, the agent type and the subagent transcript's path are kept; prompts, messages and tool data in the payload are ignored, except
 the tool and target of a permission request while it waits on the board.
 It never fails a hook (always exits 0) and does nothing outside a dev-kit project (no .dev/state.json).
@@ -74,6 +80,134 @@ def subagent_transcript(payload: dict) -> str | None:
     if not (SUBAGENT_FILE.fullmatch(p.name) and p.parent.name == "subagents" and p.is_absolute()) or CONTROL.search(str(p)):
         return None
     return str(p)
+
+
+SCOPE_RE = re.compile(r"(?m)^\s*Scope:\s*(T-\d{1,5}|M\d{1,3}(?:\.\d{1,2})?|hotfix-T-\d{1,5})\b")
+AGENT_TOOLS = ("Agent", "Task")
+KIT_DIR = Path(__file__).resolve().parents[3]
+
+
+def agent_meta(agent_type: str) -> dict:
+    """model and effort of a kit agent, from its frontmatter (agents/<name>.md); {} for other agents."""
+    name = agent_type.removeprefix("dev-kit:")
+    p = KIT_DIR / "agents" / f"{name}.md"
+    if not re.fullmatch(r"[a-z0-9-]{1,60}", name) or not p.is_file():
+        return {}
+    out = {}
+    try:
+        head = p.read_text(encoding="utf-8").split("---", 2)[1]
+    except (OSError, IndexError):
+        return {}
+    for line in head.splitlines():
+        k, _, v = line.partition(":")
+        if k.strip() in ("model", "effort"):
+            out[k.strip()] = tok(v.strip()).lower()
+    return out
+
+
+def pending_path(dev: Path) -> Path:
+    return dev / "run" / "agent-pending.jsonl"
+
+
+def note_pending(dev: Path, payload: dict) -> None:
+    """PreToolUse of the Agent tool: keep the scope and the model asked for until SubagentStart pairs them."""
+    ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    m = SCOPE_RE.search(str(ti.get("prompt") or "")) or SCOPE_RE.search("Scope: " + str(ti.get("description") or "").split(" ")[0])
+    rec = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "session": tok(payload.get("session_id")),
+           "agent": tok(ti.get("subagent_type") or "general-purpose"), "scope": m.group(1) if m else None,
+           "model": tok(ti.get("model")).lower() or None}
+    p = pending_path(dev)
+    p.parent.mkdir(exist_ok=True)
+    lines = p.read_text(encoding="utf-8").splitlines()[-50:] if p.exists() else []
+    lines.append(json.dumps(rec, separators=(",", ":")))
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def take_pending(dev: Path, session: str, agent: str) -> dict:
+    p = pending_path(dev)
+    if not p.exists():
+        return {}
+    recs = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        try:
+            recs.append(json.loads(line))
+        except json.JSONDecodeError:
+            pass
+    i = next((n for n, r in enumerate(recs) if r.get("session") == session and r.get("agent") == agent), None)
+    if i is None:
+        return {}
+    rec = recs.pop(i)
+    p.write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in recs), encoding="utf-8")
+    return rec
+
+
+def agents_log(dev: Path) -> list[dict]:
+    out = []
+    try:
+        for line in (dev / "run" / "agents.jsonl").read_text(encoding="utf-8").splitlines():
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+    except OSError:
+        pass
+    return out
+
+
+def _secs(a: str, b: str) -> float | None:
+    try:
+        f = "%Y-%m-%dT%H:%M:%SZ"
+        return max(0.0, (datetime.strptime(b, f) - datetime.strptime(a, f)).total_seconds())
+    except (TypeError, ValueError):
+        return None
+
+
+def emit_agent_event(dev: Path, event: str, payload: dict) -> None:
+    """agent_spawn at SubagentStart, agent_end at SubagentStop, in the session log (never fails the hook)."""
+    import dev_telemetry as tel
+    session, aid = tok(payload.get("session_id")), tok(payload.get("agent_id")).lower()
+    agent = tok(payload.get("agent_type")) or "subagent"
+    log = agents_log(dev)
+    start = next((r for r in reversed(log) if r.get("event") == "agent_start" and r.get("agent_id") == tok(payload.get("agent_id"))), None)
+    if event == "agent_start":
+        pend = take_pending(dev, session, agent)
+        meta = agent_meta(agent)
+        fields = {"agent": agent.removeprefix("dev-kit:").lower(), "agent_id": aid or None, "source": "hook",
+                  "model": pend.get("model") or meta.get("model") or "inherit", "effort": meta.get("effort"),
+                  "scope": pend.get("scope")}
+        open_sk = [x for x in tel.open_skills(dev) if x["session"] in (session, "-")] or tel.open_skills(dev)
+        if open_sk:
+            fields["skill"] = tok(open_sk[-1]["skill"]).lower() or None
+            fields["scope"] = fields["scope"] or open_sk[-1]["scope"]
+        sc = str(fields.get("scope") or "")
+        if re.fullmatch(r"M\d+(?:\.\d+)?", sc):
+            try:
+                st = json.loads((dev / "state.json").read_text(encoding="utf-8"))
+                fields["round"] = int(((st.get("milestones") or {}).get(sc) or {}).get("qa_runs", 0)) + 1
+            except (OSError, json.JSONDecodeError, ValueError, TypeError, AttributeError):
+                pass
+        if fields["scope"] and not tel.ID_RE.match(str(fields["scope"])):
+            fields["scope"] = tel.scope_token(fields["scope"])
+        # remember what the spawn said, for the end event
+        payload["_spawn"] = fields
+        tel.safe_emit(dev, "agent_spawn", fields)
+        return
+    spawn = next((e for e in reversed(tel.read_events(dev)[0]) if e["event"] == "agent_spawn" and e.get("agent_id") == aid), {}) if aid else {}
+    fields = {k: spawn.get(k) for k in ("agent", "agent_id", "model", "effort", "scope", "skill", "round")}
+    fields.update(agent=fields.get("agent") or agent.removeprefix("dev-kit:").lower(), source="hook", status="ok",
+                  duration_s=_secs(start["ts"], datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")) if start else None)
+    tr = subagent_transcript(payload)
+    if tr and Path(tr).is_file():
+        try:
+            import dev_cost
+            rows = dev_cost.parse_file(Path(tr), agent, aid)
+            fields.update(tokens_in=sum(r["input"] for r in rows), tokens_out=sum(r["output"] for r in rows),
+                          cache_read=sum(r["cache_read"] for r in rows),
+                          cache_write=sum(r["cache_write_5m"] + r["cache_write_1h"] for r in rows))
+            fields["tokens"] = fields["tokens_in"] + fields["tokens_out"] + fields["cache_read"] + fields["cache_write"]
+        except Exception:  # noqa: BLE001 - tokens are a bonus; the event is written without them
+            pass
+    tel.safe_emit(dev, "agent_end", fields)
 
 
 def record_agent(dev: Path, event: str, payload: dict) -> None:
@@ -262,6 +396,16 @@ def main() -> int:
         out = None
         if name in EVENTS:
             record_agent(dev, EVENTS[name], payload)
+            if name in ("SubagentStart", "SubagentStop"):
+                try:
+                    emit_agent_event(dev, EVENTS[name], payload)
+                except Exception:  # noqa: BLE001 - the session log must never break a hook
+                    pass
+        if name == "PreToolUse" and payload.get("tool_name") in AGENT_TOOLS:
+            try:
+                note_pending(dev, payload)
+            except Exception:  # noqa: BLE001
+                pass
         if name == "SessionStart" and payload.get("source", "startup") == "startup" and ui_flags(dev).get("title"):
             out = session_banner(root)
         elif name == "Stop":

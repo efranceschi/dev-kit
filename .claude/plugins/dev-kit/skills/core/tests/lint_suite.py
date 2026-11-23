@@ -310,6 +310,13 @@ def contract_checks(claude: Path, core: Path, skill_files: list[Path], agent_fil
     md_files = list(skill_files) + list(agent_files) + shared_md + docs_md + [p for p in (claude / "README.md",) if p.exists()]
     check_commands(claude, core, md_files, err)
 
+    # scripts and hooks measure, skills do not (conventions §13): no skill logs durations or agent events itself
+    manual = re.compile(r"`?(agent_spawn|agent_end)`?|duration_s")
+    for sf in skill_files:
+        for i, line in enumerate(sf.read_text(encoding="utf-8").splitlines(), 1):
+            if manual.search(line):
+                err(f"{sf.relative_to(claude)}:{i}: skills do not measure time or agents (the scripts and hooks do, conventions §13)")
+
     skills = {}
     for sf in skill_files:
         fm, _ = frontmatter(sf.read_text(encoding="utf-8"))

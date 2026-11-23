@@ -28,9 +28,10 @@ Subcommands (executor side)
                 needs the user; exit 3 with the reason otherwise
 
 Files, all in <project>/.dev/run/, each with one writer, written atomically (tmp + rename):
-  inbox/R-nnn.json        the request, immutable (board, or continuous mode)
-  inbox/R-nnn.state.json  status, timestamps, note (executor); absent = pending
-  inbox/R-nnn.cancel      cancel flag (board); a pending request is cancelled at once, a running one at the next
+  inbox/P-nnn.json        the request, immutable (board, or continuous mode); before 3.0 named R-nnn (still read,
+                          and shown as P-nnn: R<n> is reserved for releases)
+  inbox/P-nnn.state.json  status, timestamps, note (executor); absent = pending
+  inbox/P-nnn.cancel      cancel flag (board); a pending request is cancelled at once, a running one at the next
                           safe point
   worker.json             executor heartbeat (executor)
   worker-armed.json       the Claude Code process that listens (executor: arm)
@@ -77,10 +78,10 @@ APPROVAL_TARGET = 300         # characters of the command or path shown on the b
 FINISHED = ("done", "failed", "cancelled", "stale")
 OPEN = ("pending", "running", "needs_input")
 EXECUTOR_STATES = ("idle", "running", "sleeping", "offline")
-REQ_ID = re.compile(r"^R-\d{3,6}$")
+REQ_ID = re.compile(r"^[PR]-\d{3,6}$")  # P-nnn; P-nnn read for requests made before 3.0
 APPROVAL_ID = re.compile(r"^A-[0-9a-f]{8,32}$")
 TASK = r"T-\d{3,5}"
-MILESTONE = r"M\d{1,3}"
+MILESTONE = r"M\d{1,3}(?:\.\d{1,2})?"
 
 # Kit commands the board may ask the executor to run (argument shapes included). Every command that
 # dev_state.next_command() returns is one of them.
@@ -101,6 +102,8 @@ PLAN_OPS = {
     "move_milestone": {"milestone": rf"^{MILESTONE}$", "release": r"^R\d{1,3}$"},
     "new_release": {"release": r"^R\d{1,3}$"},
     "drop_release": {"release": r"^R\d{1,3}$"},
+    # Needs you › an issue left waiting (conventions §15): park it, close it as wontfix, or open it again
+    "set_issue_status": {"issue": r"^I-\d{3,5}$", "status": r"^(parked|wontfix|open)$"},
 }
 MAX_OPS = 100
 BIDI = re.compile("[\u200e\u200f\u202a-\u202e\u2066-\u2069]")  # direction overrides hide what text says
@@ -266,6 +269,8 @@ def _plan_ops(ops: object, errors: list[str]) -> list[dict]:
             o["before"] = _pattern(op.get("before"), f"{where}: before", rf"^{TASK}$", errors)
         if kind == "schedule_issue":
             o["force"] = op.get("force") is True
+        if kind in ("schedule_issue", "move_task") and op.get("confirm_frozen") is True:
+            o["confirm_frozen"] = True  # the user confirmed adding to a milestone frozen for QA (§15)
         if kind == "reorder":
             ts = op.get("tasks")
             if not isinstance(ts, list) or not ts or len(ts) > 200:
@@ -276,7 +281,7 @@ def _plan_ops(ops: object, errors: list[str]) -> list[dict]:
             o["title"] = clean(op.get("title"), f"{where}: title", 80, errors).replace("|", "/")
         if kind == "new_release":
             o["title"] = clean(op.get("title"), f"{where}: title", 80, errors, required=False).replace("|", "/")
-        unknown = set(op) - {"op", "before", "force", "tasks", "title", *PLAN_OPS[kind]}
+        unknown = set(op) - {"op", "before", "force", "confirm_frozen", "tasks", "title", *PLAN_OPS[kind]}
         if unknown:
             errors.append(f"{where}: unknown field {sorted(unknown)[0]}")
         out.append(o)
@@ -336,8 +341,22 @@ def _ids(root: Path) -> list[str]:
     d = inbox_dir(root)
     if not d.exists():
         return []
-    ids = [p.name[:-5] for p in d.glob("R-*.json") if not p.name.endswith(".state.json") and REQ_ID.match(p.name[:-5])]
-    return sorted(ids, key=lambda i: int(i[2:]))
+    ids = [p.name[:-5] for p in d.glob("[PR]-*.json") if not p.name.endswith(".state.json") and REQ_ID.match(p.name[:-5])]
+    return [public_id(i) for i in sorted(ids, key=lambda i: int(i[2:]))]
+
+
+def public_id(rid: str) -> str:
+    """The id shown everywhere: P-nnn (a request file from before 3.0 keeps its R-nnn name)."""
+    return "P-" + rid[2:] if REQ_ID.match(rid) else rid
+
+
+def _stem(root: Path, rid: str) -> str:
+    """File name (without suffix) of a request, P-nnn or the legacy R-nnn it was written as."""
+    n = rid[2:]
+    for pre in ("P", "R"):
+        if (inbox_dir(root) / f"{pre}-{n}.json").exists():
+            return f"{pre}-{n}"
+    return f"P-{n}"
 
 
 def item(root: Path, rid: str) -> dict | None:
@@ -345,12 +364,14 @@ def item(root: Path, rid: str) -> dict | None:
     if not REQ_ID.match(rid):
         return None
     d = inbox_dir(root)
-    req = _read(d / f"{rid}.json")
+    stem = _stem(root, rid)
+    req = _read(d / f"{stem}.json")
     if req is None:
         return None
-    st = _read(d / f"{rid}.state.json") or {}
+    req = {**req, "id": public_id(str(req.get("id") or stem))}
+    st = _read(d / f"{stem}.state.json") or {}
     status = st.get("status") or "pending"
-    cancel = (d / f"{rid}.cancel").exists()
+    cancel = (d / f"{stem}.cancel").exists()
     if status in ("pending", "needs_input") and cancel:
         status = "cancelled"  # nobody is working on it: cancelled at once
     out = {**req, "status": status, "cancel_requested": cancel and status == "running"}
@@ -378,7 +399,7 @@ def _prune(root: Path) -> None:
     done = [x["id"] for x in items(root) if x["status"] in FINISHED]
     for rid in done[:-KEEP_FINISHED] if len(done) > KEEP_FINISHED else []:
         for suffix in (".json", ".state.json", ".cancel"):
-            (inbox_dir(root) / f"{rid}{suffix}").unlink(missing_ok=True)
+            (inbox_dir(root) / f"{_stem(root, rid)}{suffix}").unlink(missing_ok=True)
 
 
 def _enqueue(root: Path, action: object, canonical: dict, by: str) -> str:
@@ -393,7 +414,7 @@ def _enqueue(root: Path, action: object, canonical: dict, by: str) -> str:
         n = 0
     n = max(n, int(last[-1][2:]) if last else 0) + 1
     seq_path.write_text(str(n), encoding="utf-8")
-    rid = f"R-{n:03d}"
+    rid = f"P-{n:03d}"
     _write(inbox_dir(root) / f"{rid}.json", {"id": rid, "ts": now(), "action": action, "args": canonical, "by": by})
     _prune(root)
     return rid
@@ -414,7 +435,7 @@ def cancel(root: Path, rid: str) -> dict:
         raise KeyError(rid)
     if it["status"] in FINISHED:
         raise ValueError(f"{rid} is already {it['status']}")
-    (inbox_dir(root) / f"{rid}.cancel").write_text(now(), encoding="utf-8")
+    (inbox_dir(root) / f"{_stem(root, rid)}.cancel").write_text(now(), encoding="utf-8")
     return item(root, rid) or it
 
 
@@ -563,7 +584,7 @@ def wait_decision(root: Path, aid: str, wait_s: float, request: str | None = Non
                 return got if got in ("allow", "allow_session", "deny") else "deny"
             except OSError:
                 pass
-            if request and (inbox_dir(root) / f"{request}.cancel").exists():
+            if request and (inbox_dir(root) / f"{_stem(root, request)}.cancel").exists():
                 return "cancelled"
             if time.monotonic() >= deadline:
                 return "timeout"
@@ -605,7 +626,7 @@ def snapshot(root: Path, recent: int = 15) -> dict:
 # --------------------------------------------------------------------------- executor side
 
 def _set_state(root: Path, rid: str, **fields) -> dict:
-    path = inbox_dir(root) / f"{rid}.state.json"
+    path = inbox_dir(root) / f"{_stem(root, rid)}.state.json"
     st = {**(_read(path) or {}), **{k: v for k, v in fields.items() if v is not None}, "at": now()}
     _write(path, st)
     return st
@@ -745,7 +766,8 @@ def continue_next(root: Path) -> tuple[dict | None, str]:
         rec = _read(path) or {}
         if float(rec.get("at_s") or 0) < since:
             rec = {}  # turned on again since: start fresh
-        ended = lambda x: max(_mtime(inbox_dir(root) / f"{x['id']}.state.json"), _mtime(inbox_dir(root) / f"{x['id']}.cancel"))  # noqa: E731
+        ended = lambda x: max(_mtime(inbox_dir(root) / f"{_stem(root, x['id'])}.state.json"),  # noqa: E731
+                              _mtime(inbox_dir(root) / f"{_stem(root, x['id'])}.cancel"))
         gate = lambda m: (store.milestones().get(m) or {}).get("gate", "pending")  # noqa: E731
         waiting = [x for x in all_ if x["status"] == "needs_input"]
         last = next((x for x in reversed(all_) if x["status"] in ("done", "failed")

@@ -87,7 +87,7 @@ def code_id() -> str:
 CODE_ID = code_id()
 WATCHED = ("state.json", "log.md", "open-questions.md", "costs/summary.json", "costs/milestones.json", "plan.md", "run/agents.jsonl",
            "telemetry.jsonl", "run/inbox", "run/worker.json", "run/worker-mode.json", "run/approvals", "run/questions")
-REQ_PATH = re.compile(r"^/api/inbox/(R-\d{3,6})/cancel$")
+REQ_PATH = re.compile(r"^/api/inbox/([PR]-\d{3,6})/cancel$")
 APPROVAL_PATH = re.compile(r"^/api/approvals/(A-[0-9a-f]{8,32})$")
 KIT_VERSION = ds.tel.kit_version()  # read once: it is the version of the code this server is actually running
 AGENT_STALE_S = 3600
@@ -310,7 +310,7 @@ def milestone_goals(plan: str) -> dict:
             if cur and buf:
                 goals[cur] = " ".join(buf)
             head = h[3:].split()
-            cur = head[0] if head and head[0][:1] == "M" and head[0][1:].isdigit() else None
+            cur = head[0] if head and re.fullmatch(r"M\d+(?:\.\d+)?", head[0]) else None
             buf = []
         elif h.startswith("#"):
             if cur and buf:
@@ -560,12 +560,12 @@ def _node_of(scope: object) -> str | None:
     s = str(scope or "")
     if re.fullmatch(r"T-\d{1,5}", s):
         return s
-    if re.fullmatch(r"M\d{1,3}", s):
+    if re.fullmatch(r"M\d{1,3}(?:\.\d{1,2})?", s):
         return f"GATE:{s}"
     return None
 
 
-SCOPE_LINE = re.compile(r"(?m)^\s*Scope:\s*(T-\d{1,5}|M\d{1,3})\b")
+SCOPE_LINE = re.compile(r"(?m)^\s*Scope:\s*(T-\d{1,5}|M\d{1,3}(?:\.\d{1,2})?)\b")
 _SCOPE_CACHE: dict[str, str] = {}
 
 
@@ -871,6 +871,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         dep = next((d for d in reversed(prod) if d.get("milestone") == m), None)
         milestones.append({"id": m, "title": info.get("title"), "goal": goals.get(m, ""), "gate": info.get("gate", "pending"),
                            "score": info.get("score"), "qa_runs": info.get("qa_runs", 0), "passed_at": info.get("passed_at"),
+                           "frozen_at": info.get("frozen_at"),
                            "preview": info.get("preview"), "release": info.get("release"),
                            "deploy": {k: dep.get(k) for k in ("status", "sha", "at")} if dep else None,
                            "qa": qa_detail(store.dev, m, info, events, qa_run if qa_scope == m else None),

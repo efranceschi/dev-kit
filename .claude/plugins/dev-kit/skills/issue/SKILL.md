@@ -17,6 +17,8 @@ Let `DS` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root
 ## Rules that never bend
 - Issues never insert or renumber milestones. The cadence M1, M2, M3… stays as planned (`conventions.md` §15). The only milestone an issue may open is the next maintenance milestone of an existing project in `maintenance` mode (see the last section).
 - The class follows the written criteria below, not the urgency of the moment. If the user asks for expedite without meeting the criterion, say so and recommend `standard`.
+- Severity and class agree: `low` is `intangible`, never `standard`; `high`/`critical` is never `intangible`. `add-issue` refuses the mismatch; keep it only with `--force-class "<reason>"` when the user gives one.
+- A "future", "later" or "coming soon" item is not work for the next milestone: offer **park** in the triage (recommended for such items), `DS issue I-nnn --status parked`. Parked issues are never pulled into a milestone (`conventions.md` §15) until the user schedules them.
 
 ## Classes of service (`conventions.md` §15)
 | class | criterion | where it goes |
@@ -42,7 +44,8 @@ Let `DS` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root
    - `expedite` → `DS add-task --milestone <current milestone from DS backlog --json> --type fix --title "..." --issue I-nnn --lane hotfix --acceptance "regression test reproducing I-nnn fails before the fix and passes after"`. Offer (recommended): `/dev-kit:implement T-xxx` → `/dev-kit:qa --scope T-xxx` → `/dev-kit:release --hotfix` (tags the patch and deploys it once when there is production).
    - `current` → `DS add-task --milestone <current> --type fix --issue I-nnn ...` (regression test first). Offer `/dev-kit:implement T-xxx`.
    - Every task this skill creates also gets the risk fields from what you read in steps 1–3 (`conventions.md` §4 and §9 "Tier per task"): add `--risk low|medium|high --uncertainty … --opportunity downgrade-ok|none --risk-reasons "…"` to `add-task` (an issue does not pass through `plan`). Mechanical fixes with file, line and correction known get `--opportunity downgrade-ok`.
-   - `standard` / `intangible` → leave it queued; tell when it will be picked (next milestone's buffer, or cool-down) and its position in the queue (`DS backlog --json` → `queue`, `buffer`).
+   - `standard` / `intangible` → leave it queued; tell when it will be picked (next milestone's buffer, or cool-down) and its position in the queue (`DS backlog --json` → `queue`, `buffer`). A milestone whose QA began is frozen: nothing new enters it (`add-task` refuses); the item waits for the next milestone. Only with the user's explicit yes, after telling them it re-enters that milestone's QA round and invalidates the audit of the files it touches, use `add-task --confirm-frozen`.
+   - parked (future item) → `DS issue I-nnn --status parked`; say it stays out of every milestone until scheduled.
    - `change` → it is `scope_change_major`: apply `pause_policy.scope_change_major` (`conventions.md` §10). With the user's yes, chain `prd` (with the issue as the change request) → `review prd` → (`ux`/`ui` → `review design` if the UI changes) → `plan` replan, adding tasks only to future milestones with `--issue I-nnn`. The lifecycle shows conception and planning as reopened until the replan is reviewed, while the milestone in construction keeps going (`conventions.md` §19). Otherwise leave it `open`.
    - UI improvements: the task's acceptance includes updating `.dev/design/ui-spec.md`, so spec and code do not drift.
 7. Run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root "${CLAUDE_PROJECT_DIR}" ingest` and log `skill_end` (`conventions.md` §13–14).

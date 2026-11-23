@@ -283,13 +283,23 @@ def attribute(usage: list[dict], events: list[dict]) -> list[dict]:
         inside = [w for w in wins if w[0] <= ts <= w[1]]
         return max(inside, key=lambda w: w[0])[2] if inside else "orchestration"
 
+    # the hooks log which skill each subagent ran under (agent_spawn with agent_id, conventions.md §13): exact,
+    # so it wins over the time window; the window stays for agents logged before 3.0 or without hooks
+    by_agent: dict[str, str] = {}
+    for e in events:
+        if e["event"] == "agent_spawn" and e.get("agent_id") and e.get("skill"):
+            st = tel.SKILL_STAGE.get(str(e["skill"]))
+            if e["skill"] == "review":
+                st = tel.scope_stage(e.get("scope")) or "plan"
+            if st:
+                by_agent[str(e["agent_id"])] = st
     out = []
     for r in usage:
         if r.get("agent") == "main":
             stage = window_stage(parse_ts(r.get("ts")))
         else:
             hint = next((v for k, v in AGENT_STAGE_HINT.items() if str(r.get("agent", "")).endswith(k)), None)
-            stage = hint or window_stage(first_seen.get(r.get("agent_id", "")))
+            stage = hint or by_agent.get(str(r.get("agent_id", "")).lower()) or window_stage(first_seen.get(r.get("agent_id", "")))
         out.append({**r, "stage": stage})
     return out
 
@@ -323,7 +333,7 @@ def tag_milestones(usage: list[dict], dev: Path) -> list[dict]:
     """Each usage row gets the milestone it was spent on: the milestone of a task in progress at that moment (the
     lowest-numbered one if several run), otherwise the milestone whose QA window holds it, otherwise none."""
     tasks, qa = milestone_windows(dev)
-    num = lambda m: int(m[1:]) if re.fullmatch(r"M\d+", str(m)) else 10 ** 6  # noqa: E731
+    num = lambda m: (lambda g: (int(g[1]), int(g[2] or 0)) if g else (10 ** 6, 0))(re.fullmatch(r"M(\d+)(?:\.(\d+))?", str(m)))  # noqa: E731
     out = []
     for r in usage:
         ts = parse_ts(r.get("ts"))
@@ -364,7 +374,7 @@ def milestone_costs(dev: Path) -> dict:
             if e["event"] != "agent_end" or not e.get("tokens"):
                 continue
             sc = str(e.get("scope") or "")
-            m = sc if re.fullmatch(r"M\d+", sc) else (ts.get(sc) or {}).get("milestone")
+            m = sc if re.fullmatch(r"M\d+(?:\.\d+)?", sc) else (ts.get(sc) or {}).get("milestone")
             if m:
                 row = rows.setdefault(m, {"usd": 0.0, "usd_complete": False, "tokens": 0, "requests": 0, "partial": True})
                 row["requests"] += 1
@@ -374,6 +384,41 @@ def milestone_costs(dev: Path) -> dict:
     out = {"at": tel.now(), "milestones": rows}
     (dev / "costs").mkdir(parents=True, exist_ok=True)
     (dev / "costs" / "milestones.json").write_text(json.dumps(out) + "\n", encoding="utf-8")
+    return out
+
+
+def milestone_split(dev: Path, m: str) -> dict:
+    """Cost and tokens of one milestone over all usage, split between the main session (orchestration) and agents."""
+    events, _ = tel.read_events(dev)
+    usage, _ = period_filter(attribute(load_usage(dev), events), events, "all", None, dev)
+    prices = load_prices(dev)
+    out = {"usd": 0.0, "tokens": 0, "orchestration_usd": 0.0, "agents_usd": 0.0, "complete": True, "requests": 0}
+    for r in tag_milestones(usage, dev):
+        if r.get("milestone") != m:
+            continue
+        out["requests"] += 1
+        out["tokens"] += sum(int(r.get(f, 0)) for f in TOKEN_FIELDS)
+        c = cost_of(r, prices)
+        if c is None:
+            out["complete"] = False
+            continue
+        out["usd"] += c
+        out["orchestration_usd" if r.get("agent") == "main" else "agents_usd"] += c
+    for k in ("usd", "orchestration_usd", "agents_usd"):
+        out[k] = round(out[k], 4)
+    return out
+
+
+def stage_tokens(dev: Path, mode: str = "session", since: str | None = None) -> dict:
+    """Tokens and cost per stage from the transcripts: the same numbers the cost report shows (one source)."""
+    events, _ = tel.read_events(dev)
+    usage, _ = period_filter(attribute(load_usage(dev), events), events, mode, since, dev)
+    prices = load_prices(dev)
+    out: dict[str, dict] = {}
+    for r in usage:
+        row = out.setdefault(r.get("stage") or "orchestration", {"tokens": 0, "usd": 0.0})
+        row["tokens"] += sum(int(r.get(f, 0)) for f in TOKEN_FIELDS)
+        row["usd"] = round(row["usd"] + (cost_of(r, prices) or 0.0), 4)
     return out
 
 

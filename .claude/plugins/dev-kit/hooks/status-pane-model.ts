@@ -11,10 +11,11 @@ const obj = (v: unknown): Json => (v && typeof v === 'object' && !Array.isArray(
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 
-/** Numeric order of ids like M2, T-014, I-003. */
+/** Numeric order of ids like M2, M5.1 (after M5, before M6), T-014, I-003. */
 export const byId = (a: string, b: string): number => {
-  const n = (s: string) => Number(s.replace(/\D+/g, '')) || 0
-  return n(a) - n(b) || a.localeCompare(b)
+  const n = (s: string) => (s.match(/\d+/g) || ['0']).map(Number)
+  const x = n(a), y = n(b)
+  return (x[0] - y[0]) || ((x[1] ?? 0) - (y[1] ?? 0)) || a.localeCompare(b)
 }
 
 export const emptySnapshot = (isProject: boolean, error?: string): Snapshot => ({

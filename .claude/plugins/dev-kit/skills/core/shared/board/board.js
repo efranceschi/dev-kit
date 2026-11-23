@@ -1086,9 +1086,10 @@
     const stuck = data.milestones.filter((m) => qaState(m).exhausted && !qaState(m).fixBlocked.length);
     const approvals = actionsOn() ? inbox().approvals : [];
     const waitingRel = relPlan().filter((r) => r.status === "awaiting_approval");
-    const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length + waitingRel.length;
+    const qneeds = b.needs || [];
+    const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length + waitingRel.length + qneeds.length;
     // which phase each item belongs to: the tabs show the count, the rows a tag that opens the phase
-    needsBy = { conception: 0, planning: 0, construction: blocked.length + hot.length + stuck.length, stable: 0, releases: waitingRel.length };
+    needsBy = { conception: 0, planning: qneeds.length, construction: blocked.length + hot.length + stuck.length, stable: 0, releases: waitingRel.length };
     if (approvals.length) needsBy[data.phase] = (needsBy[data.phase] || 0) + approvals.length;
     data.questions.forEach((q) => { needsBy[questionPhase(q)] += 1; });
     // the strip exists only while something needs the user; warnings alone ride along but do not open it
@@ -1107,6 +1108,7 @@
       stuck.length ? listBlock("QA rounds used up", stuck.map((m) => h("li", {}, h("span", { class: "id", text: m.id }),
         h("span", { text: `${qaState(m).qa.runs - 1} fix rounds used of ${qaState(m).max} (${qaReason(qaState(m).qa, m) || "see the QA report"}). Keep fixing, accept with an ADR, or replan.` }),
         h("span", { class: "sub" }, cmd(`/dev-kit:qa ${m.id}`)))), "", false, "construction") : null,
+      qneeds.length ? listBlock("Issue queue", qneeds.map(queueNeedRow), "", false, "planning") : null,
       hot.length ? listBlock("Open hotfixes", hot.map((id) => h("li", {}, issueId(id),
         h("span", { text: (data.tasks[id] || (b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: "hotfix" }))), "", false, "construction") : null,
       blocked.length ? listBlock("Blocked tasks", blocked.map(([id, t]) => h("li", { class: "has-btn" },
@@ -1119,6 +1121,30 @@
       warns.length ? listBlock("Warnings", warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
       actionsOn() && data.questions.length ? h("p", { class: "needs-hint" }, "Answer here: Claude Code records the answer and continues what was waiting on it.") : null,
       data.questions.length || blocked.length ? h("p", { class: "needs-hint" }, actionsOn() ? "Or go through all of them with " : "Answer in Claude Code with ", cmd("/dev-kit:interview --gaps")) : null);
+  }
+  /** Needs you › the issue queue (conventions §15): above the limit, or an issue waiting too long. Every action is a
+   * plan draft the user sends; nothing changes the plan by itself. */
+  function queueNeedRow(x) {
+    const acts = actionsOn();
+    if (x.kind === "queue_over_limit") {
+      const load = () => {
+        draft = { ops: x.draft.ops.slice(), base: data.updated_at, serverErrors: [], buffer: false, frozen: false };
+        planMode = "tasks";
+        setPhase("planning");
+        toast(`Draft of ${x.milestone} — Issues with ${plural(x.issues.length, "issue")}: review it, then send it.`);
+      };
+      return h("li", {}, h("span", { class: "id", text: "!" }),
+        h("span", { text: `Queue above the limit: ${plural(x.count, "issue")} waiting (limit ${x.limit}).` }),
+        acts && x.issues.length ? h("button", { type: "button", class: "btn btn-sm", text: "Plan the queue milestone", title: `Draft ${x.milestone} — Issues with the oldest and most severe issues; nothing changes until you send it`, onclick: load }) : null);
+    }
+    const nextOpen = (data.milestones || []).find((m) => m.gate === "pending" && !m.frozen_at);
+    const send = (ops, what) => queue("plan_draft", { ops, base: data.updated_at }).then(() => toast(what)).catch(() => {});
+    return h("li", {}, issueId(x.issue),
+      h("span", { text: `${(issueOf(x.issue) || {}).title || ""} · waiting for ${plural(x.milestones, "closed milestone")}` }),
+      acts ? h("span", { class: "q-tags" },
+        nextOpen ? h("button", { type: "button", class: "btn btn-sm", text: `Schedule in ${nextOpen.id}`, onclick: () => send([{ op: "schedule_issue", issue: x.issue, milestone: nextOpen.id, force: true }], `${x.issue} → ${nextOpen.id} queued.`) }) : null,
+        h("button", { type: "button", class: "btn btn-sm", text: "Park", title: "Parked issues are never pulled into a milestone until you schedule them", onclick: () => send([{ op: "set_issue_status", issue: x.issue, status: "parked" }], `${x.issue} parked.`) }),
+        h("button", { type: "button", class: "btn btn-sm", text: "Won't fix", onclick: () => send([{ op: "set_issue_status", issue: x.issue, status: "wontfix" }], `${x.issue} closed as won't fix.`) })) : null);
   }
   function goNeeds() {
     const el = $("needs");
@@ -1169,7 +1195,7 @@
     const pills = [];
     hist.forEach((r, i) => {
       const ok = r.value === "passed" || r.value === "skipped";
-      pills.push({ cls: ok ? "ok" : "bad", text: `R${r.n} ${ok ? "✓" : "✕"}${r.score != null ? ` ${r.score}` : ""}`,
+      pills.push({ cls: ok ? "ok" : "bad", text: `Round ${r.n} ${ok ? "✓" : "✕"}${r.score != null ? ` ${r.score}` : ""}`,
         title: `Round ${r.n}: ${ok ? "passed" : "failed"}${r.score != null ? ` with ${r.score}` : ""}${i === hist.length - 1 && !ok ? ` · ${qaReason(x.qa, m)}` : ""}` });
     });
     if (x.fixes.length) {
@@ -1179,9 +1205,9 @@
         title: x.fixBlocked.length ? `${x.fixBlocked.length} fix task(s) blocked: the agreed limit was reached` : x.fixOpen.length ? `${x.fixOpen.length} fix task(s) still open` : "All fix tasks done" });
     }
     if (!x.passed && x.ts.length && !x.buildOpen.length) {
-      if (x.running) pills.push({ cls: "run", text: `R${x.round} ●`, title: `Round ${x.round} is running now` });
+      if (x.running) pills.push({ cls: "run", text: `Round ${x.round} ●`, title: `Round ${x.round} is running now` });
       else if (x.exhausted) pills.push({ cls: "bad", text: "decide", title: "The agreed limit was reached: keep fixing, accept with an ADR, or replan" });
-      else if (!x.fixOpen.length) pills.push({ cls: "next", text: `R${x.round} next`, title: `Round ${x.round} has not started yet` });
+      else if (!x.fixOpen.length) pills.push({ cls: "next", text: `Round ${x.round} next`, title: `Round ${x.round} has not started yet` });
     }
     return pills;
   }
@@ -1512,8 +1538,8 @@
 
   // ------------------------------------------------------------------ requests to Claude Code (dev_worker.py on the server, /dev-kit:worker runs them)
   // the commands the server accepts (dev_worker.RUN_COMMANDS); anything else keeps only its copy button
-  const RUN_RES = [/^\/dev-kit:implement(?: (?:T-\d{3,5}|--milestone M\d{1,3}))?$/, /^\/dev-kit:qa M\d{1,3}$/, /^\/dev-kit:review (?:prd|design|plan|docs)$/,
-    /^\/dev-kit:(?:interview|prd|architecture|ux|ui|plan|docs|usability|costs|backlog|status|release)$/, /^\/dev-kit:interview --gaps$/, /^\/dev-kit:deploy(?: M\d{1,3})?$/];
+  const RUN_RES = [/^\/dev-kit:implement(?: (?:T-\d{3,5}|--milestone M\d{1,3}(?:\.\d{1,2})?))?$/, /^\/dev-kit:qa M\d{1,3}(?:\.\d{1,2})?$/, /^\/dev-kit:review (?:prd|design|plan|docs)$/,
+    /^\/dev-kit:(?:interview|prd|architecture|ux|ui|plan|docs|usability|costs|backlog|status|release)$/, /^\/dev-kit:interview --gaps$/, /^\/dev-kit:deploy(?: M\d{1,3}(?:\.\d{1,2})?)?$/];
   const EMPTY_INBOX = { open: [], recent: [], executor: { state: "offline", online: false, paused: false }, approvals: [], actions: false };
   const inbox = () => (data && data.inbox) || EMPTY_INBOX;
   const actionsOn = () => Boolean(inbox().actions);
@@ -1710,8 +1736,11 @@
   setInterval(() => document.querySelectorAll(".approval-left[data-deadline]").forEach((el) => { el.textContent = leftText(Number(el.dataset.deadline) - Date.now()); }), 1000);
 
   // ------------------------------------------------------------------ plan: drag tasks and issues between open milestones, add the next milestone, send the draft
-  let draft = { ops: [], base: null, serverErrors: [], buffer: false };
-  const MS_NUM = (id) => Number(String(id).slice(1));
+  let draft = { ops: [], base: null, serverErrors: [], buffer: false, frozen: false };
+  /** A milestone whose QA began: its scope is frozen; adding to it needs a confirmation (conventions §15). */
+  const isFrozen = (mid) => Boolean(((data.milestones || []).find((m) => m.id === mid) || {}).frozen_at);
+  const FROZEN_COST = (mid) => `This item enters the next QA round of ${mid} and invalidates the audit of the files it touches.`;
+  const MS_NUM = (id) => { const m = /^M(\d+)(?:\.(\d+))?$/.exec(String(id)); return m ? Number(m[1]) + Number(m[2] || 0) / 100 : 1e6; };
   const REL_OPS = ["move_milestone", "new_release", "drop_release"];
   const RELEASE_SIZE = [2, 5];  // milestones per release (conventions.md §4); dev_state.py checks it again
   const cmpSeq = (a, b) => ((data.tasks[a].seq ?? 1e6) - (data.tasks[b].seq ?? 1e6)) || (Number(a.slice(2)) - Number(b.slice(2)));
@@ -1792,7 +1821,8 @@
     if (op.op === "new_release") return `New release ${op.release}${op.title ? ` · ${op.title}` : ""}`;
     if (op.op === "drop_release") return `Remove release ${op.release}`;
     if (op.op === "move_task") return `${op.task} → ${op.milestone}${op.before ? ` (before ${op.before})` : ""}`;
-    if (op.op === "schedule_issue") return `${op.issue} → ${op.milestone}${op.before ? ` (before ${op.before})` : ""}${op.force ? " · over the buffer" : ""}`;
+    if (op.op === "schedule_issue") return `${op.issue} → ${op.milestone}${op.before ? ` (before ${op.before})` : ""}${op.force ? " · over the buffer" : ""}${op.confirm_frozen ? " · confirmed after the freeze" : ""}`;
+    if (op.op === "set_issue_status") return `${op.issue} → ${op.status}`;
     return op.op;
   }
   let dragging = null;
@@ -1986,14 +2016,14 @@
           h("span", { class: "count", title: done.length ? `${open.length} open, ${done.length} done` : null, text: !done.length ? String(open.length) : open.length ? `${open.length} · ${done.length} ✓` : `${done.length} ✓` })),
         sub ? h("p", { class: "card-sub", text: sub }) : null, list, folded, extra);
     };
-    const newNum = `M${Math.max(0, ...data.milestones.map((m) => MS_NUM(m.id)), ...draft.ops.filter((o) => o.op === "new_milestone").map((o) => MS_NUM(o.milestone))) + 1}`;
+    const newNum = `M${Math.floor(Math.max(0, ...data.milestones.map((m) => MS_NUM(m.id)), ...draft.ops.filter((o) => o.op === "new_milestone").map((o) => MS_NUM(o.milestone)))) + 1}`;
     const hasNew = draft.ops.some((o) => o.op === "new_milestone");
     const b = (data.backlog || {}).buffer;
     const hasRels = relPlan().length > 0;
     if (!hasRels) planMode = "tasks";
     const rm = planMode === "releases" ? relColumns() : null;
     const cols = rm ? rm.cols : [column("queue", "Issue queue", "Expedite and change issues go through /dev-kit:issue.", model.queued)]
-      .concat(model.ms.slice().reverse().map((m) => column(m.id, m.title || m.id, m.isNew ? "New in this draft" : b && b.milestone === m.id ? `Issue buffer ${b.used}/${b.capacity}` : null, model.cols[m.id] || [], null, m.isNew)));
+      .concat(model.ms.slice().reverse().map((m) => column(m.id, m.title || m.id, m.isNew ? "New in this draft" : isFrozen(m.id) ? "🔒 Frozen for QA — adding needs your confirmation" : b && b.milestone === m.id ? `Issue buffer ${b.used}/${b.capacity}` : null, model.cols[m.id] || [], null, m.isNew)));
     if (!hasNew && !rm) {
       const inp = h("input", { type: "text", id: "new-ms-title", maxlength: "80", placeholder: `Title of ${newNum}`, "aria-label": `Title of the new milestone ${newNum}` });
       inp.value = newMsTitle;
@@ -2011,10 +2041,11 @@
     const sendBtn = h("button", { type: "button", class: "btn btn-primary", id: "plan-send", disabled: !draft.ops.length || errors.some((x) => !draft.serverErrors.includes(x)) ? true : null, text: "Send to Claude Code",
       onclick: async (e) => {
         e.currentTarget.disabled = true;
-        const ops = draft.ops.map((o) => (o.op === "schedule_issue" && draft.buffer ? { ...o, force: true } : o));
+        const ops = draft.ops.map((o) => (o.op === "schedule_issue" && draft.buffer ? { ...o, force: true } : o))
+          .map((o) => (draft.frozen && (o.op === "schedule_issue" || o.op === "move_task") && isFrozen(o.milestone) ? { ...o, confirm_frozen: true } : o));
         try {
           await queue("plan_draft", { ops, base: draft.base || data.updated_at }, true);
-          draft = { ops: [], base: null, serverErrors: [], buffer: false };
+          draft = { ops: [], base: null, serverErrors: [], buffer: false, frozen: false };
           renderPlan();
         } catch (err) {
           draft.serverErrors = err.errors || [err.message];
@@ -2022,6 +2053,8 @@
         }
       } });
     const overBuffer = draft.serverErrors.some((x) => /issue buffer/.test(x));
+    const frozenHit = draft.serverErrors.find((x) => /is frozen since its QA began/.test(x));
+    const frozenM = frozenHit ? (/(M\d+(?:\.\d+)?) is frozen/.exec(frozenHit) || [])[1] : null;
     fill(box, modeBar,
       h("div", { class: "plan-cols" }, cols),
       h("aside", { class: "plan-draft", "aria-label": "Draft of the plan" },
@@ -2030,9 +2063,11 @@
           : h("p", { class: "card-sub", text: "Drag tasks not started and open issues between open milestones, or milestones between releases, or use Move… on a card. Nothing changes until you send the draft; Claude Code applies it with /dev-kit:worker." }),
         errors.length ? h("ul", { class: "td-list plan-errors", role: "alert" }, errors.map((x) => h("li", { text: x }))) : null,
         overBuffer ? h("button", { type: "button", class: "link-btn", text: "Go over the issue buffer and send again", onclick: () => { draft.buffer = true; draft.serverErrors = []; renderPlan(); $("plan-send").click(); } }) : null,
+        frozenM ? h("p", { class: "card-sub bad", text: FROZEN_COST(frozenM) }) : null,
+        frozenM ? h("button", { type: "button", class: "link-btn", text: `Confirm adding to ${frozenM} and send again`, onclick: () => { draft.frozen = true; draft.serverErrors = []; renderPlan(); $("plan-send").click(); } }) : null,
         h("div", { class: "plan-actions" },
           h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: "Undo", onclick: () => { draft.ops.pop(); draft.serverErrors = []; renderPlan(); } }),
-          h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: "Discard", onclick: () => { draft = { ops: [], base: null, serverErrors: [], buffer: false }; renderPlan(); } }),
+          h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: "Discard", onclick: () => { draft = { ops: [], base: null, serverErrors: [], buffer: false, frozen: false }; renderPlan(); } }),
           sendBtn)));
     box.querySelector(".plan-cols").scrollLeft = scrollX;
     box.querySelectorAll(".pcol-list[data-key]").forEach((l) => { if (scrollY[l.dataset.key]) l.scrollTop = scrollY[l.dataset.key]; });
@@ -2249,7 +2284,7 @@
   // ------------------------------------------------------------------ markdown documents of .dev/: a side drawer, linkable as #doc:<path>
   // A small renderer that builds the DOM with h() (text through textContent, never innerHTML): headings with anchors,
   // paragraphs, nested lists and checkboxes, tables, fenced code, quotes, rules, and inline code, bold, italic, links.
-  const ID_TOKEN = /^(ADR-\d{1,5}|Q-\d{1,5}|I-\d{1,5}|T-\d{1,5}|F-\d{1,5}|AC-\d{1,4}|M\d{1,3}|R\d{1,3})\b/;
+  const ID_TOKEN = /^(ADR-\d{1,5}|Q-\d{1,5}|I-\d{1,5}|T-\d{1,5}|F-\d{1,5}|AC-\d{1,4}|M\d{1,3}(?:\.\d{1,2})?|R\d{1,3})\b/;
   const INLINE = /(`+)([\s\S]*?[^`])\1(?!`)|\*\*([^*]+?)\*\*|__([^_]+?)__|~~([^~]+?)~~|\*([^*\s](?:[^*]*?[^*\s])?)\*|(?<![\w])_([^_\s](?:[^_]*?[^_\s])?)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>/g;
   let docCur = null;          // {path, anchor} of the document shown
   /** A .dev-relative path for a link written inside a document (relative to that document), or null outside .dev. */

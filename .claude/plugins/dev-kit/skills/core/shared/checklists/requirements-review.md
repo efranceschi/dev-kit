@@ -19,6 +19,11 @@ Two modes. Findings use `category: requirements` (PRD) or `category: planning` (
 - **Testability**: each task has `test_notes` naming layers; each AC has a place where it will be proven.
 - **Feasibility**: files listed exist in the architecture layout; needed credentials/services are available or flagged as `always_ask`.
 - **Risk first**: the riskiest integration or unknown is scheduled early with a spike or thin slice. Late risk → `medium`.
+- **Releases** (when the plan has `## R<n>` headings; `shared/conventions.md` §4):
+  - *Complete journey*: each release can be validated end to end by its user; a release that ships only infrastructure or one layer (a database without the interface or API that uses it) → `high`.
+  - *Risk ends a release*: a critical delivery (payments, authentication, sensitive data, destructive migration) is the last milestone of its release, so a person reviews it before anything is built on top; otherwise → `medium`.
+  - *No phase milestones*: a milestone whose content is only verification, QA, docs or a "release check" → `medium` (those activities belong to the release cycle: QA gates, `release`, `docs`); quote the milestone heading.
+  - *Size*: 2 to 5 milestones per release; outside it without a reason stated in the release's paragraph → `medium`.
 - **Parser contract**: headings and field names follow `shared/conventions.md` §4 so `dev_state.py sync-plan` loads everything (run it in a temp copy if unsure).
 
 Severity per `shared/conventions.md` §7. Report only verified issues; quote the section and ids.

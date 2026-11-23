@@ -2,6 +2,38 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.0.0-alpha.1 — 2026-11-23
+
+First phase of 3.0 (foundation: data and cheap rules). The 3.0 line is delivered phase by phase; 3.0.0 closes it.
+
+### Breaking
+- Fixes milestone of a rejected release: `M<k>.<i>` (`M5.1`, `M5.2`), right after the release's last milestone `M<k>`, titled `R<n> · Fixes <i>` (was `M<last+1>`). Every parser, sort, regex and the board accept the new form; order is `M5 < M5.1 < M5.2 < M6`. Fixes milestones created before keep their id (conventions §3, §15).
+- Board requests are `P-nnn` (were `R-nnn`): `R<n>` is reserved for releases. Request files from before keep their name and are shown and accepted as `P-nnn`. QA rounds on the board read "Round 1", "Round 2" (were `R1`, `R2`).
+- Skills no longer log `agent_spawn` / `agent_end` or `duration_s`: the scripts and the plugin hooks do (below). The lint rejects a SKILL.md that asks for them.
+
+### Added
+- Reliable telemetry (conventions §13):
+  - `shared/telemetry-schema.json` is the allowlist of every event; `DS event` validates against it and a refused key prints the accepted ones.
+  - `skill_start` / `skill_end` durations are measured by `dev_state.py` (`.dev/run/skills.json`, a stack per session and skill+scope); any `duration_s` sent is ignored; an end without a start records `duration_s: null` and a `telemetry_gap` event.
+  - `agent_spawn` / `agent_end` come from the hooks (new `PreToolUse` hook on the Agent tool, plus `SubagentStart` / `SubagentStop`): agent, agent id, model and effort (kit frontmatter or the call's model), skill, scope (the prompt's `Scope:` line), QA round, duration and tokens from the subagent's transcript. New `agent_result` event for an agent without parsable JSON.
+  - `dev_cost.py` attributes each subagent's tokens to the skill it ran under (by agent id), and `telemetry report` takes tokens per stage from the same source as the cost report.
+  - Flow per milestone, `.dev/qa/<M>/flow.json` and a `flow` event at the gate: cycle and working time, QA rounds, fix tasks, fixes per task, deferred findings left open, cost and tokens (orchestration and agents apart), cost per task, scope added after the freeze (`human_wait_s` comes with phase 3).
+  - Feedback in two readings: for each milestone the period touched, the final state (the gate's score) and the cycle over its whole history, with a cycle grade that caps the `qa` stage grade (formula in §13). The gate's score never changes.
+- Scope freeze at QA (§15): `DS freeze <M>` (run by `qa` before the first round; never undone by a replan or a failed gate). `pull-issues`, `cooldown`, `add-task` and `plan-apply` refuse new items in a frozen milestone, except QA fixes, `current`/`expedite` issues, the hotfix lane and confirmed items (`add-task --confirm-frozen`; on the board "Confirm adding to M<n> and send again", which states the cost). Confirmed items are marked `scope_after_freeze`, counted in `flow.json`, and their files' ledger units are dropped when they are done. The board marks a frozen milestone with a lock in the plan view.
+- Issue state `parked` (§15): never pulled by the buffer, the cool-down or the queue milestone; leaves only by the user. `issue` offers it for "future / coming soon" items.
+- Queue throughput (§15), `autonomy.queue = {limit: 15, limit_pct_remaining: 50, aging_milestones: 3, buffer_floor: 1}` (in `/dev-kit:settings`):
+  - above the limit, `status`, `backlog --json` (`needs`) and the board's Needs you offer **Plan the queue milestone** (a draft `M<last+1> — Issues` with the oldest and most severe queued issues, up to 12, sent only by the user);
+  - an issue unscheduled after `aging_milestones` closed milestones gets **Schedule in M<n>**, **Park**, **Won't fix** (new plan op `set_issue_status`);
+  - `add-issue` refuses `standard` + `low` and `intangible` + `high`/`critical` unless `--force-class "<reason>"`;
+  - the issue buffer never drops below `buffer_floor` (a 3-task milestone keeps 1 slot).
+- Plan review, mode plan (`requirements-review.md`): a **Releases** section with four rules (complete journey → high; risk ends a release → medium; no phase milestones such as "Release check" → medium; 2–5 milestones → medium). `plan` step 2b says not to plan phase milestones.
+
+### Fixed
+- `backlog.hotfix_open` (and the status line and WIP check) no longer counts dropped hotfix tasks, so a discarded hotfix leaves Needs you.
+
+### Migration
+- Nothing to run: old `R-nnn` request files are read as `P-nnn`; old fixes milestones keep their ids; milestones already in QA are not frozen until their next `qa` run.
+
 ## 2.6.1 — 2026-11-23
 
 ### Added

@@ -28,4 +28,4 @@ Open questions, medium/low findings deferred, decisions taken autonomously in th
 
 ## Decision
 Approve: production deploy, production smoke checks, then the release is recorded.
-Reject: write what must change, one item per line; each item becomes a fix task of `{{release}} · Fixes`.
+Reject: write what must change, one item per line; each item becomes a fix task of the fixes milestone `{{release}} · Fixes <n>` (`M<k>.<n>`, after the release's last milestone).

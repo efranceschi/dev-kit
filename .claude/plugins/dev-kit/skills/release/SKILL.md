@@ -23,7 +23,7 @@ Read `lifecycle.release` from `DS status --json`. When `release` (an id such as 
 The approval is also the confirmation of `pause_policy.production_deploy` for the approved commit: step 8 does not ask again. Every other pause point stays as configured (§10).
 
 ## Checklist (stop at the first failure and say what is missing)
-Log `skill_start`/`skill_end` and agent events (`conventions.md` §13); give each auditor a `Slot: N` and the isolation line, and run `DS cleanup` after them.
+Log `skill_start`/`skill_end` (`conventions.md` §13; the plugin hooks log the agents); give each auditor a `Slot: N` and the isolation line, and run `DS cleanup` after them.
 1. Next release (`conventions.md` §19), from `DS status --json` → `lifecycle.release`: `milestones` (closed since the last release, or the closed milestones of the planned release) is not empty, otherwise stop ("nothing to release"); `waiting_for` is empty and no task is `in_progress`, so the tag never takes a milestone half built (finish it, or release after its gate); every gate of those milestones `passed` (with its score) or `skipped`/forced with an ADR; reviews `prd`, `design` (UI products) and `plan` are `pass` or `n/a`; `usability` and `docs` are `done` or `n/a`, which means review `ux` (UI products) and review `docs` passed after the last of those milestones (run `usability`, or `docs` then `review docs`, when one says `todo` or `review`). Working tree clean outside `.dev/` (`git status --short -- . ':(exclude).dev'`).
 2. Run the full test suite, lint and type-check; run the build command from `architecture.md`.
 3. Secrets hygiene: run the detection commands in `${CLAUDE_SKILL_DIR}/../core/shared/checklists/security-secrets.md`; `.env.example` complete.

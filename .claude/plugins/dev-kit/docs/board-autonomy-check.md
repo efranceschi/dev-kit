@@ -32,7 +32,7 @@ claude
 
 Do these one at a time, and for each one write in `.dev/run/autonomy-check/manual.md` what you saw (copy the text of the Requests card, the time it took, and anything the terminal printed):
 
-1. **Wake-up.** Click ▶ next to "Next step" (`/dev-kit:implement`). Within a few seconds the terminal should show a notification `dev-kit board: request R-001 is waiting...` and Claude should start `/dev-kit:worker` by itself. Note whether it did, how long it took, and what the card said ("listening", "working on R-001").
+1. **Wake-up.** Click ▶ next to "Next step" (`/dev-kit:implement`). Within a few seconds the terminal should show a notification `dev-kit board: request P-001 is waiting...` and Claude should start `/dev-kit:worker` by itself. Note whether it did, how long it took, and what the card said ("listening", "working on P-001").
 2. **Permission from the board.** When Claude reaches T-002 it needs Bash (`ls -la`). If your permission settings already allow it, the board shows nothing; in that case, in the session's settings remove any allow rule for `Bash(ls:*)` before step 1, or write the observation and continue. When "Claude Code asks permission" appears in Needs you, note: did the terminal *also* show a permission dialog? Wait about 2 minutes, then click **Allow for this session** (or **Allow** if that button is missing). Note whether the work continued, and whether a second `ls` later in the same session asked again.
 3. **Deny.** Queue `/dev-kit:status` with ▶ (or any other runnable command), and while it runs, if a permission appears, click **Deny**. Note what Claude did next.
 4. **Timeout.** If you can, let one permission go unanswered: it should be denied after 10 minutes. Note when the terminal moved on.

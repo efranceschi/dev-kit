@@ -32,6 +32,7 @@ The user never runs a script: this skill translates what they ask into the right
 | "do not reuse earlier audits", "check more of the reused work" | `autonomy.incremental.enabled`, `.spot_check_pct`, `.full_on_last_gate` | §18; reuse never closes findings, and release always audits everything |
 | "check each task more / less" | `autonomy.task_checks` (`ui`, `all`, `off`) | `off` keeps the implementer's self-check |
 | "room for bugs in each milestone", "cool-down" | `autonomy.issue_buffer_pct` (0–50), `autonomy.cooldown` `{"enabled", "max_tasks"}` | §15 |
+| "too many issues waiting", "issues that wait too long", "always leave room for one issue" | `autonomy.queue` `{"limit": 15, "limit_pct_remaining": 50, "aging_milestones": 3, "buffer_floor": 1}`: above the limit (count, or % of the remaining tasks) Needs you offers a milestone of the queue; an issue unscheduled after that many closed milestones asks for a decision; every milestone keeps at least that many issue slots | §15 |
 | "keep the app running after each milestone" | `autonomy.local_deploy` `{"mode": "off|keep_running|smoke", "port", "notify"}` | §11; ports bound to 127.0.0.1 |
 | "deploy to production after each milestone / at release" | `autonomy.production.when` (`per_milestone`, `on_release`, `manual`, `none`) and the rest of `production` | §12; prerequisites by name only, never values |
 | "may push", "may install packages", "may start servers" | `autonomy.may_push`, `may_install_deps`, `may_run_servers` | `true` / `false` |

@@ -24,7 +24,7 @@ Let `DC` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root 
    - **Where the cost went:** the 3 most expensive rows, one line each with the main driver (e.g. output tokens on a large model, cache reads of long sessions). If grouped by stage, also run `DC report --json --by agent --no-ingest <period args>` and name the most expensive agent.
    - **Warnings** from `warnings`, if any (models without price, partial data, old price table).
    - **Data:** `.dev/costs/usage.jsonl` (one line per request, tokens only), `.dev/costs/prices.json` (editable price table, `as_of` date), and the CSV path when generated.
-5. Log `skill_end` with `status` ok and `duration_s`. End with one tip from `DS tip costs` on its own line (skip if empty).
+5. Log `skill_end` with `status` ok (the script measures the duration). End with one tip from `DS tip costs` on its own line (skip if empty).
 
 ## Rules
 - Read-only: the only files written are `.dev/costs/` (by `dev_cost.py`) and the CSV on request.
