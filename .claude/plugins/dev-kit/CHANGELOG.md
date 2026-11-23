@@ -2,6 +2,23 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.1.0 — 2026-11-23
+
+The board, redrawn after the flow diagram (`docs/dev-kit-flow.svg`): one screen per lane, in the diagram's order and colours, each fitting the window.
+
+### Changed
+- **Tabs are the lanes of the diagram**: 1 Conception, 2 Planning, 3 Milestones and 3 Releases (construction in two) and 4 Stable, joined by arrows, each with its state, a "now" label where the project is, a badge with what waits on you and a dot while something runs there. A **Map** button shows the five lanes at once, with an "anytime" bar (Needs you, requests, new issue, activity). The board always opens on the lane where the project is.
+- **Each screen fits the window** (no page scroll from 1024×640 up): on top the lane's strip, its steps as a flow coloured by who does them (yours yellow, agents orange, delivery green, gates red) with where the project is and a line on what happens there; below, blocks of the same size. What does not fit in a block or a kanban column is cut at a whole row and opens with "See all" / "+N more" in a modal, so neighbouring blocks never leave gaps. Every step of a flow opens its details in a modal.
+- **Needs you is a button** in the top bar: calm when nothing waits, red when something does (it rings once when a new item arrives; the tab title and favicon still change). It opens a drawer with every item and its buttons; the badges sit on the lane and on the step the item belongs to. Requests and Activity are drawers too.
+- **Milestones**: the milestone picker groups milestones by release; one line holds the title, goal (the whole goal opens in a modal), progress and forecast; the task board fills the rest of the screen in four columns of equal height, or the QA rounds. Burndown, velocity and gates moved to a **Metrics** modal.
+- **Planning**: roadmap by release, backlog and plan review side by side; dragging tasks, issues and milestones has a screen of its own ("Replan the milestones").
+- **Releases**: the release picked with its six stages and the rejection loop, then its numbers, milestones, what holds it back, and its quality and documents.
+- **Stable**: the flow ends in the three classes of service (expedite, standard, change) with their queues; project, production, health check, release flags, release checks and releases as six blocks.
+- The sticky, compacting chevron strips of 2.x are gone (nothing scrolls under them any more).
+
+### Tests
+- `test_v3_board.py` opens the Needs you, Activity and Requests drawers where it reads them, and checks release ids on the Map.
+
 ## 3.0.0 — 2026-11-23
 
 dev-kit 3.0: every release planned and approved by you, milestones that end on an executable exit check, quality gates with a deterministic floor, your confirmation of the PRD and the plan, a board that forecasts, speaks your language and runs its own worker, deploys separated from releases by flags, and a production health check. The alpha line (3.0.0-alpha.1 to alpha.8, below) holds the details; this entry closes it with the documentation.

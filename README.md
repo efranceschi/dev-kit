@@ -15,10 +15,10 @@ You answer one thorough interview. The kit then writes the PRD, architecture and
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/dev-kit-board-dark.png">
-    <img src=".github/assets/dev-kit-board.png" alt="dev-kit board of a sample project, Larder: the project lifecycle as chevrons (conception and planning done, construction current with 3 of 6 milestones closed, stable next, 1 of 3 releases released), a highlighted Needs you strip with an open question and its recommended answer, the releases R1 to R3 with the stages of the current one (milestones, release review, your approval, production, released), the milestones M3 and M4 with the stages of M4 and two implementer agents running in Build, the forecast to finish, the Requests panel and the activity log" width="900">
+    <img src=".github/assets/dev-kit-board.png" alt="dev-kit board of a sample project, Larder: the lanes of the flow as tabs (conception and planning done, the milestones lane current with M4 at 3 of 6 tasks, releases 1 of 3 released, stable), a red Needs you button with one item, the stages of M4 as a flow (pull issues done, implement in progress with two implementer agents, QA, gate, deploy) and the task board in four columns of equal height" width="900">
   </picture>
   <br>
-  <sub><code>/dev-kit:board</code> shows the build in <b>real time</b> in your browser: where the project is in its lifecycle, what needs you, the stage of the release and of the milestone with what is running in it, a forecast to finish, then the task kanban, quality gates, burndown and activity. More screenshots, and the full flow as a diagram, in the <a href="GET_STARTED.md">quickstart</a>.</sub>
+  <sub><code>/dev-kit:board</code> shows the build in <b>real time</b> in your browser: one screen per lane of the flow, laid out like the diagram: where the project is, what needs you, the stage of the milestone or release with what is running in it, a forecast to finish and the task board; details, metrics and activity one click away. More screenshots, and the full flow as a diagram, in the <a href="GET_STARTED.md">quickstart</a>.</sub>
 </p>
 
 ## What it does

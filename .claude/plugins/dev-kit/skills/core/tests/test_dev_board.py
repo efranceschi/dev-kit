@@ -646,36 +646,33 @@ class BoardTest(unittest.TestCase):
         html = request(self.record()["port"], "GET", "/")[1].decode()
         for el in ('id="req-card"', 'id="view-switch"', 'id="planner"', 'id="issue-dialog"', 'id="toast"', 'id="cont-btn"'):
             self.assertIn(el, html)
-        # the lifecycle bar is the page's navigation: one panel per phase; Needs you, requests and activity stay outside them
+        # the lane tabs are the page's navigation (3.1: the lanes of the flow diagram, plus the map); one panel per lane
         self.assertIn('id="phases" role="tablist"', html)
-        for ph in ("conception", "planning", "construction", "stable"):
+        self.assertIn('id="ph-map"', html)
+        for ph in ("conception", "planning", "construction", "releases", "stable"):
             self.assertIn(f'id="phase-{ph}" role="tabpanel"', html)
-        panels = html[html.index('id="phase-conception"'):html.index('<aside class="side"')]
-        for el in ('id="needs"', 'id="req-card"', 'id="feed"'):
-            self.assertNotIn(el, panels)
-        # construction: one work card, the board views and the insights are tabs of it; quality and backlog went to their phases
-        card = html[html.index('id="board-card"'):html.index('id="phase-stable"')]
-        self.assertIn('id="phase-construction"', html[:html.index('id="board-card"')])
-        for el in ('id="tab-tasks"', 'id="ins-burndown"', 'id="ins-velocity"', 'id="ins-gates"'):
-            self.assertIn(el, card)
-        for el in ('id="ins-quality"', 'id="ins-backlog"', 'class="card insights"', 'id="tab-plan"'):
+        # Needs you, requests and activity are drawers outside every panel
+        main = html[html.index('<main'):html.index('</main>')]
+        for el in ('id="impediments"', 'id="req-card"', 'id="feed"', 'id="needs-dialog"'):
+            self.assertNotIn(el, main)
+            self.assertIn(el, html)
+        self.assertIn('id="needs-btn"', html[:html.index('<main')])
+        # construction: the milestone's strip (picker and stages), then the work area; the metrics are a modal
+        cons = html[html.index('id="phase-construction"'):html.index('id="phase-releases"')]
+        for el in ('id="tabs"', 'id="stages"', 'id="board-card"', 'id="tab-tasks"', 'id="tab-qa"', 'id="metrics-btn"'):
+            self.assertIn(el, cons)
+        metrics = html[html.index('id="metrics-dialog"'):]
+        for el in ('id="ins-burndown"', 'id="ins-velocity"', 'id="ins-gates"'):
+            self.assertIn(el, metrics)
+        for el in ('id="ins-quality"', 'id="ins-backlog"', 'class="card insights"', 'id="tab-plan"', 'id="train-card"', 'id="cons-nav"'):
             self.assertNotIn(el, html)
-        # the plan view lives only in planning; construction keeps its chevrons (releases, milestones, stages) in one sticky strip
-        planning = html[html.index('id="phase-planning"'):html.index('id="phase-construction"')]
-        for el in ('id="roadmap"', 'id="product-backlog"', 'id="planner"'):
-            self.assertIn(el, planning)
-        nav = html[html.index('id="cons-nav"'):html.index('id="board-card"')]
-        self.assertNotIn('id="train-card"', html)  # the "Next release" card is gone (2.2.4)
-        for el in ('id="rel-tabs"', 'id="rel-stages"', 'id="tabs"', 'id="stages"'):
-            self.assertIn(el, nav)
+        # the plan view has a screen of its own, opened from Planning
+        self.assertIn('id="planner"', html[html.index('id="phase-replan"'):html.index('id="phase-construction"')])
         self.assertEqual(request(self.record()["port"], "GET", "/assets/favicon-alert.svg")[0], 200)  # the tab's "needs you" icon
-        # Releases is a view next to the phases (2.4.0): its panel follows Stable and holds none of the construction ids
-        self.assertIn('id="phase-releases" role="tabpanel"', html)
-        self.assertGreater(html.index('id="phase-releases"'), html.index('id="phase-stable"'))
-        releases = html[html.index('id="phase-releases"'):html.index('<aside class="side"')]
-        for el in ('id="rel-overview"', 'id="rel-page"'):
+        releases = html[html.index('id="phase-releases"'):html.index('id="phase-stable"')]
+        for el in ('id="rel-strip"', 'id="rel-tiles"'):
             self.assertIn(el, releases)
-        for el in ('id="board-card"', 'id="tabs"', 'id="stages"', 'id="rel-tabs"'):
+        for el in ('id="board-card"', 'id="tabs"', 'id="stages"'):
             self.assertNotIn(el, releases)
 
     def test_state_endpoint_is_read_only_and_complete(self):

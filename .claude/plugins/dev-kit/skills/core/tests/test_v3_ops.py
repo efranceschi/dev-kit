@@ -227,14 +227,14 @@ class TestHealthRendered(tb.RenderBase):
         self.ds("set", "autonomy.production.health", '{"command": "exit 3"}')
         self.ds("sync-plan")
         self.ds("prod-check", expect=1)
-        out = self.render([["text", "#impediments", "needs"], ["click", "#ph-stable"], ["text", "#st-health", "health"],
-                           ["text", "#st-prod", "prod"], ["text", "#st-prod-sub", "sub"]])
+        out = self.render([["click", "#needs-btn"], ["text", "#impediments", "needs"], ["key", "Escape"], ["click", "#ph-stable"], ["text", "#st-health", "health"],
+                           ["text", "#st-flags", "prod"], ["text", "#st-prod-sub", "sub"]])
         self.assertIn("PRODUCTION IS FAILING ITS HEALTH CHECK", out["needs"].upper())  # titles are styled uppercase
         self.assertIn("I-001", out["needs"])
         self.assertIn("1 failed check", out["needs"])
         self.assertIn("✕ failing", out["health"])
         self.assertIn("EVERY 15 MIN · EXIT 3", out["health"].upper())
-        self.assertIn("release_R1", out["prod"])
+        self.assertIn("release_R1", out["prod"])  # the release flags have a block of their own (3.1)
         self.assertIn("behind the release flag", out["sub"])
 
 

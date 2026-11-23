@@ -14,6 +14,7 @@
 <body>
   <a class="skip" href="#main" data-i18n="Skip to content">Skip to content</a>
 
+  <div class="app">
   <header class="topbar" role="banner">
     <div class="brand">
       <img class="logo" src="/assets/favicon.svg" alt="">
@@ -23,15 +24,29 @@
       </div>
     </div>
 
-    <div class="top-actions">
+    <div class="top-mid">
       <div class="pop-wrap" id="run-wrap">
         <button type="button" class="run-now idle" id="run-btn" aria-haspopup="true" aria-expanded="false" aria-controls="run-pop"></button>
-        <div class="popover right run-pop" id="run-pop" hidden></div>
+        <div class="popover run-pop" id="run-pop" hidden></div>
       </div>
-      <span class="live" id="live" role="status" aria-live="polite">
-        <span class="dot" aria-hidden="true"></span><span id="live-text" data-i18n-once="Connecting…">Connecting…</span>
-      </span>
       <span class="updated" id="updated" aria-live="off"></span>
+    </div>
+
+    <div class="top-actions">
+      <button type="button" class="needs-btn calm" id="needs-btn" aria-haspopup="dialog" aria-controls="needs-dialog">
+        <span class="needs-n" id="needs-n" aria-hidden="true">0</span><span class="needs-label" data-i18n="Needs you">Needs you</span><span class="visually-hidden" id="needs-sr"></span>
+      </button>
+      <button type="button" class="top-btn" id="req-btn" aria-haspopup="dialog" aria-controls="req-dialog" title="Requests to Claude Code" data-i18n-title="Requests to Claude Code">
+        <svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17"><path d="M4 6h16M4 12h10M4 18h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="18" cy="16" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        <span class="top-btn-label" data-i18n="Requests">Requests</span><span class="top-count" id="req-count" hidden></span>
+      </button>
+      <button type="button" class="top-btn" id="act-btn" aria-haspopup="dialog" aria-controls="act-dialog" title="What happened, latest first" data-i18n-title="What happened, latest first">
+        <svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17"><path d="M3 12h4l3-8 4 16 3-8h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="top-btn-label" data-i18n="Activity">Activity</span>
+      </button>
+      <span class="live" id="live" role="status" aria-live="polite">
+        <span class="dot" aria-hidden="true"></span><span id="live-text" class="live-text" data-i18n-once="Connecting…">Connecting…</span>
+      </span>
       <button type="button" class="btn btn-icon" id="theme-btn" aria-label="Switch to light theme" title="Switch to light theme">
         <svg class="ico-sun" aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <svg class="ico-moon" aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
@@ -63,192 +78,206 @@
     </div>
   </header>
 
+  <nav class="phasebar" aria-labelledby="phase-h">
+    <h2 id="phase-h" class="visually-hidden" data-i18n="Project lifecycle">Project lifecycle</h2>
+    <button type="button" class="map-btn" id="ph-map" aria-pressed="false" title="The whole flow, with where the project is" data-i18n-title="The whole flow, with where the project is">
+      <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><rect x="3" y="4" width="18" height="4" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3" y="10" width="18" height="4" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3" y="16" width="18" height="4" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      <span data-i18n="Map">Map</span>
+    </button>
+    <div class="phase-tabs" id="phases" role="tablist" aria-labelledby="phase-h"></div>
+    <span class="visually-hidden" id="phase-step"></span>
+    <button type="button" class="link-btn phase-back" id="phase-back" hidden data-i18n="Back to the current phase">Back to the current phase</button>
+  </nav>
+
   <div class="banner" id="banner" role="alert" hidden></div>
 
   <main id="main" tabindex="-1" aria-busy="true">
-    <nav class="phasebar" aria-labelledby="phase-h">
-      <div class="phasebar-head"><h2 id="phase-h" data-i18n="Project lifecycle">Project lifecycle</h2><span class="phase-step" id="phase-step"></span>
-        <button type="button" class="link-btn" id="phase-back" hidden data-i18n="Back to the current phase">Back to the current phase</button>
-        <span class="phase-cycle" data-i18n="↻ a scope change goes back to conception · bugs and improvements go straight to construction">↻ a scope change goes back to conception · bugs and improvements go straight to construction</span></div>
-      <div class="chevrons phase-chevrons" id="phases" role="tablist" aria-labelledby="phase-h"></div>
-    </nav>
 
-    <section class="needs" id="needs" aria-labelledby="needs-h" tabindex="-1" hidden>
-      <div class="needs-head">
-        <h2 id="needs-h"><span class="needs-icon" aria-hidden="true">!</span><span data-i18n="Needs you">Needs you</span></h2>
-        <span class="needs-count" id="needs-count" aria-live="polite"></span>
-      </div>
-      <div id="impediments" class="needs-lists"></div>
+    <!-- the whole flow: one lane per phase, as in docs/dev-kit-flow.svg -->
+    <section class="phase-panel map-panel" id="phase-map" aria-labelledby="map-h" hidden>
+      <h2 class="visually-hidden" id="map-h" data-i18n="Map">Map</h2>
+      <div class="map-lanes" id="map-lanes"></div>
+      <div class="anytime" id="map-any"></div>
     </section>
 
-    <div class="workspace" id="workspace">
-      <div class="main-col">
-        <section class="phase-panel" id="phase-conception" role="tabpanel" aria-labelledby="ph-conception" hidden>
-          <section class="card" aria-labelledby="conc-h">
-            <div class="card-head"><h2 id="conc-h" data-i18n="Conception">Conception</h2><p class="card-sub" data-i18n="What the product is and how it is built, before any plan">What the product is and how it is built, before any plan</p></div>
-            <ol class="step-grid" id="conc-steps"></ol>
-          </section>
-          <div class="cols-2 phase-row">
-            <section class="card" aria-labelledby="conc-rev-h"><div class="card-head"><h2 id="conc-rev-h" data-i18n="Reviews">Reviews</h2><p class="card-sub" id="conc-rev-sub"></p></div><div id="conc-reviews"></div></section>
-            <section class="card" aria-labelledby="conc-chg-h"><div class="card-head"><h2 id="conc-chg-h" data-i18n="Scope changes">Scope changes</h2><p class="card-sub" data-i18n="Change issues go back through the PRD">Change issues go back through the PRD</p></div><div id="conc-changes"></div></section>
+    <section class="phase-panel" id="phase-conception" role="tabpanel" aria-labelledby="ph-conception" hidden>
+      <section class="lane-strip" data-lane="conception" id="conc-strip" aria-labelledby="conception-strip-h"></section>
+      <div class="tiles t2x2" id="conc-tiles"></div>
+    </section>
+
+    <section class="phase-panel" id="phase-planning" role="tabpanel" aria-labelledby="ph-planning" hidden>
+      <section class="lane-strip" data-lane="planning" id="pl-strip" aria-labelledby="planning-strip-h"></section>
+      <div class="tiles t3" id="pl-tiles"></div>
+    </section>
+
+    <!-- replanning: the planner on a screen of its own, opened from Planning -->
+    <section class="phase-panel replan-panel" id="phase-replan" aria-labelledby="replan-h" hidden>
+      <div class="replan-head">
+        <button type="button" class="btn btn-sm" id="replan-back" data-i18n="← Planning">← Planning</button>
+        <h2 id="replan-h" data-i18n="Replan the milestones">Replan the milestones</h2>
+        <p class="card-sub" data-i18n="Drag tasks and issues between open milestones, then send the draft">Drag tasks and issues between open milestones, then send the draft</p>
+      </div>
+      <div class="planner" id="planner" hidden></div>
+    </section>
+
+    <section class="phase-panel" id="phase-construction" role="tabpanel" aria-labelledby="ph-construction" hidden>
+      <section class="lane-strip" data-lane="construction" id="ms-strip" aria-labelledby="construction-strip-h">
+        <div class="strip-head">
+          <h2 class="strip-title" id="construction-strip-h"><span class="strip-num">3</span> <span data-i18n="Milestones">Milestones</span></h2>
+          <span class="strip-sub" id="ms-strip-sub"></span>
+          <div class="selector" id="tabs-wrap">
+            <span class="sel-label" id="tabs-label" data-i18n="Milestone">Milestone</span>
+            <div class="sel-groups" role="tablist" id="tabs" aria-labelledby="tabs-label"></div>
+            <button type="button" class="link-btn" id="tabs-back" hidden data-i18n="Back to current">Back to current</button>
           </div>
-          <section class="card" aria-labelledby="conc-adr-h"><div class="card-head"><h2 id="conc-adr-h" data-i18n="Decisions">Decisions</h2><p class="card-sub" id="conc-adr-sub" data-i18n-once="From .dev/decisions.md, newest first">From .dev/decisions.md, newest first</p></div><div id="conc-adrs"></div></section>
-          <section class="card" aria-labelledby="conc-facts-h"><div class="card-head"><h2 id="conc-facts-h" data-i18n="Facts">Facts</h2><p class="card-sub" id="conc-facts-sub" data-i18n-once="From .dev/facts.md, newest first">From .dev/facts.md, newest first</p></div><div id="conc-facts"></div></section>
-        </section>
+        </div>
+        <div class="flow-box" id="stages"></div>
+      </section>
 
-        <section class="phase-panel" id="phase-planning" role="tabpanel" aria-labelledby="ph-planning" hidden>
-          <div class="cols-2 phase-row">
-            <section class="card" aria-labelledby="pl-h"><div class="card-head"><h2 id="pl-h" data-i18n="Plan">Plan</h2><p class="card-sub" data-i18n="Milestones and tasks from the PRD, architecture and design">Milestones and tasks from the PRD, architecture and design</p></div><ol class="step-grid one" id="pl-step"></ol><div id="pl-review"></div></section>
-            <section class="card" aria-labelledby="pl-bl-h"><div class="card-head"><h2 id="pl-bl-h" data-i18n="Backlog">Backlog</h2><p class="card-sub" id="pb-sub"></p></div><div class="run-slot" id="run-backlog"></div><div id="product-backlog" class="stack"></div></section>
+      <div class="ms-line" id="ms-line">
+        <div class="ms-text">
+          <h2 id="ms-title">—</h2>
+          <button type="button" class="goal" id="ms-goal" title="Show the whole goal" data-i18n-title="Show the whole goal">—</button>
+        </div>
+        <div class="ms-progress">
+          <div class="segbar" id="segbar" role="img" aria-label="Task status split" data-i18n-aria-label="Task status split"></div>
+          <p class="ms-count" id="ms-count"><strong id="ms-done">0</strong><span id="ms-total" data-i18n-once="/0 tasks">/0 tasks</span><span class="ms-pct" id="ms-pct"></span></p>
+          <span class="ms-facts" id="ms-facts"></span>
+        </div>
+        <div class="ms-tools">
+          <div role="tablist" class="work-tabs" id="view-switch" aria-label="Construction views" data-i18n-aria-label="Construction views">
+            <button type="button" role="tab" id="tab-tasks" aria-controls="view-tasks" data-view="tasks" data-i18n="Tasks">Tasks</button>
+            <button type="button" role="tab" id="tab-qa" aria-controls="view-qa" data-view="qa" data-i18n="QA">QA</button>
           </div>
-          <section class="card" aria-labelledby="road-h"><div class="card-head"><h2 id="road-h" data-i18n="Roadmap">Roadmap</h2><p class="card-sub" id="road-sub" data-i18n-once="Every milestone in plan order. Open one to see it in construction.">Every milestone in plan order. Open one to see it in construction.</p></div><ol class="road" id="roadmap"></ol></section>
-          <section class="card plan-host-card" id="plan-host-card" aria-labelledby="plan-host-h" hidden><div class="card-head"><h2 id="plan-host-h" data-i18n="Plan the milestones">Plan the milestones</h2><p class="card-sub" data-i18n="Drag tasks and issues between open milestones, then send the draft">Drag tasks and issues between open milestones, then send the draft</p></div><div class="planner" id="planner" hidden></div></section>
-        </section>
-
-        <section class="phase-panel" id="phase-construction" role="tabpanel" aria-labelledby="ph-construction" hidden>
-          <div class="cons-nav card" id="cons-nav">
-            <div class="rel-row" id="rel-row" hidden>
-              <span class="ms-label" id="rel-label" data-i18n="Releases">Releases</span>
-              <div role="tablist" class="rel-tabs" id="rel-tabs" aria-labelledby="rel-label"></div>
-              <ol class="chevrons stages rel-stages" id="rel-stages" aria-label="Stages of the release" data-i18n-aria-label="Stages of the release"></ol>
-            </div>
-            <div class="ms-top">
-              <span class="ms-label" id="tabs-label" data-i18n="Milestones">Milestones</span>
-              <div class="tabs-row">
-                <div class="pop-wrap" id="tabs-earlier-wrap" hidden>
-                  <button type="button" class="more-tab chev-first" id="tabs-earlier" aria-haspopup="true" aria-expanded="false" aria-controls="tabs-earlier-pop"></button>
-                  <div class="popover ms-pop" id="tabs-earlier-pop" hidden><p class="pop-title" data-i18n="Earlier milestones">Earlier milestones</p><ul class="ms-list" id="tabs-earlier-list"></ul></div>
-                </div>
-                <div role="tablist" id="tabs" aria-labelledby="tabs-label"></div>
-                <div class="pop-wrap" id="tabs-later-wrap" hidden>
-                  <button type="button" class="more-tab chev-last" id="tabs-later" aria-haspopup="true" aria-expanded="false" aria-controls="tabs-later-pop"></button>
-                  <div class="popover ms-pop" id="tabs-later-pop" hidden><p class="pop-title" data-i18n="Later milestones">Later milestones</p><ul class="ms-list" id="tabs-later-list"></ul></div>
-                </div>
-                <button type="button" class="link-btn" id="tabs-back" hidden data-i18n="Back to current">Back to current</button>
-              </div>
-              <div class="ms-facts" id="ms-facts"></div>
-            </div>
-            <ol class="chevrons stages" id="stages" aria-labelledby="stages-h"></ol>
-          </div>
-
-          <section class="card milestone" aria-labelledby="ms-title">
-            <div class="ms-body">
-              <div class="ms-text">
-                <h2 id="ms-title">—</h2>
-                <p class="goal" id="ms-goal">—</p>
-                <button type="button" class="link-btn" id="goal-more" aria-expanded="false" hidden data-i18n-once="Show more">Show more</button>
-              </div>
-              <div class="ms-progress">
-                <p class="ms-count" id="ms-count"><strong id="ms-done">0</strong><span id="ms-total" data-i18n-once="/0 tasks">/0 tasks</span><span class="ms-pct" id="ms-pct"></span></p>
-                <div class="segbar" id="segbar" role="img" aria-label="Task status split" data-i18n-aria-label="Task status split"></div>
-                <ul class="seg-legend" id="seg-legend"></ul>
-                <p class="ms-caption" id="ms-caption" aria-live="polite"></p>
-                <p class="ms-next" id="ms-next"></p>
-              </div>
-            </div>
-            <p class="stages-sub"><span class="visually-hidden" id="stages-h" data-i18n="Milestone stages">Milestone stages</span><span class="card-sub" id="stages-sub"></span></p>
-            <p class="also-running" id="also-running" hidden></p>
-          </section>
-
-          <section class="card board-card" id="board-card" data-view="tasks" aria-labelledby="board-h">
-            <div class="card-head">
-              <h2 id="board-h" data-i18n-once="Task board">Task board</h2>
-              <div role="tablist" class="work-tabs" id="view-switch" aria-label="Construction views" data-i18n-aria-label="Construction views">
-                <span class="tab-group" role="presentation">
-                  <button type="button" role="tab" id="tab-tasks" aria-controls="view-tasks" data-view="tasks" data-i18n="Tasks">Tasks</button>
-                  <button type="button" role="tab" id="tab-qa" aria-controls="view-qa" data-view="qa" data-i18n="QA">QA</button>
-                </span>
-                <span class="tab-group" role="presentation" title="Insights" data-i18n-title="Insights">
-                  <button type="button" role="tab" id="ins-tab-burndown" aria-controls="ins-burndown" data-view="burndown" data-i18n="Burndown">Burndown</button>
-                  <button type="button" role="tab" id="ins-tab-velocity" aria-controls="ins-velocity" data-view="velocity" data-i18n="Velocity">Velocity</button>
-                  <button type="button" role="tab" id="ins-tab-gates" aria-controls="ins-gates" data-view="gates" data-i18n="Gates">Gates</button>
-                </span>
-              </div>
-              <div class="board-tools">
-                <label class="search">
-                  <span class="visually-hidden" data-i18n="Filter tasks by id or title">Filter tasks by id or title</span>
-                  <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                  <input type="search" id="task-search" placeholder="Filter tasks" autocomplete="off" spellcheck="false" data-i18n-placeholder="Filter tasks">
-                </label>
-                <label>
-                  <span class="visually-hidden" data-i18n="Filter by task type">Filter by task type</span>
-                  <select id="type-filter"><option value="" data-i18n="All types">All types</option></select>
-                </label>
-              </div>
-            </div>
-            <div role="tabpanel" id="view-tasks" aria-labelledby="tab-tasks">
-              <p class="filter-note" id="filter-note" role="status" hidden></p>
-              <div class="col-tabs seg-switch" id="col-tabs" role="group" aria-label="Column shown" data-i18n-aria-label="Column shown"></div>
-              <div class="kanban" id="kanban"></div>
-            </div>
-            <div role="tabpanel" id="view-qa" aria-labelledby="tab-qa" tabindex="0" hidden>
-              <div class="qa-panel" id="qa-panel"></div>
-            </div>
-            <div role="tabpanel" id="ins-gates" aria-labelledby="ins-tab-gates" tabindex="0" hidden>
-              <p class="card-sub" id="dod-sub"></p>
-              <div id="dod"></div>
-            </div>
-            <div role="tabpanel" id="ins-burndown" aria-labelledby="ins-tab-burndown" tabindex="0" hidden>
-              <ul class="legend" aria-label="Legend" data-i18n-aria-label="Legend">
-                <li><span class="key key-line s1" aria-hidden="true"></span><span data-i18n="Remaining tasks">Remaining tasks</span></li>
-                <li><span class="key key-line ideal" aria-hidden="true"></span><span data-i18n="Ideal">Ideal</span></li>
-              </ul>
-              <div class="chart" id="burndown"></div>
-              <details class="table-view"><summary data-i18n="Show as table">Show as table</summary><div id="burndown-table"></div></details>
-            </div>
-            <div role="tabpanel" id="ins-velocity" aria-labelledby="ins-tab-velocity" tabindex="0" hidden>
-              <p class="card-sub" data-i18n="Tasks done per milestone">Tasks done per milestone</p>
-              <div class="chart" id="velocity"></div>
-              <p class="card-sub chart-title" data-i18n="Hours per milestone · cost (or tokens) when measured">Hours per milestone · cost (or tokens) when measured</p>
-              <ul class="legend" aria-label="Legend" data-i18n-aria-label="Legend">
-                <li><span class="key key-line s1" aria-hidden="true"></span><span data-i18n="Elapsed (first task start → gate)">Elapsed (first task start → gate)</span></li>
-                <li><span class="key key-line s2" aria-hidden="true"></span><span data-i18n="Working (time with a task in progress)">Working (time with a task in progress)</span></li>
-              </ul>
-              <div class="chart" id="velocity-hours"></div>
-              <details class="table-view"><summary data-i18n="Show as table">Show as table</summary><div id="velocity-table"></div></details>
-            </div>
-          </section>
-        </section>
-
-        <section class="phase-panel" id="phase-stable" role="tabpanel" aria-labelledby="ph-stable" hidden>
-          <section class="card" aria-labelledby="st-sum-h"><div class="card-head"><h2 id="st-sum-h" data-i18n="Project">Project</h2><p class="card-sub" id="st-sum-sub"></p></div><div class="facts-grid" id="st-summary"></div></section>
-          <div class="cols-2 phase-row">
-            <section class="card" aria-labelledby="st-prod-h"><div class="card-head"><h2 id="st-prod-h" data-i18n="Production">Production</h2><p class="card-sub" id="st-prod-sub"></p></div><div class="run-slot" id="run-prod"></div><div id="st-prod"></div></section>
-            <section class="card" aria-labelledby="st-rev-h"><div class="card-head"><h2 id="st-rev-h" data-i18n="Release checks">Release checks</h2><p class="card-sub" id="st-rev-sub"></p></div><div class="run-slot" id="run-checks"></div><div id="st-reviews"></div></section>
-          </div>
-          <section class="card" aria-labelledby="st-rel-h"><div class="card-head"><h2 id="st-rel-h" data-i18n="Releases">Releases</h2><p class="card-sub" data-i18n="Newest first">Newest first</p></div><div class="run-slot" id="run-releases"></div><div id="st-releases"></div></section>
-        </section>
-
-        <section class="phase-panel" id="phase-releases" role="tabpanel" aria-labelledby="ph-releases" hidden>
-          <section class="card" aria-labelledby="rel-ov-h"><div class="card-head"><h2 id="rel-ov-h" data-i18n="Planned releases">Planned releases</h2><p class="card-sub" id="rel-sum-sub"></p></div><div class="rel-cards" id="rel-overview"></div></section>
-          <section class="card" aria-labelledby="rel-pg-h"><div class="card-head"><h2 id="rel-pg-h" data-i18n-once="Release">Release</h2><p class="card-sub" id="rel-pg-sub"></p></div><div id="rel-page"></div></section>
-        </section>
+          <button type="button" class="btn btn-sm" id="metrics-btn" aria-haspopup="dialog" aria-controls="metrics-dialog">
+            <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span data-i18n="Metrics">Metrics</span>
+          </button>
+          <label class="search">
+            <span class="visually-hidden" data-i18n="Filter tasks by id or title">Filter tasks by id or title</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <input type="search" id="task-search" placeholder="Filter tasks" autocomplete="off" spellcheck="false" data-i18n-placeholder="Filter tasks">
+          </label>
+          <label>
+            <span class="visually-hidden" data-i18n="Filter by task type">Filter by task type</span>
+            <select id="type-filter"><option value="" data-i18n="All types">All types</option></select>
+          </label>
+        </div>
       </div>
 
-      <aside class="side" aria-label="Requests and activity" data-i18n-aria-label="Requests and activity">
-        <section class="card req-card" id="req-card" aria-labelledby="req-h" hidden>
-          <div class="card-head"><h2 id="req-h" data-i18n="Requests">Requests</h2><span class="exec off" id="exec" role="status" data-i18n-once="Claude Code: not running">Claude Code: not running</span></div>
-          <div class="req-tools">
-            <button type="button" class="btn btn-sm" id="new-issue-btn" aria-haspopup="dialog" data-i18n="＋ New issue">＋ New issue</button>
-            <button type="button" class="btn btn-sm" id="pause-btn" aria-pressed="false" data-i18n-once="Pause queue">Pause queue</button>
-            <button type="button" class="btn btn-sm toggle" id="cont-btn" aria-pressed="false" title="After each request, Claude Code starts the project's next step by itself, until something needs you or the milestone closes" data-i18n="Go on by itself" data-i18n-title="After each request, Claude Code starts the project&#x27;s next step by itself, until something needs you or the milestone closes">Go on by itself</button>
-          </div>
-          <p class="card-sub req-hint" id="req-hint"></p>
-          <ol class="list req-list" id="req-list" aria-live="polite"></ol>
-        </section>
-        <section class="card feed-card" aria-labelledby="act-h">
-          <div class="card-head"><h2 id="act-h" data-i18n="Activity">Activity</h2><p class="card-sub" title="From .dev/log.md and the session log (skills and agents)" data-i18n="Latest first" data-i18n-title="From .dev/log.md and the session log (skills and agents)">Latest first</p><span id="log-link"></span></div>
-          <ol class="feed" id="feed"></ol>
-        </section>
-      </aside>
-    </div>
+      <section class="work-area" id="board-card" data-view="tasks" aria-labelledby="board-h">
+        <h2 class="visually-hidden" id="board-h" data-i18n-once="Task board">Task board</h2>
+        <div role="tabpanel" class="view-tasks" id="view-tasks" aria-labelledby="tab-tasks">
+          <p class="filter-note" id="filter-note" role="status" hidden></p>
+          <div class="col-tabs seg-switch" id="col-tabs" role="group" aria-label="Column shown" data-i18n-aria-label="Column shown"></div>
+          <div class="kanban" id="kanban"></div>
+        </div>
+        <div role="tabpanel" class="view-qa" id="view-qa" aria-labelledby="tab-qa" tabindex="0" hidden>
+          <div class="qa-panel" id="qa-panel"></div>
+        </div>
+      </section>
+    </section>
 
-    <footer class="foot" id="foot"></footer>
+    <section class="phase-panel" id="phase-releases" role="tabpanel" aria-labelledby="ph-releases" hidden>
+      <section class="lane-strip" data-lane="releases" id="rel-strip" aria-labelledby="releases-strip-h"></section>
+      <div class="tiles t2x2" id="rel-tiles"></div>
+    </section>
+
+    <section class="phase-panel" id="phase-stable" role="tabpanel" aria-labelledby="ph-stable" hidden>
+      <section class="lane-strip" data-lane="stable" id="st-strip" aria-labelledby="stable-strip-h"></section>
+      <div class="tiles t3x2" id="st-tiles"></div>
+    </section>
   </main>
+  </div>
 
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
   <div class="visually-hidden" id="copy-status" role="status" aria-live="polite"></div>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- what waits on the user: a drawer opened from the red button in the top bar -->
+  <dialog id="needs-dialog" class="drawer needs-drawer" aria-labelledby="needs-h">
+    <div class="td-head">
+      <h2 id="needs-h"><span class="needs-icon" aria-hidden="true">!</span><span data-i18n="Needs you">Needs you</span></h2>
+      <span class="needs-count" id="needs-count" aria-live="polite"></span>
+      <button type="button" class="btn" id="needs-close" aria-label="Close" data-i18n="Close" data-i18n-aria-label="Close">Close</button>
+    </div>
+    <div id="impediments" class="needs-lists"></div>
+  </dialog>
+
+  <dialog id="req-dialog" class="drawer" aria-labelledby="req-h">
+    <div class="td-head">
+      <h2 id="req-h" data-i18n="Requests">Requests</h2>
+      <button type="button" class="btn" id="req-close" aria-label="Close" data-i18n="Close" data-i18n-aria-label="Close">Close</button>
+    </div>
+    <section class="req-card" id="req-card">
+      <span class="exec off" id="exec" role="status" data-i18n-once="Claude Code: not running">Claude Code: not running</span>
+      <div class="req-tools">
+        <button type="button" class="btn btn-sm" id="new-issue-btn" aria-haspopup="dialog" data-i18n="＋ New issue">＋ New issue</button>
+        <button type="button" class="btn btn-sm" id="pause-btn" aria-pressed="false" data-i18n-once="Pause queue">Pause queue</button>
+        <button type="button" class="btn btn-sm toggle" id="cont-btn" aria-pressed="false" title="After each request, Claude Code starts the project's next step by itself, until something needs you or the milestone closes" data-i18n="Go on by itself" data-i18n-title="After each request, Claude Code starts the project&#x27;s next step by itself, until something needs you or the milestone closes">Go on by itself</button>
+      </div>
+      <p class="card-sub req-hint" id="req-hint"></p>
+      <ol class="list req-list" id="req-list" aria-live="polite"></ol>
+    </section>
+  </dialog>
+
+  <dialog id="act-dialog" class="drawer" aria-labelledby="act-h">
+    <div class="td-head">
+      <h2 id="act-h" data-i18n="Activity">Activity</h2>
+      <p class="card-sub" title="From .dev/log.md and the session log (skills and agents)" data-i18n="Latest first" data-i18n-title="From .dev/log.md and the session log (skills and agents)">Latest first</p>
+      <span id="log-link"></span>
+      <button type="button" class="btn" id="act-close" aria-label="Close" data-i18n="Close" data-i18n-aria-label="Close">Close</button>
+    </div>
+    <ol class="feed" id="feed"></ol>
+    <footer class="foot" id="foot"></footer>
+  </dialog>
+
+  <!-- burndown, velocity and gates: one click away from the milestone -->
+  <dialog id="metrics-dialog" class="modal metrics-modal" aria-labelledby="metrics-h">
+    <div class="td-head">
+      <h2 id="metrics-h" data-i18n-once="Metrics">Metrics</h2><span class="card-sub" id="metrics-sub"></span>
+      <div role="tablist" class="work-tabs" id="ins-switch" aria-label="Metrics" data-i18n-aria-label="Metrics">
+        <button type="button" role="tab" id="ins-tab-burndown" aria-controls="ins-burndown" data-view="burndown" data-i18n="Burndown">Burndown</button>
+        <button type="button" role="tab" id="ins-tab-velocity" aria-controls="ins-velocity" data-view="velocity" data-i18n="Velocity">Velocity</button>
+        <button type="button" role="tab" id="ins-tab-gates" aria-controls="ins-gates" data-view="gates" data-i18n="Gates">Gates</button>
+      </div>
+      <button type="button" class="btn" id="metrics-close" aria-label="Close" data-i18n="Close" data-i18n-aria-label="Close">Close</button>
+    </div>
+    <div class="modal-body">
+      <div role="tabpanel" id="ins-gates" aria-labelledby="ins-tab-gates" tabindex="0" hidden>
+        <p class="card-sub" id="dod-sub"></p>
+        <div id="dod"></div>
+      </div>
+      <div role="tabpanel" id="ins-burndown" aria-labelledby="ins-tab-burndown" tabindex="0" hidden>
+        <ul class="legend" aria-label="Legend" data-i18n-aria-label="Legend">
+          <li><span class="key key-line s1" aria-hidden="true"></span><span data-i18n="Remaining tasks">Remaining tasks</span></li>
+          <li><span class="key key-line ideal" aria-hidden="true"></span><span data-i18n="Ideal">Ideal</span></li>
+        </ul>
+        <div class="chart" id="burndown"></div>
+        <details class="table-view"><summary data-i18n="Show as table">Show as table</summary><div id="burndown-table"></div></details>
+      </div>
+      <div role="tabpanel" id="ins-velocity" aria-labelledby="ins-tab-velocity" tabindex="0" hidden>
+        <p class="card-sub" data-i18n="Tasks done per milestone">Tasks done per milestone</p>
+        <div class="chart" id="velocity"></div>
+        <p class="card-sub chart-title" data-i18n="Hours per milestone · cost (or tokens) when measured">Hours per milestone · cost (or tokens) when measured</p>
+        <ul class="legend" aria-label="Legend" data-i18n-aria-label="Legend">
+          <li><span class="key key-line s1" aria-hidden="true"></span><span data-i18n="Elapsed (first task start → gate)">Elapsed (first task start → gate)</span></li>
+          <li><span class="key key-line s2" aria-hidden="true"></span><span data-i18n="Working (time with a task in progress)">Working (time with a task in progress)</span></li>
+        </ul>
+        <div class="chart" id="velocity-hours"></div>
+        <details class="table-view"><summary data-i18n="Show as table">Show as table</summary><div id="velocity-table"></div></details>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- the whole of a list, or the details of a step of the flow -->
+  <dialog id="list-dialog" class="modal" aria-labelledby="list-title">
+    <div class="td-head">
+      <h2 id="list-title"></h2>
+      <button type="button" class="btn" id="list-close" aria-label="Close" data-i18n="Close" data-i18n-aria-label="Close">Close</button>
+    </div>
+    <div class="modal-body" id="list-body"></div>
+  </dialog>
 
   <dialog id="issue-dialog" aria-labelledby="issue-h">
     <form method="dialog" id="issue-form">

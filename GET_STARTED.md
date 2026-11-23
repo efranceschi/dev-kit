@@ -34,7 +34,7 @@ Describe your idea in one sentence, or run `/dev-kit:start` with no text. The ki
 This writes and reviews the PRD, architecture, UX/UI design and implementation plan, all in `.dev/`. After the PRD review and again after the plan review, the kit stops at a **checkpoint**: open the board (`/dev-kit:board`), read the summary in **Needs you** (the link opens the whole document) and **Confirm**, or **Ask for changes** in your own words. Nothing is built before you confirm the plan.
 
 <p align="center">
-  <img src=".claude/plugins/dev-kit/docs/images/board-planning.png" alt="The board's Planning tab: the plan and its passed review, the issue queue, the later milestones and the roadmap grouped by release" width="900">
+  <img src=".claude/plugins/dev-kit/docs/images/board-planning.png" alt="The board's Planning lane: the flow plan, review, your confirmation and sync, all done, then the roadmap grouped by release, the backlog and the plan review" width="900">
 </p>
 
 ## 4. Build
@@ -50,13 +50,13 @@ The kit implements the plan milestone by milestone, with tests, and runs a quali
 The plan groups milestones into **planned releases** (R1, R2…). When every milestone of a release is closed, `/dev-kit:release` runs the usability audit (apps with a UI), the docs and the release audit, writes the **release review** (`.dev/releases/R<n>/review.md`) and waits for your approval: approve on the board (Needs you) or by running `/dev-kit:release` again, or reject with what must change, which becomes a fixes milestone of the same release. With nothing open and everything released, the project is **stable**.
 
 <p align="center">
-  <img src=".claude/plugins/dev-kit/docs/images/board-releases.png" alt="The board's Releases tab: R1 released, R2 in progress with its forecast, R3 to do, and the page of R2 with its stages milestones, release review, your approval, production and released" width="900">
+  <img src=".claude/plugins/dev-kit/docs/images/board-releases.png" alt="The board's Releases lane: R2 picked, its stages as a flow (checks, audit, review, your approval, production, released) with the rejection loop, then its numbers, milestones, what holds it back and its quality and documents" width="900">
 </p>
 
 If you want each milestone in production as soon as it passes its gate, turn on **release flags** in `/dev-kit:settings`: the new code goes out behind the release's flag, off, and the flag is turned on only after you approve the release. A **production health check** (a command or a URL) runs on a schedule; a failure opens an urgent issue and shows in Needs you.
 
 <p align="center">
-  <img src=".claude/plugins/dev-kit/docs/images/board-stable.png" alt="The board's Stable tab: project totals, production with the health check and its recent results, the release flags (R1 on, R2 off) and the release checks" width="900">
+  <img src=".claude/plugins/dev-kit/docs/images/board-stable.png" alt="The board's Stable lane: the flow (stable, production health, issue, expedite or standard or change), then the project totals, production, the health check, release flags, release checks and releases" width="900">
 </p>
 
 From there the product keeps living: `/dev-kit:issue "what happens"` sends a bug or improvement straight to construction (a new task in a milestone), while a scope change reopens conception and planning, only for what changed, and the milestone being built keeps going. The phase you see (`conception · prd`, `construction · M3`, `stable`) is worked out from `.dev/`, so it always matches the work.

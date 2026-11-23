@@ -144,6 +144,7 @@ const { chromium } = require('playwright');
   const out = { errors };
   for (const [op, arg, key] of steps) {
     if (op === 'click') { await p.click(arg); await p.waitForTimeout(300); }
+    else if (op === 'key') { await p.keyboard.press(arg); await p.waitForTimeout(200); }
     else if (op === 'text') out[key || arg] = await p.evaluate((s) => [...document.querySelectorAll(s)].filter((e) => e.offsetParent || e === document.body).map((e) => e.innerText).join('\n'), arg);
     else if (op === 'buttons') out[key || arg] = await p.evaluate((s) => [...document.querySelectorAll(s)].filter((e) => e.offsetParent).map((e) => ({ cmd: e.dataset.cmd || null, text: e.innerText.trim(), disabled: e.disabled, title: e.title })), arg);
     else if (op === 'eval') out[key] = await p.evaluate(arg);
@@ -292,8 +293,9 @@ class TestNeedsYouRendered(RenderBase):
         self.ds("drop", "T-012", "--reason", "not reproducible")
         with (self.dev / "log.md").open("a", encoding="utf-8") as f:
             f.write("- 2026-11-23T12:01:00Z cleanup killed=0 removed=2\n- 2026-11-23T12:02:00Z tip shown T-3 source=-\n")
-        out = self.render([["buttons", "#impediments button.btn", "needs"], ["text", "#impediments", "needs_text"], ["text", "#feed", "feed"],
-                           ["text", "#foot", "foot"]])
+        # Needs you and Activity are drawers opened from the top bar
+        out = self.render([["click", "#needs-btn"], ["buttons", "#impediments button.btn", "needs"], ["text", "#impediments", "needs_text"], ["key", "Escape"],
+                           ["click", "#act-btn"], ["text", "#feed", "feed"], ["text", "#foot", "foot"]])
         texts = [b["text"] for b in out["needs"]]
         for label in ("Continue fixing (+1 round)", "Accept with an ADR *", "Replan", "Unblock", "Skip to the next milestone", "Drop *"):
             self.assertTrue(any(t.startswith(label) for t in texts), (label, texts))
@@ -517,13 +519,14 @@ class TestBoardVocabularyRendered(RenderBase):
         steps = []
         for tab in ("conception", "planning", "construction", "stable", "releases"):
             steps += [["click", f"#ph-{tab}"], ["text", "body", tab]]
-        steps += [["click", "#ph-construction"], ["click", "#tab-qa"], ["text", "body", "qa"]]
+        steps += [["click", "#ph-construction"], ["click", "#tab-qa"], ["text", "body", "qa"], ["click", "#ph-map"], ["text", "body", "map"],
+                  ["click", "#req-btn"], ["text", "body", "requests"]]
         out = self.render(steps)
         releases = {r["id"] for r in self.state()["release_plan"]}
-        for k in ("conception", "planning", "construction", "stable", "releases", "qa"):
+        for k in ("conception", "planning", "construction", "stable", "releases", "qa", "map", "requests"):
             ids = set(re.findall(r"\bR-?\d+\b", out[k]))
             self.assertTrue(ids <= releases, (k, ids - releases))
-        self.assertIn("P-001", out["construction"])  # board requests are P-nnn
+        self.assertIn("P-001", out["requests"])  # board requests are P-nnn, in the Requests drawer
 
     def test_in_qa_the_milestone_state_is_in_one_place_and_the_qa_tab_opens(self) -> None:
         self.ds("event", "skill_start", "--set", "skill=qa", "--set", "scope=M1")
