@@ -6,43 +6,25 @@ What to do at each stage of a project, in the order of the [flow diagram](dev-ki
 |---|---|---|---|
 | [Conception](#1-conception) | 1 Conception | `/dev-kit:start`, then the autopilot (or each skill by hand) | the interview, **Confirm PRD** |
 | [Planning](#2-planning) | 2 Planning | the autopilot, or `/dev-kit:plan` and `/dev-kit:review plan` | **Confirm plan** (every replan too) |
-| [Milestones](#3-milestones) | 3 Milestones | the board's **Autopilot** switch, or `/dev-kit:autopilot` | questions and permissions in **Needs you**, decisions after repeated failed gates |
+| [Milestones](#3-milestones) | 3 Milestones | `/dev-kit:autopilot` (or each skill by hand) | questions, decisions after repeated failed gates |
 | [Releases](#4-releases) | 3 Releases | `/dev-kit:release` (the autopilot runs it) | **Approve** or **Reject** the release review |
 | [Stable and maintenance](#5-stable-and-maintenance) | 4 Stable | `/dev-kit:issue`, the production health check | scope changes, expedite issues |
 | [Coming from 2.x](#6-coming-from-dev-kit-2x) | | the first command after updating | review and confirm the regrouped plan |
 
 ## Two ways to drive
 
-Every stage can be driven in two ways, and you can switch at any time:
+Every stage is driven from a Claude Code session, in one of two ways, and you can switch at any time:
 
-- **From the board (recommended for long runs).** Open it with `/dev-kit:board` and turn on the **Autopilot** switch in the top bar. The board's server then runs `/dev-kit:autopilot --milestones 1 --board` headless (`claude -p`), one milestone per run with a fresh context, and starts the next run by itself until a release waits for your approval or the project is stable. Every question and every permission prompt goes to **Needs you**; when only work that needs you is left, the run ends and the board starts it again as soon as you answer. You can close the Claude Code session: the board keeps going, and it does not stop for idleness while the Autopilot is on. Its output is in `.dev/run/autopilot.log`.
-- **From a Claude Code session.** `/dev-kit:autopilot` runs the same driver in your session and asks its questions in the chat (or parks them, at the `unattended` level). `--until plan` stops after planning, `--milestones N` after N milestones. Or go step by step, one skill at a time (each section below lists them).
+- **The autopilot.** `/dev-kit:autopilot` runs the driver in your session and asks its questions in the chat (or parks them, at the `unattended` level). `--until plan` stops after planning, `--milestones N` after N milestones (resume in a fresh session or after `/clear`: a fresh context is cheaper), `--parallel N` builds N tasks of a milestone at once (1 to 6, default 3), each implementer in its own git worktree; only tasks with no file in common run together, and more at once costs no more tokens but uses more CPU and disk and reaches your account's usage limits sooner. Only one autopilot drives a project at a time.
+- **Step by step**, one skill at a time (each section below lists them).
 
-Only one autopilot drives a project. While the board's switch is on, a `/dev-kit:autopilot` started by hand does not start a second driver: it tells you the board is driving, and with only `--parallel N` it just changes the number of implementers of the run in progress. While you run the autopilot in a session, the board's Autopilot shows "waiting for another session".
+**The board only shows.** `/dev-kit:board` follows the project as it happens: the top bar shows the **Autopilot** while `/dev-kit:autopilot` runs (and for how long), the task board its implementers at work. It never starts, stops or answers anything: every decision is taken in Claude Code.
 
-![The Autopilot card on the board: running for 24 minutes, the command it runs, 4 runs so far, Implementers at once 3 with 2 running now, Turn off and Force stop](images/board-autopilot.png)
+**Needs you** is the red button in the top bar, with how many items wait (the tab title and icon change too). It opens a drawer with every item and the command that settles it in Claude Code: open questions (with the recommended answer first; `/dev-kit:interview --gaps` goes through them), **Confirm PRD** and **Confirm plan**, release approvals (`/dev-kit:release`) and offers such as a queue of issues above its limit (`/dev-kit:backlog`). Without the board, `/dev-kit:backlog` lists the same items.
 
-Next to the switch, one word says what it is doing:
+![The Needs you drawer: an open question with its answers and the command to answer it](images/board-needs-you.png)
 
-| The switch says | What it means | What to do |
-|---|---|---|
-| off | nothing runs by itself | turn it on when you want the project to move |
-| starting · running | a run is starting or in progress (for how long) | nothing; click it for the details |
-| finishing the step | you turned it off: the run finishes its step (green work only), then stops | wait, or **Force stop** to end it now |
-| waiting for you · N | only work that needs you is left | answer the N items in **Needs you**: the next run starts by itself |
-| waiting for your approval | a release review waits for you | **Approve** or **Reject** it in Needs you ([Releases](#4-releases)) |
-| waiting for another session | a board request, or an autopilot you started in a session, is working on the project | nothing: it starts when that one ends |
-| retrying soon | a run failed; it tries again after 30 s, 2 and 10 minutes | nothing, unless it ends in "stopped" |
-| stopped | three runs failed in a row, or a run changed nothing | read the reason in its card and `.dev/run/autopilot.log`, fix the cause, then **Start again** |
-| project stable | nothing is open | nothing ([Stable](#5-stable-and-maintenance)) |
-
-**Implementers at once** (on the same card, 1 to 6, default 3) sets how many tasks of a milestone are built in parallel, each implementer in its own git worktree. It applies from the next batch while the running implementers finish; only tasks with no file in common run together; more at once costs no more tokens but uses more CPU and disk and reaches your account's usage limits sooner. The setting is kept on this machine (`.dev/run/autopilot.json`) and is also read by an autopilot you run by hand; `/dev-kit:autopilot --parallel N` changes it from a session. QA keeps its own rule (light auditors together, heavy ones limited by the CPUs).
-
-**Needs you** is the red button in the top bar, with how many items wait (the tab title and icon change too). It opens a drawer with every item and its buttons: open questions (with the recommended answer first, or your own words), **Confirm PRD** and **Confirm plan**, release approvals, permission prompts (Allow, Allow for this session, Deny; with no answer in 10 minutes the prompt is denied and the task is blocked with the reason) and offers such as a queue of issues above its limit. Without the board, `/dev-kit:backlog` lists the same items and `/dev-kit:interview --gaps` goes through the open questions.
-
-![The Needs you drawer: an open question with the recommended answer first, the other answer and a field for your own](images/board-needs-you.png)
-
-**Live**, at the right of the top bar, lists on hover or click what is running now: the autopilot run, a board request, the skills of the session log and their agents.
+**Live**, at the right of the top bar, lists on hover or click what is running now: the skills of the session log (the autopilot included) and their agents.
 
 ## 1. Conception
 
@@ -55,7 +37,7 @@ What the product is and how it is built, before any plan.
 /dev-kit:autopilot --until plan
 ```
 
-`start` runs the interview (about 10 rounds; every question has a recommended option and a "decide for me" choice) and writes `.dev/brief.md`. The autopilot then writes the PRD and reviews it, stops for your confirmation of the PRD, and goes on with the architecture, the UX and UI specs (only when there is an interface) and the design review. By hand, in this order: `/dev-kit:prd` → `/dev-kit:review prd` → (Confirm PRD) → `/dev-kit:architecture` → `/dev-kit:ux` → `/dev-kit:ui` → `/dev-kit:review design`. With the board up you can also turn the Autopilot on right after the interview: it runs conception and planning and waits at each checkpoint.
+`start` runs the interview (about 10 rounds; every question has a recommended option and a "decide for me" choice) and writes `.dev/brief.md`. The autopilot then writes the PRD and reviews it, stops for your confirmation of the PRD, and goes on with the architecture, the UX and UI specs (only when there is an interface) and the design review. By hand, in this order: `/dev-kit:prd` → `/dev-kit:review prd` → (Confirm PRD) → `/dev-kit:architecture` → `/dev-kit:ux` → `/dev-kit:ui` → `/dev-kit:review design`. Without `--until`, the autopilot runs conception and planning and waits at each checkpoint.
 
 **The board shows** tab 1 with the steps as a flow (interview, PRD, review, Confirm PRD, architecture, UX → UI, design review), each done, in progress, waiting for its review or out of date after a change. Below: the documents (each opens formatted in a side panel), the reviews with their score against the cut-off, the decisions recorded in `decisions.md`, and the scope changes waiting.
 
@@ -64,7 +46,7 @@ What the product is and how it is built, before any plan.
 **Needs you**
 
 - **The interview** is yours: answer in your own language. The answers that matter most later are the quality bar, how much of the run you want to follow (`supervised` or `unattended`), production and the issue buffer. Change them later with `/dev-kit:settings` or `/dev-kit:interview --gaps`.
-- **Confirm PRD.** When the PRD review passes, Needs you shows its summary (personas, stories by priority, how many acceptance criteria, what is out of scope) and a link to the whole document. **Confirm**, or **Ask for changes** in your own words: the PRD is revised, reviewed again and comes back to you. The architecture does not start before you confirm. Without the board, tell the session ("confirm the PRD") or run `/dev-kit:backlog`, which lists it.
+- **Confirm PRD.** When the PRD review passes, the session shows its summary (personas, stories by priority, how many acceptance criteria, what is out of scope; the board's Needs you has it too, with a link to the whole document). Confirm, or ask for changes in your own words: the PRD is revised, reviewed again and comes back to you. The architecture does not start before you confirm. Tell the session ("confirm the PRD"); `/dev-kit:backlog` lists it while it waits.
 - Decisions on the always-ask list (paid services, deleting data, public exposure, the security model, credentials) come as questions, each with a recommendation.
 
 **Unstuck**
@@ -80,15 +62,15 @@ What the product is and how it is built, before any plan.
 
 The specs become releases, milestones and tasks.
 
-**Run** the same `/dev-kit:autopilot --until plan` (or the board's Autopilot) goes on from conception. By hand: `/dev-kit:plan`, then `/dev-kit:review plan`. To change the plan later: `/dev-kit:plan replan`, or the **Replan the milestones** screen on the board.
+**Run** the same `/dev-kit:autopilot --until plan` goes on from conception. By hand: `/dev-kit:plan`, then `/dev-kit:review plan`. To change the plan later: `/dev-kit:plan replan` (say what to move: tasks between milestones, milestones between releases, a new milestone).
 
-**The board shows** tab 2: the flow plan → review → your confirmation → sync, the roadmap grouped by release (R1, R2…; 2 to 5 milestones each, each a complete journey a user can validate), the backlog and the plan review. **Replan the milestones** (from this tab) lets you drag tasks not started and open issues between open milestones, or milestones between releases, add the next milestone and send the draft; nothing changes until you send it.
+**The board shows** tab 2: the flow plan → review → your confirmation → sync, the roadmap grouped by release (R1, R2…; 2 to 5 milestones each, each a complete journey a user can validate), the backlog and the plan review.
 
 ![The Planning tab: the flow plan, review, your confirmation and sync, then the roadmap by release, the backlog and the plan review](images/board-planning.png)
 
 **Needs you**
 
-- **Confirm plan.** When the plan review passes (and after every replan), Needs you shows the releases, each milestone with its goal, its `exit_check` and its number of tasks. Read it: mistakes are cheapest here. **Confirm**, or **Ask for changes**. No milestone that has not started begins before you confirm; during a replan the milestone in progress keeps going.
+- **Confirm plan.** When the plan review passes (and after every replan), the session (and the board's Needs you) shows the releases, each milestone with its goal, its `exit_check` and its number of tasks. Read it: mistakes are cheapest here. Confirm, or ask for changes. No milestone that has not started begins before you confirm; during a replan the milestone in progress keeps going.
 - Check each milestone's `exit_check`: the test, command or acceptance criteria that must pass at its gate. It is how you decide what "done" means for that milestone.
 
 **Unstuck**
@@ -97,13 +79,13 @@ The specs become releases, milestones and tasks.
 |---|---|
 | No milestone starts | Confirm plan waits in Needs you |
 | The plan has milestones without an exit check (older plans) | `/dev-kit:plan --annotate-exit` proposes them; until then the gate does not require one |
-| You want a different grouping or order | Ask for changes on Confirm plan, or use **Replan the milestones** |
+| You want a different grouping or order | Ask for changes on Confirm plan, or run `/dev-kit:plan replan` |
 
 ## 3. Milestones
 
 Construction, one milestone after the other: pull the issues, implement, QA, gate, then smoke and deploy. It runs on its own.
 
-**Run** the board's **Autopilot** switch (it runs one milestone per run and starts the next by itself), or `/dev-kit:autopilot` in a session. By hand: `/dev-kit:implement --milestone M1`, then `/dev-kit:qa M1`; repeat `implement` and `qa` while the gate creates fix tasks. Set how many tasks are built at once on the Autopilot card, or with `--parallel N`.
+**Run** `/dev-kit:autopilot` in a session. By hand: `/dev-kit:implement --milestone M1`, then `/dev-kit:qa M1`; repeat `implement` and `qa` while the gate creates fix tasks. Set how many tasks are built at once with `--parallel N`.
 
 **The board shows** tab 3 Milestones: the milestones grouped by release in a picker; for the one picked, its stages (pull issues, implement, QA, gate, deploy) with where it is, one line with its goal, progress and **forecast** (the probable finish, a later "by" date and the cost to finish), and the task board in four columns (to do, in progress, blocked, done) with the agents running on each card. Finished work says how long it took: each done card shows its execution time (from start to done), and a closed milestone shows it next to "closed" and on its Closed step (from its first task to the gate; the working time is in the tooltip). **QA** shows the rounds and their scores; **Metrics** opens burndown, velocity and gates.
 
@@ -114,7 +96,7 @@ A gate passes only with the hard floor met (the build and the suite pass, no sec
 **Needs you**
 
 - **Questions** a task cannot go on without. The task waits (blocked, with the question), the rest of the milestone goes on, and your answer unblocks it.
-- **Permission prompts** of the run (a command, an edit outside the project), when the permission mode does not cover them. With the Autopilot or a board request they come to Needs you; in a session, to the terminal.
+- **Permission prompts** of the run (a command, an edit outside the project), when the permission mode does not cover them. They come to the terminal; cover them with a permission mode or `/fewer-permission-prompts` for an unattended run.
 - **Fix rounds used up**, or the same finding back twice ("needs your decision"): accept with an ADR, replan, or give more rounds. The `unattended` level applies the recommendation by itself, never with a critical or high finding open or security below its minimum.
 - **Production deploys** when you set them to ask.
 
@@ -128,7 +110,7 @@ A gate passes only with the hard floor met (the build and the suite pass, no sec
 | A gate keeps failing | Read `.dev/qa/<M>/report.md`; from round 2 only previous findings and new medium or worse ones count |
 | "gate of Mn is pending" | Milestones are sequential: finish `qa Mn` first; only hotfix tasks skip the line |
 | "Frozen for QA" when adding work | The milestone is in QA; adding to it needs your confirmation, or put the work in the next milestone |
-| The machine is slower than you like | Lower **Implementers at once** (applies from the next batch) |
+| The machine is slower than you like | Run the autopilot with a lower `--parallel N` |
 | A session froze or the machine rebooted | `/dev-kit:start` reconciles `.dev/` with git and stops leftover processes; turn the Autopilot back on (it resumes if it was on) |
 
 ## 4. Releases
@@ -137,7 +119,7 @@ When every milestone of a release is closed, it is checked, audited and waits fo
 
 **Run** `/dev-kit:release` (the autopilot runs it when a release is ready). It runs the usability audit (apps with an interface), the docs and their review and the release audit, then writes the **release review** (`.dev/releases/R<n>/review.md`: what it delivers against the PRD, scores, risks, how to try it and how to roll back) and stops. `/dev-kit:release --dry-run` shows the checklist and the version it would use without changing anything.
 
-**The board shows** tab 3 Releases: the release picked with its stages (checks, audit, review, your approval, production, released) and the rejection loop, its numbers, its milestones, what holds it back, and its quality and documents. When it waits for you, **Approve** and **Reject** are there and in Needs you, and the Autopilot says "waiting for your approval".
+**The board shows** tab 3 Releases: the release picked with its stages (checks, audit, review, your approval, production, released) and the rejection loop, its numbers, its milestones, what holds it back, and its quality and documents. When it waits for you, it says so there and in Needs you, with the command that decides it.
 
 ![The Releases tab: R2 picked, its stages as a flow with the rejection loop, its numbers, milestones, what holds it back and its documents](images/board-releases.png)
 
@@ -147,8 +129,8 @@ A released release says how long it took next to "released" (from the first task
 
 **Needs you**
 
-- **Approve** (on the board, or `/dev-kit:release --approve`): the kit tags the version, deploys to production when there is one, runs the smoke checks and records the release. With release flags, the flag of the release is turned on.
-- **Reject** with what must change (on the board, or `/dev-kit:release --reject "what must change"`): it becomes a fixes milestone in the same release (`M<k>.<i>`, for example `M5.1`), built and gated like any other, and the release comes back to you. No milestone of the next release reaches the main branch before; while you decide, its first milestone may be built ahead on its own branch (`autonomy.pipeline`).
+- **Approve** (`/dev-kit:release --approve`): the kit tags the version, deploys to production when there is one, runs the smoke checks and records the release. With release flags, the flag of the release is turned on.
+- **Reject** with what must change (`/dev-kit:release --reject "what must change"`): it becomes a fixes milestone in the same release (`M<k>.<i>`, for example `M5.1`), built and gated like any other, and the release comes back to you. No milestone of the next release reaches the main branch before; while you decide, its first milestone may be built ahead on its own branch (`autonomy.pipeline`).
 
 **Production before the release** (optional): with `/dev-kit:settings` turn on release flags and set production to `per_milestone_flagged`. Each milestone then goes to production as soon as its gate passes, with its release's flag off; approval turns the flag on, `/dev-kit:deploy --rollback R2` turns it off again, and a chore to remove the flag is planned in the next release.
 
@@ -190,9 +172,9 @@ A project built with 2.x moves to 3.x in place: you do not start over.
 
 1. Update the plugin (`/plugin marketplace update dev-kit`) and start a new Claude Code session in the project. If a board was running, stop it (`/dev-kit:board stop`) and start it again: an old board says "started by another version".
 2. Run `/dev-kit:start`. The first command that reads the old `state.json` copies it and `plan.md` to `.dev/backup/` before anything changes, and `.dev/.gitignore` gets its managed block (your own rules stay).
-3. The next `sync-plan` (any skill that syncs the plan runs it) regroups the plan into releases: milestones already released go under `## R0 — Released before 3.0`, with every version and tag kept; the others under `## R1`; maintenance milestones under `## R<k> — Maintenance`. It records an ADR and marks the plan review out of date. Board requests named `R-nnn` show as `P-nnn`.
-4. Run `/dev-kit:review plan` (or let the autopilot do it) and **Confirm plan** on the board. Until you confirm, no milestone that has not started begins; the one in progress goes on.
+3. The next `sync-plan` (any skill that syncs the plan runs it) regroups the plan into releases: milestones already released go under `## R0 — Released before 3.0`, with every version and tag kept; the others under `## R1`; maintenance milestones under `## R<k> — Maintenance`. It records an ADR and marks the plan review out of date.
+4. Run `/dev-kit:review plan` (or let the autopilot do it) and **Confirm plan**. Until you confirm, no milestone that has not started begins; the one in progress goes on.
 5. Optional: `/dev-kit:plan --annotate-exit` adds an `exit_check` to the open milestones, so their gates require it; with CI in the project, the gate also looks for a green run (`/dev-kit:settings` turns that off).
-6. "Go on by itself" from 2.x is now the **Autopilot** switch: a project that had it on starts with the Autopilot on.
+6. "Go on by itself" from 2.x is now `/dev-kit:autopilot`, run from a session.
 
-New in 3.x for everyone coming from 2.x: you confirm the PRD and the plan, every release waits for your approval, each milestone has an exit check, and the board can drive the whole run (the Autopilot switch, from 3.2) with several implementers at once (from 3.3).
+New in 3.x for everyone coming from 2.x: you confirm the PRD and the plan, every release waits for your approval, each milestone has an exit check, and the autopilot builds several tasks at once (`--parallel N`, from 3.3); since 3.12 the board only shows the project.

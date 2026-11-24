@@ -21,7 +21,6 @@ sys.path.insert(0, str(CORE / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dev_diagram as dg  # noqa: E402
-import dev_worker as dw  # noqa: E402
 
 SCRIPT = CORE / "scripts" / "dev_diagram.py"
 SVG_NS = "{http://www.w3.org/2000/svg}"
@@ -152,12 +151,7 @@ class TestRenderAndCheck(Base):
         self.assertFalse((self.root / dg.SVG).exists())
 
 
-class TestBoardAndQueue(Base):
-    def test_the_queue_accepts_the_diagram_commands_only(self):
-        ok = [c for c in ("/dev-kit:diagram", "/dev-kit:diagram update") if any(rx.match(c) for rx in dw.RUN_COMMANDS)]
-        self.assertEqual(len(ok), 2)
-        self.assertFalse(any(rx.match("/dev-kit:diagram update; rm -rf /") for rx in dw.RUN_COMMANDS))
-
+class TestBoard(Base):
     def test_board_serves_the_diagram_and_reports_it_in_the_state(self):
         from test_dev_board import BoardTest, request
         bt = BoardTest("test_start_twice_reuses_the_same_server")
@@ -186,8 +180,8 @@ class TestBoardAndQueue(Base):
         self.assertLess(html.index('id="ph-map"'), html.index('id="ph-arch"'))
         self.assertLess(html.index('id="ph-arch"'), html.index('id="phases"'))
         js = (CORE / "shared" / "board" / "board.js").read_text(encoding="utf-8")
-        self.assertIn('"/dev-kit:diagram update"', js)
-        self.assertIn("/^\\/dev-kit:diagram(?: update)?$/", js)
+        self.assertIn('"/dev-kit:diagram update"', js)  # named on the page, run in Claude Code
+        self.assertNotIn("RUN_RES", js)
 
 
 class TestDocsMakeItMandatory(unittest.TestCase):

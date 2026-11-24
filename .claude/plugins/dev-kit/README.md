@@ -2,7 +2,7 @@
 
 A Claude Code plugin where specialised agents build a complete application and keep it evolving, from the requirements interview through milestones and releases until the product is stable. You answer one interview; the kit then specifies, plans, implements, tests, audits and releases almost on its own, and stops only when it needs a decision from you.
 
-- **27 skills**, invoked as `/dev-kit:<name>`.
+- **26 skills**, invoked as `/dev-kit:<name>`.
 - **17 agents** the skills call: one implementer, one architecture consultant and 15 read-only reviewers.
 - **Resumable state** in `.dev/` inside your project.
 - **Lost?** `/dev-kit:help` tells you what to do next; `/dev-kit:help <question>` answers "how do I…?".
@@ -36,9 +36,7 @@ Step by step: [getting started](docs/getting-started.md). What each stage expect
 | let the kit build it | `/dev-kit:autopilot` |
 | build it step by step | `/dev-kit:prd` → `review prd` → `architecture` → `ux` → `ui` → `review design` → `plan` → `review plan` → `implement` → `qa` |
 | see where things stand | `/dev-kit:status` |
-| watch it live in the browser | `/dev-kit:board` (`/dev-kit:board stop` to stop) |
-| let the board drive the build | the **Autopilot** switch on `/dev-kit:board`: one milestone per run, questions in Needs you, implementers at once on its card |
-| ask for one thing from the board | buttons on `/dev-kit:board`: the board's own worker runs the requests (or `/dev-kit:worker` in a session) |
+| watch it live in the browser (read-only) | `/dev-kit:board` (`/dev-kit:board stop` to stop) |
 | report a bug or ask for an improvement | `/dev-kit:issue "what happens"` |
 | see everything pending | `/dev-kit:backlog` |
 | put it in production | `/dev-kit:deploy` |
@@ -46,11 +44,11 @@ Step by step: [getting started](docs/getting-started.md). What each stage expect
 | change autonomy, release flags, health check | `/dev-kit:settings` |
 | know how much it cost | `/dev-kit:costs` |
 | review the session or send feedback to the author | `/dev-kit:feedback` |
-| draw the architecture diagram of what is being built (also the board's Architecture button) | `/dev-kit:diagram` |
+| draw the architecture diagram of what is being built (shown on the board's Architecture tab) | `/dev-kit:diagram` |
 | find out why a run looks stuck, or make a dump for a dev-kit patch | `/dev-kit:debug` |
 | run it overnight | [recipe](docs/recipes.md#let-it-run-overnight) |
 
-All 27 skills by category, with arguments and examples: [skills](docs/skills.md).
+All 26 skills by category, with arguments and examples: [skills](docs/skills.md).
 
 ## How it works, in short
 
@@ -61,7 +59,7 @@ All 27 skills by category, with arguments and examples: [skills](docs/skills.md)
 - **The lifecycle is a cycle**, derived from `.dev/` and never set by hand: a scope change reopens conception and planning while the milestone in construction keeps going; `/dev-kit:status` shows the phase and step (`construction · M3`).
 - **Milestones** M1, M2… are the cadence of construction; each ends with a quality gate: a hard floor (build, tests, secrets), its `exit_check` and a score of 0–100 per dimension against the cut-off set in the interview. Building and QA belong to the milestone, not to the project phase.
 - **Releases** R1, R2… group milestones; each is audited, gets a release review and waits for your approval before production. With release flags, milestones can reach production earlier behind the release's flag.
-- **You confirm** the PRD and the plan at checkpoints on the board, and approve each release; everything else runs on its own.
+- **You confirm** the PRD and the plan at checkpoints, and approve each release; everything else runs on its own.
 - **Autonomy** is yours to set: supervised (asks at each decision point, always with a recommendation) or unattended (parks what needs you and keeps going).
 - **Bugs and ideas** found at any time enter by class of service without renumbering milestones.
 - Every question comes with a recommended option; short tips (`💡`) explain each mechanism the first times it matters.

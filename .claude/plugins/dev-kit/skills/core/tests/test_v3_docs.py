@@ -89,12 +89,11 @@ class TestStagesGuide(unittest.TestCase):
             for part in ("**Run**", "**The board shows**", "**Needs you**", "**Unstuck**"):
                 self.assertIn(part, stages[title], f"{title}: {part}")
 
-    def test_the_autopilot_states_match_the_board(self) -> None:
+    def test_the_guide_says_the_board_only_shows(self) -> None:
         text = (DOCS / "stages.md").read_text(encoding="utf-8")
-        js = (CORE / "shared" / "board" / "board.js").read_text(encoding="utf-8")
-        words = re.search(r"const AP_WORD = tmap\(\{(.*?)\}\);", js, re.S).group(1)
-        for word in re.findall(r'N_\("([^"]+)"\)', words):
-            self.assertIn(word, text, f"stages.md does not explain the Autopilot state '{word}'")
+        self.assertIn("**The board only shows.**", text)
+        for gone in ("Autopilot switch", "Force stop", "Implementers at once", "/dev-kit:worker"):
+            self.assertNotIn(gone, text)
 
     def test_linked_from_the_entry_points(self) -> None:
         for page in (REPO / "README.md", REPO / "GET_STARTED.md", KIT / "README.md", DOCS / "getting-started.md"):

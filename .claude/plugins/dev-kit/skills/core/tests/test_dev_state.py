@@ -652,23 +652,16 @@ class TestPlannedReleases(Base):
         gates = [e for e in events if e.get("event") == "release_gate"]
         self.assertEqual([e.get("transition") for e in gates][:3], ["submit", "reject", "submit"])
 
-    def test_board_decision_is_read_from_its_request(self) -> None:
-        sys.path.insert(0, str(SCRIPTS))
-        import dev_worker as dw
+    def test_rejection_feedback_becomes_the_fixes_tasks(self) -> None:
         self.close(("M1", ["T-001"]), ("M2", ["T-002"]))
         self.run_state("release-submit", "R1")
-        with self.assertRaises(dw.Invalid):
-            dw.validate("release_decision", {"release": "R1", "decision": "reject"})  # no feedback
-        with self.assertRaises(dw.Invalid):
-            dw.validate("release_decision", {"release": "M1", "decision": "approve"})
-        item = dw.submit(self.root, "release_decision", {"release": "R1", "decision": "reject",
-                                                         "feedback": "- First thing\n\n* Second thing\n"})
-        self.run_state("release-decide", "R2", "--request", item["id"], expect=1)  # decides R1, not R2
-        out = self.run_state("release-decide", "R1", "--request", item["id"]).stdout
+        self.run_state("release-decide", "R1", "--reject", expect=1)  # no feedback
+        self.run_state("release-decide", "R1", "--request", "P-001", expect=2)  # 3.12: the board records no decision
+        out = self.run_state("release-decide", "R1", "--reject", "--feedback", "First thing", "--feedback", "Second thing").stdout
         self.assertIn("T-004, T-005", out)
         self.assertEqual(self.state()["tasks"]["T-005"]["title"], "Second thing")
 
-    # ---- the board's release planning: move_milestone, new_release, drop_release (all or nothing)
+    # ---- release planning: move_milestone, new_release, drop_release (all or nothing)
 
     FIVE = ("# Implementation plan — demo\n\n## R1 — First\n\n## M1 — One\n\n## M2 — Two\n\n## M3 — Three\n\n"
             "## R2 — Second\n\n## M4 — Four\n\n## M5 — Five\n")
@@ -1607,15 +1600,13 @@ class TestBoardPlanEdits(Base):
                     {"op": "schedule_issue", "issue": "I-001", "milestone": "M3"}])
         self.assertEqual((self.state()["phase"], self.state()["step"]), ("construction", "M3"))
 
-    def test_draft_from_the_board_and_json_output(self) -> None:
-        sys.path.insert(0, str(SCRIPTS))
-        import dev_worker as dw
-        x = dw.submit(self.root, "plan_draft", {"ops": [{"op": "move_task", "task": "T-003", "milestone": "M1"}],
-                                                "base": "2000-01-01T00:00:00Z"})
-        out = json.loads(self.run_state("plan-apply", "--draft", x["id"], "--json").stdout)
-        self.assertTrue(out["ok"] and out["applied"] and out["state_changed_since_draft"])
+    def test_ops_and_json_output(self) -> None:
+        out = json.loads(self.run_state("plan-apply", "--ops", json.dumps([{"op": "move_task", "task": "T-003", "milestone": "M1"}]),
+                                        "--json").stdout)
+        self.assertTrue(out["ok"] and out["applied"])
+        self.assertNotIn("state_changed_since_draft", out)
         self.assertEqual(out["changes"], ["T-003 M2 → M1"])
-        self.run_state("plan-apply", "--draft", "P-404", expect=1)
+        self.run_state("plan-apply", "--draft", "P-001", expect=2)  # 3.12: no board drafts
         self.run_state("plan-apply", "--ops", "[]", expect=1)
         self.run_state("plan-apply", expect=1)
 
@@ -1626,11 +1617,10 @@ class TestQuestionsWithOptions(Base):
         self.init_with_plan()
 
     def test_options_and_answer(self) -> None:
-        qid = self.run_state("add-question", "Which database?", "--options", "Postgres|SQLite", "--recommended", "Postgres",
-                             "--request", "P-004").stdout.strip()
+        qid = self.run_state("add-question", "Which database?", "--options", "Postgres|SQLite", "--recommended", "Postgres").stdout.strip()
         side = json.loads((self.root / ".dev" / "run" / "questions" / f"{qid}.json").read_text())
-        self.assertEqual((side["options"], side["recommended"], side["request"], side["answered"]),
-                         (["Postgres", "SQLite"], "Postgres", "P-004", False))
+        self.assertEqual((side["options"], side["recommended"], side["answered"]), (["Postgres", "SQLite"], "Postgres", False))
+        self.assertNotIn("request", side)
         self.assertIn("Open questions: 1", self.run_state("status").stdout)
         self.run_state("answer-question", qid, "--answer", "SQLite | for now", "--ref", "ADR-007")
         text = (self.root / ".dev" / "open-questions.md").read_text()
@@ -1645,7 +1635,7 @@ class TestQuestionsWithOptions(Base):
     def test_option_rules(self) -> None:
         self.run_state("add-question", "q", "--options", "only one", expect=1)
         self.run_state("add-question", "q", "--options", "a|b", "--recommended", "c", expect=1)
-        self.run_state("add-question", "q", "--request", "R-1; x", expect=1)
+        self.run_state("add-question", "q", "--request", "P-001", expect=2)  # 3.12: no board requests
         qid = self.run_state("add-question", "plain question").stdout.strip()
         self.assertFalse((self.root / ".dev" / "run" / "questions" / f"{qid}.json").exists())
 

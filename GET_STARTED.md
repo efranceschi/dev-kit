@@ -31,7 +31,7 @@ Describe your idea in one sentence, or run `/dev-kit:start` with no text. The ki
 /dev-kit:autopilot --until plan
 ```
 
-This writes and reviews the PRD, architecture, UX/UI design and implementation plan, all in `.dev/`. After the PRD review and again after the plan review, the kit stops at a **checkpoint**: open the board (`/dev-kit:board`), read the summary in **Needs you** (the link opens the whole document) and **Confirm**, or **Ask for changes** in your own words. Nothing is built before you confirm the plan.
+This writes and reviews the PRD, architecture, UX/UI design and implementation plan, all in `.dev/`. After the PRD review and again after the plan review, the kit stops at a **checkpoint**: read the summary it shows (on the board, `/dev-kit:board`, **Needs you** has it too, with a link to the whole document) and confirm, or ask for changes in your own words. Nothing is built before you confirm the plan.
 
 <p align="center">
   <img src=".claude/plugins/dev-kit/docs/images/board-planning.png" alt="The board's Planning lane: the flow plan, review, your confirmation and sync, all done, then the roadmap grouped by release, the backlog and the plan review" width="900">
@@ -45,15 +45,15 @@ This writes and reviews the PRD, architecture, UX/UI design and implementation p
 
 The kit implements the plan milestone by milestone, with tests, and runs a quality gate at the end of each one: a hard floor (build, tests, no secrets), the milestone's `exit_check` and a score per dimension. It pauses only for decisions that need you; questions show up in **Needs you** with a recommended answer.
 
-**Or let the board drive it.** On the board, turn on the **Autopilot** switch in the top bar: the board runs the autopilot itself, headless, one milestone per run, until a release waits for your approval. Questions and permission prompts wait in Needs you while independent work goes on, and the next run starts as soon as you answer. Its card sets **Implementers at once** (1 to 6, default 3), how many tasks are built in parallel. You can close Claude Code meanwhile. What each word next to the switch means: [stage by stage](.claude/plugins/dev-kit/docs/stages.md#two-ways-to-drive).
+**Follow it on the board.** While `/dev-kit:autopilot` runs, the board's top bar shows the Autopilot running and the milestone's task board shows its implementers at work. The board only shows: questions, confirmations and approvals are answered in Claude Code. `--parallel N` (1 to 6, default 3) sets how many tasks are built at once.
 
 <p align="center">
-  <img src=".claude/plugins/dev-kit/docs/images/board-milestones.png" alt="The board's Milestones lane: the Autopilot switch on and running, M4 in implementation with two implementer agents, its forecast and the task board in four columns" width="900">
+  <img src=".claude/plugins/dev-kit/docs/images/board-milestones.png" alt="The board's Milestones lane: the Autopilot running, M4 in implementation with two implementer agents, its forecast and the task board in four columns" width="900">
 </p>
 
 ## 5. Release, then keep evolving
 
-The plan groups milestones into **planned releases** (R1, R2…). When every milestone of a release is closed, `/dev-kit:release` runs the usability audit (apps with a UI), the docs and the release audit, writes the **release review** (`.dev/releases/R<n>/review.md`) and waits for your approval: approve on the board (Needs you) or by running `/dev-kit:release` again, or reject with what must change, which becomes a fixes milestone of the same release. With nothing open and everything released, the project is **stable**.
+The plan groups milestones into **planned releases** (R1, R2…). When every milestone of a release is closed, `/dev-kit:release` runs the usability audit (apps with a UI), the docs and the release audit, writes the **release review** (`.dev/releases/R<n>/review.md`) and waits for your approval: approve by running `/dev-kit:release` again (the board shows it waiting in Needs you), or reject with what must change, which becomes a fixes milestone of the same release. With nothing open and everything released, the project is **stable**.
 
 <p align="center">
   <img src=".claude/plugins/dev-kit/docs/images/board-releases.png" alt="The board's Releases lane: R2 picked, its stages as a flow (checks, audit, review, your approval, production, released) with the rejection loop, then its numbers, milestones, what holds it back and its quality and documents" width="900">
@@ -75,7 +75,6 @@ From there the product keeps living: `/dev-kit:issue "what happens"` sends a bug
 | know what to do next, or ask a "how do I...?" question | `/dev-kit:help` |
 | see progress and blockers | `/dev-kit:status` |
 | watch it live in the browser | `/dev-kit:board` |
-| let the board drive the build | the **Autopilot** switch on the board |
 | report a bug or ask for a change | `/dev-kit:issue "what happens"` |
 | see everything still pending | `/dev-kit:backlog` |
 | put an approved milestone in production | `/dev-kit:deploy` |
@@ -83,7 +82,7 @@ From there the product keeps living: `/dev-kit:issue "what happens"` sends a bug
 | change autonomy, flags, the board language | `/dev-kit:settings` |
 | see how much it cost | `/dev-kit:costs` |
 | get an evaluation of the session | `/dev-kit:feedback` |
-| draw the architecture diagram of what is being built (also the board's Architecture button) | `/dev-kit:diagram` |
+| draw the architecture diagram of what is being built (shown on the board's Architecture tab) | `/dev-kit:diagram` |
 | find out why a run looks stuck, or make a dump for a dev-kit patch | `/dev-kit:debug` |
 
 ## Good to know

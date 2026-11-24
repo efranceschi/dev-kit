@@ -149,22 +149,22 @@ class TestRoundFenceAndBoard(Started):
         self.assertFalse(any("git apply" in x for x in dev_state.headless_allowed_tools(store)))
 
     def test_board_shows_the_round_its_tasks_and_a_warning(self) -> None:
-        import dev_worker as dw
+        import dev_board as db
         run = self.dev / "run"
         run.mkdir(parents=True, exist_ok=True)
         (run / "round.json").write_text(json.dumps({"pid": os.getpid(), "child": os.getpid(), "skill": "implement", "scope": "M1",
                                                     "round": "implement-M1-x", "started": "2026-11-24T09:30:26+00:00"}), encoding="utf-8")
         (run / "round-activity.json").write_text(json.dumps({"round": "implement-M1-x", "at": "2026-11-24T09:44:00Z", "tool": "Bash",
                                                              "what": "e2e", "agent": None}), encoding="utf-8")
-        rd = dw.autopilot_status(self.root)["round"]
+        rd = db.round_view(self.root)
         self.assertTrue(rd["unregistered"])
-        self.assertEqual((rd["skill"], rd["scope"], rd["last"]["what"]), ("implement", "M1", "e2e"))
+        self.assertEqual((rd["skill"], rd["scope"], rd["last"]["tool"]), ("implement", "M1", "Bash"))
         self.ds("start", "T-001")
-        rd = dw.autopilot_status(self.root)["round"]
-        self.assertEqual([t["id"] for t in rd["tasks"]], ["T-001"])
+        rd = db.round_view(self.root)
+        self.assertEqual(rd["tasks"], ["T-001"])
         self.assertFalse(rd["unregistered"])
         (run / "round.json").unlink()
-        self.assertIsNone(dw.autopilot_status(self.root)["round"])
+        self.assertIsNone(db.round_view(self.root))
 
 
 class TestDebug(Started):

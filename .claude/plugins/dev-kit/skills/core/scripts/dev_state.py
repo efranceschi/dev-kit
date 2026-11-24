@@ -45,26 +45,26 @@ Subcommands
   affected      pending tasks whose acceptance cites changed ACs (--acs AC-4,AC-7 [--json]), conventions §15
   unblock T     blocked -> todo
   drop T        drop a task removed by a replan (--reason); it no longer counts for milestones or release
-  task-decide T unblock|skip|drop|run [--note] [--request P-nnn]: Needs-you decision on a blocked task or a hotfix
+  task-decide T unblock|skip|drop|run [--note]: Needs-you decision on a blocked task or a hotfix
   flag list|set release_R<n> on|off [--rollback]: release flags (autonomy.release_flags, §21)
   prod-check    run the production health check once (--due: only when its interval passed); a failure opens an
                 expedite issue (one per check) and a Needs-you item
-  qa-decide M continue|accept|replan [--rounds N] [--note] [--request P-nnn]: QA rounds used up
+  qa-decide M continue|accept|replan [--rounds N] [--note]: QA rounds used up
   add-task      create a task in state and plan.md
   fix-tasks     one fix task per blocking finding of a findings file (--from --milestone; idempotent)
   add-question  append a non-blocking question to open-questions.md (--options a|b --recommended a: the board
-                offers them as answers)
+                shows them with the question)
   answer-question Q  move an open question to Resolved with its answer (--answer --ref)
   move-task T M move a task not started to another open milestone (--before T2), in plan.md and state
   new-milestone M TITLE  add the next milestone (M<last+1>) to plan.md and state; milestones are never inserted
   reorder M T…  new order of tasks not started inside a milestone (the order `next` follows)
-  plan-apply    apply a plan draft from the board (--draft P-nnn, or --ops JSON): all its changes or none
+  plan-apply    apply plan edits given as JSON (--ops or --ops-file): all its changes or none
                 (--dry-run shows them)
   gate M        set milestone gate: passed | pending | skipped (passed needs --score >= cut-off, the hard floor,
                 a green CI when required and, with an exit_check, `exit: pass` in scores.json; conventions §7)
   hard-floor M  record the round's deterministic checks (--from JSON): each failure becomes a hard_floor:<check> fix
   ci ACTION M   check | record (--sha --status success|failure|pending|none [--url]) | status: CI as the gate's verdict
-  debt ACTION   status [--json] | decide promote|accept|cooldown [--request P-nnn]: deferred debt above the cap
+  debt ACTION   status [--json] | decide promote|accept|cooldown: deferred debt above the cap
   artifact mark NAME  record that an artifact (brief|prd|architecture|ux|ui|plan|all) is up to date with its upstream
   stale         artifacts whose upstream changed since they were marked, and passed reviews now out of date
   ledger        work ledger (conventions §18): plan | record (files of an audit dimension), sections |
@@ -74,8 +74,7 @@ Subcommands
   xref          cross-document checks: ACs without tasks, unknown ACs, unspecified screens, unknown ADRs and deps
   review NAME   record a review (prd|design|plan|docs...): pass | fail | pending (pass needs --score >= cut-off);
                 a passed prd or plan review opens its checkpoint
-  checkpoint ACTION TARGET  status | confirm | adjust --feedback | summary --text, for prd or plan ([--request
-                P-nnn] reads the decision made on the board), conventions §19
+  checkpoint ACTION TARGET  status | confirm | adjust --feedback | summary --text, for prd or plan, conventions §19
   event TYPE    append an allowlisted event to .dev/telemetry.jsonl (--set k=v, --json)
   feedback      brief feedback about the dev-kit (--worked/--failed/--improve area:note)
   telemetry     summary | report | export [--all | --since D] [--json] [--out FILE] [--events]: session log, per-stage grades, export
@@ -89,8 +88,7 @@ Subcommands
   deploy [ENV]  record a deploy (--sha --status ok|failed|rolled_back [--milestone M] [--migration REV])
   preview M     record the local deploy of a milestone (--url --sha [--pid]) or --stopped
   release-submit R  freeze a planned release for the user's approval (--review PATH): awaiting approval
-  release-decide R  the user's decision: --approve, or --reject --feedback ITEM… (a fixes milestone in the release),
-                or --request P-nnn (the decision made on the board)
+  release-decide R  the user's decision: --approve, or --reject --feedback ITEM… (a fixes milestone in the release)
   release-record  record a release (--version [--tag] --release R after its approval, or --hotfix T): its
                 milestones are no longer waiting for a release (writes .dev/releases/R/flow.json); the phase (conception, planning, construction, stable) is always derived
   set KEY VAL   set language | project | stack.<field> | autonomy.<field>[.<sub>] (nested keys merge;
@@ -115,6 +113,7 @@ import signal
 import subprocess
 import sys
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -187,9 +186,6 @@ DEFAULT_AUTONOMY = {
     # the branch the project builds on (conventions.md §17): implementers' worktrees start from it and the pipeline
     # integrates into it; null = the branch checked out in the main checkout (not necessarily main)
     "git": {"base_branch": None},
-    # the board's server starts a headless worker session itself (`claude -p "/dev-kit:worker"`) when a request waits
-    # and no session takes requests (§17); permission_mode is passed to it, timeout_min ends a run that hangs
-    "board_executor": {"auto": True, "permission_mode": "acceptEdits", "timeout_min": 180, "autopilot_timeout_min": 360},
     # feature flags per planned release (conventions.md §21): off by default; when on, every release R<n> has the
     # flag release_R<n>, its feature tasks wrap the new behaviour in it, approved milestones go to production with the
     # flag off (production.when per_milestone_flagged), and approving the release turns it on. provider = how the
@@ -517,15 +513,6 @@ def check_autonomy_field(field: str, val: object) -> object:
         if val.get("enabled") and not (val.get("provider") or "").strip():
             fail("autonomy.release_flags needs a provider when enabled (env var, config file, flag service...): "
                  "/dev-kit:architecture records it")
-    elif field == "board_executor":
-        modes = ("default", "acceptEdits", "plan", "auto", "bypassPermissions", "dontAsk")
-        mins = lambda k, d: isinstance(val.get(k, d), int) and not isinstance(val.get(k, d), bool) and 5 <= val.get(k, d) <= 1440  # noqa: E731
-        if (not isinstance(val, dict) or set(val) - {"auto", "permission_mode", "timeout_min", "autopilot_timeout_min", "autopilot_in_session"}
-                or not isinstance(val.get("auto", True), bool) or val.get("permission_mode", "acceptEdits") not in modes
-                or not mins("timeout_min", 180) or not mins("autopilot_timeout_min", 360)
-                or not isinstance(val.get("autopilot_in_session", True), bool)):
-            fail(f'autonomy.board_executor must be {{"auto": true | false, "permission_mode": {" | ".join(modes)}, "timeout_min": 5-1440, '
-                 f'"autopilot_timeout_min": 5-1440, "autopilot_in_session": true | false}}')
     elif field == "ci":
         if (not isinstance(val, dict) or set(val) - {"provider", "required", "timeout_min"}
                 or val.get("provider", "auto") not in CI_PROVIDERS or not isinstance(val.get("required", True), bool)
@@ -1603,7 +1590,7 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
         store.state.pop("needs_release_migration", None)
         notices.append(f"migrated to planned releases ({adr}): " + " · ".join(groups))
         notices.append("review the grouping with /dev-kit:review plan (now stale); when it passes, Confirm plan holds every "
-                       "milestone not started yet until you confirm it (board Needs you or the review's question)")
+                       "milestone not started yet until you confirm it (the review's question)")
         store.event("migration", transition="releases")
     if store.state.pop("needs_gitignore", None) and stage_gitignore(store):
         notices.append("updated .dev/.gitignore: machine-local files are ignored (your own rules were kept)")
@@ -1723,23 +1710,14 @@ def pick_batch(store: Store, milestone: str | None, n: int) -> tuple[list[str], 
     return chosen, ""
 
 
-PARALLEL_MIN, PARALLEL_MAX, PARALLEL_DEFAULT = 1, 6, 3  # implementers at once (the board's Autopilot card, 3.3)
-
-
-def parallel_setting(store: Store) -> int:
-    """Implementers at once set on this machine (.dev/run/autopilot.json `parallel`, the Autopilot card), or 3."""
-    try:
-        n = json.loads((store.dev / "run" / "autopilot.json").read_text(encoding="utf-8")).get("parallel")
-    except (OSError, ValueError, AttributeError):
-        n = None
-    return n if isinstance(n, int) and not isinstance(n, bool) and PARALLEL_MIN <= n <= PARALLEL_MAX else PARALLEL_DEFAULT
+PARALLEL_MIN, PARALLEL_MAX, PARALLEL_DEFAULT = 1, 6, 3  # implementers at once (`next --batch auto` = the default)
 
 
 def cmd_next(store: Store, a: argparse.Namespace) -> None:
     store.load()
     if getattr(a, "batch", None) is not None:
         if a.batch == "auto":
-            a.batch = parallel_setting(store)
+            a.batch = PARALLEL_DEFAULT
         else:
             try:
                 a.batch = int(a.batch)
@@ -2109,7 +2087,7 @@ def cmd_challenge(store: Store, a: argparse.Namespace) -> None:
             cmd_add_question(store, argparse.Namespace(
                 text=f"Disputed security finding {fid} ({f.get('title')}): keep the block? Challenger's evidence: {evidence[:300]}",
                 skill="qa", assumption="keep blocking (recommended)", impact="a real critical security flaw would ship",
-                options="keep blocking|release it", recommended="keep blocking", request=None))
+                options="keep blocking|release it", recommended="keep blocking"))
         qid = buf.getvalue().strip()
         rec["question"] = qid
     path = challenges_path(store, a.milestone)
@@ -2460,7 +2438,7 @@ def cmd_pipeline(store: Store, a: argparse.Namespace) -> None:
             cmd_add_question(store, argparse.Namespace(
                 text=f"Rebasing {br} on {main} conflicts: resolve it by hand, or redo its tasks on {main}?", skill="implement",
                 assumption="redo its tasks on the main branch", impact="the work ahead may be lost if redone",
-                options="resolve by hand|redo the tasks", recommended="resolve by hand", request=None))
+                options="resolve by hand|redo the tasks", recommended="resolve by hand"))
         tel.safe_emit(store.dev, "error", {"code": "merge_conflict"})
         print(f"conflict rebasing {br} on {main}: {buf.getvalue().strip()} in Needs you; nothing was changed")
         store.event("pipeline", transition="conflict")
@@ -2688,17 +2666,12 @@ def cmd_qa_watch(store: Store, a: argparse.Namespace) -> None:
                                                           " · stop them and run qa-watch again with --settle"))
 
 
-def round_parked_path(store: Store) -> Path:
-    return store.dev / "run" / "round-parked.json"
-
-
 def cmd_round(store: Store, a: argparse.Namespace) -> None:
     """run SKILL SCOPE: one QA round or one milestone's implementation in a headless child session of Claude Code
     (`claude -p "/dev-kit:<skill> <scope> --round-child" --plugin-dir <kit>`), with a clean context, the same project
     directory and permission mode, and the kit's own commands allowed (headless_allowed_tools); it waits and prints a
     JSON summary for the parent, which never reads the child's reports (conventions.md §17). The child logs into the
-    parent's telemetry session (`parent_session`). When a permission goes unanswered on the board, the round is
-    stopped there; whatever way it ends, `reconcile` then makes the state true (slots closed, tasks left in progress
+    parent's telemetry session (`parent_session`). Whatever way it ends, `reconcile` then makes the state true (slots closed, tasks left in progress
     blocked with their attempt in the ledger)."""
     store.load()
     if a.skill not in ROUND_SKILLS:
@@ -2729,9 +2702,7 @@ def cmd_round(store: Store, a: argparse.Namespace) -> None:
            "DEV_KIT_ROUND_ID": rid, "CLAUDE_PROJECT_DIR": str(store.root)}
     before = round_snapshot(store, a.scope)
     started = now()
-    round_parked_path(store).unlink(missing_ok=True)
     t0 = time.monotonic()
-    parked: dict = {}
     stalled: dict = {}
     try:
         with log.open("w", encoding="utf-8") as fh:
@@ -2745,17 +2716,14 @@ def cmd_round(store: Store, a: argparse.Namespace) -> None:
                 try:
                     rc = proc.wait(timeout=2)
                 except subprocess.TimeoutExpired:
-                    pk = _read_json(round_parked_path(store))
-                    if pk.get("round") == rid:
-                        parked = pk  # a permission went unanswered: the round stops here (§17)
                     # heartbeat: the round's last tool call (orchestrator or agent); none for stall_min = stalled
                     act = _read_json(store.dev / "run" / "round-activity.json")
                     beat = time.time() - (_iso_age(act.get("at")) or 0.0) if act.get("round") == rid else None
                     last = max(beat or 0.0, time.time() - (time.monotonic() - t0))
-                    if not parked and time.time() - last > stall_s:
+                    if time.time() - last > stall_s:
                         stalled = {"idle_s": round(time.time() - last), "what": act.get("what") if beat else None,
                                    "agent": act.get("agent") if beat else None}
-                    if parked or stalled or (deadline and time.monotonic() > deadline):
+                    if stalled or (deadline and time.monotonic() > deadline):
                         with contextlib.suppress(OSError):
                             os.killpg(proc.pid, signal.SIGTERM)
                         try:
@@ -2764,14 +2732,12 @@ def cmd_round(store: Store, a: argparse.Namespace) -> None:
                             with contextlib.suppress(OSError):
                                 os.killpg(proc.pid, signal.SIGKILL)
                             proc.wait()
-                        rc = 125 if parked else 126 if stalled else 124
+                        rc = 126 if stalled else 124
     except OSError as e:
         round_marker(store).unlink(missing_ok=True)
         fail(f"cannot start the child session: {e}", 3)
     round_marker(store).unlink(missing_ok=True)
-    why = (f"round {rid} stopped: nobody answered the permission for {parked.get('tool') or 'a tool'} "
-           f"({str(parked.get('target') or '')[:80]})" if parked else
-           f"round {rid} stalled: no tool call for {round(stalled['idle_s'] / 60)} min"
+    why = (f"round {rid} stalled: no tool call for {round(stalled['idle_s'] / 60)} min"
            + (f" (last: {stalled.get('agent') or 'orchestrator'} {str(stalled.get('what') or '')[:60]})" if stalled.get("what") else "")
            if stalled else
            f"round {rid} ended with exit code {rc}" if rc else f"round {rid} ended with the task unfinished")
@@ -2779,9 +2745,6 @@ def cmd_round(store: Store, a: argparse.Namespace) -> None:
         rec = reconcile(store, a.scope, started, why)
     out = round_summary(store, a.skill, a.scope, before, rc, time.monotonic() - t0, log)
     out["reconciled"] = rec
-    if parked:
-        out["parked"] = {"tool": parked.get("tool"), "target": parked.get("target")}
-        out["verdict"] = "parked"
     if a.skill == "qa":  # what the next round reuses and what it re-runs (dev_score.py select --raw-dir)
         rows = qa_auditors(store, a.scope, time.time() - (time.monotonic() - t0) - 5)
         out["auditors"] = {"delivered": [r["agent"] for r in rows if r["status"] == "delivered"],
@@ -2977,22 +2940,10 @@ def lesson_suggestions(store: Store) -> list[dict]:
 
 def cmd_lesson(store: Store, a: argparse.Namespace) -> None:
     """add AGENT "<text>" (the user's confirmation) | rm AGENT N | show AGENT (the block skills add to its prompt) |
-    list [--json] | suggest [--json] | dismiss AGENT SIGNAL. add and dismiss take --request P-nnn (the board's decision)."""
+    list [--json] | suggest [--json] | dismiss AGENT SIGNAL."""
     store.load()
     if a.action in ("add", "rm", "show", "dismiss") and (not a.agent or not AGENT_NAME.match(a.agent)):
         fail("give the agent's name (e.g. code-reviewer)")
-    if a.request:
-        import dev_worker as dw
-        x = dw.item(store.root, a.request)
-        if x is None or x.get("action") != "lesson_decision":
-            fail(f"{a.request} is not a lesson decision from the board")
-        args = x["args"]
-        if args.get("agent") != a.agent:
-            fail(f"{a.request} is about {args.get('agent')}, not {a.agent}")
-        if a.action == "add":
-            a.rest = [args.get("text") or ""]
-        elif a.action == "dismiss":
-            a.rest = [args.get("signal") or ""]
     if a.action == "add":
         text = " ".join(a.rest).strip()
         if not text:
@@ -3835,8 +3786,6 @@ def cmd_add_question(store: Store, a: argparse.Namespace) -> None:
         fail("--options takes 2 to 6 answers separated by |")
     if a.recommended is not None and a.recommended.strip() not in options:
         fail("--recommended must be one of --options")
-    if a.request is not None and not re.fullmatch(r"[PR]-\d{3,6}", a.request):
-        fail("--request takes a board request id such as P-004")
     qid = store.new_question_id()
     path = store.dev / "open-questions.md"
     if not store.file_exists(path):
@@ -3856,9 +3805,9 @@ def cmd_add_question(store: Store, a: argparse.Namespace) -> None:
     lines.insert(j, row)
     store.stage(path, "\n".join(lines).rstrip("\n") + "\n")
     store.save()
-    if options:  # the board shows them as answers to pick (conventions §10, board mode)
+    if options:  # the board shows them with the question (conventions §10)
         _write_json(question_sidecar(store, qid), store=store, obj={"id": qid, "options": options, "recommended": a.recommended,
-                                                   "request": a.request, "answered": False, "at": now()})
+                                                   "answered": False, "at": now()})
     task = getattr(a, "task", None)  # internal callers build their own Namespace without it
     if task:
         store.task(task)["question"] = qid  # a blocked task waiting on this answer: the board shows it inline
@@ -4153,14 +4102,8 @@ def cmd_debt(store: Store, a: argparse.Namespace) -> None:
                   + (" · above the cap" if d["over"] else ""))
         return
     decision, ref = a.decision, None
-    if a.request:
-        import dev_worker as dw
-        x = dw.item(store.root, a.request)
-        if x is None or x.get("action") != "debt_decision":
-            fail(f"{a.request} is not a debt decision from the board")
-        decision, ref = x["args"]["decision"], a.request
     if decision not in ("promote", "accept", "cooldown"):
-        fail("decide needs promote, accept or cooldown (or --request P-nnn)")
+        fail("decide needs promote, accept or cooldown")
     al = store.state.setdefault("debt_alert", {"at": now(), "milestone": None, "total": d["total"], "medium": d["medium"]})
     al.update(decided_at=now(), decision=decision, total_at_decision=d["total"], **({"request": ref} if ref else {}))
     if decision == "cooldown":
@@ -4180,27 +4123,15 @@ def fix_rounds_allowed(store: Store, m: str) -> int:
     return base + int((store.milestones().get(m) or {}).get("extra_fix_rounds") or 0)
 
 
-def _board_request(store: Store, rid: str | None, action: str) -> dict | None:
-    if not rid:
-        return None
-    import dev_worker as dw
-    x = dw.item(store.root, rid)
-    if x is None or x.get("action") != action:
-        fail(f"{rid} is not a {action.replace('_', ' ')} from the board")
-    return x["args"]
-
-
 def cmd_qa_decide(store: Store, a: argparse.Namespace) -> None:
     """Needs you › QA rounds used up (§7): continue fixing with more rounds, accept the milestone as it is with an ADR,
-    or replan. From the board, --request P-nnn carries the decision."""
+    or replan."""
     store.load()
-    req = _board_request(store, a.request, "qa_decision")
-    m_id, decision = (req["milestone"], req["decision"]) if req else (a.milestone, a.decision)
-    rounds, note = (int(req.get("rounds") or 1), req.get("note")) if req else (a.rounds, a.note)
+    m_id, decision, rounds, note = a.milestone, a.decision, a.rounds, a.note
     if m_id not in store.milestones():
         fail(f"unknown milestone {m_id}")
     if decision not in ("continue", "accept", "replan"):
-        fail("qa-decide needs continue, accept or replan (or --request P-nnn)")
+        fail("qa-decide needs continue, accept or replan")
     m = store.milestones()[m_id]
     if m.get("gate") in ("passed", "skipped"):
         fail(f"{m_id} is already closed")
@@ -4230,17 +4161,16 @@ def cmd_qa_decide(store: Store, a: argparse.Namespace) -> None:
         m["replan_requested"] = now()
         out = f"{m_id}: replan; next: /dev-kit:plan {m_id} (the blocked fixes wait for the new plan)"
     store.save()
-    store.log(f"qa-decide {m_id} {decision}" + (f" ({a.request})" if a.request else ""))
+    store.log(f"qa-decide {m_id} {decision}")
     store.event("qa_decision", scope=m_id, decision=decision, rounds=rounds if decision == "continue" else None)
     print(out)
 
 
 def cmd_task_decide(store: Store, a: argparse.Namespace) -> None:
     """Needs you › a blocked task (unblock with a note, skip to the next milestone, drop with a reason) or an open
-    hotfix (run it now, drop it). From the board, --request P-nnn carries the decision."""
+    hotfix (run it now, drop it)."""
     store.load()
-    req = _board_request(store, a.request, "task_decision")
-    tid, decision, note = (req["task"], req["decision"], req.get("note")) if req else (a.task, a.decision, a.note)
+    tid, decision, note = a.task, a.decision, a.note
     t = store.task(tid)
     if t["status"] in FINISHED:
         fail(f"{tid} is {t['status']}")
@@ -4264,7 +4194,7 @@ def cmd_task_decide(store: Store, a: argparse.Namespace) -> None:
         if held[0] == "blocked":
             t["status"], t["blocked_reason"] = held
             store.save()
-        store.log(f"task-decide {tid} skip to {later[0]}" + (f" ({a.request})" if a.request else ""))
+        store.log(f"task-decide {tid} skip to {later[0]}")
         return
     elif decision == "drop":
         if not note:
@@ -4280,9 +4210,9 @@ def cmd_task_decide(store: Store, a: argparse.Namespace) -> None:
             t.update(status="todo", blocked_reason=None)
         out = f"{tid}: next: /dev-kit:implement {tid}"
     else:
-        fail("task-decide needs unblock, skip, drop or run (or --request P-nnn)")
+        fail("task-decide needs unblock, skip, drop or run")
     store.save()
-    store.log(f"task-decide {tid} {decision}" + (f": {note}" if note else "") + (f" ({a.request})" if a.request else ""))
+    store.log(f"task-decide {tid} {decision}" + (f": {note}" if note else ""))
     store.event("task", task=tid, transition={"unblock": "unblock", "drop": "drop"}.get(decision, decision), type=t.get("type"),
                 milestone=t.get("milestone"))
     print(out)
@@ -6186,7 +6116,7 @@ def cmd_review(store: Store, a: argparse.Namespace) -> None:
     store.log(f"review {a.name} {a.value}" + (f" score={a.score}" if a.score is not None else ""))
     print(f"review {a.name}: {a.value}" + (f" (score {a.score})" if a.score is not None else "") + f" · rounds {r['rounds']}")
     if cp:
-        print(f"checkpoint {a.name}: waiting for the user's confirmation ({CHECKPOINT_TITLE[a.name]}: board Needs you, or "
+        print(f"checkpoint {a.name}: waiting for the user's confirmation ({CHECKPOINT_TITLE[a.name]}: "
               f"`checkpoint confirm {a.name}` after the user says so); " + ("no milestone that has not started begins before it"
                                                                            if a.name == "plan" else "architecture waits for it"))
         queue_notice(store, f"dev-kit: {CHECKPOINT_TITLE[a.name]} waits for you")
@@ -6249,8 +6179,8 @@ def lesson_needs(store: Store) -> list[dict]:
 
 
 def cmd_checkpoint(store: Store, a: argparse.Namespace) -> None:
-    """The user's confirmation of the PRD or the plan (§19). confirm | adjust --feedback (or --request P-nnn, the
-    decision made on the board) | summary --text (what the board shows) | status."""
+    """The user's confirmation of the PRD or the plan (§19). confirm | adjust --feedback | summary --text (what the
+    board shows) | status."""
     store.load()
     if a.target not in CHECKPOINT_TARGETS:
         fail(f"checkpoint target must be {' or '.join(CHECKPOINT_TARGETS)}")
@@ -6270,21 +6200,12 @@ def cmd_checkpoint(store: Store, a: argparse.Namespace) -> None:
         print(f"checkpoint {a.target}: summary recorded")
         return
     decision, feedback, by = a.action, (a.feedback or "").strip(), a.by or "user"
-    if a.request:
-        import dev_worker as dw
-        x = dw.item(store.root, a.request)
-        if x is None or x.get("action") != "checkpoint" or (x.get("args") or {}).get("target") != a.target:
-            fail(f"{a.request} is not a checkpoint decision on {a.target} from the board")
-        decision = "confirm" if x["args"]["decision"] == "confirm" else "adjust"
-        if decision != a.action:
-            fail(f"{a.request} asks to {x['args']['decision']}, not {a.action}")
-        feedback, by = str(x["args"].get("feedback") or "").strip(), "board"
     if cp.get("status") != "pending":
         fail(f"checkpoint {a.target} is {cp.get('status')}, not waiting for a decision")
     if decision == "adjust" and not feedback:
         fail("adjust needs --feedback: what must change")
     entry = {"at": now(), "decision": decision, "by": by, "version": cp.get("version"),
-             **({"feedback": feedback[:4000]} if feedback else {}), **({"request": a.request} if a.request else {})}
+             **({"feedback": feedback[:4000]} if feedback else {})}
     cp.setdefault("history", []).append(entry)
     if decision == "confirm":
         cp.update(status="confirmed", confirmed_at=now(), by=by)
@@ -6292,7 +6213,7 @@ def cmd_checkpoint(store: Store, a: argparse.Namespace) -> None:
     else:
         cp.update(status="adjust", feedback=feedback[:4000], adjusted_at=now())
     store.save()
-    store.log(f"checkpoint {a.target} {decision} by {by}" + (f" ({a.request})" if a.request else ""))
+    store.log(f"checkpoint {a.target} {decision} by {by}")
     store.event("checkpoint", target=a.target, transition=decision, round=cp.get("round"))
     record_wait(store, "checkpoint", cp.get("created_at"), a.target)
     if decision == "confirm":
@@ -6343,12 +6264,8 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
             node[parts[-1]] = parsed
             store_autonomy_object(auto, top, merged)
         elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy", "ui", "queue", "milestone_size", "ci", "pipeline",
-                     "board_executor", "release_flags", "git"):
-            if top == "board_executor" and not isinstance(parsed, dict):
-                if val not in ("on", "off", "true", "false", "yes", "no"):
-                    fail('autonomy.board_executor must be on | off or {"auto": true, "permission_mode": "acceptEdits", "timeout_min": 180}')
-                parsed = {"auto": val in ("on", "true", "yes")}
-            elif top == "local_deploy" and not isinstance(parsed, dict):
+                     "release_flags", "git"):
+            if top == "local_deploy" and not isinstance(parsed, dict):
                 parsed = {"mode": val}
             elif top == "model_policy" and not isinstance(parsed, dict):
                 parsed = {"mode": val}
@@ -6397,7 +6314,7 @@ def store_autonomy_object(auto: dict, top: str, obj: dict) -> None:
         obj = {**DEFAULT_AUTONOMY["local_deploy"], **obj}
     elif top in ("cooldown", "quality"):
         check_autonomy_field(top, obj)
-    elif top in ("queue", "milestone_size", "ci", "pipeline", "board_executor", "release_flags", "git"):
+    elif top in ("queue", "milestone_size", "ci", "pipeline", "release_flags", "git"):
         obj = {**DEFAULT_AUTONOMY[top], **obj}
         check_autonomy_field(top, obj)
     elif top == "ui":
@@ -6449,7 +6366,7 @@ def has_ui(store: Store) -> bool:
 GITIGNORE_BEGIN = "# >>> dev-kit: machine-local files (managed by dev_state.py; put your own rules outside this block)"
 GITIGNORE_END = "# <<< dev-kit"
 GITIGNORE_RULES = [
-    "run/", "preview/", "tmp/", "backup/",        # board, locks, slots, skill stack, worker queue, PIDs; local preview; scratch; backups
+    "run/", "preview/", "tmp/", "backup/",        # board, locks, slots, skill stack, PIDs; local preview; scratch; backups
     "telemetry-session", "telemetry.jsonl",        # the session id and the raw session log (exports go to feedback/)
     "tips-seen.json", "state.json.bak",            # per-user tips; the previous copy of state.json
     "costs/*", "!costs/prices.json",               # usage caches rebuilt from the transcripts; the prices you edit are kept
@@ -6503,6 +6420,8 @@ def migrate_state(store: Store) -> None:
     goes to 2 and the kit's version is recorded; the plan itself migrates at the next sync-plan (§19). In memory only:
     the next command that saves writes it."""
     s = store.state
+    if isinstance(s.get("autonomy"), dict):
+        s["autonomy"].pop("board_executor", None)  # 3.12: the board no longer runs anything
     for g in (s.get("release_state") or {}).values():  # 3.0.0-alpha.6 renamed the "dossier" to the release review
         if isinstance(g, dict):
             for x in [g, *(g.get("history") or [])]:
@@ -6910,24 +6829,14 @@ def cmd_release_submit(store: Store, a: argparse.Namespace) -> None:
     store.log(f"release {a.release} submitted for approval" + (f" ({a.review})" if a.review else ""))
     store.event("release_gate", scope=a.release, transition="submit")
     queue_notice(store, f"dev-kit: {a.release} waits for your approval")
-    print(f"{a.release}: awaiting approval · approve or reject on the board or with /dev-kit:release"
+    print(f"{a.release}: awaiting approval · approve or reject with /dev-kit:release"
           + (f" · resumed ahead: {', '.join(resumed)}" if resumed else ""))
 
 
 def _decision_args(store: Store, a: argparse.Namespace) -> tuple[str, list[str], str | None]:
-    """--approve/--reject with --feedback, or --request P-nnn: the decision made on the board, read from its request."""
-    if a.request:
-        import dev_worker as dw
-        x = dw.item(store.root, a.request)
-        if x is None or x.get("action") != "release_decision":
-            fail(f"{a.request} is not a release decision from the board")
-        args = x["args"]
-        if args.get("release") != a.release:
-            fail(f"{a.request} decides {args.get('release')}, not {a.release}")
-        fb = [ln.strip(" -*\t") for ln in str(args.get("feedback") or "").splitlines()]
-        return args["decision"], [f for f in fb if f], a.request
+    """--approve/--reject with --feedback."""
     if a.approve == a.reject:
-        fail("give exactly one of --approve, --reject or --request P-nnn")
+        fail("give exactly one of --approve or --reject")
     return ("approve" if a.approve else "reject"), [f.strip() for f in a.feedback or [] if f.strip()], None
 
 
@@ -7246,8 +7155,8 @@ def health_issue(store: Store, res: dict) -> tuple[str, bool]:
 
 def cmd_prod_check(store: Store, a: argparse.Namespace) -> None:
     """Run the production health check (autonomy.production.health) once and record it in .dev/run/prod-health.json;
-    a failure opens (or updates) an expedite issue and shows in Needs you. The board's server runs it every
-    interval_min while it is up; `deploy` can offer a scheduled task."""
+    a failure opens (or updates) an expedite issue and shows in Needs you. `--due` runs it only when interval_min
+    passed since the last check (autopilot and status run it so); `deploy` can offer a scheduled task."""
     store.load()
     hc = health_cfg(store)
     if hc is None:
@@ -7389,7 +7298,7 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
         if rel.get("status") == "awaiting_approval":
             g = (s.get("release_state") or {}).get(rel["release"]) or {}
             print(f"Needs your approval: {rel['release']}" + (f" · release review {g['review_doc']}" if g.get("review_doc") else "")
-                  + " · approve or reject on the board or with /dev-kit:release")
+                  + " · approve or reject with /dev-kit:release")
     if rel["milestones"] or rel["last"]:
         last = rel["last"]
         print("Next release: " + (f"{', '.join(rel['milestones'])} closed since the last release" if rel["milestones"] else "nothing to release")
@@ -7435,12 +7344,12 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
         for n in queue_needs(store):
             if n["kind"] == "queue_over_limit":
                 print(f"Needs you: issue queue above the limit ({n['count']} > {n['limit']}) · plan {n['milestone']} — Issues "
-                      f"with {len(n['issues'])} of them (board: Needs you › Plan the queue milestone)")
+                      f"with {len(n['issues'])} of them (/dev-kit:backlog)")
             else:
                 print(f"Needs you: {n['issue']} waited {n['milestones']} closed milestones · schedule it next, park it or wontfix")
     for n in checkpoint_needs(store) + debt_needs(store):
         if n["kind"] == "checkpoint":
-            print(f"Needs you: {n['title']} (review {n['target']} passed) · board: Needs you › {n['title']}, or say so here")
+            print(f"Needs you: {n['title']} (review {n['target']} passed) · say so here to confirm it, or what must change")
         else:
             print(f"Needs you: {n['text']} · promote to issues, accept with an ADR, or use the next cool-down")
     cs = store.dev / "costs" / "summary.json"
@@ -7489,7 +7398,7 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
     print_tip(store, "status", a)
 
 
-# --------------------------------------------------------------------------- questions with options (board)
+# --------------------------------------------------------------------------- questions with options
 
 def question_sidecar(store: Store, qid: str) -> Path:
     return store.dev / "run" / "questions" / f"{qid}.json"
@@ -7504,8 +7413,8 @@ def _write_json(path: Path, obj: object, store: "Store | None" = None) -> None:
 
 
 def cmd_answer_question(store: Store, a: argparse.Namespace) -> None:
-    """Move a question from Open to Resolved in open-questions.md with its answer (the board's answers and
-    interview --gaps both use it)."""
+    """Move a question from Open to Resolved in open-questions.md with its answer (interview --gaps and every
+    skill that asks use it)."""
     store.load()
     if not re.fullmatch(r"Q-\d{1,5}", a.id):
         fail("question ids look like Q-3")
@@ -7545,7 +7454,7 @@ def cmd_answer_question(store: Store, a: argparse.Namespace) -> None:
     print(f"{a.id} resolved: {answer}")
 
 
-# --------------------------------------------------------------------------- plan edits (board drafts)
+# --------------------------------------------------------------------------- plan edits (plan-apply, move-task, new-milestone, reorder)
 
 HEADING_RE = re.compile(r"^#{1,3}\s")
 TOP_HEADING_RE = re.compile(r"^#{1,2}\s")
@@ -7704,7 +7613,7 @@ class PlanDoc:
 
 
 def plan_edit(store: Store, ops: list[dict], text: str) -> tuple[str, list[str], list[str], dict]:
-    """Apply a board draft to state (in memory) and to plan.md text. Every operation is checked against the state
+    """Apply plan edits to state (in memory) and to plan.md text. Every operation is checked against the state
     as the earlier ones left it; nothing is written here. Returns (new plan text, changes, errors, effects)."""
     doc = PlanDoc(text)
     ts, ms = store.tasks(), store.milestones()
@@ -7925,32 +7834,102 @@ def plan_edit(store: Store, ops: list[dict], text: str) -> tuple[str, list[str],
     return doc.text(), changes, sorted(set(errors), key=errors.index), effects
 
 
-def _load_draft(store: Store, a: argparse.Namespace) -> tuple[list[dict], str | None]:
-    import dev_worker as dw
-    if a.draft:
-        x = dw.item(store.root, a.draft)
-        if x is None or x.get("action") != "plan_draft":
-            fail(f"{a.draft} is not a plan draft from the board")
-        return x["args"].get("ops") or [], x["args"].get("base")
+PLAN_TASK, PLAN_MS = r"T-\d{3,5}", r"M\d{1,3}(?:\.\d{1,2})?"
+PLAN_OPS = {
+    "schedule_issue": {"issue": r"^I-\d{3,5}$", "milestone": rf"^{PLAN_MS}$"},
+    "move_task": {"task": rf"^{PLAN_TASK}$", "milestone": rf"^{PLAN_MS}$"},
+    "reorder": {"milestone": rf"^{PLAN_MS}$"},
+    "new_milestone": {"milestone": rf"^{PLAN_MS}$"},
+    "move_milestone": {"milestone": rf"^{PLAN_MS}$", "release": r"^R\d{1,3}$"},
+    "new_release": {"release": r"^R\d{1,3}$"},
+    "drop_release": {"release": r"^R\d{1,3}$"},
+    # an issue left waiting (conventions §15): park it, close it as wontfix, or open it again
+    "set_issue_status": {"issue": r"^I-\d{3,5}$", "status": r"^(parked|wontfix|open)$"},
+}
+PLAN_MAX_OPS = 100
+_BIDI = re.compile("[\u200e\u200f\u202a-\u202e\u2066-\u2069]")  # direction overrides hide what text says
+
+
+def _plan_text(v: object, field: str, max_len: int, errors: list[str], required: bool = True) -> str:
+    """A title in a plan operation: a string, no control or bidi-override characters, within its length."""
+    if v is None or v == "":
+        if required:
+            errors.append(f"{field} is required")
+        return ""
+    if not isinstance(v, str):
+        errors.append(f"{field} must be text")
+        return ""
+    t = "".join(c for c in _BIDI.sub("", unicodedata.normalize("NFC", v)) if unicodedata.category(c) != "Cc").strip()
+    if len(t) > max_len:
+        errors.append(f"{field} is longer than {max_len} characters")
+    if not t and required:
+        errors.append(f"{field} is required")
+    return t
+
+
+def plan_ops_valid(ops: object) -> tuple[list[dict], list[str]]:
+    """The canonical plan operations of plan-apply, with every reason they are not valid."""
+    errors: list[str] = []
+    if not isinstance(ops, list) or not ops:
+        return [], ["ops must be a non-empty list"]
+    if len(ops) > PLAN_MAX_OPS:
+        return [], [f"at most {PLAN_MAX_OPS} operations at once"]
+
+    def pat(v: object, field: str, rx: str) -> str:
+        if not isinstance(v, str) or not re.fullmatch(rx, v):
+            errors.append(f"{field} is not valid")
+            return ""
+        return v
+    out = []
+    for i, op in enumerate(ops, 1):
+        where = f"operation {i}"
+        if not isinstance(op, dict) or op.get("op") not in PLAN_OPS:
+            errors.append(f"{where}: op must be one of {', '.join(PLAN_OPS)}")
+            continue
+        kind = op["op"]
+        o: dict = {"op": kind}
+        for k, rx in PLAN_OPS[kind].items():
+            o[k] = pat(op.get(k), f"{where}: {k}", rx)
+        if kind in ("move_task", "schedule_issue") and op.get("before") is not None:
+            o["before"] = pat(op.get("before"), f"{where}: before", rf"^{PLAN_TASK}$")
+        if kind == "schedule_issue":
+            o["force"] = op.get("force") is True
+        if kind in ("schedule_issue", "move_task") and op.get("confirm_frozen") is True:
+            o["confirm_frozen"] = True  # the user confirmed adding to a milestone frozen for QA (§15)
+        if kind == "reorder":
+            ts = op.get("tasks")
+            if not isinstance(ts, list) or not ts or len(ts) > 200:
+                errors.append(f"{where}: tasks must be a list of task ids")
+            else:
+                o["tasks"] = [pat(t, f"{where}: tasks", rf"^{PLAN_TASK}$") for t in ts]
+        if kind == "new_milestone":
+            o["title"] = _plan_text(op.get("title"), f"{where}: title", 80, errors).replace("|", "/")
+        if kind == "new_release":
+            o["title"] = _plan_text(op.get("title"), f"{where}: title", 80, errors, required=False).replace("|", "/")
+        unknown = set(op) - {"op", "before", "force", "confirm_frozen", "tasks", "title", *PLAN_OPS[kind]}
+        if unknown:
+            errors.append(f"{where}: unknown field {sorted(unknown)[0]}")
+        out.append(o)
+    return out, errors
+
+
+def _load_ops(a: argparse.Namespace) -> list[dict]:
     try:
         raw = json.loads(Path(a.ops_file).read_text(encoding="utf-8") if a.ops_file else a.ops)
     except (OSError, TypeError, json.JSONDecodeError) as e:
         fail(f"the operations are not valid JSON: {e}")
-    try:
-        ops = dw.validate("plan_draft", {"ops": raw if isinstance(raw, list) else raw.get("ops")})["ops"]
-    except dw.Invalid as e:
-        fail("; ".join(e.errors))
-    return ops, None
+    ops, errors = plan_ops_valid(raw if isinstance(raw, list) else raw.get("ops") if isinstance(raw, dict) else None)
+    if errors:
+        fail("; ".join(errors))
+    return ops
 
 
-def apply_plan_ops(store: Store, ops: list[dict], *, dry_run: bool, as_json: bool, base: str | None = None,
-                   label: str = "plan-apply") -> None:
+def apply_plan_ops(store: Store, ops: list[dict], *, dry_run: bool, as_json: bool, label: str = "plan-apply") -> None:
     plan_path = store.dev / "plan.md"
     if not plan_path.exists():
         fail(f"plan not found: {plan_path}")
-    stale = bool(base) and base != store.state.get("updated_at")
     text, changes, errors, eff = plan_edit(store, ops, store.read_text(plan_path))
-    out = {"ok": not errors, "changes": changes, "errors": errors, "state_changed_since_draft": stale, "applied": False}
+    out = {"ok": not errors, "changes": changes, "errors": errors, "applied": False}
     if not errors and not dry_run:
         try:
             _, _, problems = sync_plan_text(store, text)
@@ -7970,8 +7949,6 @@ def apply_plan_ops(store: Store, ops: list[dict], *, dry_run: bool, as_json: boo
     if as_json:
         print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
-        if stale:
-            print("the state changed since this draft was made; every change was checked again against the current state")
         if errors:
             print("nothing changed:\n  " + "\n  ".join(errors))
         else:
@@ -7983,13 +7960,12 @@ def apply_plan_ops(store: Store, ops: list[dict], *, dry_run: bool, as_json: boo
 
 
 def cmd_plan_apply(store: Store, a: argparse.Namespace) -> None:
-    """Apply a plan draft made on the board (or given as JSON): every change is checked first, then all are
-    written together (plan.md and state), or none."""
+    """Apply plan edits given as JSON: every change is checked first, then all are written together (plan.md and
+    state), or none."""
     store.load()
-    if sum(bool(x) for x in (a.draft, a.ops, a.ops_file)) != 1:
-        fail("give exactly one of --draft P-nnn, --ops JSON or --ops-file FILE")
-    ops, base = _load_draft(store, a)
-    apply_plan_ops(store, ops, dry_run=a.dry_run, as_json=a.json, base=base)
+    if sum(bool(x) for x in (a.ops, a.ops_file)) != 1:
+        fail("give exactly one of --ops JSON or --ops-file FILE")
+    apply_plan_ops(store, _load_ops(a), dry_run=a.dry_run, as_json=a.json)
 
 
 def cmd_move_task(store: Store, a: argparse.Namespace) -> None:
@@ -8051,7 +8027,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--note"); s.add_argument("--force", action="store_true"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("next"); s.set_defaults(fn=cmd_next)
     s.add_argument("--milestone"); s.add_argument("--json", action="store_true")
-    s.add_argument("--batch", help="up to N ready tasks that can run in parallel; auto = the number set on the board's Autopilot card (.dev/run/autopilot.json, default 3)")
+    s.add_argument("--batch", help="up to N ready tasks that can run in parallel; auto = 3")
 
     s = sub.add_parser("start"); s.set_defaults(fn=cmd_start); s.add_argument("task"); s.add_argument("--force", action="store_true")
     s.add_argument("--resume", action="store_true", help="take over the work an earlier attempt left (worktree or dev-kit/T-nnn)")
@@ -8087,7 +8063,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--all", action="store_true"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("lesson"); s.set_defaults(fn=cmd_lesson)
     s.add_argument("action", choices=["add", "rm", "show", "list", "suggest", "dismiss"]); s.add_argument("agent", nargs="?")
-    s.add_argument("rest", nargs="*"); s.add_argument("--request"); s.add_argument("--json", action="store_true")
+    s.add_argument("rest", nargs="*"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("challenger"); s.set_defaults(fn=cmd_challenger); s.add_argument("milestone"); s.add_argument("finding")
     s.add_argument("--json", action="store_true")
     s = sub.add_parser("challenge"); s.set_defaults(fn=cmd_challenge); s.add_argument("action", choices=["record"])
@@ -8105,10 +8081,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("ci"); s.set_defaults(fn=cmd_ci); s.add_argument("action", choices=["check", "record", "status"])
     s.add_argument("milestone"); s.add_argument("--sha"); s.add_argument("--status"); s.add_argument("--url")
     s = sub.add_parser("debt"); s.set_defaults(fn=cmd_debt); s.add_argument("action", choices=["status", "decide"])
-    s.add_argument("decision", nargs="?"); s.add_argument("--request"); s.add_argument("--json", action="store_true")
+    s.add_argument("decision", nargs="?"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("checkpoint"); s.set_defaults(fn=cmd_checkpoint)
     s.add_argument("action", choices=["status", "confirm", "adjust", "summary"]); s.add_argument("target")
-    s.add_argument("--feedback"); s.add_argument("--text"); s.add_argument("--by"); s.add_argument("--request")
+    s.add_argument("--feedback"); s.add_argument("--text"); s.add_argument("--by")
 
     s = sub.add_parser("fix-tasks"); s.set_defaults(fn=cmd_fix_tasks)
     s.add_argument("--from", dest="src_file", required=True); s.add_argument("--milestone", required=True)
@@ -8117,20 +8093,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("add-question"); s.set_defaults(fn=cmd_add_question)
     s.add_argument("text"); s.add_argument("--skill"); s.add_argument("--assumption"); s.add_argument("--impact")
-    s.add_argument("--options", help="answers the board offers, separated by | (2 to 6)")
-    s.add_argument("--recommended", help="the option recommended, first in the board"); s.add_argument("--request")
+    s.add_argument("--options", help="the answers offered, separated by | (2 to 6; the board shows them)")
+    s.add_argument("--recommended", help="the option recommended, shown first")
     s.add_argument("--task", help="the task waiting on the answer (the board shows the question on it)")
     s = sub.add_parser("answer-question"); s.set_defaults(fn=cmd_answer_question)
     s.add_argument("id"); s.add_argument("--answer", required=True); s.add_argument("--ref")
     s = sub.add_parser("plan-apply"); s.set_defaults(fn=cmd_plan_apply)
-    s.add_argument("--draft", help="board request id of a plan draft (P-nnn)"); s.add_argument("--ops"); s.add_argument("--ops-file")
+    s.add_argument("--ops"); s.add_argument("--ops-file")
     s.add_argument("--dry-run", action="store_true"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("qa-decide"); s.set_defaults(fn=cmd_qa_decide)
     s.add_argument("milestone", nargs="?"); s.add_argument("decision", nargs="?", choices=["continue", "accept", "replan"])
-    s.add_argument("--rounds", type=int, default=1); s.add_argument("--note"); s.add_argument("--request")
+    s.add_argument("--rounds", type=int, default=1); s.add_argument("--note")
     s = sub.add_parser("task-decide"); s.set_defaults(fn=cmd_task_decide)
     s.add_argument("task", nargs="?"); s.add_argument("decision", nargs="?", choices=["unblock", "skip", "drop", "run"])
-    s.add_argument("--note"); s.add_argument("--request")
+    s.add_argument("--note")
     s = sub.add_parser("move-task"); s.set_defaults(fn=cmd_move_task)
     s.add_argument("task"); s.add_argument("milestone"); s.add_argument("--before")
     s.add_argument("--dry-run", action="store_true"); s.add_argument("--json", action="store_true")
@@ -8173,7 +8149,6 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("release-decide"); s.set_defaults(fn=cmd_release_decide)
     s.add_argument("release"); s.add_argument("--approve", action="store_true"); s.add_argument("--reject", action="store_true")
     s.add_argument("--feedback", action="append", help="one rejection item (repeat); each becomes a fix task")
-    s.add_argument("--request", help="the board request (P-nnn) holding the decision")
     s = sub.add_parser("release-record"); s.set_defaults(fn=cmd_release_record)
     s.add_argument("--version", required=True); s.add_argument("--tag")
     s.add_argument("--release", help="the planned release (R1…) being recorded, after its approval")

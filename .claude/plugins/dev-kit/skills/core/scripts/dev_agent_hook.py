@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Hook handler: the board's live agents panel and the Claude Code interface of a dev-kit project.
 
-Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit, PermissionRequest and Stop hooks
-(hooks/hooks.json). Reads the hook payload from stdin.
+Wired to the SessionStart, PreToolUse (Agent tool), PermissionRequest, SubagentStart, SubagentStop and Stop hooks
+(hooks/hooks.json).
+Reads the hook payload from stdin.
 - SessionStart, SubagentStart, SubagentStop: append one JSON line to <project>/.dev/run/agents.jsonl:
   {"ts": "...Z", "event": "session_start|agent_start|agent_stop", "session": "<id>", "agent_id": "<id>", "agent": "<type>",
    "transcript": "<path of the subagent's own transcript>"}; the board reads the `Scope:` line of the agent's prompt
@@ -11,19 +12,11 @@ Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit, Permis
   ("dev-kit · <project> · <milestone, or phase and step>") and show one line with the next command (systemMessage).
 - Stop, with autonomy.ui.notify on: show the notices queued by dev_state.py (gates, blocks, autopilot) as a
   desktop notification (OSC 9 terminal sequence) and a line in the chat, then clear the queue.
-- SessionStart, UserPromptSubmit and Stop: when the board queued requests for Claude Code (dev_worker.py), one line
-  with how many and the command that runs them (/dev-kit:worker); at a prompt or the end of a turn only when the
-  set of waiting requests changed since the last notice. Only ids and counts: the text of a request never enters
-  the session from here. Silent while a session listens (the plugin's monitor, armed by /dev-kit:board, announces
-  each request by itself).
-- PermissionRequest, in an unattended run (a request from the board, the board's autopilot run, a round child):
-  a Bash command made only of the kit's safe set (dev_perms.py: read-only inspection, a timed measurement script in
-  .dev/tmp/) is allowed at once. Otherwise, with a board up to answer on, the permission goes to the board (tool, and the command or path cut to 300 characters,
-  kept in .dev/run/approvals/ until answered), the hook waits up to 10 minutes for Allow, Allow for this session or Deny, and answers Claude
-  Code with it; no answer is a denial, kept in .dev/run/permission-misses.json for Needs you ("Always allow in this
-  project"). An auditor's request waits at most 2 minutes and never parks the round: denied, the auditor goes on
-  without that command. Anywhere else it returns nothing and Claude Code's own prompt applies.
-
+- PermissionRequest, only in a round child (`dev_state.py round run`, DEV_KIT_ROUND_ID set), where nobody is at
+  the console: a Bash command made only of the kit's safe set (dev_perms.py: read-only inspection, a timed
+  measurement script in .dev/tmp/) is allowed at once. Any other permission is left to Claude Code (in a headless
+  child nobody answers, so it is denied) and is kept in .dev/run/permission-misses.json with the rule that would
+  allow it (`dev_perms.py show`, read-only in the board's Needs you). Anywhere else it returns nothing.
 - PreToolUse (Agent tool), SubagentStart, SubagentStop: the session log's agent_spawn / agent_end events
   (conventions.md §13), written here so no skill has to: agent, model and effort (from the kit agent's frontmatter,
   or the model the Agent call asked for), the skill running it (innermost open skill in .dev/run/skills.json),
@@ -31,8 +24,8 @@ Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit, Permis
   round), duration and tokens (from the subagent's own transcript). The `Slot:` line binds the agent id to its slot
   in .dev/run/agent-slots.json, for the file fence (dev_fence.py, conventions.md §17).
 
-Privacy: only ids, the agent type and the subagent transcript's path are kept; prompts, messages and tool data in the payload are ignored, except
-the tool and target of a permission request while it waits on the board.
+Privacy: only ids, the agent type and the subagent transcript's path are kept; prompts, messages and tool data in the
+payload are ignored.
 It never fails a hook (always exits 0) and does nothing outside a dev-kit project (no .dev/state.json).
 """
 from __future__ import annotations
@@ -41,7 +34,6 @@ import json
 import os
 import re
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -90,11 +82,10 @@ def subagent_transcript(payload: dict) -> str | None:
 SLOT_RE = re.compile(r"(?m)^\s*Slot:\s*(\d{1,3})\b")
 SCOPE_RE = re.compile(r"(?m)^\s*Scope:\s*(T-\d{1,5}|M\d{1,3}(?:\.\d{1,2})?|hotfix-T-\d{1,5})\b")
 AGENT_TOOLS = ("Agent", "Task")
-# the read-only kit agents: a permission of theirs never parks a round, and waits at most AUDITOR_WAIT_S (§17)
+# the read-only kit agents: a permission of theirs denied in a round child is recorded as skipped by the auditor (§17)
 AUDITOR_AGENTS = {"a11y-auditor", "code-reviewer", "copy-reviewer", "data-reviewer", "deps-auditor", "design-reviewer",
                   "docs-reviewer", "ops-reviewer", "performance-auditor", "requirements-reviewer", "security-auditor",
                   "spec-tracer", "test-auditor", "usability-auditor", "visual-reviewer"}
-AUDITOR_WAIT_S = 120
 KIT_DIR = Path(__file__).resolve().parents[3]
 
 
@@ -294,152 +285,34 @@ def take_notices(dev: Path) -> dict | None:
     return {"systemMessage": "\n".join(texts), "terminalSequence": f"\x1b]9;{texts[-1][:180]}\x07"}
 
 
-def board_requests(root: Path, dev: Path, only_new: bool) -> dict | None:
-    """One line about the requests the board queued, or None (nothing waiting, nothing new since the last one, or
-    someone takes them: a listening session, the executor working on the queue, or the board's own worker)."""
-    import dev_worker as dw
-    if dw.listening(root):
-        return None
-    waiting = [x for x in dw.items(root) if x["status"] == "pending"]
-    nxt = dw.claimable(root)
-    ids = [x["id"] for x in waiting]
-    seen_path = dev / "run" / "worker-notice.json"
-    try:
-        seen = json.loads(seen_path.read_text(encoding="utf-8")).get("ids")
-    except (OSError, json.JSONDecodeError, AttributeError):
-        seen = None
-    if seen != ids:
-        dw._write(seen_path, {"ids": ids})
-    if not nxt or dw.modes(root)["paused"] or (only_new and seen == ids):
-        return None
-    taker, why = dw.who_takes(root)
-    if taker and taker != "autopilot":
-        return None  # the board's own worker (or a session that holds the queue) takes it: nothing for the user to do
-    n = len(waiting) or 1
-    head = f"dev-kit board: {n} request{'s' if n != 1 else ''} waiting ({', '.join(ids[:5]) or nxt['id']})"
-    if taker == "autopilot":
-        text = f"{head} · {why}"
-        return {"systemMessage": text, "context": f"{text}. Do not run /dev-kit:worker while the Autopilot run is open."}
-    text = f"{head} · {why} · run /dev-kit:worker"
-    return {"systemMessage": text, "context": f"{text}. The requests come from the project's web board; /dev-kit:worker runs them."}
-
-
-def session_rules(suggestions: object) -> tuple[list[dict], str | None]:
-    """What "Allow for this session" keeps: the allow rules Claude Code itself suggests for this request (and
-    "accept edits" for file edits), always with destination `session`, so nothing outlives the session and nothing
-    is written to a settings file. Never a deny/ask rule, a directory, or any other permission mode."""
-    keep: list[dict] = []
-    labels: list[str] = []
-    for s in suggestions if isinstance(suggestions, list) else []:
-        if not isinstance(s, dict):
-            continue
-        if s.get("type") == "addRules" and s.get("behavior") == "allow" and isinstance(s.get("rules"), list):
-            rules = [{k: r[k] for k in ("toolName", "ruleContent") if isinstance(r.get(k), str)}
-                     for r in s["rules"] if isinstance(r, dict) and isinstance(r.get("toolName"), str)]
-            if rules:
-                keep.append({"type": "addRules", "rules": rules, "behavior": "allow", "destination": "session"})
-                labels += [f"{r['toolName']}({r['ruleContent']})" if r.get("ruleContent") else r["toolName"] for r in rules]
-        elif s.get("type") == "setMode" and s.get("mode") == "acceptEdits":
-            keep.append({"type": "setMode", "mode": "acceptEdits", "destination": "session"})
-            labels.append("all file edits")
-    return keep, (CONTROL.sub(" ", ", ".join(labels))[:200] or None)
-
-
-def board_takes_requests(dev: Path) -> bool:
-    try:
-        rec = json.loads((dev / "run" / "board.json").read_text(encoding="utf-8"))
-        os.kill(int(rec["pid"]), 0)
-        return bool(rec.get("actions"))
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
-
-
 def permission(root: Path, dev: Path, payload: dict) -> dict | None:
-    """A permission prompt of Claude Code while this session runs a request from the board: the user answers on the
-    board (Allow, Allow for this session, Deny), because nobody may be at the console. No answer within 10 minutes
-    is a denial. Outside a board request, or with no board to answer on, nothing is returned and Claude Code's own
-    prompt handles it as usual."""
+    """A permission prompt of Claude Code in a round child (conventions.md §17): the kit's safe set is allowed at
+    once, so an audit never waits for `gzip -c a.js | wc -c`; anything else is recorded as a miss and left to Claude
+    Code. Outside a round child nothing is returned and Claude Code's own prompt applies as usual."""
     import dev_perms
-    import dev_worker as dw
-    tool = str(payload.get("tool_name") or "")
-    if not tool or tool in ("AskUserQuestion", "ExitPlanMode"):
-        return None  # a question goes to the board as a question (board mode), never as a permission
-    run = dw.board_run(root)
     rnd = os.environ.get("DEV_KIT_ROUND_ID") or ""
+    tool = str(payload.get("tool_name") or "")
+    if not rnd or not tool or tool in ("AskUserQuestion", "ExitPlanMode"):
+        return None
     ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if tool == "Bash" and dev_perms.is_safe(str(ti.get("command") or "")):
+        return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
     target = next((str(ti[k]) for k in ("command", "file_path", "notebook_path", "url", "path", "pattern", "query") if ti.get(k)),
                   "") or json.dumps(ti, ensure_ascii=False)
-    if (run or rnd) and tool == "Bash" and dev_perms.is_safe(str(ti.get("command") or "")):
-        # the kit's safe set (read-only inspection, a timed measurement script in .dev/tmp/): nobody may be at the
-        # console in an unattended run, and an audit must never wait 10 minutes for `gzip -c a.js | wc -c` (§17)
-        return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
     agent = str(payload.get("agent_type") or "").removeprefix("dev-kit:")
-    auditor = agent in AUDITOR_AGENTS
-    keep, label = session_rules(payload.get("permission_suggestions"))
-    if not run or not board_takes_requests(dev):
-        if rnd:  # a round child with no board to answer on: Claude Code would deny it anyway; remember it for later
-            with_miss(root, tool, target, agent, "no_board", label, rnd)
-        return None
-    try:
-        wait_s = min(float(dw.APPROVAL_WAIT_S), max(1.0, float(os.environ.get("DEV_KIT_APPROVAL_WAIT_S") or dw.APPROVAL_WAIT_S)))
-        if auditor:  # an auditor can always go on without one command: it never holds the round for 10 minutes
-            wait_s = min(wait_s, max(1.0, float(os.environ.get("DEV_KIT_AUDITOR_WAIT_S") or AUDITOR_WAIT_S)))
-    except ValueError:
-        wait_s = float(AUDITOR_WAIT_S if auditor else dw.APPROVAL_WAIT_S)
-    rid = run["id"]
-    parked = dev / "run" / "round-parked.json"
-    if rnd and auditor:
-        pass  # an auditor's permission never parks the round, and an earlier park does not deny it at once
-    elif rnd:
-        try:
-            prev = json.loads(parked.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            prev = {}
-        if isinstance(prev, dict) and prev.get("round") == rnd:  # one unanswered permission stops the round (§17)
-            return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {
-                "behavior": "deny", "message": "A permission already went unanswered on the dev-kit board in this round, so the "
-                                               "round is stopping. Do not retry anything and do not run dev_state.py block: end "
-                                               "now with one line; the round's reconciliation blocks the tasks with the reason."}}}
-    aid = dw.request_approval(root, tool, target, rid, label, wait_s)
-    got = dw.wait_decision(root, aid, wait_s, rid)
-    if got == "timeout":  # nobody saw it: kept (dev_perms.py show, the board's Needs you) until allowed or dismissed
-        with_miss(root, tool, target, agent, "auditor_skipped" if auditor else "no_answer", label, rnd or rid)
-    if got == "timeout" and auditor:
-        return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {
-            "behavior": "deny", "message": f"Nobody answered this permission on the dev-kit board within {max(1, round(wait_s / 60))} "
-                                           "minute(s), so it is denied. Do not retry it or ask again: measure another way with "
-                                           "read-only commands, or leave this check out and name it in `stats.not_run` of "
-                                           "your result, then finish your audit as usual. The round goes on."}}}
-    if got == "timeout" and rnd:
-        try:
-            tmp = parked.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"round": rnd, "tool": tool[:80], "target": target[:200], "at": time.time()}) + "\n", encoding="utf-8")
-            os.replace(tmp, parked)
-        except OSError:
-            pass
-    if got in ("allow", "allow_session"):
-        decision: dict = {"behavior": "allow"}
-        if got == "allow_session" and keep:
-            decision["updatedPermissions"] = keep
-    else:
-        why = {"deny": f"Denied by the user on the dev-kit board ({rid}). Do not retry this action: go on without it, or "
-                       "finish the request as failed with a note naming what was denied.",
-               "cancelled": f"{rid} was cancelled on the dev-kit board. Stop at the next safe point, as the worker skill says.",
-               "timeout": f"Nobody answered this permission on the dev-kit board within {max(1, round(wait_s / 60))} minutes, so it "
-                          f"is denied ({rid}). Do not retry it now: finish what does not need it, or finish the request as "
-                          "failed with a note naming the permission that was missing."}[got]
-        if rnd and got == "timeout":  # a round child: the round stops and its reconciliation blocks the tasks (§17)
-            why = (f"Nobody answered this permission on the dev-kit board within {max(1, round(wait_s / 60))} minutes, so it "
-                   "is denied and this round stops. Do not retry it and do not run dev_state.py block: end now with one "
-                   "line naming the permission; the round's reconciliation blocks the tasks with the reason.")
-        elif rid == "autopilot":  # the board's autopilot run: no request to finish, the run parks what needs it
-            why = {"deny": "Denied by the user on the dev-kit board. Do not retry this action: go on with work that does not need it, "
-                           "and block the task that does with the reason.",
-                   "timeout": f"Nobody answered this permission on the dev-kit board within {max(1, round(wait_s / 60))} minutes, so it "
-                              "is denied. Do not retry it now: block the task that needs it with the reason (it shows in Needs you) "
-                              "and go on with independent work."}.get(got, why)
-        decision = {"behavior": "deny", "message": why}
-    return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}
+    with_miss(root, tool, target, agent, "auditor_skipped" if agent in AUDITOR_AGENTS else "no_answer", suggested_rule(payload), rnd)
+    return None
+
+
+def suggested_rule(payload: dict) -> str | None:
+    """The allow rule Claude Code itself suggests for this request, as text (shown with a denied permission)."""
+    labels: list[str] = []
+    sug = payload.get("permission_suggestions")
+    for s in sug if isinstance(sug, list) else []:
+        if isinstance(s, dict) and s.get("type") == "addRules" and s.get("behavior") == "allow" and isinstance(s.get("rules"), list):
+            labels += [f"{r['toolName']}({r['ruleContent']})" if isinstance(r.get("ruleContent"), str) else r["toolName"]
+                       for r in s["rules"] if isinstance(r, dict) and isinstance(r.get("toolName"), str)]
+    return CONTROL.sub(" ", ", ".join(labels))[:200] or None
 
 
 def with_miss(root: Path, tool: str, target: str, agent: str, how: str, label: str | None, where: str) -> None:
@@ -450,40 +323,8 @@ def with_miss(root: Path, tool: str, target: str, agent: str, how: str, label: s
         pass
 
 
-def trace(dev: Path, name: str, payload: dict, out: dict | None, started: float) -> None:
-    """With DEV_KIT_HOOK_TRACE=1 in Claude Code's environment: one line per hook run in .dev/run/hook-trace.jsonl,
-    for docs/board-autonomy-check.md. It records which keys the payload has, never their values, except what a
-    permission check needs to be understood: the tool name and the rules Claude Code suggested."""
-    import time
-    import dev_worker as dw
-    rec = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "event": name, "parents": dw.ancestors()[1:8],
-           "payload_keys": sorted(payload), "elapsed_s": round(time.monotonic() - started, 2), "answered": bool(out)}
-    if name == "PermissionRequest":
-        rec.update(tool=tok(payload.get("tool_name")), permission_mode=tok(payload.get("permission_mode")),
-                   agent_type=tok(payload.get("agent_type")), suggestions=payload.get("permission_suggestions"),
-                   decision=((out or {}).get("hookSpecificOutput") or {}).get("decision"))
-    path = dev / "run" / "hook-trace.jsonl"
-    path.parent.mkdir(exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-
-
-def merge(out: dict | None, extra: dict | None, event: str) -> dict | None:
-    if not extra:
-        return out
-    out = dict(out or {})
-    out["systemMessage"] = "\n".join(x for x in (out.get("systemMessage"), extra["systemMessage"]) if x)
-    if event in ("SessionStart", "UserPromptSubmit"):
-        hso = dict(out.get("hookSpecificOutput") or {"hookEventName": event})
-        hso["additionalContext"] = extra["context"]
-        out["hookSpecificOutput"] = hso
-    return out
-
-
 def main() -> int:
     try:
-        import time
-        started = time.monotonic()
         payload = json.load(sys.stdin)
         name = str(payload.get("hook_event_name"))
         root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ".")
@@ -491,14 +332,6 @@ def main() -> int:
         if not (dev / "state.json").is_file():
             return 0
         out = None
-        kind = {"Stop": "stop", "UserPromptSubmit": "prompt", "SubagentStart": "agent_start", "SubagentStop": "agent_stop",
-                "PreToolUse": "tool"}.get(name)
-        if kind:
-            try:  # whether the executor's session still works (dev_worker.parked): never breaks a hook
-                import dev_worker as dw
-                dw.note_session(root, kind, tok(payload.get("agent_id")) if kind.startswith("agent") else None)
-            except Exception:  # noqa: BLE001
-                pass
         if name in EVENTS:
             record_agent(dev, EVENTS[name], payload)
             if name in ("SubagentStart", "SubagentStop"):
@@ -517,16 +350,6 @@ def main() -> int:
             out = take_notices(dev)
         elif name == "PermissionRequest":
             out = permission(root, dev, payload)
-        if name in ("SessionStart", "UserPromptSubmit", "Stop") and not str(payload.get("prompt") or "").startswith("/dev-kit:worker"):
-            try:
-                out = merge(out, board_requests(root, dev, only_new=name != "SessionStart"), name)
-            except Exception:  # noqa: BLE001 - the board's queue must never break a hook
-                pass
-        if os.environ.get("DEV_KIT_HOOK_TRACE") == "1":
-            try:
-                trace(dev, name, payload, out, started)
-            except Exception:  # noqa: BLE001
-                pass
         if out:
             print(json.dumps(out, ensure_ascii=False))
     except Exception:  # noqa: BLE001 - a hook must never break the session

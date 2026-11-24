@@ -92,19 +92,10 @@ Tick each item; note the Claude Code version used.
 - [ ] (1.18) `/dev-kit:costs --time` shows time per agent and skill and the ledger reuse table.
 - [ ] (1.19) A consumer task's `dev_state.py brief` shows the producer's contract; `xref` flags `consumes` without `contract`; two parallel tasks cannot hold the same `lock`; `docs` merges `changelog.d/`.
 
-## 9. Requests from the board (1.23–1.26)
-These need a real Claude Code with the plugin's hooks and monitors. The step-by-step script that records what this Claude Code version does, to send back to the kit's author, is [board-autonomy-check](board-autonomy-check.md).
-- [ ] `/dev-kit:board` prints `requests: on` and `listening`; the Requests card says "Claude Code: listening". ▶ next to "Next step" starts `/dev-kit:implement` in that session with nobody typing; the board shows the request running, then `done` with its note.
-- [ ] In a session that did not run `/dev-kit:board`, a queued request shows on the session banner (at the next prompt or at the end of the turn) as `1 request waiting · run /dev-kit:worker` and on the status line as `▣ 1`.
-- [ ] (3.2) The Autopilot switch starts `/dev-kit:autopilot --milestones 1 --board` headless; a question goes to Needs you and the switch says "waiting for you" until it is answered, then the next run starts; it stops at a release waiting for approval; off lets the run finish its step; Force stop ends it now.
-- [ ] (3.3) Implementers at once on the Autopilot card changes the number of implementers from the next batch; `/dev-kit:autopilot --parallel N` in a session while the switch is on changes it without starting a second driver.
-- [ ] A permission prompt during a board request appears in Needs you with Allow, Allow for this session (when Claude Code suggests a rule) and Deny; the answer reaches Claude Code; with no answer it is denied after 10 minutes; outside a board request the terminal prompt works as before.
-- [ ] The tab title shows "(n) Needs you" and the icon gets its dot while a question or a permission waits.
-- [ ] `/dev-kit:board --trusted-host <name>` behind a reverse proxy: the page loads and its buttons work through the proxy's https address; another host name is refused.
-- [ ] `/dev-kit:worker` takes the request, runs the skill and closes it; the board shows `done` with the note. A second Claude Code session in the same project running `/dev-kit:worker` is refused while the first is alive.
-- [ ] A question raised while a request runs appears in Needs you with its options; the request shows "needs your answer"; answering on the board queues the answer, the worker records it and resumes the request.
-- [ ] "Replan the milestones" screen (Planning): drag a task and an open issue into a new milestone, Send; the worker runs `plan-apply` and `plan.md`, state and `issues.md` agree; a draft that breaks a dependency cannot be sent.
-- [ ] "Replan the milestones" screen (Planning) with planned releases (R1 and R2 in `plan.md`): switch to Releases, drag a pending milestone from R2 to R1 (leave R2 with at least 2), create R3, Send; the worker runs `plan-apply` and the `## R` sections of `plan.md`, Roadmap and Construction chevrons agree; a release left with 1 milestone, or a closed or released one, is refused with the reason.
-- [ ] Releases tab (planned releases in `plan.md`): a card per release with tasks, milestones, QA gates, cost, time and pace; picking a card opens its page (also `#release:R2`) with stages, milestones, fixes, what holds it back, QA scores, gate history and documents; a release waiting for approval shows its count on the tab and Approve and Reject on its page; after a rejection the history lists the fixes milestone.
-- [ ] Cancel a running request: the worker stops at the next safe point and the task is blocked with the reason; Pause queue: nothing new is taken.
-- [ ] Where plugin monitors do not start (an older Claude Code, `claude -p`): `/dev-kit:board` says "not listening", the card says "open, not listening", and `/dev-kit:worker` runs the queue when asked.
+## 9. The read-only board (3.12)
+- [ ] `/dev-kit:board` opens the board; no button on it changes the project or starts Claude Code (only **Stop server** in the ⋯ menu); every POST except `/api/shutdown` answers 404.
+- [ ] `/dev-kit:autopilot` started in a session shows on the board's top bar as "Autopilot running" with its duration, and disappears when the run ends; its implementers show on the task cards.
+- [ ] A question parked by the autopilot appears in Needs you with its options and the command that answers it (`/dev-kit:interview --gaps`); answering it in Claude Code removes it from the board.
+- [ ] The tab title shows "(n) Needs you" and the icon gets its dot while something waits.
+- [ ] `/dev-kit:board --trusted-host <name>` behind a reverse proxy: the page loads through the proxy's https address; another host name is refused.
+- [ ] Releases tab (planned releases in `plan.md`): a card per release with tasks, milestones, QA gates, cost, time and pace; picking a card opens its page (also `#release:R2`) with stages, milestones, fixes, what holds it back, QA scores, gate history and documents; a release waiting for approval shows its count on the tab and the command that decides it on its page; after a rejection the history lists the fixes milestone.

@@ -4,15 +4,12 @@
     "SessionStart": [
       {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]}
     ],
-    "UserPromptSubmit": [
-      {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]}
-    ],
-    "PermissionRequest": [
-      {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"", "timeout": 660}]}
-    ],
     "PreToolUse": [
       {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]},
       {"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|Read|Grep|Glob|WebFetch|WebSearch", "hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_fence.py\""}]}
+    ],
+    "PermissionRequest": [
+      {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\"", "timeout": 30}]}
     ],
     "SubagentStart": [
       {"hooks": [{"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/dev_agent_hook.py\""}]}

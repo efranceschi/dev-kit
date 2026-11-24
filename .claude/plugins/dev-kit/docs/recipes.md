@@ -23,7 +23,7 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 
 1. Choose 'unattended with floors' in the interview, or later: /dev-kit:settings run overnight without asking
 2. Cover permission prompts: /fewer-permission-prompts and --permission-mode acceptEdits
-3. Run inside tmux: claude --permission-mode acceptEdits "/dev-kit:autopilot", or turn on the board's Autopilot switch (it runs headless with acceptEdits, and its prompts wait in Needs you)
+3. Run inside tmux: claude --permission-mode acceptEdits "/dev-kit:autopilot"
 4. In the morning: /dev-kit:status, /dev-kit:backlog, /dev-kit:costs, /dev-kit:interview --gaps
 
 ## I found a bug
@@ -61,7 +61,7 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 1. Answer the production questions in the interview (method, host, when, smoke checks, prerequisites)
 2. /dev-kit:deploy --check to see the drift
 3. /dev-kit:deploy M3 or let autopilot deploy per milestone
-4. /dev-kit:deploy --health to check production now (the board checks it on schedule while it is open)
+4. /dev-kit:deploy --health to check production now (the autopilot checks it at each milestone, /dev-kit:status when its interval passed)
 
 ## Deploy each milestone before its release (release flags)
 
@@ -98,26 +98,12 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 2. /dev-kit:board --host 0.0.0.0 shares it on your network: open the access link it prints on the other device
 3. /dev-kit:board stop (or the Stop server button) when done
 
-## Drive the work from the board
-
-1. /dev-kit:board in a Claude Code session opens the board and makes that session listen (keep it open, e.g. in tmux); away from the machine use an SSH tunnel, --host 0.0.0.0 with the access link, or --trusted-host behind your reverse proxy
-2. on the board: Run next to a command, New issue, answer a question in Needs you, Replan the milestones to drag tasks and issues between milestones (or milestones between releases) and Send
-3. each request starts in the listening session by itself; questions come back to the board with answers to pick. With no session listening, the board starts a headless Claude Code session for them by itself
-4. to let the board drive the whole build, turn on its Autopilot switch (next recipe)
-
-## Let the board drive the build (Autopilot switch)
-
-1. /dev-kit:board, then turn on the Autopilot switch in the top bar: the board runs /dev-kit:autopilot headless, one milestone per run, until a release waits for your approval or the project is stable; you can close the Claude Code session
-2. questions and permission prompts go to Needs you; when only work that needs you is left the switch says waiting for you, and the next run starts once you answer
-3. Implementers at once on the Autopilot card (1 to 6, default 3) sets how many tasks are built in parallel, from the next batch; /dev-kit:autopilot --parallel N does the same from a session
-4. stopped: its card says why (three failed runs or a run that changed nothing); read .dev/run/autopilot.log, fix the cause, then Start again. Turning it off lets the run finish its step; Force stop ends it now
-
 ## Ship a release
 
 1. When every milestone of a planned release has passed its gate, /dev-kit:status (or the board) shows the release ready
 2. /dev-kit:release --dry-run to see the checklist and the version it would use
 3. /dev-kit:release runs usability (UI apps), docs and the release audit, writes releases/R<n>/review.md and waits for you
-4. Approve on the board (Needs you) or with /dev-kit:release: production deploy, smoke, tag; or reject with what must change (a fixes milestone in the same release)
+4. Approve with /dev-kit:release: production deploy, smoke, tag; or reject with what must change (a fixes milestone in the same release)
 
 ## Check that the app is usable and accessible
 

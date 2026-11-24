@@ -350,13 +350,8 @@ class TestLessons(Base):
         self.ds("lesson", "add", "code-reviewer", "Merged lesson")
         self.assertEqual(len((self.dev / "lessons" / "code-reviewer.md").read_text(encoding="utf-8").split("\n- ")) - 1, 8)
 
-    def test_unknown_agent_and_board_request_are_validated(self) -> None:
+    def test_unknown_agent_is_refused_and_a_signal_dismissed(self) -> None:
         self.ds("lesson", "add", "nobody", "x", expect=1)
-        import dev_worker as dw
-        ok = dw.validate("lesson_decision", {"agent": "code-reviewer", "signal": "dispute_rate", "decision": "approve", "text": "Reproduce first"})
-        self.assertEqual(ok["decision"], "approve")
-        with self.assertRaises(dw.Invalid):
-            dw.validate("lesson_decision", {"agent": "code-reviewer", "signal": "dispute_rate", "decision": "approve"})
         self.ds("lesson", "dismiss", "code-reviewer", "dispute_rate")
         self.assertIn("code-reviewer:dispute_rate", self.state()["lessons_dismissed"])
 

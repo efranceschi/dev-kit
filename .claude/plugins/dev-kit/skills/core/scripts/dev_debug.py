@@ -8,8 +8,8 @@ writes one Markdown file under .dev/run/debug/ (machine-local, never committed).
   check [--json]                                    only the consistency checks (exit 1 when one is an error)
 
 The dump holds: the kit and tool versions, the checks, git (status, worktrees, branches, recent commits), the tasks
-that are not done, the run files (.dev/run/*.json: autopilot, round, slots, activity), the end of .dev/log.md, of the
-autopilot log and of the round logs, the ledger's task records and the last telemetry events. It never copies the
+that are not done, the run files (.dev/run/*.json: round, slots, activity), the end of .dev/log.md and of the round
+logs, the ledger's task records and the last telemetry events. It never copies the
 project's source files or the environment.
 
 Every dump keeps codes only: task, question, milestone, issue and ADR ids, statuses, times, counts and check codes.
@@ -352,50 +352,9 @@ def checks(root: Path) -> list[dict]:
         if s != "in_progress":
             add("dirty_files_of_unstarted_task", "error" if round_alive else "warn",
                 f"the main checkout has uncommitted changes in files of {tid}, which is {s}", ", ".join(sorted(set(fs))[:12]))
-    queue_checks(root, add)
     if started:
         add("round_running", "info", f"round {rnd.get('round')} started {started}", f"pids {rnd.get('pid')}/{rnd.get('child')}")
     return out
-
-
-QUEUE_STUCK_S = 60  # a request the board's worker should have taken by now
-
-
-def queue_checks(root: Path, add) -> None:
-    """The board's request queue: a request that waits while nobody takes it (no listening session, no executor working,
-    the board's own worker not started, failing or off), and requests left stale by an executor that stopped."""
-    try:
-        import dev_worker as dw
-        all_ = dw.items(root)
-    except Exception:  # noqa: BLE001 - the checks never fail on the queue
-        return
-    for x in all_:
-        if x["status"] == "stale":
-            add("request_stale", "warn", f"{x['id']} was running when its executor stopped; the next claim closes it",
-                f"claimed {x.get('claimed_at')}")
-    nxt = dw.claimable(root, all_)
-    if nxt is None or dw.modes(root)["paused"]:
-        return
-    age = dw.time.time() - dw._ts(nxt.get("ts"))
-    ex = dw.executor(root)
-    w = dw._read(dw.run_dir(root) / "worker.json") or {}
-    auto = dw.auto_status(root)
-    ev = (f"{nxt['id']} {nxt['action']} {nxt['status']} since {nxt.get('ts')} · executor {ex['state']}"
-          + (f" (session {w.get('session')}, idle since {w.get('idle_since')})" if ex["online"] else "")
-          + f" · board worker {auto.get('state') or 'never started'}"
-          + (f" ({auto.get('reason')}, {auto.get('fails')} failed run(s))" if auto.get("reason") else ""))
-    taker, why = dw.who_takes(root)
-    if taker == "board" and auto.get("state") == "running":
-        return
-    if taker == "autopilot":
-        add("queue_waits_for_autopilot", "info", f"{nxt['id']} waits: {why}", ev)
-        return
-    if taker is None:
-        add("queue_stuck", "error" if age > QUEUE_STUCK_S else "warn",
-            f"{nxt['id']} waits and nobody will take it: {why}", ev + " (run /dev-kit:worker, or fix what the text says)")
-    elif taker == "board" and age > QUEUE_STUCK_S:
-        add("queue_not_taken", "error", f"{nxt['id']} has waited {int(age)} s and the board has not started its worker: "
-            "an old board server (restart it with /dev-kit:board restart), or the board's executor loop is failing (.dev/run/board.log)", ev)
 
 
 def section(title: str, body: str, lang: str = "") -> str:
@@ -518,23 +477,12 @@ def dump(root: Path, n: int, share: bool = False) -> tuple[str, list[dict]]:
         except (OSError, json.JSONDecodeError):
             body = "(not JSON: left out)"
         runs.append(f"--- .dev/{rel}\n{body}")
-    if (run / "autopilot.stop").exists():
-        runs.append("--- .dev/run/autopilot.stop (present)")
     parts.append(section("Run files", "\n".join(runs)))
-    try:
-        import dev_worker as dw
-        q = [f"{x['id']} {x['action']} {x['status']} ts {x.get('ts')}" + (f" claimed {x['claimed_at']}" if x.get("claimed_at") else "")
-             + (f" waits on {x['question']}" if x.get("question") else "") for x in dw.items(root) if x["status"] in dw.OPEN or x["status"] == "stale"]
-        parts.append(section("Board queue (open requests; codes only)", "\n".join(q) or "empty"))
-        parts.append(section(f"Board worker log (last {n // 2} lines)", claude_log(tail(run / "worker-auto.log", n // 2), sh)))
-    except Exception:  # noqa: BLE001 - a dump never fails on one part
-        pass
     parts.append(section(f".dev/log.md (last {n})", "\n".join(log_line(x, sh) for x in tail(dev / "log.md", n).splitlines())))
     oq = tail(dev / "open-questions.md", 60)
     if sh:
         oq = "\n".join(sorted({f"{q} " + ("open" if re.search(r"(?i)\bopen\b", ln) else "") for ln in oq.splitlines() for q in re.findall(r"\bQ-\d+\b", ln)}))
     parts.append(section("Open questions", oq if sh else redact(oq)))
-    parts.append(section(f"Autopilot log (last {n // 2} lines)", claude_log(tail(run / "autopilot.log", n // 2), sh)))
     rlogs = sorted((run / "rounds").glob("*.log"), key=lambda p: p.stat().st_mtime) if (run / "rounds").is_dir() else []
     for p in rlogs[-3:]:
         size = p.stat().st_size

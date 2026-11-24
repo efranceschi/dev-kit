@@ -290,13 +290,6 @@ class TestDebtCap(Base):
         self.write_deferred("M1", 12, medium=11)
         self.assertTrue(json.loads(self.ds("debt", "status", "--json").stdout)["over"])
 
-    def test_board_decision_is_validated(self) -> None:
-        import dev_worker as dw
-        self.assertEqual(dw.validate("debt_decision", {"decision": "accept"}), {"decision": "accept"})
-        with self.assertRaises(dw.Invalid):
-            dw.validate("debt_decision", {"decision": "ignore"})
-
-
 # ------------------------------------------------------------------ item 11: checkpoints
 
 class TestCheckpoint(Base):
@@ -363,18 +356,6 @@ class TestCheckpoint(Base):
         self.ds("checkpoint", "confirm", "prd")
         p = self.ds("review", "prd", "pass", "--score", "91")
         self.assertNotIn("checkpoint prd", p.stdout)
-
-    def test_board_request(self) -> None:
-        import dev_worker as dw
-        self.setup_plan()
-        self.conceive()
-        with self.assertRaises(dw.Invalid):
-            dw.validate("checkpoint", {"target": "plan", "decision": "adjust"})
-        item = dw.submit(self.root, "checkpoint", {"target": "prd", "decision": "confirm"})
-        self.ds("checkpoint", "confirm", "prd", "--request", item["id"])
-        self.assertEqual(self.state()["checkpoints"]["prd"]["by"], "board")
-        self.assertEqual(self.state()["checkpoints"]["prd"]["history"][-1]["request"], item["id"])
-
 
 # ------------------------------------------------------------------ item 8: scope change pauses affected tasks
 

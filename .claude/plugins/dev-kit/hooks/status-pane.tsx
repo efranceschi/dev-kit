@@ -14,10 +14,7 @@ const POLL_MS = 5000
 // What runs now can change with no file changing (a process ends): read it again at least this often.
 const LIVE_MAX_AGE_MS = 30000
 // The run files `dev_board.py pane` reads: a change in any of them reads it again.
-const LIVE_FILES = [
-  'run/agents.jsonl', 'run/autopilot.json', 'run/autopilot-run.json', 'run/round.json', 'run/round-activity.json',
-  'run/worker.json', 'run/worker-auto.json', 'run/board.json', 'run/inbox', 'run/approvals',
-]
+const LIVE_FILES = ['run/agents.jsonl', 'telemetry.jsonl', 'run/round.json', 'run/round-activity.json', 'run/board.json']
 
 // Change a shape tag when its fields change: an earlier version's value is declined.
 const snapshot = atom({ plugin: 'dev-kit', key: 'snapshot' } as const, emptySnapshot(false), {
@@ -119,7 +116,7 @@ async function refresh($: EngineInterface, force = false): Promise<Snapshot> {
   }
 }
 
-/** What runs now: the Autopilot, its round, the agents, the board's requests and permission prompts. */
+/** What runs now: the Autopilot, its round and the agents. */
 async function readLive($: EngineInterface, root: string, now: number) {
   lastLiveAt = now
   try {
@@ -206,7 +203,7 @@ export const register: Register = on => {
     if (e.props.placement === 'widget') {
       const running = snap.tasks.filter(t => t.status === 'in_progress').map(t => t.id)
       const ap = snap.live?.autopilot
-      const apMark = ap && (ap.state === 'running' || ap.state === 'stopping') ? `AP ${ap.where === 'session' ? 'here' : 'bg'}` : ap?.on ? `AP ${ap.state}` : ''
+      const apMark = ap?.state === 'running' ? 'AP' : ''
       const nAgents = snap.live?.agents.length ?? 0
       return (
         <Text wrap="truncate-end">
@@ -286,8 +283,8 @@ export const register: Register = on => {
           <Text
             wrap="truncate-end"
             bold={snap.live?.autopilot.state === 'running'}
-            color={snap.live?.autopilot.state === 'running' ? 'success' : ['waiting_user', 'release', 'backoff', 'stopped'].includes(snap.live?.autopilot.state ?? '') ? 'warning' : undefined}
-            dimColor={!snap.live?.autopilot.on}
+            color={snap.live?.autopilot.state === 'running' ? 'success' : undefined}
+            dimColor={snap.live?.autopilot.state !== 'running'}
           >
             {apText}
             {snap.live?.autopilot.round?.lastTool ? <Text dimColor> · last {snap.live.autopilot.round.lastAgent ?? snap.live.autopilot.round.lastTool}</Text> : ''}

@@ -130,13 +130,11 @@ class TestCutReleases(Base):
         p = self.ds("release-record", "--version", "1.2.0", "--milestones", "M3", expect=1)
         self.assertIn("record R1 with --release R1 after its approval", p.stderr)
 
-    def test_old_board_request_and_open_work_survive(self) -> None:
+    def test_open_work_survives(self) -> None:
         self.ds("sync-plan")
         s = self.state()
         self.assertEqual(sum(1 for t in s["tasks"].values() if t["status"] == "done"), 15)
         self.assertEqual(len(s.get("issues") or {}), 1)
-        import dev_worker as dw
-        self.assertEqual([x["id"] for x in dw.items(self.root)], ["P-001"])
         nxt = json.loads(self.ds("next", "--json").stdout)
         self.assertEqual(nxt["milestone"], "M3")  # the milestone in progress goes on while the plan review is stale
 

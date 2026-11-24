@@ -25,11 +25,8 @@
     </div>
 
     <div class="top-mid">
-      <div class="pop-wrap ap-wrap" id="ap-wrap" hidden>
-        <button type="button" class="ap-switch" id="ap-switch" role="switch" aria-checked="false" aria-label="Autopilot" data-i18n-aria-label="Autopilot"
-          title="Runs /dev-kit:autopilot from the board, one milestone per run, until a release waits for your approval" data-i18n-title="Runs /dev-kit:autopilot from the board, one milestone per run, until a release waits for your approval"><span class="ap-knob" aria-hidden="true"></span></button>
-        <button type="button" class="ap-state off" id="ap-btn" aria-haspopup="true" aria-expanded="false" aria-controls="ap-pop"><span class="ap-name" data-i18n="Autopilot">Autopilot</span><span class="ap-word" id="ap-word"></span></button>
-        <div class="popover ap-pop" id="ap-pop" hidden></div>
+      <div class="ap-wrap" id="ap-wrap" hidden>
+        <span class="ap-state on" id="ap-state" role="status"><span class="ap-name" data-i18n="Autopilot">Autopilot</span><span class="ap-word" id="ap-word"></span></span>
       </div>
       <span class="updated" id="updated" aria-live="off"></span>
     </div>
@@ -37,10 +34,6 @@
     <div class="top-actions">
       <button type="button" class="needs-btn calm" id="needs-btn" aria-haspopup="dialog" aria-controls="needs-dialog">
         <span class="needs-n" id="needs-n" aria-hidden="true">0</span><span class="needs-label" data-i18n="Needs you">Needs you</span><span class="visually-hidden" id="needs-sr"></span>
-      </button>
-      <button type="button" class="top-btn" id="req-btn" aria-haspopup="dialog" aria-controls="req-dialog" title="Requests to Claude Code" data-i18n-title="Requests to Claude Code">
-        <svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17"><path d="M4 6h16M4 12h10M4 18h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="18" cy="16" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-        <span class="top-btn-label" data-i18n="Requests">Requests</span><span class="top-count" id="req-count" hidden></span>
       </button>
       <button type="button" class="top-btn" id="act-btn" aria-haspopup="dialog" aria-controls="act-dialog" title="What happened, latest first" data-i18n-title="What happened, latest first">
         <svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17"><path d="M3 12h4l3-8 4 16 3-8h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -84,7 +77,7 @@
             <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
             <span data-i18n="Stop server">Stop server</span>
           </button>
-          <p class="pop-note" data-i18n="The board changes the project only through Claude Code: requests run /dev-kit:worker and the Autopilot switch runs /dev-kit:autopilot. It stops by itself when no tab is open and the Autopilot is off.">The board changes the project only through Claude Code: requests run /dev-kit:worker and the Autopilot switch runs /dev-kit:autopilot. It stops by itself when no tab is open and the Autopilot is off.</p>
+          <p class="pop-note" data-i18n="The board only shows the project: every decision and run happens in Claude Code. It stops by itself when no tab is open.">The board only shows the project: every decision and run happens in Claude Code. It stops by itself when no tab is open.</p>
         </div>
       </div>
     </div>
@@ -136,16 +129,6 @@
     <section class="phase-panel" id="phase-planning" role="tabpanel" aria-labelledby="ph-planning" hidden>
       <section class="lane-strip" data-lane="planning" id="pl-strip" aria-labelledby="planning-strip-h"></section>
       <div class="tiles t3" id="pl-tiles"></div>
-    </section>
-
-    <!-- replanning: the planner on a screen of its own, opened from Planning -->
-    <section class="phase-panel replan-panel" id="phase-replan" aria-labelledby="replan-h" hidden>
-      <div class="replan-head">
-        <button type="button" class="btn btn-sm" id="replan-back" data-i18n="← Planning">← Planning</button>
-        <h2 id="replan-h" data-i18n="Replan the milestones">Replan the milestones</h2>
-        <p class="card-sub" data-i18n="Drag tasks and issues between open milestones, then send the draft">Drag tasks and issues between open milestones, then send the draft</p>
-      </div>
-      <div class="planner" id="planner" hidden></div>
     </section>
 
     <section class="phase-panel" id="phase-construction" role="tabpanel" aria-labelledby="ph-construction" hidden>
@@ -220,8 +203,6 @@
   </div>
 
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
-  <div class="visually-hidden" id="copy-status" role="status" aria-live="polite"></div>
-  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <!-- what waits on the user: a drawer opened from the red button in the top bar -->
   <dialog id="needs-dialog" class="drawer needs-drawer" aria-labelledby="needs-h">
@@ -231,22 +212,6 @@
       <button type="button" class="btn" id="needs-close" aria-label="Close" data-i18n="Close" data-i18n-aria-label="Close">Close</button>
     </div>
     <div id="impediments" class="needs-lists"></div>
-  </dialog>
-
-  <dialog id="req-dialog" class="drawer" aria-labelledby="req-h">
-    <div class="td-head">
-      <h2 id="req-h" data-i18n="Requests">Requests</h2>
-      <button type="button" class="btn" id="req-close" aria-label="Close" data-i18n="Close" data-i18n-aria-label="Close">Close</button>
-    </div>
-    <section class="req-card" id="req-card">
-      <span class="exec off" id="exec" role="status" data-i18n-once="Claude Code: not running">Claude Code: not running</span>
-      <div class="req-tools">
-        <button type="button" class="btn btn-sm" id="new-issue-btn" aria-haspopup="dialog" data-i18n="＋ New issue">＋ New issue</button>
-        <button type="button" class="btn btn-sm" id="pause-btn" aria-pressed="false" data-i18n-once="Pause queue">Pause queue</button>
-      </div>
-      <p class="card-sub req-hint" id="req-hint"></p>
-      <ol class="list req-list" id="req-list" aria-live="polite"></ol>
-    </section>
   </dialog>
 
   <dialog id="act-dialog" class="drawer" aria-labelledby="act-h">
@@ -307,22 +272,6 @@
     <div class="modal-body" id="list-body"></div>
   </dialog>
 
-  <dialog id="issue-dialog" aria-labelledby="issue-h">
-    <form method="dialog" id="issue-form">
-      <h2 id="issue-h" data-i18n="New issue">New issue</h2>
-      <p data-i18n="Claude Code classifies it and asks you here if it needs to.">Claude Code classifies it and asks you here if it needs to.</p>
-      <label class="field"><span data-i18n="Title">Title</span> <input id="issue-title" maxlength="120" required autocomplete="off"></label>
-      <label class="field"><span data-i18n="Type">Type</span>
-        <select id="issue-type"><option value="bug" data-i18n="Bug">Bug</option><option value="improvement" data-i18n="Improvement">Improvement</option><option value="change" data-i18n="Change of scope">Change of scope</option></select>
-      </label>
-      <label class="field"><span data-i18n="Details">Details</span> <span class="card-sub" data-i18n="(optional)">(optional)</span><textarea id="issue-note" maxlength="2000" rows="4"></textarea></label>
-      <div class="dialog-actions">
-        <button class="btn" value="cancel" formnovalidate data-i18n="Cancel">Cancel</button>
-        <button class="btn btn-primary" value="send" data-i18n="Queue the issue">Queue the issue</button>
-      </div>
-    </form>
-  </dialog>
-
   <dialog id="task-dialog" class="drawer" aria-labelledby="task-title">
     <div class="td-head"><h2 id="task-title"></h2><button type="button" class="btn" id="task-close" aria-label="Close details" data-i18n="Close" data-i18n-aria-label="Close details">Close</button></div>
     <div id="task-body" aria-live="polite"></div>
@@ -340,7 +289,7 @@
   <dialog id="stop-dialog" aria-labelledby="stop-h">
     <form method="dialog">
       <h2 id="stop-h" data-i18n="Stop the board server?">Stop the board server?</h2>
-      <p><span data-i18n="The page stops updating. Start it again any time with">The page stops updating. Start it again any time with</span> <code data-copy>/dev-kit:board</code><span data-i18n=". Your project is not touched.">. Your project is not touched.</span></p>
+      <p><span data-i18n="The page stops updating. Start it again any time with">The page stops updating. Start it again any time with</span> <code>/dev-kit:board</code><span data-i18n=". Your project is not touched.">. Your project is not touched.</span></p>
       <div class="dialog-actions">
         <button class="btn" value="cancel" autofocus data-i18n="Keep running">Keep running</button>
         <button class="btn btn-danger" value="stop" id="stop-confirm" data-i18n="Stop server">Stop server</button>
@@ -352,7 +301,7 @@
     <div class="stopped-card">
       <img class="logo big" src="/assets/favicon.svg" alt="">
       <h2 data-i18n="Board stopped">Board stopped</h2>
-      <p><span data-i18n="The server is off. You can close this tab.">The server is off. You can close this tab.</span><br><span data-i18n="Run">Run</span> <code data-copy>/dev-kit:board</code> <span data-i18n="to start it again.">to start it again.</span></p>
+      <p><span data-i18n="The server is off. You can close this tab.">The server is off. You can close this tab.</span><br><span data-i18n="Run">Run</span> <code>/dev-kit:board</code> <span data-i18n="to start it again.">to start it again.</span></p>
     </div>
   </div>
 </body>

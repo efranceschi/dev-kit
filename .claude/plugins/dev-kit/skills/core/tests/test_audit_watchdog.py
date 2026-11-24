@@ -117,43 +117,34 @@ class TestSettings(Base):
 
 
 class TestHook(Base):
-    def run_hook(self, cmd: str, agent: str, decision: str = "timeout", rnd: str = "qa-M1-x") -> tuple[dict | None, list]:
+    def run_hook(self, cmd: str, agent: str, rnd: str = "qa-M1-x") -> dict | None:
         import dev_agent_hook as hook
-        import dev_worker as dw
-        calls: list = []
-        with mock.patch.object(dw, "board_run", return_value={"id": "autopilot"}), \
-                mock.patch.object(hook, "board_takes_requests", return_value=True), \
-                mock.patch.object(dw, "request_approval", side_effect=lambda *a, **k: calls.append(a) or "A-1"), \
-                mock.patch.object(dw, "wait_decision", side_effect=lambda r, a, w, rid: calls.append(("wait", w)) or decision), \
-                mock.patch.dict(os.environ, {"DEV_KIT_ROUND_ID": rnd}):
-            out = hook.permission(self.root, self.dev, {"tool_name": "Bash", "tool_input": {"command": cmd}, "agent_type": agent})
-        return out, calls
+        env = {"DEV_KIT_ROUND_ID": rnd} if rnd else {}
+        with mock.patch.dict(os.environ, env):
+            if not rnd:
+                os.environ.pop("DEV_KIT_ROUND_ID", None)
+            return hook.permission(self.root, self.dev, {"tool_name": "Bash", "tool_input": {"command": cmd}, "agent_type": agent})
 
     def test_the_safe_set_is_allowed_at_once(self) -> None:
-        out, calls = self.run_hook("gzip -c dist/app.js | wc -c", "dev-kit:performance-auditor")
+        out = self.run_hook("gzip -c dist/app.js | wc -c", "dev-kit:performance-auditor")
         self.assertEqual(out["hookSpecificOutput"]["decision"]["behavior"], "allow")
-        self.assertEqual(calls, [])
 
-    def test_an_auditor_permission_never_parks_the_round(self) -> None:
-        out, calls = self.run_hook("npx lighthouse http://localhost:3000", "dev-kit:performance-auditor")
-        dec = out["hookSpecificOutput"]["decision"]
-        self.assertEqual(dec["behavior"], "deny")
-        self.assertIn("The round goes on", dec["message"])
-        self.assertLessEqual(calls[-1][1], 120)  # waited 2 minutes at most, not 10
-        self.assertFalse((self.dev / "run" / "round-parked.json").exists())
+    def test_another_permission_is_left_to_claude_code_and_kept(self) -> None:
+        self.assertIsNone(self.run_hook("npx lighthouse http://localhost:3000", "dev-kit:performance-auditor"))
         miss = dev_perms.misses(self.root)[0]
         self.assertEqual((miss["agent"], miss["how"]), ("performance-auditor", "auditor_skipped"))
-
-    def test_the_orchestrator_still_parks_the_round_and_leaves_it_in_needs_you(self) -> None:
-        out, _ = self.run_hook("make deploy", "")
-        self.assertIn("this round stops", out["hookSpecificOutput"]["decision"]["message"])
-        self.assertTrue((self.dev / "run" / "round-parked.json").exists())
+        self.assertIsNone(self.run_hook("make deploy", ""))
         self.assertEqual(dev_perms.misses(self.root)[0]["target"], "make deploy")
+        self.assertFalse((self.dev / "run" / "round-parked.json").exists())  # 3.12: nothing parks a round on the board
+
+    def test_outside_a_round_child_the_hook_says_nothing(self) -> None:
+        self.assertIsNone(self.run_hook("gzip -c dist/app.js | wc -c", "", rnd=""))
+        self.assertEqual(dev_perms.misses(self.root), [])
 
     def test_the_board_lists_denied_permissions(self) -> None:
-        import dev_worker as dw
+        import dev_board
         self.run_hook("npx lighthouse http://localhost:3000", "dev-kit:performance-auditor")
-        denied = dw.snapshot(self.root)["denied"]
+        denied = dev_board.denied_permissions(self.root)
         self.assertEqual(denied[0]["rule"], "Bash(npx lighthouse *)")
 
 

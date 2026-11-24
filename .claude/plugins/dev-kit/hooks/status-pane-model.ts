@@ -155,11 +155,7 @@ export function toLive(raw: unknown, readAt: number): LiveView {
     autopilot: {
       on: ap.on === true,
       state: str(ap.state) ?? 'off',
-      ...(str(ap.where) ? { where: str(ap.where) } : {}),
-      ...(str(ap.handoff) ? { handoff: str(ap.handoff) } : {}),
       ...(str(ap.since) ? { since: str(ap.since) } : {}),
-      ...(str(ap.reason) ? { reason: str(ap.reason) } : {}),
-      ...(num(ap.until) !== undefined ? { until: num(ap.until) } : {}),
       ...(round ? { round } : {}),
     },
     agents,
@@ -168,49 +164,20 @@ export function toLive(raw: unknown, readAt: number): LiveView {
       ...(str(r.scope) ? { scope: str(r.scope) } : {}),
       ...(str(r.started_at) ? { startedAt: str(r.started_at) } : {}),
     })),
-    requests: arr(s.requests).map(obj).filter(r => str(r.id)).map(r => ({
-      id: str(r.id)!,
-      action: str(r.action) ?? '',
-      status: str(r.status) ?? '',
-      ...(str(r.question) ? { question: str(r.question) } : {}),
-    })),
-    approvals: arr(s.approvals).map(obj).filter(a => str(a.tool)).map(a => ({
-      tool: str(a.tool)!,
-      target: str(a.target) ?? '',
-      ...(num(a.seconds_left) !== undefined ? { secondsLeft: num(a.seconds_left) } : {}),
-    })),
-    executor: str(obj(s.executor).state) ?? 'offline',
     readAt,
   }
 }
 
-const AP_WORDS: Record<string, string> = {
-  off: 'off',
-  idle: 'on, starting the next run',
-  running: 'running',
-  stopping: 'finishing the step, then off',
-  waiting_user: 'waiting for you (Needs you)',
-  release: 'a release waits for your approval',
-  stable: 'stable: nothing left',
-  waiting_session: 'waiting for another run',
-  backoff: 'a run failed, trying again',
-  stopped: 'stopped',
-}
-
-/** One line on the Autopilot: its state, where it runs, its round and since when. */
+/** One line on the Autopilot (/dev-kit:autopilot running in a session): its headless round and since when. */
 export function autopilotLine(live: LiveView | undefined, now: number): string {
   if (!live) return ''
   const ap = live.autopilot
-  if (!ap.on && ap.state === 'off') return 'Autopilot off'
-  const parts = [`Autopilot ${AP_WORDS[ap.state] ?? ap.state}`]
-  if (ap.state === 'running' || ap.state === 'stopping') {
-    if (ap.where === 'session') parts.push(ap.handoff === 'pending' ? 'handed to this session, not started yet' : 'in this session')
-    else parts.push('headless')
-    const rd = ap.round
-    if (rd) parts.push(`${rd.skill}${rd.scope ? ` ${rd.scope}` : ''}${rd.tasks.length ? ` ${rd.tasks.join(' ')}` : ''}`)
-    const t = since(ap.since, now)
-    if (t) parts.push(t)
-  } else if (ap.state === 'stopped' && ap.reason) parts.push(ap.reason.replace(/_/g, ' '))
+  if (ap.state !== 'running') return 'Autopilot off'
+  const parts = ['Autopilot running']
+  const rd = ap.round
+  if (rd) parts.push(`${rd.skill}${rd.scope ? ` ${rd.scope}` : ''}${rd.tasks.length ? ` ${rd.tasks.join(' ')}` : ''}`)
+  const t = since(ap.since, now)
+  if (t) parts.push(t)
   return parts.join(' · ')
 }
 
@@ -224,15 +191,11 @@ export function agentsByNode(live: LiveView | undefined): Record<string, LiveAge
 /** The "Needs you" lines, most urgent first. */
 export function needsYou(snap: Snapshot): string[] {
   const out: string[] = []
-  for (const a of snap.live?.approvals ?? [])
-    out.push(`Permission: ${a.tool} ${a.target}`.trim() + (a.secondsLeft !== undefined ? ` (${Math.max(0, Math.ceil(a.secondsLeft / 60))}m left)` : ''))
   for (const r of snap.releasesWaiting) out.push(`Release ${r} waits for your approval`)
   const hotfix = snap.tasks.filter(t => t.lane === 'hotfix' && t.status !== 'done')
   if (hotfix.length) out.push(`Hotfix: ${hotfix.map(t => t.id).join(', ')}`)
   if (snap.openQuestions) out.push(`${snap.openQuestions} open question${snap.openQuestions > 1 ? 's' : ''}`)
   const blocked = snap.tasks.filter(t => t.status === 'blocked').length
   if (blocked) out.push(`${blocked} blocked task${blocked > 1 ? 's' : ''}`)
-  const waiting = (snap.live?.requests ?? []).filter(r => r.status === 'pending')
-  if (waiting.length) out.push(`${waiting.length} board request${waiting.length > 1 ? 's' : ''} waiting (${waiting.map(r => r.id).join(', ')})`)
   return out
 }

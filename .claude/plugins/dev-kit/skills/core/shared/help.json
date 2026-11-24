@@ -173,8 +173,8 @@
     {
       "name": "board",
       "category": "start",
-      "one_line": "Live board in the browser, laid out like the flow diagram (docs/dev-kit-flow.svg): its tabs are the lanes - conception, planning, construction in two (milestones and releases) and stable - plus a Map with all five lanes at once, and it opens on the lane where the project is. Each screen fits the window without scrolling: on top the lane's steps as a flow, coloured by who does them (yours in yellow, agents in orange, delivery in green, gates in red), with where the project is, what runs and what waits on you; below, blocks of the same size, where what does not fit opens with \"See all\". Conception shows its documents, the PRD and design reviews, decisions and facts, and scope changes; planning the roadmap by release, the backlog and the plan review, with a screen of its own to replan by dragging tasks, issues and milestones; milestones the milestone picked (grouped by release) with its stages, the task board in columns of equal height or its QA rounds, and burndown, velocity and gates in a Metrics modal; releases the release picked with its stages (checks, audit, review, your approval, production, released) and its numbers, milestones, blockers and documents; stable the project totals, production, the health check, release flags, release checks and releases. \"Needs you\" is a button in the top bar that turns red (and rings once) when something waits, with a badge on the lane and on the step it belongs to; it opens a drawer with every item and its buttons (Approve and Reject for a release). Requests and activity are drawers too. Every link to a document of .dev/ opens it formatted in a side panel. Buttons ask Claude Code for work (run the next step, new issue, answer a question, a plan draft) and start it in the session that opened the board; the Autopilot switch in the top bar runs /dev-kit:autopilot from the board, one milestone per run, until a release waits for your approval, waiting on Needs you when only your decisions are left; hovering Live lists what is running; light or dark, English or Portuguese; local, shared on your network with an access link, or behind your reverse proxy.",
-      "when": "When you want to watch the project visually or drive it from the browser, e.g. away from the console; it updates by itself.",
+      "one_line": "Live board in the browser, laid out like the flow diagram (docs/dev-kit-flow.svg): its tabs are the lanes - conception, planning, construction in two (milestones and releases) and stable - plus a Map with all five lanes at once, and it opens on the lane where the project is. Each screen fits the window without scrolling: on top the lane's steps as a flow, coloured by who does them (yours in yellow, agents in orange, delivery in green, gates in red), with where the project is, what runs and what waits on you; below, blocks of the same size, where what does not fit opens with \"See all\". Conception shows its documents, the PRD and design reviews, decisions and facts, and scope changes; planning the roadmap by release, the backlog and the plan review; milestones the milestone picked (grouped by release) with its stages, the task board in columns of equal height or its QA rounds, and burndown, velocity and gates in a Metrics modal; releases the release picked with its stages (checks, audit, review, your approval, production, released) and its numbers, milestones, blockers and documents; stable the project totals, production, the health check, release flags, release checks and releases. \"Needs you\" is a button in the top bar that turns red (and rings once) when something waits, with a badge on the lane and on the step it belongs to; it opens a drawer with every item and the command that settles it in Claude Code. Activity is a drawer too. Every link to a document of .dev/ opens it formatted in a side panel. The board is read-only: it never changes the project or starts Claude Code, every decision and run happens in a Claude Code session and shows on the board as it happens; the top bar shows the Autopilot while /dev-kit:autopilot runs, hovering Live lists what is running; light or dark, English or Portuguese; local, shared on your network with an access link, or behind your reverse proxy.",
+      "when": "When you want to follow the project visually, e.g. on a second screen or a phone; it updates by itself.",
       "args": [
         {
           "arg": "(empty)",
@@ -203,10 +203,6 @@
         {
           "arg": "--trusted-host NAME",
           "meaning": "host name of your reverse proxy in front of the board (remembered for the project; none forgets it)"
-        },
-        {
-          "arg": "--actions on|off",
-          "meaning": "let the page queue requests to Claude Code (on by default; off makes the board show the project only)"
         }
       ],
       "examples": [
@@ -223,36 +219,11 @@
           "what": "stop the board server"
         }
       ],
-      "produces": "nothing in the project by itself (requests are run by /dev-kit:worker: in the session that listens, or in a headless session the board starts itself when none does); its own files in .dev/run/",
+      "produces": "nothing in the project: the board only shows it (every decision and run happens in Claude Code); its own files in .dev/run/",
       "related": [
-        "worker",
         "status",
         "backlog",
         "costs"
-      ]
-    },
-    {
-      "name": "worker",
-      "category": "start",
-      "one_line": "Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft, release approval or rejection) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick.",
-      "when": "It starts by itself, each time a request arrives: in the session that opened the board with /dev-kit:board, or, when no session listens, in a headless session the board starts (autonomy.board_executor). Run it by hand in another session only when the board says it cannot start Claude Code.",
-      "args": [
-        {
-          "arg": "(empty)",
-          "meaning": "run every request waiting on the board, in order, until none is left or the queue is paused"
-        }
-      ],
-      "examples": [
-        {
-          "command": "/dev-kit:worker",
-          "what": "run what you asked for on the board"
-        }
-      ],
-      "produces": "whatever each request does (commits, issues, plan changes); the request's result on the board",
-      "related": [
-        "board",
-        "issue",
-        "plan"
       ]
     },
     {
@@ -453,15 +424,11 @@
         },
         {
           "arg": "--parallel N",
-          "meaning": "implementers at once for this run (1-6); without it, the number set on the board's Autopilot card (default 3). With the board's Autopilot running, it changes that run's number instead"
-        },
-        {
-          "arg": "--board",
-          "meaning": "how the board's Autopilot switch runs it: in the session that listens to the board, or headless; questions go to Needs you, ends saying why (you do not type it)"
+          "meaning": "implementers at once for this run (1-6, default 3)"
         },
         {
           "arg": "--rounds session|child",
-          "meaning": "where the implement and QA rounds run: session (here, so the implementers show in this session's task list; the default when you are at the console) or child (a fresh headless session per round, a smaller context; the default in a headless run)"
+          "meaning": "where the implement and QA rounds run: session (here, so the implementers show in this session's task list; the default) or child (a fresh headless session per round, a smaller context)"
         }
       ],
       "examples": [
@@ -505,7 +472,7 @@
         },
         {
           "arg": "--parallel N",
-          "meaning": "N isolated implementers in git worktrees; --parallel auto takes the number set on the board's Autopilot card (default 3)"
+          "meaning": "N isolated implementers in git worktrees; --parallel auto = 3"
         },
         {
           "arg": "--skip-gate",
@@ -826,7 +793,7 @@
       "name": "diagram",
       "category": "ship",
       "one_line": "The high-level architecture diagram of the system being built, in draw.io's style without draw.io: an SVG for the board and the README, plus a .drawio file.",
-      "when": "The board's Architecture button has no diagram yet, the architecture changed, or as part of docs (which always runs it).",
+      "when": "The board's Architecture tab has no diagram yet, the architecture changed, or as part of docs (which always runs it).",
       "args": [
         {
           "arg": "update",
@@ -840,7 +807,7 @@
         },
         {
           "command": "/dev-kit:diagram update",
-          "what": "redraws it after the architecture changed (the board's Update diagram button)"
+          "what": "redraws it after the architecture changed"
         }
       ],
       "produces": "docs/diagrams/architecture.json (the model), architecture.svg and architecture.drawio",
@@ -1060,7 +1027,7 @@
       "steps": [
         "Choose 'unattended with floors' in the interview, or later: /dev-kit:settings run overnight without asking",
         "Cover permission prompts: /fewer-permission-prompts and --permission-mode acceptEdits",
-        "Run inside tmux: claude --permission-mode acceptEdits \"/dev-kit:autopilot\", or turn on the board's Autopilot switch (it runs headless with acceptEdits, and its prompts wait in Needs you)",
+        "Run inside tmux: claude --permission-mode acceptEdits \"/dev-kit:autopilot\"",
         "In the morning: /dev-kit:status, /dev-kit:backlog, /dev-kit:costs, /dev-kit:interview --gaps"
       ]
     },
@@ -1164,7 +1131,7 @@
         "Answer the production questions in the interview (method, host, when, smoke checks, prerequisites)",
         "/dev-kit:deploy --check to see the drift",
         "/dev-kit:deploy M3 or let autopilot deploy per milestone",
-        "/dev-kit:deploy --health to check production now (the board checks it on schedule while it is open)"
+        "/dev-kit:deploy --health to check production now (the autopilot checks it at each milestone, /dev-kit:status when its interval passed)"
       ]
     },
     {
@@ -1273,45 +1240,6 @@
       ]
     },
     {
-      "id": "board-requests",
-      "title": "Drive the work from the board",
-      "topics": [
-        "board",
-        "request",
-        "button",
-        "drag",
-        "plan milestone",
-        "answer question",
-        "remote"
-      ],
-      "steps": [
-        "/dev-kit:board in a Claude Code session opens the board and makes that session listen (keep it open, e.g. in tmux); away from the machine use an SSH tunnel, --host 0.0.0.0 with the access link, or --trusted-host behind your reverse proxy",
-        "on the board: Run next to a command, New issue, answer a question in Needs you, Replan the milestones to drag tasks and issues between milestones (or milestones between releases) and Send",
-        "each request starts in the listening session by itself; questions come back to the board with answers to pick. With no session listening, the board starts a headless Claude Code session for them by itself",
-        "to let the board drive the whole build, turn on its Autopilot switch (next recipe)"
-      ]
-    },
-    {
-      "id": "board-autopilot",
-      "title": "Let the board drive the build (Autopilot switch)",
-      "topics": [
-        "autopilot switch",
-        "board autopilot",
-        "drive",
-        "headless",
-        "parallel",
-        "implementers",
-        "waiting for you",
-        "stopped"
-      ],
-      "steps": [
-        "/dev-kit:board, then turn on the Autopilot switch in the top bar: the board runs /dev-kit:autopilot headless, one milestone per run, until a release waits for your approval or the project is stable; you can close the Claude Code session",
-        "questions and permission prompts go to Needs you; when only work that needs you is left the switch says waiting for you, and the next run starts once you answer",
-        "Implementers at once on the Autopilot card (1 to 6, default 3) sets how many tasks are built in parallel, from the next batch; /dev-kit:autopilot --parallel N does the same from a session",
-        "stopped: its card says why (three failed runs or a run that changed nothing); read .dev/run/autopilot.log, fix the cause, then Start again. Turning it off lets the run finish its step; Force stop ends it now"
-      ]
-    },
-    {
       "id": "release",
       "title": "Ship a release",
       "topics": [
@@ -1327,7 +1255,7 @@
         "When every milestone of a planned release has passed its gate, /dev-kit:status (or the board) shows the release ready",
         "/dev-kit:release --dry-run to see the checklist and the version it would use",
         "/dev-kit:release runs usability (UI apps), docs and the release audit, writes releases/R<n>/review.md and waits for you",
-        "Approve on the board (Needs you) or with /dev-kit:release: production deploy, smoke, tag; or reject with what must change (a fixes milestone in the same release)"
+        "Approve with /dev-kit:release: production deploy, smoke, tag; or reject with what must change (a fixes milestone in the same release)"
       ]
     },
     {
@@ -1383,7 +1311,7 @@
     },
     {
       "term": "production health check",
-      "definition": "production.health: a command or URL checked every interval_min by prod-check (on the board while it is open); a failure opens one expedite issue."
+      "definition": "production.health: a command or URL checked every interval_min by prod-check (by the autopilot at each milestone and by /dev-kit:status); a failure opens one expedite issue."
     },
     {
       "term": "stable",
@@ -1391,7 +1319,7 @@
     },
     {
       "term": "checkpoint",
-      "definition": "Confirm PRD and Confirm plan: after a passed review, you confirm the document on the board or ask for changes; no milestone starts before the plan is confirmed."
+      "definition": "Confirm PRD and Confirm plan: after a passed review, you confirm the document in Claude Code or ask for changes; no milestone starts before the plan is confirmed."
     },
     {
       "term": "milestone",
@@ -1522,16 +1450,12 @@
       "definition": ".dev/telemetry.jsonl: structured, high-level events of the run, without project data."
     },
     {
-      "term": "Autopilot switch",
-      "definition": "The switch in the board's top bar that runs /dev-kit:autopilot headless, one milestone per run, until a release waits for your approval or the project is stable; its questions and permission prompts go to Needs you."
-    },
-    {
       "term": "implementers at once",
-      "definition": "How many tasks of a milestone are built in parallel, each in its own worktree (1 to 6, default 3), set on the board's Autopilot card or with /dev-kit:autopilot --parallel N; applies from the next batch."
+      "definition": "How many tasks of a milestone are built in parallel, each in its own worktree (1 to 6, default 3), set with /dev-kit:autopilot --parallel N."
     },
     {
       "term": "Needs you",
-      "definition": "The board's red button and drawer with everything waiting for you: questions, Confirm PRD and Confirm plan, release approvals, permission prompts and offers on the issue queue."
+      "definition": "The board's red button and drawer with everything waiting for you: questions, Confirm PRD and Confirm plan, release approvals and offers on the issue queue, each with the command that settles it in Claude Code."
     },
     {
       "term": "Baseline",

@@ -12,8 +12,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 | [`help`](#help) | Help inside Claude Code: what to do next, how each skill works, recipes and concepts. |
 | [`interview`](#interview) | Exhaustive requirements interview in 10 blocks; everything goes to .dev/brief.md with the autonomy policy. |
 | [`status`](#status) | Read-only dashboard: lifecycle phase and step, next release, milestones, gates, scores, issues, preview, production drift, cost so far. |
-| [`board`](#board) | Live board in the browser, laid out like the flow diagram (docs/dev-kit-flow.svg): its tabs are the lanes - conception, planning, construction in two (milestones and releases) and stable - plus a Map with all five lanes at once, and it opens on the lane where the project is. Each screen fits the window without scrolling: on top the lane's steps as a flow, coloured by who does them (yours in yellow, agents in orange, delivery in green, gates in red), with where the project is, what runs and what waits on you; below, blocks of the same size, where what does not fit opens with "See all". Conception shows its documents, the PRD and design reviews, decisions and facts, and scope changes; planning the roadmap by release, the backlog and the plan review, with a screen of its own to replan by dragging tasks, issues and milestones; milestones the milestone picked (grouped by release) with its stages, the task board in columns of equal height or its QA rounds, and burndown, velocity and gates in a Metrics modal; releases the release picked with its stages (checks, audit, review, your approval, production, released) and its numbers, milestones, blockers and documents; stable the project totals, production, the health check, release flags, release checks and releases. "Needs you" is a button in the top bar that turns red (and rings once) when something waits, with a badge on the lane and on the step it belongs to; it opens a drawer with every item and its buttons (Approve and Reject for a release). Requests and activity are drawers too. Every link to a document of .dev/ opens it formatted in a side panel. Buttons ask Claude Code for work (run the next step, new issue, answer a question, a plan draft) and start it in the session that opened the board; the Autopilot switch in the top bar runs /dev-kit:autopilot from the board, one milestone per run, until a release waits for your approval, waiting on Needs you when only your decisions are left; hovering Live lists what is running; light or dark, English or Portuguese; local, shared on your network with an access link, or behind your reverse proxy. |
-| [`worker`](#worker) | Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft, release approval or rejection) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick. |
+| [`board`](#board) | Live board in the browser, laid out like the flow diagram (docs/dev-kit-flow.svg): its tabs are the lanes - conception, planning, construction in two (milestones and releases) and stable - plus a Map with all five lanes at once, and it opens on the lane where the project is. Each screen fits the window without scrolling: on top the lane's steps as a flow, coloured by who does them (yours in yellow, agents in orange, delivery in green, gates in red), with where the project is, what runs and what waits on you; below, blocks of the same size, where what does not fit opens with "See all". Conception shows its documents, the PRD and design reviews, decisions and facts, and scope changes; planning the roadmap by release, the backlog and the plan review; milestones the milestone picked (grouped by release) with its stages, the task board in columns of equal height or its QA rounds, and burndown, velocity and gates in a Metrics modal; releases the release picked with its stages (checks, audit, review, your approval, production, released) and its numbers, milestones, blockers and documents; stable the project totals, production, the health check, release flags, release checks and releases. "Needs you" is a button in the top bar that turns red (and rings once) when something waits, with a badge on the lane and on the step it belongs to; it opens a drawer with every item and the command that settles it in Claude Code. Activity is a drawer too. Every link to a document of .dev/ opens it formatted in a side panel. The board is read-only: it never changes the project or starts Claude Code, every decision and run happens in a Claude Code session and shows on the board as it happens; the top bar shows the Autopilot while /dev-kit:autopilot runs, hovering Live lists what is running; light or dark, English or Portuguese; local, shared on your network with an access link, or behind your reverse proxy. |
 | [`settings`](#settings) | Shows and changes the project's settings in plain words: autonomy, quality bar, rounds, reuse, checks, deploys, tips, status line and notifications. |
 
 ## Specify
@@ -159,11 +158,11 @@ Read-only dashboard: lifecycle phase and step, next release, milestones, gates, 
 
 ### board
 
-Live board in the browser, laid out like the flow diagram (docs/dev-kit-flow.svg): its tabs are the lanes - conception, planning, construction in two (milestones and releases) and stable - plus a Map with all five lanes at once, and it opens on the lane where the project is. Each screen fits the window without scrolling: on top the lane's steps as a flow, coloured by who does them (yours in yellow, agents in orange, delivery in green, gates in red), with where the project is, what runs and what waits on you; below, blocks of the same size, where what does not fit opens with "See all". Conception shows its documents, the PRD and design reviews, decisions and facts, and scope changes; planning the roadmap by release, the backlog and the plan review, with a screen of its own to replan by dragging tasks, issues and milestones; milestones the milestone picked (grouped by release) with its stages, the task board in columns of equal height or its QA rounds, and burndown, velocity and gates in a Metrics modal; releases the release picked with its stages (checks, audit, review, your approval, production, released) and its numbers, milestones, blockers and documents; stable the project totals, production, the health check, release flags, release checks and releases. "Needs you" is a button in the top bar that turns red (and rings once) when something waits, with a badge on the lane and on the step it belongs to; it opens a drawer with every item and its buttons (Approve and Reject for a release). Requests and activity are drawers too. Every link to a document of .dev/ opens it formatted in a side panel. Buttons ask Claude Code for work (run the next step, new issue, answer a question, a plan draft) and start it in the session that opened the board; the Autopilot switch in the top bar runs /dev-kit:autopilot from the board, one milestone per run, until a release waits for your approval, waiting on Needs you when only your decisions are left; hovering Live lists what is running; light or dark, English or Portuguese; local, shared on your network with an access link, or behind your reverse proxy.
+Live board in the browser, laid out like the flow diagram (docs/dev-kit-flow.svg): its tabs are the lanes - conception, planning, construction in two (milestones and releases) and stable - plus a Map with all five lanes at once, and it opens on the lane where the project is. Each screen fits the window without scrolling: on top the lane's steps as a flow, coloured by who does them (yours in yellow, agents in orange, delivery in green, gates in red), with where the project is, what runs and what waits on you; below, blocks of the same size, where what does not fit opens with "See all". Conception shows its documents, the PRD and design reviews, decisions and facts, and scope changes; planning the roadmap by release, the backlog and the plan review; milestones the milestone picked (grouped by release) with its stages, the task board in columns of equal height or its QA rounds, and burndown, velocity and gates in a Metrics modal; releases the release picked with its stages (checks, audit, review, your approval, production, released) and its numbers, milestones, blockers and documents; stable the project totals, production, the health check, release flags, release checks and releases. "Needs you" is a button in the top bar that turns red (and rings once) when something waits, with a badge on the lane and on the step it belongs to; it opens a drawer with every item and the command that settles it in Claude Code. Activity is a drawer too. Every link to a document of .dev/ opens it formatted in a side panel. The board is read-only: it never changes the project or starts Claude Code, every decision and run happens in a Claude Code session and shows on the board as it happens; the top bar shows the Autopilot while /dev-kit:autopilot runs, hovering Live lists what is running; light or dark, English or Portuguese; local, shared on your network with an access link, or behind your reverse proxy.
 
-**When:** When you want to watch the project visually or drive it from the browser, e.g. away from the console; it updates by itself.
+**When:** When you want to follow the project visually, e.g. on a second screen or a phone; it updates by itself.
 
-**Usage:** `/dev-kit:board [stop | status | --open | --no-open | --port N | --host IP | --trusted-host NAME | --idle-min N | --actions on|off]`
+**Usage:** `/dev-kit:board [stop | status | --open | --no-open | --port N | --host IP | --trusted-host NAME | --idle-min N]`
 
 | Argument | Meaning |
 |---|---|
@@ -174,7 +173,6 @@ Live board in the browser, laid out like the flow diagram (docs/dev-kit-flow.svg
 | `--host IP` | listen address (default 127.0.0.1); 0.0.0.0 shares the board on the network, opened only with the access link it prints |
 | `--idle-min N` | stop after N minutes with no open tab (default 120; 0 = never) |
 | `--trusted-host NAME` | host name of your reverse proxy in front of the board (remembered for the project; none forgets it) |
-| `--actions on|off` | let the page queue requests to Claude Code (on by default; off makes the board show the project only) |
 
 **Examples:**
 
@@ -182,29 +180,9 @@ Live board in the browser, laid out like the flow diagram (docs/dev-kit-flow.svg
 - `/dev-kit:board --host 0.0.0.0`: share it on your network (phone, another computer) with a private access link
 - `/dev-kit:board stop`: stop the board server
 
-**Produces:** nothing in the project by itself (requests are run by /dev-kit:worker: in the session that listens, or in a headless session the board starts itself when none does); its own files in .dev/run/
+**Produces:** nothing in the project: the board only shows it (every decision and run happens in Claude Code); its own files in .dev/run/
 
-**Related:** [`worker`](#worker), [`status`](#status), [`backlog`](#backlog), [`costs`](#costs)
-
-### worker
-
-Runs the requests you queued on the board (run a command, new issue, answer a question, plan draft, release approval or rejection) in this Claude Code session, one at a time; questions that would stop the run go to the board with answers to pick.
-
-**When:** It starts by itself, each time a request arrives: in the session that opened the board with /dev-kit:board, or, when no session listens, in a headless session the board starts (autonomy.board_executor). Run it by hand in another session only when the board says it cannot start Claude Code.
-
-**Usage:** `/dev-kit:worker `
-
-| Argument | Meaning |
-|---|---|
-| `(empty)` | run every request waiting on the board, in order, until none is left or the queue is paused |
-
-**Examples:**
-
-- `/dev-kit:worker`: run what you asked for on the board
-
-**Produces:** whatever each request does (commits, issues, plan changes); the request's result on the board
-
-**Related:** [`board`](#board), [`issue`](#issue), [`plan`](#plan)
+**Related:** [`status`](#status), [`backlog`](#backlog), [`costs`](#costs)
 
 ### prd
 
@@ -341,16 +319,15 @@ Drives the build on its own: conception and planning, then milestone after miles
 
 **When:** After the interview, when you want the app built with minimal interaction (also overnight).
 
-**Usage:** `/dev-kit:autopilot [--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N] [--parallel N] [--board] [--rounds session|child]`
+**Usage:** `/dev-kit:autopilot [--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N] [--parallel N] [--rounds session|child]`
 
 | Argument | Meaning |
 |---|---|
 | `--until step` | stop at a step: prd, architecture, design, plan, qa, usability, docs or release (e.g. plan, to review the documents first) |
 | `--milestone M1` | build only one milestone |
 | `--milestones N` | stop after N approved gates, to resume in a fresh session (cheaper long runs) |
-| `--parallel N` | implementers at once for this run (1-6); without it, the number set on the board's Autopilot card (default 3). With the board's Autopilot running, it changes that run's number instead |
-| `--board` | how the board's Autopilot switch runs it: in the session that listens to the board, or headless; questions go to Needs you, ends saying why (you do not type it) |
-| `--rounds session|child` | where the implement and QA rounds run: session (here, so the implementers show in this session's task list; the default when you are at the console) or child (a fresh headless session per round, a smaller context; the default in a headless run) |
+| `--parallel N` | implementers at once for this run (1-6, default 3) |
+| `--rounds session|child` | where the implement and QA rounds run: session (here, so the implementers show in this session's task list; the default) or child (a fresh headless session per round, a smaller context) |
 
 **Examples:**
 
@@ -375,7 +352,7 @@ Implements ready tasks test-first, full suite, one commit per task; hotfix lane 
 |---|---|
 | `T-003` | one task |
 | `--milestone M1 | --tasks N` | a milestone or N tasks |
-| `--parallel N` | N isolated implementers in git worktrees; --parallel auto takes the number set on the board's Autopilot card (default 3) |
+| `--parallel N` | N isolated implementers in git worktrees; --parallel auto = 3 |
 | `--skip-gate` | work past a pending gate (records an ADR and sets the gate skipped) |
 | `--round-child` | internal: the milestone runs in a child session started by `dev_state.py round run` |
 
@@ -577,7 +554,7 @@ Project documentation from the artifacts and code: README, architecture diagram 
 
 The high-level architecture diagram of the system being built, in draw.io's style without draw.io: an SVG for the board and the README, plus a .drawio file.
 
-**When:** The board's Architecture button has no diagram yet, the architecture changed, or as part of docs (which always runs it).
+**When:** The board's Architecture tab has no diagram yet, the architecture changed, or as part of docs (which always runs it).
 
 **Usage:** `/dev-kit:diagram [update]`
 
@@ -588,7 +565,7 @@ The high-level architecture diagram of the system being built, in draw.io's styl
 **Examples:**
 
 - `/dev-kit:diagram`: draws docs/diagrams/architecture.svg and .drawio
-- `/dev-kit:diagram update`: redraws it after the architecture changed (the board's Update diagram button)
+- `/dev-kit:diagram update`: redraws it after the architecture changed
 
 **Produces:** docs/diagrams/architecture.json (the model), architecture.svg and architecture.drawio
 

@@ -158,15 +158,6 @@ echo "a = 3" > "$CLAUDE_PROJECT_DIR/.dev/run/worktrees/T-001/src/a.py"
 exit 1
 """
 
-FAKE_WAITS = """#!/bin/sh
-# a round child whose permission went unanswered on the board, then hangs
-DS="{py} -I {state} --root $CLAUDE_PROJECT_DIR"
-$DS start T-001 >/dev/null
-printf '{{"round": "%s", "tool": "Bash", "target": "make deploy"}}' "$DEV_KIT_ROUND_ID" > "$CLAUDE_PROJECT_DIR/.dev/run/round-parked.json"
-sleep 60
-"""
-
-
 class TestRoundReconcile(Base):
     def fake(self, body: str) -> Path:
         exe = self.root / ".dev" / "tmp" / "fake-claude"
@@ -195,16 +186,6 @@ class TestRoundReconcile(Base):
         self.assertIn("Bash(pytest -q*)", allowed)
         self.assertFalse((self.dev / "run" / "round.json").exists())
 
-    def test_an_unanswered_permission_stops_the_round(self) -> None:
-        p = self.ds("round", "run", "implement", "M1", expect=1, env={"DEV_KIT_CLAUDE": str(self.fake(FAKE_WAITS))})
-        out = json.loads(p.stdout)
-        self.assertEqual(out["verdict"], "parked")
-        self.assertEqual(out["parked"]["target"], "make deploy")
-        self.assertLess(out["duration_s"], 50)
-        t = self.state()["tasks"]["T-001"]
-        self.assertEqual(t["status"], "blocked")
-        self.assertIn("make deploy", t["blocked_reason"])
-
     def test_adopt_moves_only_the_task_files_out_of_the_main_checkout(self) -> None:
         self.ds("start", "T-001")
         (self.root / "src" / "a.py").write_text("a = 9\n", encoding="utf-8")
@@ -215,26 +196,6 @@ class TestRoundReconcile(Base):
         self.assertEqual((self.root / "src" / "a.py").read_text(encoding="utf-8"), "a = 1\n")
         self.assertEqual((Path(res["worktree"]) / "src" / "a.py").read_text(encoding="utf-8"), "a = 9\n")
         self.assertTrue((self.root / "notes.txt").exists())
-
-
-class TestPermissionStopsTheRound(Base):
-    def test_after_one_timeout_the_next_request_is_denied_at_once(self) -> None:
-        import dev_agent_hook as hook
-        import dev_worker as dw
-        calls = []
-        with mock.patch.object(dw, "board_run", return_value={"id": "autopilot"}), \
-                mock.patch.object(hook, "board_takes_requests", return_value=True), \
-                mock.patch.object(dw, "request_approval", side_effect=lambda *a, **k: calls.append(a) or "A-1"), \
-                mock.patch.object(dw, "wait_decision", return_value="timeout"), \
-                mock.patch.dict(os.environ, {"DEV_KIT_ROUND_ID": "implement-M1-x"}):
-            pl = {"tool_name": "Bash", "tool_input": {"command": "make deploy"}}
-            first = hook.permission(self.root, self.dev, pl)
-            self.assertIn("this round stops", first["hookSpecificOutput"]["decision"]["message"])
-            second = hook.permission(self.root, self.dev, pl)
-        self.assertEqual(second["hookSpecificOutput"]["decision"]["behavior"], "deny")
-        self.assertEqual(len(calls), 1)  # the second one never waited on the board
-        rec = json.loads((self.dev / "run" / "round-parked.json").read_text(encoding="utf-8"))
-        self.assertEqual((rec["round"], rec["target"]), ("implement-M1-x", "make deploy"))
 
 
 if __name__ == "__main__":

@@ -2,6 +2,21 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.12.0 — 2026-11-24
+
+The board is read-only. Managing the project from the board and from the console at the same time kept the two out of step, so Eduardo decided the board only shows the project: every decision and every run happens in Claude Code.
+
+### Changed
+- **The board only shows.** No button changes the project or starts Claude Code, and nothing is copied: Needs you lists each item (questions with their options, Confirm PRD and Confirm plan, release approvals, blocked tasks, hotfixes, deferred debt, lessons, production health, the issue queue) with the command that settles it in Claude Code. Its only action is **Stop server** in the ⋯ menu; every POST but `/api/shutdown` answers 404. Animations, the architecture diagram, Live, the status pane, the theme and the language stay.
+- **The Autopilot is shown, not driven.** The top bar shows "Autopilot running" (and since when) while `/dev-kit:autopilot` runs in a session; the switch, its card, Implementers at once and Force stop are gone. Parallel work is `/dev-kit:autopilot --parallel N` (1 to 6, default 3; `--parallel auto` = 3).
+- **Autopilot rounds** run in the session by default (`--rounds session`); `--rounds child` sends each round to a headless child session as before. The `--board` mode is gone.
+- **Production health** is no longer checked by the board's server: the autopilot runs `dev_state.py prod-check --due` at the start of each milestone and `/dev-kit:status` when its interval passed.
+- `plan-apply` takes the moves only with `--ops` / `--ops-file` (asked for in Claude Code, e.g. `/dev-kit:plan replan`).
+
+### Removed
+- The board's request queue and executor: `dev_worker.py`, `/dev-kit:worker` (26 skills now), the board listener monitor (`monitors/`), the headless worker and the Autopilot hand-off, permission prompts answered on the board (the `UserPromptSubmit` hook, and the waits of the `PermissionRequest` hook: it now only allows the kit's safe set in a round child and records the other permissions, which Needs you still lists read-only), `verdict: parked` of `round run`, `dev_board.py --actions`, every `--request P-nnn` flag of `dev_state.py`, and `autonomy.board_executor` (dropped from `state.json` on the next command).
+- The Replan screen (dragging tasks, issues and milestones), New issue, the Requests drawer and Run buttons. The documentation screenshots show the read-only board.
+
 ## 3.11.0 — 2026-11-24
 
 Field report from M4: the performance-auditor ran a benchmark of its own that never returned, and in the next round `gzip -c` (to measure bundle sizes) asked a permission nobody saw. After 10 minutes the whole round stopped and the 8 auditors that had delivered were run again. Auditors no longer hold a QA round.

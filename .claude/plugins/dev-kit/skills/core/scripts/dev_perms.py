@@ -15,10 +15,9 @@ Standard library only. Commands (--root defaults to the current directory):
 The safe set is what audits run all the time and what cannot change the project: read-only git, file inspection
 (ls, wc, du, stat, head, tail, grep, gzip -c to measure a size...), the dependency scanners, and the measurement
 scripts an auditor writes in its own scratch folder `.dev/tmp/` (run with `timeout`). The PermissionRequest hook
-(dev_agent_hook.py) allows a command made only of these at once in an unattended run (a round child, the board's
-worker or Autopilot), so an audit never waits 10 minutes for `gzip -c dist/app.js | wc -c`; `round run` and the
-board's headless runs also pass the same rules to Claude Code as --allowedTools. A permission outside the set that
-nobody answers is recorded in .dev/run/permission-misses.json: `show` lists it with the rule that would allow it,
+(dev_agent_hook.py) allows a command made only of these at once in a round child (`dev_state.py round run`), so an
+audit never waits for `gzip -c dist/app.js | wc -c`; `round run` also passes the same rules to Claude Code as
+--allowedTools. A permission outside the set that nobody answers is recorded in .dev/run/permission-misses.json: `show` lists it with the rule that would allow it,
 and the board shows it (read-only) in Needs you.
 """
 from __future__ import annotations

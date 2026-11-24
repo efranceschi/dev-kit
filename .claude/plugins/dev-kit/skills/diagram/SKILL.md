@@ -34,6 +34,6 @@ draw.io is never needed: you write the model (what the system is made of), and `
 6. `DG check` must print that the diagram is current. Report in the user's language: created or updated, layers, nodes and edges, what changed since the previous version (nodes added or removed), and the paths. The three files are part of the project's documentation: they are committed with the docs (`docs: architecture diagram` when committed alone).
 
 ## Board
-The board's Architecture button shows `docs/diagrams/architecture.svg`; when there is none it queues `/dev-kit:diagram`, and its Update diagram button queues `/dev-kit:diagram update`. Run from a board request, this skill asks nothing: it works from the files.
+The board's Architecture tab shows `docs/diagrams/architecture.svg` (only shows it: it is drawn and redrawn here). This skill asks nothing: it works from the files.
 
 **Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).

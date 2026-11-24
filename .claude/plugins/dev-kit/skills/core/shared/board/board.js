@@ -1,4 +1,4 @@
-/* dev-kit board - live view of .dev/state.json: milestone window, what needs the user, the stages of the milestone with what runs in each, the milestone kanban, insights; with actions on, requests to Claude Code (run a command, answer a question, new issue, a plan draft made by dragging cards) queued through the server and run by /dev-kit:worker. No dependencies. All untrusted text goes through textContent. */
+/* dev-kit board - live view of .dev/state.json: milestone window, what needs the user, the stages of the milestone with what runs in each, the milestone kanban, insights. Read-only: it only shows the project; every decision and run happens in Claude Code. No dependencies. All untrusted text goes through textContent. */
 (() => {
   "use strict";
 
@@ -176,47 +176,13 @@
     return String(text || "").split(/\b(T-\d{1,5})\b/).map((part) => (TASK_RE.test(part) && data.tasks[part]
       ? h("button", { type: "button", class: "tid-btn", text: part, title: data.tasks[part].title, onclick: () => openTask(part) }) : part));
   }
-  // ------------------------------------------------------------------ commands the user pastes into Claude Code: always with a copy button
-  const COPY_ICON = "M9 9h10v12H9zM5 15V3h10";
-  const copySvg = () => s("svg", { viewBox: "0 0 24 24", width: "14", height: "14", "aria-hidden": "true" },
-    s("path", { d: COPY_ICON, fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linejoin": "round" }));
-  async function copyText(text) {
-    try {
-      if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
-    } catch (e) { /* fall back below */ }
-    // plain HTTP on the network (shared board) has no Clipboard API: use a temporary selection
-    const ta = h("textarea", { class: "copy-buffer", readonly: true, "aria-hidden": "true", tabindex: "-1" });
-    ta.value = text;
-    document.body.append(ta);
-    ta.select();
-    let ok = false;
-    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
-    ta.remove();
-    return ok;
-  }
-  function copyBtn(text) {
-    const label = tr("Copy {text}", { text });
-    const btn = h("button", { type: "button", class: "copy-btn", title: label, "aria-label": label }, copySvg());
-    btn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const ok = await copyText(text);
-      btn.classList.toggle("copied", ok);
-      btn.classList.toggle("copy-failed", !ok);
-      fill(btn, ok ? "✓" : "✕");
-      $("copy-status").textContent = ok ? tr("Copied {text}. Paste it in Claude Code.", { text }) : tr("Could not copy. Select {text} and copy it by hand.", { text });
-      clearTimeout(btn._t);
-      btn._t = setTimeout(() => { btn.classList.remove("copied", "copy-failed"); fill(btn, copySvg()); }, 1600);
-    });
-    return btn;
-  }
-  /** A command shown as code with its copy button and, when the board takes requests, a button that queues it. */
-  const cmd = (text) => (runnable(text) ? h("span", { class: "cmd act" }, runBtn(text, true), copyBtn(text))
-    : h("span", { class: "cmd" }, h("code", { text }), copyBtn(text)));
-  /** What a command does, in words, for its button ("Run QA of M2"); the literal command is in the title and the copy button. */
+  // ------------------------------------------------------------------ commands: shown as text only (the board is read-only; the console runs them)
+  const cmd = (text) => h("code", { class: "cmd", text });
+  /** What a command does, in words ("Run QA of M2"); the literal command is in the title. */
   const ACTION_LABEL = tmap({ qa: N_("Run QA of {s}"), implement: N_("Build {s}"), autopilot: N_("Continue construction"), docs: N_("Generate docs"), release: N_("Prepare release {s}"),
     plan: N_("Plan"), review: N_("Review {s}"), interview: N_("Answer open questions"), prd: N_("Write the PRD"), architecture: N_("Design the architecture"), ux: N_("Design the UX"),
     ui: N_("Design the UI"), usability: N_("Test usability"), deploy: N_("Deploy"), issue: N_("Triage issues"), backlog: N_("Review the backlog"), feedback: N_("Review the kit's feedback"),
-    start: N_("Start"), worker: N_("Take board requests"), board: N_("Open the board"), settings: N_("Settings"), onboarding: N_("Onboard the project") });
+    start: N_("Start"), board: N_("Open the board"), settings: N_("Settings"), onboarding: N_("Onboard the project") });
   function actionLabel(text) {
     const m = /^\/dev-kit:([a-z-]+)\s*(.*)$/.exec(text || "");
     if (!m) return text;
@@ -227,12 +193,6 @@
   }
   /** The run of this command going on now (same skill and scope), if any. */
   const runningRun = (text) => skillRuns().find((r) => runCmd(r) === String(text || "").trim());
-  // static commands in index.html: <code data-copy>
-  document.querySelectorAll("code[data-copy]").forEach((c) => {
-    const wrap = h("span", { class: "cmd" });
-    c.replaceWith(wrap);
-    wrap.append(c, copyBtn(c.textContent));
-  });
 
   function keepFocus(fn) {
     const a = document.activeElement;
@@ -256,7 +216,6 @@
     pops.push({ btn, pop, close });
   }
   popover($("menu-btn"), $("menu-pop"));
-  popover($("ap-btn"), $("ap-pop"));
   popover($("live"), $("live-pop"));
   document.addEventListener("click", (e) => pops.forEach((p) => { if (!p.pop.hidden && !p.pop.contains(e.target) && !p.btn.contains(e.target)) p.close(); }));
   document.addEventListener("keydown", (e) => {
@@ -404,17 +363,17 @@
   function msFun(m, prog, closed) {
     const box = $("ms-fun");
     if (!box) return;
-    const ap = inbox().autopilot || {};
+    const ap = autopilotRun();
     box.hidden = !funOn() || !m;
     if (box.hidden) { fill(box); return; }
     const p = Math.max(0, Math.min(1, closed ? 1 : prog.total));
     const pct = Math.round(p * 100);
-    if (actionsOn() && ap.on) {
+    if (ap) {
       const label = tr("Autopilot coffee: {v}% of {id} still to do", { v: 100 - pct, id: m.id });
       box.setAttribute("aria-label", label); box.title = label;
       const liquid = s("rect", { x: "12", y: "28", width: "38", height: "30", class: "c-liquid" });
       liquid.style.setProperty("--drop", `${(p * 26).toFixed(1)}px`);
-      fill(box, s("svg", { class: `cup${ap.state === "running" && p < 1 ? " hot" : ""}`, viewBox: "0 0 64 64" },
+      fill(box, s("svg", { class: `cup${p < 1 ? " hot" : ""}`, viewBox: "0 0 64 64" },
         s("path", { d: "M24 20 q-3 -4 0 -8 q3 -4 0 -8", class: "c-steam s1" }), s("path", { d: "M31 20 q-3 -4 0 -8 q3 -4 0 -8", class: "c-steam s2" }),
         s("path", { d: "M38 20 q-3 -4 0 -8 q3 -4 0 -8", class: "c-steam s3" }),
         s("defs", {}, s("clipPath", { id: "cup-clip" }, s("path", { d: "M14 26 H46 V44 Q46 54 36 54 H24 Q14 54 14 44 Z" }))),
@@ -595,7 +554,7 @@
   const runCmd = (r) => `/dev-kit:${r.skill}${r.scope ? ` ${r.scope}` : ""}`;
   const since = (t) => h("span", { class: "agent-time", "data-start": t, text: dur((Date.now() - parseT(t)) / 1000) });
   // Every skill that runs has a place on the board, so work that is not a task card is visible where it happens.
-  // Orchestrators (autopilot, worker, start…) only show in the top bar; the work they start shows in its place.
+  // Orchestrators (autopilot, start…) only show in the top bar; the work they start shows in its place.
   const RUN_PLACE = {
     interview: ["conception", "step:interview"], prd: ["conception", "step:prd"], architecture: ["conception", "step:architecture"],
     ux: ["conception", "step:ux"], ui: ["conception", "step:ui"], plan: ["planning", "step:plan"], issue: ["planning", "backlog"],
@@ -638,30 +597,15 @@
   }
 
   // ------------------------------------------------------------------ Live: the connection, and on hover or click what runs now
-  /** Headless runs the board's server started (the autopilot, the worker), then the skills of the session log (the
-   * board itself is not work) and the agents. */
-  function liveRuns() {
-    const out = [];
-    const ap = inbox().autopilot || {};
-    if (ap.state === "running" || ap.state === "stopping") out.push({ cmd: ap.command || "/dev-kit:autopilot", since: ap.since,
-      by: ap.where !== "session" ? tr("started by the Autopilot switch") : ap.handoff === "pending" ? tr("handed to your Claude Code session, waiting for it to start") : tr("running in your Claude Code session") });
-    const rd = ap.round;
-    if (rd) out.push({ cmd: `/dev-kit:${rd.skill} ${rd.scope || ""}`.trim(), since: rd.since, by: roundWhat(rd) });
-    const au = inbox().executor.auto || {};
-    if (au.state === "running") out.push({ cmd: "/dev-kit:worker", since: au.since, by: au.request ? tr("started by the board for {id}", { id: au.request }) : tr("started by the board") });
-    return out;
-  }
   function renderRunning() {
-    const runs = skillRuns(), ags = activeAgents(), heads = liveRuns();
+    const runs = skillRuns(), ags = activeAgents();
     const nx = data.next && data.next.command;
-    const n = heads.length + runs.length + ags.length;
+    const n = runs.length + ags.length;
     const badge = $("live-n");
     badge.hidden = !n;
     badge.textContent = String(n);
     $("live").setAttribute("aria-label", n ? tr("Live: {v} running. Show what runs", { v: String(n) }) : tr("Live: nothing running. Show details"));
     fill($("live-pop"), h("p", { class: "pop-title", text: n ? tr("Running now") : tr("Nothing is running now") }),
-      heads.length ? h("ul", { class: "rn-list" }, heads.map((r) => h("li", {}, h("code", { text: r.cmd }), r.since ? h("span", { class: "card-sub" }, tr(" for "), since(r.since)) : null,
-        h("span", { class: "card-sub", text: `· ${r.by}` })))) : null,
       runs.length ? h("ol", { class: "rn-list" }, runs.map((r, i) => h("li", { class: i ? "nested" : null },
         h("code", { text: runCmd(r) }), h("span", { class: "card-sub" }, tr(" for "), since(r.started_at))))) : null,
       ags.length ? [h("p", { class: "pop-title", text: plural(ags.length, "agent") }), h("ul", { class: "rn-list" }, ags.map((a) => h("li", {},
@@ -680,96 +624,16 @@
     btn.addEventListener("click", () => { if (byHover) { byHover = false; pop.hidden = false; btn.setAttribute("aria-expanded", "true"); } }, true);
   })();
 
-  // ------------------------------------------------------------------ the Autopilot switch: /dev-kit:autopilot run by the board (dev_worker AutoExecutor)
-  const AP_WORD = tmap({ off: N_("off"), idle: N_("starting"), running: N_("running"), stopping: N_("finishing the step"), waiting_user: N_("waiting for you"),
-    release: N_("waiting for your approval"), stable: N_("project stable"), waiting_session: N_("waiting for another session"), backoff: N_("retrying soon"), stopped: N_("stopped") });
-  const AP_CLASS = { off: "off", idle: "on", running: "on", stopping: "wait", waiting_user: "wait", release: "wait", stable: "off", waiting_session: "wait", backoff: "bad", stopped: "bad" };
-  const AP_REASON = tmap({ milestone_done: N_("the last run closed a milestone"), waiting_for_user: N_("only work that needs you is left: answer in Needs you and it starts again"),
-    release_approval: N_("a release waits for your approval in Needs you"), stable: N_("nothing is open"), until_reached: N_("the last run reached its target"),
-    switched_off: N_("switched off"), force_stopped: N_("force-stopped"), no_change: N_("the last run changed nothing: look at its log"), failed: N_("a run failed"),
-    request_running: N_("a Claude Code session runs a board request"), other_session: N_("/dev-kit:autopilot runs in another session"),
-    no_claude: N_("the claude command was not found") });
-  /** What a headless round works on: its tasks, or a warning when an implement round has none started. */
-  function roundWhat(rd) {
-    if (rd.tasks && rd.tasks.length) return tr("round on {v}", { v: rd.tasks.map((t) => t.id).join(", ") });
-    return rd.unregistered ? tr("round with no task started in the state") : tr("headless round");
-  }
-  /** The round running now, in the Autopilot card: tasks (each opens its card) and its last action. */
-  function roundBlock(rd) {
-    if (!rd) return null;
-    const last = rd.last;
-    return h("div", { class: "ap-round" },
-      h("p", { class: "ap-line" }, h("strong", { text: tr("Now: ") }), h("code", { text: `/dev-kit:${rd.skill} ${rd.scope || ""}`.trim() }),
-        rd.since ? [tr(" for "), since(rd.since)] : null),
-      rd.tasks && rd.tasks.length ? h("p", { class: "card-sub" }, tr("Tasks: "), rd.tasks.map((t) => h("button", { type: "button", class: "tid-btn",
-        text: t.id, title: t.title || t.id, onclick: () => openTask(t.id) })))
-        : rd.unregistered ? h("p", { class: "card-sub warn-text", text: tr("No task is started in the state while this round works: the board cannot say which one runs. The round's reconcile fixes it when it ends.") }) : null,
-      last ? h("p", { class: "card-sub" }, tr("Last action: "), h("code", { text: `${last.tool || ""}${last.what ? ` · ${last.what}` : ""}` }),
-        last.agent ? ` (${last.agent})` : null, last.at ? [" · ", ago(parseT(last.at))] : null) : null);
-  }
+  // ------------------------------------------------------------------ Autopilot: shown while /dev-kit:autopilot runs in a Claude Code session (read-only)
+  const autopilotRun = () => skillRuns().find((r) => r.skill === "autopilot") || null;
   function renderAutopilot() {
+    const ap = autopilotRun();
     const wrap = $("ap-wrap");
-    wrap.hidden = !actionsOn();
-    if (wrap.hidden) return;
-    const ap = inbox().autopilot || { on: false, state: "off" };
-    const sw = $("ap-switch");
-    sw.setAttribute("aria-checked", String(Boolean(ap.on)));
-    sw.classList.toggle("on", Boolean(ap.on));
-    const st = $("ap-btn");
-    st.className = `ap-state ${AP_CLASS[ap.state] || "off"}`;
-    const waitN = ap.state === "waiting_user" ? needsN : 0;
-    const rd = ap.round;
-    const word = ap.state === "stopping" && rd ? tr("finishing {v}", { v: `${rd.skill} ${rd.scope || ""}`.trim() }) : AP_WORD[ap.state] || ap.state;
-    fill($("ap-word"), word, ap.state === "running" && ap.since ? [" · ", since(ap.since)] : null, waitN ? ` · ${waitN}` : null);
-    st.setAttribute("aria-label", tr("Autopilot: {v}. Show details", { v: AP_WORD[ap.state] || ap.state }));
-    const reason = ap.reason ? (AP_REASON[ap.reason] || ap.reason) : null;
-    fill($("ap-pop"), h("p", { class: "pop-title", text: tr("Autopilot") }),
-      h("p", { class: "ap-line" }, h("strong", { text: word }), reason ? ` · ${reason}` : null,
-        ap.state === "backoff" && ap.until ? ` · ${tr("next try at {v}", { v: new Date(ap.until * 1000).toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" }) })}` : null),
-      ap.note ? h("p", { class: "card-sub", text: ap.note }) : null,
-      roundBlock(rd),
-      ap.where === "session"
-        ? h("p", { class: "pop-note top" }, tr("Runs "), h("code", { text: ap.command || "/dev-kit:autopilot --milestones 1 --board --rounds session" }),
-          tr(" in the Claude Code session that listens to the board, one milestone per run, until a release waits for your approval: its implementers and auditors show in that session's task list. Questions and permissions go to Needs you."))
-        : h("p", { class: "pop-note top" }, tr("Runs "), h("code", { text: ap.command || "/dev-kit:autopilot --milestones 1 --board" }),
-          tr(" headless, one milestone per run, until a release waits for your approval. Questions and permissions go to Needs you. Output: "), h("code", { text: ".dev/run/autopilot.log" })),
-      ap.runs ? h("p", { class: "card-sub", text: plural(ap.runs, "run") }) : null,
-      parallelRow(ap),
-      h("div", { class: "ap-actions" },
-        ap.state === "waiting_user" || ap.state === "release" ? h("button", { type: "button", class: "btn btn-sm", text: tr("Open Needs you"), onclick: goNeeds }) : null,
-        h("button", { type: "button", class: "btn btn-sm", text: ap.on ? (ap.state === "stopped" ? tr("Start again") : tr("Turn off")) : tr("Turn on"),
-          onclick: () => setAutopilot(ap.state === "stopped" ? true : !ap.on) }),
-        ap.state === "running" || ap.state === "stopping" ? h("button", { type: "button", class: "btn btn-sm btn-danger", text: tr("Force stop"), onclick: forceStop }) : null));
+    wrap.hidden = !ap;
+    if (!ap) return;
+    fill($("ap-word"), tr("running"), ap.started_at ? [" · ", since(ap.started_at)] : null);
+    $("ap-state").setAttribute("title", tr("{text} runs in a Claude Code session; it is started and stopped there", { text: runCmd(ap) }));
   }
-  /** Implementers at once (1-6, default 3): `implement` reads it before every batch, so a change applies from the next one. */
-  function parallelRow(ap) {
-    const n = ap.parallel || 3, [lo, hi] = ap.parallel_range || [1, 6];
-    const busy = activeAgents().filter((a) => a.agent === "implementer").length;
-    const step = (d, label) => h("button", { type: "button", class: "btn btn-sm ap-step", text: d < 0 ? "−" : "+", "aria-label": label,
-      disabled: (d < 0 ? n <= lo : n >= hi) ? "" : null, onclick: () => setParallel(n + d) });
-    return h("div", { class: "ap-par" },
-      h("div", { class: "ap-par-row" }, h("span", { class: "ap-par-label", id: "ap-par-label", text: tr("Implementers at once") }),
-        h("span", { class: "ap-stepper", role: "group", "aria-labelledby": "ap-par-label" }, step(-1, tr("Fewer implementers")),
-          h("output", { class: "ap-par-n", "aria-live": "polite", text: String(n) }), step(1, tr("More implementers"))),
-        h("span", { class: "card-sub", text: tr("{v} running now", { v: String(busy) }) })),
-      h("p", { class: "pop-note", text: n === 1 ? tr("1 = one task at a time.")
-        : tr("Applies from the next batch. Only tasks with no file in common run together. More at once costs no more tokens, but uses more CPU and disk and reaches the account's usage limits sooner.") }));
-  }
-  async function setParallel(n) {
-    try { await api("/api/autopilot", { parallel: n }); toast(tr("{v} implementers at once, from the next batch.", { v: String(n) })); load(); } catch (e) { toast(e.message, true); }
-  }
-  async function setAutopilot(on) {
-    try {
-      const d = await api("/api/autopilot", { on });
-      toast(on ? tr("Autopilot on: the board starts /dev-kit:autopilot in a few seconds.")
-        : d.autopilot && d.autopilot.state === "stopping" ? tr("Autopilot off: the run finishes its step, then stops.") : tr("Autopilot off."));
-      load();
-    } catch (e) { toast(e.message, true); }
-  }
-  async function forceStop() {
-    try { await api("/api/autopilot", { force_stop: true }); toast(tr("Autopilot stopped now.")); load(); } catch (e) { toast(e.message, true); }
-  }
-  $("ap-switch").addEventListener("click", () => { const ap = inbox().autopilot || {}; setAutopilot(ap.state === "stopped" ? true : !ap.on); });
 
   function renderHeader() {
     $("project").textContent = data.project;
@@ -860,7 +724,6 @@
   function setPhase(p, focus) {
     closeDrawers(); closeList();
     phasePick = data && p === data.phase ? null : p;   // picking the current phase goes back to following it
-    if (p !== "planning") replanOpen = false;
     render();
     const el = $(p === "map" ? "ph-map" : p === "arch" ? "ph-arch" : `ph-${shownPhase()}`);
     if (focus && el) el.focus();
@@ -928,24 +791,8 @@
   }
   const REL_WORD = tmap({ in_progress: N_("in progress"), ready_for_review: N_("ready for review"), awaiting_approval: N_("waiting for your approval"),
     deploying_prod: N_("approved · going to production"), released: N_("released") });
-  /** Approve, or reject with what must change: queued for Claude Code, which records it (release-decide --request). */
-  const rejectDrafts = {};
-  function releaseDecision(r) {
-    if (!actionsOn()) return h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd("/dev-kit:release"));
-    const sent = inbox().open.find((x) => x.action === "release_decision" && x.args && x.args.release === r.id);
-    if (sent) return h("div", { class: "sub answer-sent", text: tr("Decision sent ({id}): {decision}. Claude Code applies it.", { id: sent.id, decision: sent.args.decision }) });
-    const box = h("div", { class: "sub answer rel-decide", role: "group", "aria-label": tr("Decision on {id}", { id: r.id }) });
-    const ta = h("textarea", { id: `rej-${r.id}`, maxlength: "4000", rows: "3", class: "answer-input", "aria-label": tr("What must change in {id}, one item per line", { id: r.id }),
-      placeholder: tr("What must change, one item per line (each becomes a fix task)") });
-    ta.value = rejectDrafts[r.id] || "";
-    ta.addEventListener("input", () => { rejectDrafts[r.id] = ta.value; });
-    const send = async (args, el) => { el.disabled = true; try { await queue("release_decision", { release: r.id, ...args }); delete rejectDrafts[r.id]; } catch (e) { el.disabled = false; } };
-    box.append(
-      h("button", { type: "button", class: "btn btn-sm btn-primary", text: tr("Approve {id}", { id: r.id }), onclick: (e) => send({ decision: "approve" }, e.currentTarget) }),
-      h("span", { class: "answer-free" }, ta, h("button", { type: "button", class: "btn btn-sm btn-danger", id: `rej-send-${r.id}`, text: tr("Reject"),
-        onclick: (e) => { const v = ta.value.trim(); if (v) send({ decision: "reject", feedback: v }, e.currentTarget); else { ta.focus(); toast(tr("Write what must change before rejecting."), true); } } })));
-    return box;
-  }
+  /** The release decision is taken in Claude Code (approve or reject with what must change). */
+  const releaseDecision = () => h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd("/dev-kit:release"));
 
   // ------------------------------------------------------------------ Releases: the release picked (the next to ship by default), its flow and four tiles
   let relView = null;
@@ -1573,8 +1420,7 @@
     const stuck = data.milestones.filter((m) => qaState(m).exhausted);
     const heldByQa = (t) => isFix(t) && /rounds_exhausted/.test(t.blocked_reason || "");
     const blocked = Object.entries(data.tasks).filter(([, t]) => t.status === "blocked" && !heldByQa(t) && t.lane !== "hotfix");
-    const approvals = actionsOn() ? inbox().approvals : [];
-    const denied = actionsOn() ? (inbox().denied || []) : [];
+    const denied = data.denied || [];
     const waitingRel = relPlan().filter((r) => r.status === "awaiting_approval");
     const allNeeds = b.needs || [];
     const cneeds = allNeeds.filter((x) => x.kind === "checkpoint");
@@ -1582,11 +1428,11 @@
     const lneeds = allNeeds.filter((x) => x.kind === "lesson");
     const hneeds = allNeeds.filter((x) => x.kind === "prod_health");
     const qneeds = allNeeds.filter((x) => !["checkpoint", "debt_over_cap", "lesson", "prod_health"].includes(x.kind));
-    const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length + denied.length + waitingRel.length + allNeeds.length;
+    const n = blocked.length + data.questions.length + hot.length + stuck.length + denied.length + waitingRel.length + allNeeds.length;
     // which phase each item belongs to: the tabs show the count, the rows a tag that opens the phase
     const cpPrd = cneeds.filter((x) => x.target === "prd").length;
     needsBy = { conception: cpPrd, planning: qneeds.length + cneeds.length - cpPrd, construction: blocked.length + hot.length + stuck.length + dneeds.length, stable: hneeds.length, releases: waitingRel.length };
-    if (approvals.length + denied.length) needsBy[data.phase] = (needsBy[data.phase] || 0) + approvals.length + denied.length;
+    if (denied.length) needsBy[data.phase] = (needsBy[data.phase] || 0) + denied.length;
     data.questions.forEach((q) => { needsBy[questionPhase(q)] += 1; });
     // the strip exists only while something needs the user; warnings alone ride along but do not open it
     const nb = $("needs-btn");
@@ -1601,7 +1447,6 @@
     if (n > before && !firstRender) { nb.classList.remove("ping"); void nb.offsetWidth; nb.classList.add("ping"); }
     if (!n) { fill($("impediments"), h("div", { class: "empty good needs-empty" }, h("strong", { text: tr("Nothing needs you now.") }), h("span", { text: tr("Questions, confirmations, approvals and blocked work show up here.") }))); return; }
     fill($("impediments"),
-      approvals.length ? listBlock(tr("Claude Code asks permission"), approvals.map(approvalRow), "") : null,
       denied.length ? listBlock(tr("Denied because nobody answered"), denied.map(deniedRow), "") : null,
       hneeds.length ? listBlock(tr("Production is failing its health check"), hneeds.map(healthRow), "", false, "stable") : null,
       waitingRel.length ? listBlock(tr("Releases waiting for your approval"), waitingRel.map((r) => h("li", {}, h("span", { class: "id", text: r.id }),
@@ -1618,123 +1463,53 @@
       blocked.length ? listBlock(tr("Blocked tasks"), blocked.map(([id, t]) => blockedRow(id, t)), "", false, "construction") : null,
       data.questions.length ? listBlock(tr("Open questions"), data.questions.map((q) => h("li", {}, hasDoc("open-questions.md") ? docLink("open-questions.md", q.id, q.id, "id") : h("span", { class: "id", text: q.id }), h("span", {}, linkify(q.question)),
         h("span", { class: "q-tags" }, h("span", { class: "chip", text: q.by || "?" }), phaseTag(questionPhase(q))), q.assumption ? h("span", { class: "sub", text: tr("Assumed meanwhile: {assumption}", { assumption: q.assumption }) }) : null,
-        actionsOn() ? answerBox(q) : null)), "") : null,
+        q.options && q.options.length ? h("span", { class: "sub", text: tr("Options: {v}", { v: q.options.map((o) => (o === q.recommended ? `${o} (${tr("recommended")})` : o)).join(" · ") }) }) : null)), "") : null,
       warns.length ? listBlock(tr("Warnings"), warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
-      actionsOn() && data.questions.length ? h("p", { class: "needs-hint" }, tr("Answer here: Claude Code records the answer and continues what was waiting on it.")) : null,
-      data.questions.length || blocked.length ? h("p", { class: "needs-hint" }, actionsOn() ? tr("Or go through all of them with ") : tr("Answer in Claude Code with "), cmd("/dev-kit:interview --gaps")) : null);
-  }
-  /** A row of decision buttons that queue one request; the recommended one first and highlighted, a note field when asked. */
-  const decisionDrafts = {};
-  function decisionBox(key, label, action, base, options, sentText) {
-    const sent = inbox().open.find((r) => r.action === action && Object.entries(base).every(([k, v]) => r.args && r.args[k] === v));
-    if (sent) return h("div", { class: "sub answer-sent", text: tr("Sent ({id}): {v}. Claude Code applies it.", { id: sent.id, v: sentText(sent.args) }) });
-    const ta = h("textarea", { maxlength: "2000", rows: "2", class: "answer-input", "aria-label": tr("{label}: note", { label }), placeholder: tr("Note or reason (needed where marked *)") });
-    ta.value = decisionDrafts[key] || "";
-    ta.addEventListener("input", () => { decisionDrafts[key] = ta.value; });
-    const send = async (o, el) => {
-      const note = ta.value.trim();
-      if (o.needsNote && !note) { ta.focus(); toast(tr("Write the reason first."), true); return; }
-      el.disabled = true;
-      try { await queue(action, { ...base, ...o.args, ...(note ? { note } : {}) }); delete decisionDrafts[key]; } catch (e) { el.disabled = false; }
-    };
-    const opts = options.slice().sort((a, b) => Boolean(b.recommended) - Boolean(a.recommended));
-    return h("div", { class: "sub answer", role: "group", "aria-label": label },
-      opts.map((o) => h("button", { type: "button", class: `btn btn-sm${o.recommended ? " btn-primary" : o.danger ? " btn-danger" : ""}`, title: o.title || null,
-        onclick: (e) => send(o, e.currentTarget) }, o.text + (o.needsNote ? " *" : ""), o.recommended ? h("span", { class: "rec", text: tr("recommended") }) : null)),
-      options.some((o) => o.note !== false) ? h("span", { class: "answer-free" }, ta) : null);
+      data.questions.length || blocked.length ? h("p", { class: "needs-hint" }, tr("Answer in Claude Code with "), cmd("/dev-kit:interview --gaps")) : null);
   }
   /** Needs you › QA rounds used up (conventions §7): keep fixing (+1 round), accept with an ADR (a justification), or replan. */
   function qaDecisionRow(m) {
     const q = qaState(m);
     const head = [h("span", { class: "id", text: m.id }),
       h("span", { text: tr("{v} fix rounds used of {max} ({v2}).", { v: Math.max(0, q.qa.runs - 1), max: q.max, v2: qaReason(q.qa, m) || tr("see the QA report") }) })];
-    if (!actionsOn()) return h("li", {}, ...head, h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd(`/dev-kit:qa ${m.id}`)));
-    // a fix that did not hold twice points to the plan, not to one more round
-    const replan = q.fixBlocked.some((t) => (t.blocked_count || 0) >= 2);
-    return h("li", {}, ...head, decisionBox(`qa:${m.id}`, tr("QA of {id}", { id: m.id }), "qa_decision", { milestone: m.id }, [
-      { text: tr("Continue fixing (+1 round)"), args: { decision: "continue", rounds: 1 }, recommended: !replan, title: tr("One more fix round, then QA again") },
-      { text: tr("Accept with an ADR"), args: { decision: "accept" }, needsNote: true, title: tr("The milestone closes as it is; an ADR records why") },
-      { text: tr("Replan"), args: { decision: "replan" }, recommended: replan, title: tr("Change the plan of this milestone") }],
-    (a) => ({ continue: tr("continue fixing"), accept: tr("accept with an ADR"), replan: "replan" })[a.decision]));
+    return h("li", {}, ...head, h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd(`/dev-kit:qa ${m.id}`)));
   }
-  /** Needs you › a blocked task: the question it waits on, answered right here, or unblock / skip / drop. */
+  /** Needs you › a blocked task, and the question it waits on (decided in Claude Code). */
   function blockedRow(id, t) {
     const q = data.questions.find((x) => x.task === id);
     const head = h("button", { type: "button", class: "row-btn", "data-tid": id, "aria-haspopup": "dialog", onclick: () => openTask(id) },
       h("span", { class: "id", text: id }), h("span", { text: t.title }), h("span", { class: "chip", text: t.milestone }),
       h("span", { class: "sub bad", text: t.blocked_reason || tr("No reason recorded") }));
-    if (!actionsOn()) return h("li", { class: "has-btn" }, head);
-    if (q) return h("li", { class: "has-btn" }, head, h("span", { class: "sub" }, tr("Waiting on {id}: ", { id: q.id }), linkify(q.question)), answerBox(q));
-    return h("li", { class: "has-btn" }, head, decisionBox(`task:${id}`, tr("Blocked {id}", { id }), "task_decision", { task: id }, [
-      { text: tr("Unblock"), args: { decision: "unblock" }, recommended: true, title: tr("Back to To do, with your note for the implementer") },
-      { text: tr("Skip to the next milestone"), args: { decision: "skip" }, title: tr("Move it to the next open milestone") },
-      { text: tr("Drop"), args: { decision: "drop" }, needsNote: true, danger: true, title: tr("Remove it from the plan, with the reason") }],
-    (a) => ({ unblock: "unblock", skip: tr("skip to the next milestone"), drop: "drop" })[a.decision]));
+    return h("li", { class: "has-btn" }, head, q ? h("span", { class: "sub" }, tr("Waiting on {id}: ", { id: q.id }), linkify(q.question)) : null);
   }
-  /** Needs you › an open hotfix: where it is, and run it now or drop it. */
+  /** Needs you › an open hotfix and where it is. */
   function hotfixRow(id, b) {
     const t = data.tasks[id] || {};
     const head = [issueId(id), h("span", { text: t.title || ((b.issues || {})[id] || {}).title || "" }), h("span", { class: "chip lane-hotfix", text: tr("hotfix") }),
       t.status ? h("span", { class: "chip", text: stLabel(t.status) }) : null];
-    if (!actionsOn() || !data.tasks[id]) return h("li", {}, ...head);
-    return h("li", {}, ...head, decisionBox(`hot:${id}`, tr("Hotfix {id}", { id }), "task_decision", { task: id }, [
-      { text: tr("Run"), args: { decision: "run" }, recommended: true, title: tr("Build {id} now", { id }), note: false },
-      { text: tr("Drop"), args: { decision: "drop" }, needsNote: true, danger: true, title: tr("Drop the hotfix, with the reason") }],
-    (a) => (a.decision === "run" ? "run" : "drop")));
+    return h("li", {}, ...head);
   }
-  /** Needs you › Confirm PRD / Confirm plan (conventions §19): the document opens formatted in the side drawer; Confirm,
-   * or ask for changes with what must change (the skill revises, a new review and a new checkpoint follow). */
-  const adjustDrafts = {};
+  /** Needs you › Confirm PRD / Confirm plan (conventions §19): the document opens formatted in the side drawer; the
+   * confirmation (or the changes asked) is given in Claude Code. */
   function checkpointRow(x) {
     const doc = hasDoc(x.doc) ? docLink(x.doc, tr("Open {doc}", { doc: x.doc })) : h("span", { class: "sub", text: x.doc });
     const head = [h("span", { class: "id", text: x.target === "prd" ? tr("PRD") : tr("Plan") }),
       h("span", { text: tr("{title}{v}: the review passed; nothing {v2} until you confirm.", { title: x.title, v: x.round > 1 ? tr(" · round {round}", { round: x.round }) : "", v2: x.target === "prd" ? tr("after the PRD") : tr("new is built") }) }),
       h("span", { class: "sub" }, doc)];
     const summary = x.summary ? h("div", { class: "sub cp-summary" }, linkify(x.summary)) : null;
-    if (!actionsOn()) return h("li", {}, ...head, summary, h("span", { class: "sub" }, tr("Confirm in Claude Code with "), cmd(`/dev-kit:review ${x.target}`)));
-    const sent = inbox().open.find((r) => r.action === "checkpoint" && r.args && r.args.target === x.target);
-    if (sent) return h("li", {}, ...head, summary, h("div", { class: "sub answer-sent", text: tr("Sent ({id}): {decision}. Claude Code records it.", { id: sent.id, decision: sent.args.decision }) }));
-    const ta = h("textarea", { maxlength: "4000", rows: "3", class: "answer-input", "aria-label": tr("What must change in the {target}", { target: x.target }), placeholder: tr("What must change (Claude revises it and asks again)") });
-    ta.value = adjustDrafts[x.target] || "";
-    ta.addEventListener("input", () => { adjustDrafts[x.target] = ta.value; });
-    const send = async (args, el) => { el.disabled = true; try { await queue("checkpoint", { target: x.target, ...args }); delete adjustDrafts[x.target]; } catch (e) { el.disabled = false; } };
-    return h("li", {}, ...head, summary, h("div", { class: "sub answer", role: "group", "aria-label": x.title },
-      h("button", { type: "button", class: "btn btn-sm btn-primary", text: tr("Confirm"), onclick: (e) => send({ decision: "confirm" }, e.currentTarget) }),
-      h("span", { class: "answer-free" }, ta, h("button", { type: "button", class: "btn btn-sm", text: tr("Ask for changes"),
-        onclick: (e) => { const v = ta.value.trim(); if (v) send({ decision: "adjust", feedback: v }, e.currentTarget); else { ta.focus(); toast(tr("Write what must change first."), true); } } }))));
+    return h("li", {}, ...head, summary, h("span", { class: "sub" }, tr("Confirm in Claude Code with "), cmd("/dev-kit:backlog")));
   }
-  /** Needs you › deferred debt above the cap (conventions §7): promote to issues, accept with an ADR, or the next cool-down. */
+  /** Needs you › deferred debt above the cap (conventions §7): promote, accept or cool-down, decided in Claude Code. */
   function debtRow(x) {
     const head = [h("span", { class: "id", text: "!" }), h("span", { text: tr("{total} deferred findings open (cap {cap_total}) · {medium} medium (cap {cap_medium}).", { total: x.total, cap_total: x.cap_total, medium: x.medium, cap_medium: x.cap_medium }) })];
-    if (!actionsOn()) return h("li", {}, ...head, h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd("/dev-kit:backlog")));
-    const sent = inbox().open.find((r) => r.action === "debt_decision");
-    if (sent) return h("li", {}, ...head, h("div", { class: "sub answer-sent", text: tr("Sent ({id}): {decision}.", { id: sent.id, decision: sent.args.decision }) }));
-    const send = (decision, what) => queue("debt_decision", { decision }).then(() => toast(what)).catch(() => {});
-    return h("li", {}, ...head, h("span", { class: "q-tags" },
-      h("button", { type: "button", class: "btn btn-sm", text: tr("Promote to issues"), title: tr("Choose which findings become standard issues"), onclick: () => send("promote", tr("Claude Code lists the findings to promote.")) }),
-      h("button", { type: "button", class: "btn btn-sm", text: tr("Accept formally"), title: tr("An ADR lists the accepted findings"), onclick: () => send("accept", tr("Claude Code records the ADR.")) }),
-      h("button", { type: "button", class: "btn btn-sm", text: tr("Use the next cool-down"), title: tr("Cool-down is turned on for the next milestone with these items"), onclick: () => send("cooldown", tr("Cool-down turned on for the next milestone.")) })));
+    return h("li", {}, ...head, h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd("/dev-kit:backlog")));
   }
-  /** Needs you › a proposed lesson of method for one agent (conventions §13), with the evidence that raised it: approve
-   * (the text can be edited first) or dismiss. An approved lesson goes into every prompt of that agent. */
-  const lessonDrafts = {};
+  /** Needs you › a proposed lesson of method for one agent (conventions §13), with the evidence that raised it; it is
+   * approved or dismissed in Claude Code. An approved lesson goes into every prompt of that agent. */
   function lessonRow(x) {
-    const key = `${x.agent}:${x.signal}`;
     const head = [h("span", { class: "id", text: x.agent }), h("span", { text: x.text }), h("span", { class: "sub", text: tr("Why: {evidence}", { evidence: x.evidence }) })];
-    if (!actionsOn()) return h("li", {}, ...head, h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd("/dev-kit:feedback")));
-    const sent = inbox().open.find((r) => r.action === "lesson_decision" && r.args && `${r.args.agent}:${r.args.signal}` === key);
-    if (sent) return h("li", {}, ...head, h("div", { class: "sub answer-sent", text: tr("Sent ({id}): {decision}.", { id: sent.id, decision: sent.args.decision }) }));
-    const ta = h("textarea", { maxlength: "300", rows: "2", class: "answer-input", "aria-label": tr("Lesson for {agent}", { agent: x.agent }) });
-    ta.value = lessonDrafts[key] !== undefined ? lessonDrafts[key] : x.text;
-    ta.addEventListener("input", () => { lessonDrafts[key] = ta.value; });
-    const send = (args, what) => queue("lesson_decision", { agent: x.agent, signal: x.signal, ...args }).then(() => { delete lessonDrafts[key]; toast(what); }).catch(() => {});
-    return h("li", {}, ...head, h("div", { class: "sub answer", role: "group", "aria-label": tr("Lesson for {agent}", { agent: x.agent }) },
-      h("span", { class: "answer-free" }, ta,
-        h("button", { type: "button", class: "btn btn-sm btn-primary", text: tr("Approve"), onclick: () => { const v = ta.value.trim(); if (v) send({ decision: "approve", text: v }, tr("Claude Code adds the lesson.")); else ta.focus(); } }),
-        h("button", { type: "button", class: "btn btn-sm", text: tr("Dismiss"), onclick: () => send({ decision: "dismiss" }, tr("Suggestion dismissed.")) }))));
+    return h("li", {}, ...head, h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd("/dev-kit:feedback")));
   }
-  /** Needs you › the issue queue (conventions §15): above the limit, or an issue waiting too long. Every action is a
-   * plan draft the user sends; nothing changes the plan by itself. */
   /** A failing production health check: its expedite issue, how many checks failed, and the way to a hotfix. */
   function healthRow(x) {
     const fix = x.tasks && x.tasks.length ? `/dev-kit:implement ${x.tasks[x.tasks.length - 1]}` : `/dev-kit:issue ${x.issue}`;
@@ -1742,29 +1517,18 @@
       h("span", { text: tr("{v} · last: {detail}", { v: plural(x.failures, "failed check"), detail: x.detail || "?" }) }),
       h("span", { class: "chip lane-hotfix", text: tr("expedite") }),
       h("span", { class: "sub", text: x.target || "" }),
-      actionsOn() ? runBtn(fix, true) : cmd(fix));
+      cmd(fix));
   }
+  /** Needs you › the issue queue (conventions §15): above the limit, or an issue waiting too long; planned in Claude Code. */
   function queueNeedRow(x) {
-    const acts = actionsOn();
     if (x.kind === "queue_over_limit") {
-      const load = () => {
-        draft = { ops: x.draft.ops.slice(), base: data.updated_at, serverErrors: [], buffer: false, frozen: false };
-        planMode = "tasks";
-        setPhase("planning");
-        toast(tr("Draft of {milestone} — Issues with {v}: review it, then send it.", { milestone: x.milestone, v: plural(x.issues.length, "issue") }));
-      };
       return h("li", {}, h("span", { class: "id", text: "!" }),
         h("span", { text: tr("Queue above the limit: {v} waiting (limit {limit}).", { v: plural(x.count, "issue"), limit: x.limit }) }),
-        acts && x.issues.length ? h("button", { type: "button", class: "btn btn-sm", text: tr("Plan the queue milestone"), title: tr("Draft {milestone} — Issues with the oldest and most severe issues; nothing changes until you send it", { milestone: x.milestone }), onclick: load }) : null);
+        h("span", { class: "sub" }, tr("Plan it in Claude Code with "), cmd("/dev-kit:backlog")));
     }
-    const nextOpen = (data.milestones || []).find((m) => m.gate === "pending" && !m.frozen_at);
-    const send = (ops, what) => queue("plan_draft", { ops, base: data.updated_at }).then(() => toast(what)).catch(() => {});
     return h("li", {}, issueId(x.issue),
       h("span", { text: tr("{v} · waiting for {v2}", { v: (issueOf(x.issue) || {}).title || "", v2: plural(x.milestones, "closed milestone") }) }),
-      acts ? h("span", { class: "q-tags" },
-        nextOpen ? h("button", { type: "button", class: "btn btn-sm", text: tr("Schedule in {id}", { id: nextOpen.id }), onclick: () => send([{ op: "schedule_issue", issue: x.issue, milestone: nextOpen.id, force: true }], tr("{issue} → {id} queued.", { issue: x.issue, id: nextOpen.id })) }) : null,
-        h("button", { type: "button", class: "btn btn-sm", text: tr("Park"), title: tr("Parked issues are never pulled into a milestone until you schedule them"), onclick: () => send([{ op: "set_issue_status", issue: x.issue, status: "parked" }], tr("{issue} parked.", { issue: x.issue })) }),
-        h("button", { type: "button", class: "btn btn-sm", text: tr("Won't fix"), onclick: () => send([{ op: "set_issue_status", issue: x.issue, status: "wontfix" }], tr("{issue} closed as won't fix.", { issue: x.issue })) })) : null);
+      h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd("/dev-kit:backlog")));
   }
   /** Opens "Needs you" (the drawer of the red button in the top bar). */
   function goNeeds() { openDrawer(ndlg); }
@@ -2017,7 +1781,7 @@
       return h("li", { class: r.kind === "live" ? "feed-live" : r.kind ? `feed-${r.kind}` : null }, h("time", { datetime: r.at, title: Number.isFinite(t) ? fmtDT(t) : r.at, text: Number.isFinite(t) ? agoShort(t) : r.at }),
         h("span", { class: "txt" }, linkify(fullLog ? r.text : feedText(r))));
     }) : h("li", {}, h("span", { class: "txt", text: tr("No activity logged yet.") })));
-    fill($("foot"), tr("{v} of {project}/.dev{v2} · autonomy {v3}", { v: actionsOn() ? tr("View") : tr("Read-only view"), project: data.project, v2: actionsOn() ? tr(" · requests run by Claude Code") : "", v3: data.autonomy || "?" }));
+    fill($("foot"), tr("Read-only view of {project}/.dev · autonomy {v}", { project: data.project, v: data.autonomy || "?" }));
     const b = data.board;
     fill($("server-about"), b ? tr("Server pid {pid} on port {port}", { pid: b.pid, port: b.port }) : tr("Server details unknown"), tr(". Stop it here or with "), cmd("/dev-kit:board stop"), ".");
   }
@@ -2319,8 +2083,7 @@
       tile({ title: tr("Reviews"), sub: tr("Cut-off {review_min_overall}", { review_min_overall: data.quality.review_min_overall }), body: reviewList(["prd", "design"], tr("No reviews.")), all: () => reviewList(["prd", "design"], tr("No reviews.")) }),
       tile({ title: tr("Decisions and facts"), count: adrs.length + facts.filter((f) => !f.stale).length || null, sub: ".dev/decisions.md · facts.md", body: decBody(), all: () => [decBody()[0], renderFacts()] }),
       tile({ title: tr("Scope changes"), count: open.length || null, sub: tr("Change issues go back through the PRD"),
-        body: [listBlock(tr("Open"), open.map(issueLi), tr("No scope change waiting."), true), issues.length > open.length ? h("p", { class: "pending-line", text: tr("{v} closed", { v: issues.length - open.length }) }) : null],
-        foot: actionsOn() ? h("button", { type: "button", class: "link-btn", text: tr("＋ New issue"), onclick: newIssue }) : null }));
+        body: [listBlock(tr("Open"), open.map(issueLi), tr("No scope change waiting."), true), issues.length > open.length ? h("p", { class: "pending-line", text: tr("{v} closed", { v: issues.length - open.length }) }) : null] }));
   }
   /** Facts (conventions §2), searchable by text, file or AC: verified facts with their evidence, newest first; a contradicted one stays, struck through. */
   let factQuery = "";
@@ -2345,13 +2108,11 @@
 
   // the CSP forbids style attributes: the width goes through the CSSOM
   const roadMeter = (x) => { const bar = h("span"); bar.style.width = `${x.total ? Math.round((x.done / x.total) * 100) : 0}%`; return h("span", { class: "road-meter", "aria-hidden": "true" }, bar); };
-  let replanOpen = false;
   function renderPlanning() {
     const nodes = planNodes();
     const p = phaseOf("planning");
     fill($("pl-strip"), stripHead("planning", tr("The plan and every replan; no milestone starts before the plan is confirmed"),
-      actionsOn() ? h("button", { type: "button", class: "btn btn-sm btn-primary", id: "replan-btn", onclick: () => { replanOpen = true; render(); } }, tr("Replan the milestones →"))
-        : h("span", { class: `chip lane-chip st-${laneState("planning")}`, text: PHASE_WORD[p.state === "active" ? "current" : p.state] || "" })),
+      h("span", { class: `chip lane-chip st-${laneState("planning")}`, text: PHASE_WORD[p.state === "active" ? "current" : p.state] || "" })),
       flowList(nodes, false, tr("Steps of planning")), stepDetail(nodes));
     // roadmap: releases and their milestones, in plan order
     const ms = data.milestones;
@@ -2400,8 +2161,7 @@
       tile({ title: tr("Roadmap"), count: ms.length || null, sub: ms.length ? tr("{closed} of {v} closed", { closed, v: plural(ms.length, "milestone") }) : "",
         body: ms.length ? [roadStrip(ms), h("ol", { class: "list road" }, roadRows())] : h("div", { class: "empty" }, tr("No milestones yet. They appear after "), cmd("/dev-kit:plan"), "."), all: () => h("ol", { class: "list road" }, roadRows()) }),
       tile({ title: tr("Backlog"), count: queued.length + laterTasks || null, sub: tr("{v} · {v2} in later milestones", { v: plural(queued.length, "queued issue"), v2: plural(laterTasks, "task") }),
-        body: [runBanner(runsAt("backlog")), ...backBody()], all: backBody,
-        foot: actionsOn() ? h("button", { type: "button", class: "link-btn", text: tr("＋ New issue"), onclick: newIssue }) : null }),
+        body: [runBanner(runsAt("backlog")), ...backBody()], all: backBody }),
       tile({ title: tr("Plan review"), sub: tr("Cut-off {review_min_overall}", { review_min_overall: data.quality.review_min_overall }),
         body: [reviewList(["plan"], tr("Not run yet.")), h("div", { class: "kpis" }, kpi(tr("Releases"), rp.length), kpi(tr("Milestones"), ms.length), kpi(tr("Tasks"), tasks), kpi(tr("Flags"), (data.flags || []).length))],
         foot: hasDoc("plan.md") ? docLink("plan.md", "plan.md") : null }));
@@ -2422,8 +2182,8 @@
         state: !hc ? "skipped" : !hc.last ? "todo" : hc.last.ok ? "done" : "failed", need: hneeds, needText: tr("failing"), running: runsAt("prod").length > 0,
         about: tr("A failure opens an expedite issue"), detail: () => healthBlock() },
       { key: "issue", label: "/dev-kit:issue", kind: "human", sub: tr("classifies what happened"), state: n("expedite") + n("standard") + n("change") + n("current") + n("intangible") ? "current" : "todo",
-        need: qneeds, needText: tr("queue"), about: tr("A bug, an improvement or a change: Claude Code classifies it (also from the board)"),
-        detail: () => [actionsOn() ? h("p", {}, h("button", { type: "button", class: "btn btn-sm btn-primary", text: tr("＋ New issue"), onclick: () => { closeList(); newIssue(); } })) : h("p", {}, cmd("/dev-kit:issue"))] },
+        need: qneeds, needText: tr("queue"), about: tr("A bug, an improvement or a change: Claude Code classifies it"),
+        detail: () => [h("p", {}, tr("Report it in Claude Code with "), cmd("/dev-kit:issue"))] },
       { key: "branch", label: tr("Expedite · standard · change"), kind: "gate", sub: tr("hotfix · next milestone · PRD"), state: "todo", branch: [
         ["expedite", tr("Expedite"), tr("hotfix lane, patch release"), n("expedite")], ["standard", tr("Standard"), tr("the next milestone"), n("standard") + n("current") + n("intangible")],
         ["change", tr("Change"), tr("the PRD, then a replan"), n("change")]] }]));
@@ -2450,7 +2210,7 @@
       fact(tr("Releases"), String(rel.length), rel.length ? h("span", { class: "card-sub", text: tr("last {v}", { v: rel.at(-1).tag || rel.at(-1).version || "" }) }) : null),
       (data.backlog || {}).debt ? fact(tr("Deferred debt"), String(data.backlog.debt.total), h("span", { class: "card-sub", text: debtLine(data.backlog.debt) })) : fact(tr("Deferred debt"), "0"),
       c && (Number(c.usd) > 0 || Number(c.tokens) > 0) ? fact(tr("Cost (estimate)"), tr("US$ {v}", { v: Number(c.usd || 0).toFixed(2) }), h("span", { class: "card-sub", text: tr("{v} tokens", { v: compact(c.tokens || 0) }) }))
-        : fact(tr("Cost"), tr("not computed"), h("span", { class: "fact-cmd" }, copyBtn("/dev-kit:costs"))));
+        : fact(tr("Cost"), tr("not computed"), h("span", { class: "fact-cmd" }, cmd("/dev-kit:costs"))));
     // production
     const pr = data.production, lc = data.lifecycle || {};
     const when = { per_milestone: tr("after each milestone"), per_milestone_flagged: tr("after each milestone, behind the release flag"), on_release: tr("at each release"), manual: tr("by hand"), none: tr("no production environment") };
@@ -2511,31 +2271,22 @@
 
   // ------------------------------------------------------------------ the map: the five lanes of the flow at once, with where the project is
   // ------------------------------------------------------------------ architecture: the diagram of the system being built
-  // docs/diagrams/architecture.svg (served by /api/diagram) drawn by /dev-kit:diagram; none yet → the board asks for it once
+  // docs/diagrams/architecture.svg (served by /api/diagram) drawn by /dev-kit:diagram in Claude Code; the board only shows it
   const DIAGRAM_NEW = "/dev-kit:diagram", DIAGRAM_UPDATE = "/dev-kit:diagram update";
-  let archAsked = false;     // a missing diagram is queued once per page, never again by itself after a failure
   let archZoom = false;
-  const diagramBusy = () => [DIAGRAM_NEW, DIAGRAM_UPDATE].map((c) => runningRun(c) || openRun(c)).find(Boolean) || null;
+  const diagramBusy = () => [DIAGRAM_NEW, DIAGRAM_UPDATE].map((c) => runningRun(c)).find(Boolean) || null;
   function renderArch() {
     const d = data.diagram || { exists: false };
     const busy = diagramBusy();
-    const busyText = busy ? (busy.started_at && !busy.id ? tr("Claude Code is drawing it now") : tr("Queued ({id})", { id: busy.id || "" })) : "";
     const sub = $("arch-sub");
     if (d.exists) {
       fill(sub, d.at ? tr("High-level view of the system being built, drawn on {v}", { v: fmtDT(d.at) }) : tr("High-level view of the system being built"),
         d.stale || !d.current ? h("span", { class: "stale", text: ` · ${tr("out of date: the architecture changed since")}` }) : null,
-        busy ? ` · ${busyText}` : null);
+        d.stale || !d.current ? [" · ", tr("update it in Claude Code with "), cmd(DIAGRAM_UPDATE)] : null,
+        busy ? ` · ${tr("Claude Code is drawing it now")}` : null);
     } else fill(sub, tr("High-level view of the system being built"));
-    const upd = h("button", { type: "button", class: `btn btn-sm${d.exists ? "" : " btn-primary"}`, disabled: busy || !actionsOn() ? true : null,
-      title: actionsOn() ? tr("Run {text} in Claude Code", { text: d.exists ? DIAGRAM_UPDATE : DIAGRAM_NEW }) : tr("Requests are off on this board: run {text} in Claude Code", { text: d.exists ? DIAGRAM_UPDATE : DIAGRAM_NEW }),
-      text: d.exists ? tr("Update diagram") : tr("Create diagram") });
-    upd.addEventListener("click", async () => {
-      upd.disabled = true;
-      try { await queue("run", { command: d.exists ? DIAGRAM_UPDATE : DIAGRAM_NEW }); } catch (e) { upd.disabled = false; }
-    });
     const v = encodeURIComponent(d.at || "");
-    fill($("arch-actions"), upd,
-      d.exists ? h("a", { class: "btn btn-sm", href: `/api/diagram?v=${v}`, target: "_blank", rel: "noopener", text: tr("Open full size") }) : null);
+    fill($("arch-actions"), d.exists ? h("a", { class: "btn btn-sm", href: `/api/diagram?v=${v}`, target: "_blank", rel: "noopener", text: tr("Open full size") }) : null);
     const view = $("arch-view");
     view.classList.toggle("zoom", archZoom && d.exists);
     view.classList.toggle("has-img", Boolean(d.exists));
@@ -2545,14 +2296,9 @@
       fill(view, img);
       return;
     }
-    if (!busy && !archAsked && actionsOn()) {
-      archAsked = true;
-      queue("run", { command: DIAGRAM_NEW }).catch(() => {});
-    }
     fill(view, h("div", { class: "empty" },
-      busy || archAsked && actionsOn() ? tr("No diagram yet: Claude Code is drawing it with /dev-kit:diagram. It shows here when it is done.")
-        : actionsOn() ? tr("No diagram yet. Create it to see the architecture here.")
-          : tr("No diagram yet. Run /dev-kit:diagram in Claude Code to draw it.")));
+      busy ? tr("No diagram yet: Claude Code is drawing it with /dev-kit:diagram. It shows here when it is done.")
+        : tr("No diagram yet. Run /dev-kit:diagram in Claude Code to draw it.")));
   }
 
   function renderMap() {
@@ -2577,16 +2323,11 @@
       lane("construction", m ? msNodes(m) : [], m ? `${m.title || ""}${fc ? ` · ${forecastText(fc)}` : ""}` : ""),
       lane("releases", r ? relNodes(r) : [], r ? `${r.id} · ${REL_WORD[r.status]}` : ""),
       lane("stable", stableNodes(), ""));
-    const ib = inbox();
-    const [, word] = execLabel(ib.executor);
     const c = data.costs;
     fill($("map-any"), h("strong", { class: "any-title", text: tr("Anytime") }),
       h("button", { type: "button", class: "link-btn", onclick: goNeeds }, tr("Needs you: {n}", { n: needsN })),
-      h("button", { type: "button", class: "link-btn", onclick: () => openDrawer(rdlg) }, tr("Requests: {n}", { n: ib.open.length })),
-      h("span", { class: "sub", text: word }),
       c && Number(c.usd) > 0 ? h("span", { class: "sub", text: tr("Cost so far: US$ {v}", { v: Number(c.usd).toFixed(2) }) }) : null,
       h("span", { class: "any-sp" }),
-      actionsOn() ? h("button", { type: "button", class: "btn btn-sm", text: tr("＋ New issue"), onclick: newIssue }) : null,
       h("button", { type: "button", class: "btn btn-sm", text: tr("Activity"), onclick: () => openDrawer(adlg) }));
   }
 
@@ -2595,556 +2336,28 @@
   }
   setInterval(tickAgents, 1000);
 
-  // ------------------------------------------------------------------ requests to Claude Code (dev_worker.py on the server, /dev-kit:worker runs them)
-  // the commands the server accepts (dev_worker.RUN_COMMANDS); anything else keeps only its copy button
-  const RUN_RES = [/^\/dev-kit:implement(?: (?:T-\d{3,5}|--milestone M\d{1,3}(?:\.\d{1,2})?))?$/, /^\/dev-kit:qa M\d{1,3}(?:\.\d{1,2})?$/, /^\/dev-kit:review (?:prd|design|plan|docs)$/,
-    /^\/dev-kit:(?:interview|prd|architecture|ux|ui|plan|docs|usability|costs|backlog|status|release)$/, /^\/dev-kit:interview --gaps$/, /^\/dev-kit:deploy(?: M\d{1,3}(?:\.\d{1,2})?)?$/,
-    /^\/dev-kit:diagram(?: update)?$/];
-  const EMPTY_INBOX = { open: [], recent: [], executor: { state: "offline", online: false, paused: false }, approvals: [], denied: [], actions: false };
-  const inbox = () => (data && data.inbox) || EMPTY_INBOX;
-  const actionsOn = () => Boolean(inbox().actions);
-  function runnable(c) { return actionsOn() && RUN_RES.some((r) => r.test(c)); }
-  const openRun = (c) => inbox().open.find((x) => x.action === "run" && x.args && x.args.command === c);
-  let toastT = null;
-  function toast(text, bad) {
-    const el = $("toast");
-    el.textContent = text;
-    el.classList.toggle("bad", Boolean(bad));
-    el.hidden = false;
-    clearTimeout(toastT);
-    toastT = setTimeout(() => { el.hidden = true; }, bad ? 9000 : 5000);
-  }
-  async function api(path, body) {
-    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Board-Token": TOKEN }, body: JSON.stringify(body || {}) });
-    let d = {};
-    try { d = await r.json(); } catch (e) { /* no body */ }
-    if (!r.ok) {
-      const err = new Error((d.errors && d.errors.join("; ")) || d.hint || d.error || tr("HTTP {status}", { status: r.status }));
-      err.errors = d.errors || [err.message];
-      throw err;
-    }
-    return d;
-  }
-  // the board starts Claude Code by itself when a request waits (unless it is off, or no claude command is installed)
-  const autoOn = (ex) => Boolean(ex.auto && !["off", "no_claude"].includes(ex.auto.state));
-  const takesIt = (ex) => Boolean(ex.listening || (ex.online && ex.state === "running") || autoOn(ex));
-  const workerHint = () => (takesIt(inbox().executor) ? tr("Claude Code takes it.")
-    : (inbox().executor.auto || {}).state === "no_claude" ? tr("The claude command was not found: install Claude Code, or run /dev-kit:worker in a session.")
-    : tr("Run /dev-kit:worker in Claude Code to start it."));
-  async function queue(action, args, quietErrors) {
-    try {
-      const d = await api("/api/inbox", { action, args });
-      toast(tr("Queued {id}. {v}", { id: d.item.id, v: workerHint() }));
-      load();
-      return d.item;
-    } catch (e) {
-      if (!quietErrors) toast(tr("Not queued: {message}", { message: e.message }), true);
-      throw e;
-    }
-  }
-  function runBtn(text, labelled) {
-    const q = openRun(text), live = runningRun(text);
-    const busy = live ? tr("Running for {v}", { v: dur((Date.now() - parseT(live.started_at)) / 1000) }) : q ? tr("Queued ({id})", { id: q.id }) : null;
-    const label = busy ? `${text}: ${busy}` : tr("Run {text} in Claude Code", { text });
-    const btn = h("button", { type: "button", class: `run-btn${busy ? " queued" : ""}${labelled ? " labelled" : ""}`, title: label, "aria-label": labelled ? `${actionLabel(text)}: ${label}` : label,
-      disabled: busy ? true : null, "data-cmd": text }, busy ? "◷" : "▶", labelled ? h("span", { class: "run-label", text: busy ? `${actionLabel(text)} · ${busy}` : actionLabel(text) }) : null);
-    btn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      btn.disabled = true;
-      try { await queue("run", { command: text }); } catch (err) { btn.disabled = false; }
-    });
-    return btn;
-  }
-  function describeReq(x) {
-    const a = x.args || {};
-    if (x.action === "run") return h("code", { text: a.command || "" });
-    if (x.action === "issue_new") return tr("New {v}: {v2}", { v: a.type === "improvement" ? "improvement" : a.type === "change" ? "change" : "bug", v2: a.title || "" });
-    if (x.action === "answer_question") return tr("Answer to {question}: {v}", { question: a.question, v: a.option || a.answer || "" });
-    if (x.action === "plan_draft") return tr("Plan draft · {v}", { v: plural((a.ops || []).length, "change") });
-    if (x.action === "release_decision") return `${a.decision === "approve" ? tr("Approve") : tr("Reject")} ${a.release}`;
-    if (x.action === "checkpoint") return `${a.decision === "confirm" ? tr("Confirm") : tr("Ask for changes in")} ${a.target === "prd" ? tr("the PRD") : tr("the plan")}`;
-    if (x.action === "debt_decision") return tr("Deferred debt: {decision}", { decision: a.decision });
-    if (x.action === "lesson_decision") return tr("Lesson for {agent}: {decision}", { agent: a.agent, decision: a.decision });
-    if (x.action === "qa_decision") return tr("QA of {milestone}: {decision}{v}", { milestone: a.milestone, decision: a.decision, v: a.rounds ? ` (+${a.rounds})` : "" });
-    if (x.action === "task_decision") return `${a.task}: ${a.decision}`;
-    return x.action;
-  }
-  const REQ_WORD = tmap({ pending: N_("waiting"), running: N_("running"), needs_input: N_("needs your answer"), done: N_("done"), failed: N_("failed"), cancelled: N_("cancelled"), stale: N_("stopped") });
-  function execLabel(ex) {
-    const runs = skillRuns();
-    const au = ex.auto || {};
-    if (au.state === "running") return ["on", tr("Claude Code: started by the board{v}", { v: au.request ? ` (${au.request})` : "" })];
-    if (au.state === "waiting") return ["paused", tr("Claude Code: the last run failed ({reason}); it tries again soon", { reason: au.reason || "?" })];
-    if (!ex.online && !runs.length) return ["off", tr("Claude Code: not running")];
-    if (ex.paused) return ["paused", tr("Claude Code: paused")];
-    if (ex.state === "running") return ["on", tr("Claude Code: working{v}", { v: ex.item ? ` on ${ex.item}` : "" })];
-    if (ex.listening) return ["on", tr("Claude Code: listening")];
-
-    if (runs.length) return ["on", tr("Claude Code: running {v}; requests wait for it", { v: runCmd(runs[runs.length - 1]) })];
-    return ["idle", tr("Claude Code: open, not listening")];
-  }
-  function renderRequests() {
-    const ib = inbox();
-    const card = $("req-card");
-    card.hidden = !ib.actions && !ib.open.length && !ib.recent.length;
-    if (card.hidden) return;
-    const [cls, word] = execLabel(ib.executor);
-    const ex = $("exec");
-    ex.className = `exec ${cls}`;
-    ex.textContent = word;
-    $("new-issue-btn").hidden = !ib.actions;
-    const pb = $("pause-btn");
-    pb.hidden = !ib.actions;
-    pb.setAttribute("aria-pressed", String(Boolean(ib.executor.paused)));
-    pb.textContent = ib.executor.paused ? tr("Resume queue") : tr("Pause queue");
-    const waiting = ib.open.filter((x) => x.status === "pending").length;
-    const line = (...kids) => h("span", { class: "hint-line" }, kids);
-    fill($("req-hint"),
-      !ib.actions ? line(tr("This board only shows the project: requests are off (start it with --actions on).")) : null,
-      ib.actions && !takesIt(ib.executor) && waiting && (ib.executor.auto || {}).state === "no_claude" ? h("span", { class: "hint-line bad" }, workerHint()) : null,
-      ib.actions && !takesIt(ib.executor) && waiting && (ib.executor.auto || {}).state !== "no_claude" ? line(tr("{v} waiting. In Claude Code, run ", { v: plural(waiting, "request") }), h("span", { class: "cmd" }, h("code", { text: "/dev-kit:worker" }), copyBtn("/dev-kit:worker"))) : null,
-      ib.actions && !ib.executor.online && !waiting && !autoOn(ib.executor) ? line(tr("No Claude Code session is listening. Run "), h("span", { class: "cmd" }, h("code", { text: "/dev-kit:board" }), copyBtn("/dev-kit:board")), tr(" in one: requests then start by themselves.")) : null,
-      ib.actions && ib.executor.paused ? line(tr("Paused: Claude Code finishes what it is doing and takes nothing new.")) : null,
-      ib.actions && !ib.open.length && !ib.recent.length ? line(tr("Nothing queued. Use ▶ next to a command, answer a question, add an issue, or plan by dragging cards.")) : null);
-    const row = (x, open) => h("li", { class: `req s-${x.status}` },
-      h("span", { class: "id", text: x.id }),
-      h("span", { class: "req-what" }, describeReq(x)),
-      h("span", { class: `chip req-st s-${x.status}`, text: x.cancel_requested ? "cancelling" : REQ_WORD[x.status] || x.status }),
-      x.note ? h("span", { class: "sub", text: x.note }) : null,
-      x.status === "needs_input" ? h("button", { type: "button", class: "link-btn sub", text: tr("Answer {v} in Needs you", { v: x.question || tr("the question") }), onclick: goNeeds }) : null,
-      open && ib.actions && !x.cancel_requested ? h("button", { type: "button", class: "link-btn req-cancel", "aria-label": tr("Cancel {id}", { id: x.id }), text: tr("Cancel"),
-        onclick: async (e) => { e.currentTarget.disabled = true; try { await api(`/api/inbox/${x.id}/cancel`, {}); toast(`${x.id}: ${x.status === "running" ? tr("Claude Code stops at the next safe point") : "cancelled"}.`); load(); } catch (err) { toast(err.message, true); } } }) : null);
-    fill($("req-list"), ib.open.map((x) => row(x, true)), ib.recent.slice(0, 6).map((x) => row(x, false)));
-    const rc = $("req-count");
-    rc.hidden = !ib.open.length;
-    rc.textContent = String(ib.open.length);
-  }
-  $("pause-btn").addEventListener("click", async () => {
-    const paused = !inbox().executor.paused;
-    try { await api("/api/worker/mode", { paused }); toast(paused ? tr("Queue paused.") : tr("Queue resumed.")); load(); } catch (e) { toast(e.message, true); }
-  });
-
-  // the tab says when something waits on the user: "(2) Needs you" in the title and a dot on the icon
-  let needsN = 0;
-  let seenFail = Number(store.get("board-seen-fail", "0")) || 0;
-  function updateAttention() {
-    if (!data || !data.ok) return;
-    const fails = inbox().recent.filter((x) => (x.status === "failed" || x.status === "stale") && Number(x.id.slice(2)) > seenFail);
-    if (fails.length && document.visibilityState === "visible" && document.hasFocus()) {
-      seenFail = Math.max(...fails.map((x) => Number(x.id.slice(2))));  // looking at the board: they have been seen
-      store.set("board-seen-fail", String(seenFail));
-      fails.length = 0;
-    }
-    const n = needsN + fails.length;
-    document.title = n ? tr("({n}) Needs you · {project}", { n, project: data.project }) : tr("{project} · dev-kit board", { project: data.project });
-    const icon = document.querySelector('link[rel="icon"]');
-    const want = n ? "/assets/favicon-alert.svg" : "/assets/favicon.svg";
-    if (icon && icon.getAttribute("href") !== want) icon.setAttribute("href", want);
-  }
-  document.addEventListener("visibilitychange", updateAttention);
-  window.addEventListener("focus", updateAttention);
-
-  // new issue: a short form; Claude Code classifies it and asks here when it needs to
-  const idlg = $("issue-dialog");
-  const newIssue = () => { $("issue-form").reset(); idlg.showModal(); };
-  $("new-issue-btn").addEventListener("click", newIssue);
-  idlg.addEventListener("close", async () => {
-    if (idlg.returnValue !== "send") { $("new-issue-btn").focus(); return; }
-    const title = $("issue-title").value.trim();
-    if (!title) return;
-    try { await queue("issue_new", { title, type: $("issue-type").value, note: $("issue-note").value.trim() }); } catch (e) { /* toast shown */ }
-    $("new-issue-btn").focus();
-  });
-
-  // answers to the open questions, right where they are listed
-  const answerDrafts = {};
-  function answerBox(q) {
-    const sent = inbox().open.find((x) => x.action === "answer_question" && x.args && x.args.question === q.id);
-    if (sent) return h("div", { class: "sub answer-sent", text: tr("Answer sent ({id}): {v}. Claude Code applies it.", { id: sent.id, v: sent.args.option || sent.args.answer }) });
-    const opts = (q.options || []).slice().sort((a, b) => (b === q.recommended) - (a === q.recommended));
-    const box = h("div", { class: "sub answer", role: "group", "aria-label": tr("Answer {id}", { id: q.id }) });
-    const send = async (args, el) => { el.disabled = true; try { await queue("answer_question", { question: q.id, ...args }); delete answerDrafts[q.id]; } catch (e) { el.disabled = false; } };
-    opts.forEach((o) => box.append(h("button", { type: "button", class: `btn btn-sm${o === q.recommended ? " btn-primary" : ""}`, onclick: (e) => send({ option: o }, e.currentTarget) },
-      o, o === q.recommended ? h("span", { class: "rec", text: tr("recommended") }) : null)));
-    if (!opts.length && q.assumption) box.append(h("button", { type: "button", class: "btn btn-sm btn-primary", onclick: (e) => send({ answer: q.assumption }, e.currentTarget) }, tr("Keep the assumption")));
-    const inp = h("input", { type: "text", id: `ans-${q.id}`, maxlength: "2000", class: "answer-input", "aria-label": tr("Your answer to {id}", { id: q.id }),
-      placeholder: opts.length || q.assumption ? tr("Or write another answer") : tr("Your answer") });
-    inp.value = answerDrafts[q.id] || "";
-    inp.addEventListener("input", () => { answerDrafts[q.id] = inp.value; });
-    const go = h("button", { type: "button", class: "btn btn-sm", id: `ans-send-${q.id}`, text: tr("Send"),
-      onclick: (e) => { const v = inp.value.trim(); if (v) send({ answer: v }, e.currentTarget); else inp.focus(); } });
-    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go.click(); } });
-    box.append(h("span", { class: "answer-free" }, inp, go));
-    return box;
-  }
-  const DECIDED = tmap({ allow: N_("Allowed"), allow_session: N_("Allowed for this session"), deny: N_("Denied") });
-  const leftText = (ms) => (ms <= 0 ? tr("No answer in time: denied.") : ms < 60000 ? tr("Denied in {v} s without an answer.", { v: Math.ceil(ms / 1000) }) : tr("Denied in {v} min without an answer.", { v: Math.ceil(ms / 60000) }));
-  function approvalRow(a) {
-    const deadline = lastUpdate + (a.seconds_left || 0) * 1000;
-    const decide = async (decision, el) => {
-      el.disabled = true;
-      try { await api(`/api/approvals/${a.id}`, { decision }); toast(`${DECIDED[decision]}: ${a.tool}.`); load(); } catch (e) { el.disabled = false; toast(e.message, true); load(); }
-    };
-    return h("li", {}, h("span", { class: "id", text: a.tool || "tool" }), h("span", { class: "mono-wrap", text: a.target || "" }),
-      h("span", { class: "chip", text: a.request || "" }),
-      h("div", { class: "sub answer", role: "group", "aria-label": tr("Permission for {tool}", { tool: a.tool }) },
-        h("button", { type: "button", class: "btn btn-sm btn-primary", text: tr("Allow"), onclick: (e) => decide("allow", e.currentTarget) }),
-        a.rule ? h("button", { type: "button", class: "btn btn-sm", title: tr("Until the Claude Code session ends, without asking again: {rule}", { rule: a.rule }),
-          onclick: (e) => decide("allow_session", e.currentTarget) }, tr("Allow for this session")) : null,
-        h("button", { type: "button", class: "btn btn-sm btn-danger", text: tr("Deny"), onclick: (e) => decide("deny", e.currentTarget) })),
-      a.rule ? h("span", { class: "sub" }, tr("For this session it would allow: "), h("code", { text: a.rule })) : null,
-      h("span", { class: "sub approval-left", "data-deadline": String(deadline), text: leftText(deadline - Date.now()) }));
-  }
-  /** A permission an unattended run was denied because nobody answered (information only: the board does not act). */
+  const issueOf = (id) => ((data.backlog || {}).issues || {})[id];
+  /** A permission a round child was denied because nobody answered (information only: the board does not act). */
   function deniedRow(m) {
     return h("li", {}, h("span", { class: "id", text: m.tool || "tool" }), h("span", { class: "mono-wrap", text: m.target || "" }),
       m.agent ? h("span", { class: "chip", text: m.agent }) : null,
       h("span", { class: "sub", text: m.how === "auditor_skipped"
         ? tr("The auditor went on without it; the round did not stop.") : tr("Denied after the wait; what needed it stopped.") }),
-      m.rule ? h("span", { class: "sub" }, tr("Rule to allow it: "), h("code", { text: m.rule })) : null);
+      m.rule ? h("span", { class: "sub" }, tr("Rule to allow it: "), h("code", { text: m.rule })) : null,
+      h("span", { class: "sub" }, tr("Allow it in Claude Code with "), cmd("/dev-kit:settings")));
   }
-  setInterval(() => document.querySelectorAll(".approval-left[data-deadline]").forEach((el) => { el.textContent = leftText(Number(el.dataset.deadline) - Date.now()); }), 1000);
 
-  // ------------------------------------------------------------------ plan: drag tasks and issues between open milestones, add the next milestone, send the draft
-  let draft = { ops: [], base: null, serverErrors: [], buffer: false, frozen: false };
-  /** A milestone whose QA began: its scope is frozen; adding to it needs a confirmation (conventions §15). */
-  const isFrozen = (mid) => Boolean(((data.milestones || []).find((m) => m.id === mid) || {}).frozen_at);
-  const FROZEN_COST = (mid) => tr("This item enters the next QA round of {mid} and invalidates the audit of the files it touches.", { mid });
-  const MS_NUM = (id) => { const m = /^M(\d+)(?:\.(\d+))?$/.exec(String(id)); return m ? Number(m[1]) + Number(m[2] || 0) / 100 : 1e6; };
-  const REL_OPS = ["move_milestone", "new_release", "drop_release"];
-  const RELEASE_SIZE = [2, 5];  // milestones per release (conventions.md §4); dev_state.py checks it again
-  const cmpSeq = (a, b) => ((data.tasks[a].seq ?? 1e6) - (data.tasks[b].seq ?? 1e6)) || (Number(a.slice(2)) - Number(b.slice(2)));
-  const movableTask = (t) => t && t.status === "todo" && t.lane !== "hotfix";
-  const issueOf = (id) => ((data.backlog || {}).issues || {})[id];
-  const movableIssue = (i) => i && i.status === "open" && !["expedite", "change"].includes(i.class) && i.type !== "change";
-  /** The plan as the draft leaves it: open milestones (and the new one) with their cards, the issue queue, and the problems found. */
-  function planModel() {
-    const ms = data.milestones.filter((m) => m.gate === "pending").map((m) => ({ id: m.id, title: m.title, isNew: false }));
-    const cols = Object.fromEntries(ms.map((m) => [m.id, []]));
-    Object.keys(data.tasks).filter((id) => cols[data.tasks[id].milestone] && data.tasks[id].status !== "dropped").sort(cmpSeq)
-      .forEach((id) => cols[data.tasks[id].milestone].push({ kind: "task", id }));
-    const queued = Object.entries((data.backlog || {}).issues || {}).filter(([, i]) => i.status === "open")
-      .sort((a, b) => String(a[1].created_at || "").localeCompare(String(b[1].created_at || ""))).map(([id]) => ({ kind: "issue", id }));
-    const where = {};
-    Object.entries(cols).forEach(([m, l]) => l.forEach((c) => { where[c.id] = m; }));
-    const problems = [];
-    const take = (id) => {
-      if (where[id] === "queue") { const i = queued.findIndex((c) => c.id === id); return queued.splice(i, 1)[0]; }
-      const l = cols[where[id]] || [];
-      const i = l.findIndex((c) => c.id === id);
-      return i >= 0 ? l.splice(i, 1)[0] : null;
-    };
-    const put = (card, m, before) => {
-      const l = cols[m];
-      const i = before ? l.findIndex((c) => c.id === before) : -1;
-      if (i >= 0) l.splice(i, 0, card); else l.push(card);
-      where[card.id] = m;
-    };
-    queued.forEach((c) => { where[c.id] = "queue"; });
-    draft.ops.forEach((op, n) => {
-      const at = tr("Change {v}", { v: n + 1 });
-      if (REL_OPS.includes(op.op)) return;  // release changes are replayed by relModel
-      if (op.op === "new_milestone") { ms.push({ id: op.milestone, title: op.title, isNew: true }); cols[op.milestone] = []; return; }
-      if (!cols[op.milestone]) { problems.push(tr("{at}: {milestone} is no longer open", { at, milestone: op.milestone })); return; }
-      const id = op.op === "move_task" ? op.task : op.issue;
-      if (op.op === "move_task" && !movableTask(data.tasks[id])) { problems.push(tr("{at}: {id} is {v} now; undo this change", { at, id, v: stLabel((data.tasks[id] || {}).status || "gone") })); return; }
-      if (op.op === "schedule_issue" && !movableIssue(issueOf(id))) { problems.push(tr("{at}: {id} is not open any more; undo this change", { at, id })); return; }
-      const card = take(id);
-      if (card) put(card, op.milestone, op.before);
-    });
-    // a task never sits in an earlier milestone than a task it depends on (done ones do not count)
-    Object.entries(cols).forEach(([m, l]) => l.forEach((c) => {
-      if (c.kind !== "task") return;
-      (data.tasks[c.id].deps || []).forEach((d) => {
-        const dt = data.tasks[d];
-        if (dt && dt.status !== "done" && where[d] && where[d] !== "queue" && MS_NUM(where[d]) > MS_NUM(m)) problems.push(tr("{id} depends on {d}, which would be in a later milestone ({v})", { id: c.id, d, v: where[d] }));
-      });
-    }));
-    return { ms, cols, queued, where, problems };
+  // the tab says when something waits on the user: "(2) Needs you" in the title and a dot on the icon
+  let needsN = 0;
+  function updateAttention() {
+    if (!data || !data.ok) return;
+    const n = needsN;
+    document.title = n ? tr("({n}) Needs you · {project}", { n, project: data.project }) : tr("{project} · dev-kit board", { project: data.project });
+    const icon = document.querySelector('link[rel="icon"]');
+    const want = n ? "/assets/favicon-alert.svg" : "/assets/favicon.svg";
+    if (icon && icon.getAttribute("href") !== want) icon.setAttribute("href", want);
   }
-  function addOp(op) {
-    if (!draft.ops.length) draft.base = data.updated_at;
-    draft.ops.push(op);
-    draft.serverErrors = [];
-    draft.buffer = false;
-    renderPlan();
-  }
-  function moveCard(card, m, beforeId, model) {
-    const l = model.cols[m] || [];
-    // a draft anchors on tasks only: an issue scheduled in the draft has no task id yet
-    let before = null;
-    if (beforeId) {
-      const i = l.findIndex((c) => c.id === beforeId);
-      before = (l.slice(i).find((c) => c.kind === "task" && c.id !== card.id) || {}).id || null;
-    }
-    if (card.kind === "task") {
-      if (model.where[card.id] === m && !beforeId && l[l.length - 1] && l[l.length - 1].id === card.id) return;
-      addOp({ op: "move_task", task: card.id, milestone: m, ...(before ? { before } : {}) });
-    } else {
-      addOp({ op: "schedule_issue", issue: card.id, milestone: m, ...(before ? { before } : {}) });
-    }
-    toast(tr("{id} → {m}{v}. Send the draft when it is ready.", { id: card.id, m, v: before ? tr(" (before {before})", { before }) : "" }));
-  }
-  function describeOp(op) {
-    if (op.op === "new_milestone") return tr("New milestone {milestone} · {title}", { milestone: op.milestone, title: op.title });
-    if (op.op === "move_milestone") return `${op.milestone} → ${op.release}`;
-    if (op.op === "new_release") return tr("New release {release}{v}", { release: op.release, v: op.title ? ` · ${op.title}` : "" });
-    if (op.op === "drop_release") return tr("Remove release {release}", { release: op.release });
-    if (op.op === "move_task") return `${op.task} → ${op.milestone}${op.before ? tr(" (before {before})", { before: op.before }) : ""}`;
-    if (op.op === "schedule_issue") return `${op.issue} → ${op.milestone}${op.before ? tr(" (before {before})", { before: op.before }) : ""}${op.force ? tr(" · over the buffer") : ""}${op.confirm_frozen ? tr(" · confirmed after the freeze") : ""}`;
-    if (op.op === "set_issue_status") return `${op.issue} → ${op.status}`;
-    return op.op;
-  }
-  let dragging = null;
-  function planCard(c, model, m) {
-    const isTask = c.kind === "task";
-    const x = isTask ? data.tasks[c.id] : issueOf(c.id);
-    if (!x) return null;
-    const movable = isTask ? movableTask(x) : movableIssue(x);
-    const targets = model.ms.map((t) => t.id);
-    const sel = movable ? h("select", { class: "move-sel", "aria-label": tr("Move {id}", { id: c.id }), id: `mv-${c.id}` },
-      h("option", { value: "", text: tr("Move…") }),
-      isTask && m ? [h("option", { value: "up", text: tr("↑ Up") }), h("option", { value: "down", text: tr("↓ Down") })] : null,
-      targets.filter((t) => t !== m).map((t) => h("option", { value: `to:${t}`, text: tr("To {t}", { t }) }))) : null;
-    if (sel) sel.addEventListener("change", () => {
-      const v = sel.value;
-      sel.value = "";
-      if (!v) return;
-      const l = model.cols[m] || [];
-      const i = l.findIndex((k) => k.id === c.id);
-      if (v === "up" && i > 0) moveCard(c, m, l[i - 1].id, model);
-      else if (v === "down" && i >= 0 && i < l.length - 1) moveCard(c, m, l[i + 2] ? l[i + 2].id : null, model);
-      else if (v.startsWith("to:")) moveCard(c, v.slice(3), null, model);
-      requestAnimationFrame(() => { const el = $(`mv-${c.id}`); if (el) el.focus(); });
-    });
-    const el = h("li", { class: `pcard ${isTask ? `s-${x.status}` : "issue"}${movable ? " movable" : " locked"}`, "data-id": c.id, draggable: movable ? "true" : null,
-      title: movable ? tr("Drag to another place, or use Move…") : isTask ? tr("{v}: only tasks not started move", { v: stLabel(x.status) }) : tr("{class}: goes through /dev-kit:issue", { class: x.class }) },
-      h("div", { class: "tcard-top" }, h("span", { class: "tid", text: c.id }),
-        isTask ? h("span", { class: "chip", text: x.type }) : h("span", { class: `chip${x.class === "expedite" ? " lane-hotfix" : ""}`, text: x.class || "issue" }),
-        isTask && x.status !== "todo" ? h("span", { class: `chip st-chip s-${x.status}`, text: stLabel(x.status) }) : null,
-        isTask && x.lane ? h("span", { class: `chip lane-${x.lane}`, text: x.lane }) : null,
-        !isTask && x.severity ? h("span", { class: "chip", text: x.severity }) : null),
-      h("div", { class: "tcard-title", text: x.title || "", title: x.title || null }),
-      sel);
-    if (movable) {
-      el.addEventListener("dragstart", (e) => { dragging = c; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.id); el.classList.add("dragging"); });
-      el.addEventListener("dragend", () => { dragging = null; el.classList.remove("dragging"); document.querySelectorAll(".drop-before").forEach((n) => n.classList.remove("drop-before")); });
-    }
-    return el;
-  }
-  function dropZone(list, m, model) {
-    const target = (e) => [...list.querySelectorAll(".pcard:not(.dragging)")].find((n) => { const r = n.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
-    list.addEventListener("dragover", (e) => {
-      if (!dragging || (m === "queue" && dragging.kind === "task")) return;
-      e.preventDefault();
-      list.querySelectorAll(".drop-before").forEach((n) => n.classList.remove("drop-before"));
-      const t = target(e);
-      if (t) t.classList.add("drop-before");
-      list.classList.add("drop-on");
-    });
-    list.addEventListener("dragleave", (e) => { if (!list.contains(e.relatedTarget)) { list.classList.remove("drop-on"); list.querySelectorAll(".drop-before").forEach((n) => n.classList.remove("drop-before")); } });
-    list.addEventListener("drop", (e) => {
-      e.preventDefault();
-      list.classList.remove("drop-on");
-      const card = dragging;
-      if (!card) return;
-      dragging = null;  // the drop re-renders the plan; renderPlan waits while a drag is in progress
-      const t = target(e);
-      if (m === "queue") {
-        // back to the queue: undo the scheduling of this issue (the latest one)
-        const i = draft.ops.map((o) => o.issue).lastIndexOf(card.id);
-        if (i >= 0) { draft.ops.splice(i, 1); renderPlan(); toast(tr("{id} back in the queue.", { id: card.id })); }
-        return;
-      }
-      moveCard(card, m, t ? t.dataset.id : null, model);
-    });
-  }
-  // ---- plan, releases mode: drag whole milestones between the planned releases (R1, R2, ...) of plan.md
-  let planMode = "tasks";
-  let newRelTitle = "";
-  const msTasks = (id) => Object.values(data.tasks).filter((t) => t.milestone === id && t.status !== "dropped");
-  /** The planned releases as the draft leaves them: each with its milestones in number order, and the problems found. */
-  function relModel() {
-    const rels = relPlan().map((r) => ({ id: r.id, title: r.title, status: r.status, ms: r.milestones.slice().sort((a, b) => MS_NUM(a) - MS_NUM(b)), isNew: false }));
-    const touched = new Set();
-    const problems = [];
-    draft.ops.filter((o) => REL_OPS.includes(o.op)).forEach((op, n) => {
-      if (op.op === "new_release") { rels.push({ id: op.release, title: op.title || "", status: "in_progress", ms: [], isNew: true }); touched.add(op.release); return; }
-      if (op.op === "drop_release") { const i = rels.findIndex((r) => r.id === op.release); if (i >= 0) rels.splice(i, 1); touched.delete(op.release); return; }
-      const from = rels.find((r) => r.ms.includes(op.milestone)), to = rels.find((r) => r.id === op.release);
-      const m = data.milestones.find((x) => x.id === op.milestone);
-      if (!from || !to || !m || m.gate !== "pending" || from.status !== "in_progress" || to.status !== "in_progress") {
-        problems.push(tr("{milestone} → {release} no longer fits the plan; undo this change", { milestone: op.milestone, release: op.release }));
-        return;
-      }
-      from.ms.splice(from.ms.indexOf(op.milestone), 1);
-      to.ms.push(op.milestone);
-      to.ms.sort((a, b) => MS_NUM(a) - MS_NUM(b));
-      touched.add(from.id); touched.add(to.id);
-    });
-    rels.filter((r) => touched.has(r.id) && (r.ms.length < RELEASE_SIZE[0] || r.ms.length > RELEASE_SIZE[1]))
-      .forEach((r) => problems.push(tr("{id} would hold {v}; a release holds {v2} to {v3}", { id: r.id, v: plural(r.ms.length, "milestone"), v2: RELEASE_SIZE[0], v3: RELEASE_SIZE[1] })));
-    return { rels, problems };
-  }
-  const relLocked = (r) => r.status !== "in_progress";
-  function msCard(mid, rel, model) {
-    const m = data.milestones.find((x) => x.id === mid);
-    if (!m) return null;
-    const ts = msTasks(mid);
-    const running = ts.some((t) => t.status === "in_progress");
-    const movable = m.gate === "pending" && !relLocked(rel) && !running;
-    const why = m.gate !== "pending" ? tr("its gate is {gate}", { gate: m.gate }) : relLocked(rel) ? `${rel.id} is ${REL_WORD[rel.status] || rel.status}` : running ? tr("a task is running") : "";
-    const targets = model.rels.filter((r) => r.id !== rel.id && !relLocked(r));
-    const sel = movable && targets.length ? h("select", { class: "move-sel", "aria-label": tr("Move {mid} to another release", { mid }), id: `mv-${mid}` },
-      h("option", { value: "", text: tr("Move…") }), targets.map((r) => h("option", { value: r.id, text: tr("To {id}", { id: r.id }) }))) : null;
-    if (sel) sel.addEventListener("change", () => {
-      const v = sel.value;
-      sel.value = "";
-      if (v) { addOp({ op: "move_milestone", milestone: mid, release: v }); toast(tr("{mid} → {v}. Send the draft when it is ready.", { mid, v })); }
-      requestAnimationFrame(() => { const el = $(`mv-${mid}`); if (el) el.focus(); });
-    });
-    const el = h("li", { class: `pcard${movable ? " movable" : " locked"}${m.gate === "pending" ? "" : " s-done"}`, "data-id": mid, draggable: movable ? "true" : null,
-      title: movable ? tr("Drag to another release, or use Move…") : tr("Stays here: {why}", { why }) },
-      h("div", { class: "tcard-top" }, h("span", { class: "tid", text: mid }),
-        h("span", { class: "chip", text: m.gate === "pending" ? plural(ts.length, "task") : tr("gate {v}", { v: m.gate }) }),
-        msTook(m) ? h("span", { class: "took", title: msTook(m).title, text: tr("took {v}", { v: msTook(m).text }) }) : null),
-      h("div", { class: "tcard-title", text: m.title || mid, title: m.title || null }), sel);
-    if (movable) {
-      el.addEventListener("dragstart", (e) => { dragging = { kind: "ms", id: mid, from: rel.id }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", mid); el.classList.add("dragging"); });
-      el.addEventListener("dragend", () => { dragging = null; el.classList.remove("dragging"); });
-    }
-    return el;
-  }
-  function relDropZone(list, rel) {
-    if (relLocked(rel)) return;
-    const ok = () => dragging && dragging.kind === "ms" && dragging.from !== rel.id;
-    list.addEventListener("dragover", (e) => { if (!ok()) return; e.preventDefault(); list.classList.add("drop-on"); });
-    list.addEventListener("dragleave", (e) => { if (!list.contains(e.relatedTarget)) list.classList.remove("drop-on"); });
-    list.addEventListener("drop", (e) => {
-      e.preventDefault();
-      list.classList.remove("drop-on");
-      if (!ok()) return;
-      const card = dragging;
-      dragging = null;
-      addOp({ op: "move_milestone", milestone: card.id, release: rel.id });
-      toast(tr("{id} → {id2}. Send the draft when it is ready.", { id: card.id, id2: rel.id }));
-    });
-  }
-  /** The lanes of releases mode, and the one to create the next release. */
-  function relColumns() {
-    const model = relModel();
-    const lanes = model.rels.map((r) => {
-      const list = h("ol", { class: "pcol-list", "data-key": `rel-${r.id}`, "aria-label": `${r.id} ${r.title}, ${plural(r.ms.length, "milestone")}` }, r.ms.map((m) => msCard(m, r, model)).filter(Boolean));
-      if (!r.ms.length) list.append(h("li", { class: "col-empty", text: relLocked(r) ? "—" : tr("Drop milestones here") }));
-      relDropZone(list, r);
-      const canDrop = !relLocked(r) && !r.ms.length;
-      return h("section", { class: `pcol rel${r.isNew ? " new" : ""}${relLocked(r) ? " locked" : ""}`, "aria-label": `${r.id} ${r.title}` },
-        h("div", { class: "col-head" }, h("strong", { text: r.id }), r.title && r.title !== r.id ? h("span", { class: "pcol-title", text: r.title, title: r.title }) : null,
-          h("span", { class: "count", text: String(r.ms.length) })),
-        h("p", { class: "card-sub", text: r.isNew ? tr("New in this draft") : REL_WORD[r.status] || r.status }), list,
-        canDrop ? h("button", { type: "button", class: "link-btn", text: tr("Remove {id}", { id: r.id }), onclick: () => addOp({ op: "drop_release", release: r.id }) }) : null);
-    });
-    const next = `R${Math.max(0, ...model.rels.map((r) => Number(r.id.slice(1)))) + 1}`;
-    const inp = h("input", { type: "text", id: "new-rel-title", maxlength: "80", placeholder: tr("Title of {next} (optional)", { next }), "aria-label": tr("Title of the new release {next}", { next }) });
-    inp.value = newRelTitle;
-    inp.addEventListener("input", () => { newRelTitle = inp.value; });
-    const add = () => { const v = inp.value.trim(); newRelTitle = ""; addOp({ op: "new_release", release: next, ...(v ? { title: v } : {}) }); toast(tr("{next} added to the draft: drag its milestones in.", { next })); };
-    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } });
-    lanes.push(h("section", { class: "pcol add" }, h("div", { class: "col-head" }, h("strong", { text: `＋ ${next}` })),
-      h("p", { class: "card-sub", text: tr("The next release, after the others. Create it, then drag milestones into it. A release holds 2 to 5 milestones.") }),
-      h("div", { class: "answer-free" }, inp, h("button", { type: "button", class: "btn btn-sm", text: tr("Add"), onclick: add }))));
-    return { cols: lanes, problems: model.problems };
-  }
-  let newMsTitle = "";
-  const doneOpen = new Set();  // plan columns whose done tasks are expanded, kept across live updates
-  function renderPlan() {
-    const box = $("planner");
-    if (!planShown() || !data || !data.ok) { box.hidden = true; return; }
-    if (dragging) return;  // a live update in the middle of a drag would pull the card from under the pointer
-    box.hidden = false;
-    // the plan is rebuilt on every update: keep where the user had scrolled to
-    const lanes = box.querySelector(".plan-cols");
-    const scrollX = lanes ? lanes.scrollLeft : 0;
-    const scrollY = {};
-    box.querySelectorAll(".pcol-list[data-key]").forEach((l) => { scrollY[l.dataset.key] = l.scrollTop; });
-    const model = planModel();
-    const column = (key, title, sub, cards, extra, isNew) => {
-      // done tasks never move: they fold away under the open ones
-      const done = cards.filter((c) => c.kind === "task" && data.tasks[c.id].status === "done");
-      const open = cards.filter((c) => !done.includes(c));
-      const list = h("ol", { class: "pcol-list", "data-key": key, "aria-label": `${title}, ${plural(open.length, "open card")}` }, open.map((c) => planCard(c, model, key === "queue" ? null : key)).filter(Boolean));
-      if (!open.length) list.append(h("li", { class: "col-empty", text: key === "queue" ? tr("No open issue") : tr("Drop tasks or issues here") }));
-      dropZone(list, key, model);
-      let folded = null;
-      if (done.length) {
-        folded = h("details", { class: "pcol-done" }, h("summary", { text: tr("{v} done", { v: plural(done.length, "task") }) }),
-          h("ol", { class: "pcol-list done-list", "aria-label": tr("{title}, done tasks", { title }) }, done.map((c) => planCard(c, model, key)).filter(Boolean)));
-        folded.open = doneOpen.has(key);
-        folded.addEventListener("toggle", () => { if (folded.open) doneOpen.add(key); else doneOpen.delete(key); });
-      }
-      return h("section", { class: `pcol${key === "queue" ? " queue" : ""}${isNew ? " new" : ""}`, "aria-label": key === "queue" ? tr("Issue queue") : `${key} ${title}` },
-        h("div", { class: "col-head" }, h("strong", { text: key === "queue" ? tr("Issue queue") : key }), key === "queue" || title === key ? null : h("span", { class: "pcol-title", text: title, title }),
-          h("span", { class: "count", title: done.length ? tr("{open_n} open, {done_n} done", { open_n: open.length, done_n: done.length }) : null, text: !done.length ? String(open.length) : open.length ? `${open.length} · ${done.length} ✓` : `${done.length} ✓` })),
-        sub ? h("p", { class: "card-sub", text: sub }) : null, list, folded, extra);
-    };
-    const newNum = `M${Math.floor(Math.max(0, ...data.milestones.map((m) => MS_NUM(m.id)), ...draft.ops.filter((o) => o.op === "new_milestone").map((o) => MS_NUM(o.milestone)))) + 1}`;
-    const hasNew = draft.ops.some((o) => o.op === "new_milestone");
-    const b = (data.backlog || {}).buffer;
-    const hasRels = relPlan().length > 0;
-    if (!hasRels) planMode = "tasks";
-    const rm = planMode === "releases" ? relColumns() : null;
-    const cols = rm ? rm.cols : [column("queue", tr("Issue queue"), tr("Expedite and change issues go through /dev-kit:issue."), model.queued)]
-      .concat(model.ms.slice().map((m) => column(m.id, m.title || m.id, m.isNew ? tr("New in this draft") : isFrozen(m.id) ? tr("🔒 Frozen for QA — adding needs your confirmation") : b && b.milestone === m.id ? bufferText(b) : null, model.cols[m.id] || [], null, m.isNew)));
-    if (!hasNew && !rm) {
-      const inp = h("input", { type: "text", id: "new-ms-title", maxlength: "80", placeholder: tr("Title of {newNum}", { newNum }), "aria-label": tr("Title of the new milestone {newNum}", { newNum }) });
-      inp.value = newMsTitle;
-      inp.addEventListener("input", () => { newMsTitle = inp.value; });
-      const add = () => { const v = inp.value.trim(); if (!v) { inp.focus(); return; } newMsTitle = ""; addOp({ op: "new_milestone", milestone: newNum, title: v }); toast(tr("{newNum} added to the draft.", { newNum })); };
-      inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } });
-      cols.push(h("section", { class: "pcol add" }, h("div", { class: "col-head" }, h("strong", { text: `＋ ${newNum}` })),
-        h("p", { class: "card-sub", text: tr("The next milestone, after the others. Name it, then drag cards into it.") }),
-        h("div", { class: "answer-free" }, inp, h("button", { type: "button", class: "btn btn-sm", text: tr("Add"), onclick: add }))));
-    }
-    const errors = model.problems.concat(relModel().problems, draft.serverErrors);
-    const modeBar = hasRels ? h("div", { class: "plan-mode", role: "group", "aria-label": tr("What to plan") },
-      [["tasks", tr("Tasks and issues")], ["releases", tr("Releases")]].map(([k, label]) => h("button", { type: "button", class: "btn btn-sm", "aria-pressed": String(planMode === k), text: label,
-        onclick: () => { planMode = k; renderPlan(); } }))) : null;
-    const sendBtn = h("button", { type: "button", class: "btn btn-primary", id: "plan-send", disabled: !draft.ops.length || errors.some((x) => !draft.serverErrors.includes(x)) ? true : null, text: tr("Send to Claude Code"),
-      onclick: async (e) => {
-        e.currentTarget.disabled = true;
-        const ops = draft.ops.map((o) => (o.op === "schedule_issue" && draft.buffer ? { ...o, force: true } : o))
-          .map((o) => (draft.frozen && (o.op === "schedule_issue" || o.op === "move_task") && isFrozen(o.milestone) ? { ...o, confirm_frozen: true } : o));
-        try {
-          await queue("plan_draft", { ops, base: draft.base || data.updated_at }, true);
-          draft = { ops: [], base: null, serverErrors: [], buffer: false, frozen: false };
-          renderPlan();
-        } catch (err) {
-          draft.serverErrors = err.errors || [err.message];
-          renderPlan();
-        }
-      } });
-    const overBuffer = draft.serverErrors.some((x) => /issue buffer/.test(x));
-    const frozenHit = draft.serverErrors.find((x) => /is frozen since its QA began/.test(x));
-    const frozenM = frozenHit ? (/(M\d+(?:\.\d+)?) is frozen/.exec(frozenHit) || [])[1] : null;
-    fill(box, modeBar,
-      h("div", { class: "plan-cols" }, cols),
-      h("aside", { class: "plan-draft", "aria-label": tr("Draft of the plan") },
-        h("div", { class: "list-title" }, tr("Draft"), draft.ops.length ? h("span", { class: "chip", text: String(draft.ops.length) }) : null),
-        draft.ops.length ? h("ol", { class: "td-list" }, draft.ops.map((o) => h("li", { text: describeOp(o) })))
-          : h("p", { class: "card-sub", text: tr("Drag tasks not started and open issues between open milestones, or milestones between releases, or use Move… on a card. Nothing changes until you send the draft; Claude Code applies it with /dev-kit:worker.") }),
-        errors.length ? h("ul", { class: "td-list plan-errors", role: "alert" }, errors.map((x) => h("li", { text: x }))) : null,
-        overBuffer ? h("button", { type: "button", class: "link-btn", text: tr("Go over the issue buffer and send again"), onclick: () => { draft.buffer = true; draft.serverErrors = []; renderPlan(); $("plan-send").click(); } }) : null,
-        frozenM ? h("p", { class: "card-sub bad", text: FROZEN_COST(frozenM) }) : null,
-        frozenM ? h("button", { type: "button", class: "link-btn", text: tr("Confirm adding to {frozenM} and send again", { frozenM }), onclick: () => { draft.frozen = true; draft.serverErrors = []; renderPlan(); $("plan-send").click(); } }) : null,
-        h("div", { class: "plan-actions" },
-          h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: tr("Undo"), onclick: () => { draft.ops.pop(); draft.serverErrors = []; renderPlan(); } }),
-          h("button", { type: "button", class: "btn", disabled: !draft.ops.length ? true : null, text: tr("Discard"), onclick: () => { draft = { ops: [], base: null, serverErrors: [], buffer: false, frozen: false }; renderPlan(); } }),
-          sendBtn)));
-    box.querySelector(".plan-cols").scrollLeft = scrollX;
-    box.querySelectorAll(".pcol-list[data-key]").forEach((l) => { if (scrollY[l.dataset.key]) l.scrollTop = scrollY[l.dataset.key]; });
-  }
-  /** The plan view (drag, draft, send) has a screen of its own, opened from Planning while the board takes requests. */
-  const planShown = () => actionsOn() && replanOpen && shownPhase() === "planning";
+
   /** Tabs and panels of the construction view: the task board or the QA of the milestone. */
   function applyView() {
     if (!VIEWS.includes(view)) view = "tasks";
@@ -3179,9 +2392,9 @@
   $("view-switch").addEventListener("click", (e) => { const b = e.target.closest("[data-view]"); if (b) setView(b.dataset.view, false); });
   tabKeys($("view-switch"), VIEWS, () => view, (v) => setView(v, true));
 
-  // ------------------------------------------------------------------ drawers (Needs you, Requests, Activity) and the metrics modal
-  const ndlg = $("needs-dialog"), rdlg = $("req-dialog"), adlg = $("act-dialog"), mdlg = $("metrics-dialog");
-  const DRAWERS = [ndlg, rdlg, adlg, mdlg];
+  // ------------------------------------------------------------------ drawers (Needs you, Activity) and the metrics modal
+  const ndlg = $("needs-dialog"), adlg = $("act-dialog"), mdlg = $("metrics-dialog");
+  const DRAWERS = [ndlg, adlg, mdlg];
   const drawerFrom = new Map();
   /** One drawer at a time; closing it gives the focus back to what opened it. */
   function openDrawer(d) {
@@ -3191,15 +2404,13 @@
     if (d.showModal) d.showModal(); else d.setAttribute("open", "");
   }
   const closeDrawers = () => DRAWERS.forEach((x) => { if (x.open) { drawerFrom.delete(x); x.close(); } });
-  [[ndlg, "needs-close"], [rdlg, "req-close"], [adlg, "act-close"], [mdlg, "metrics-close"]].forEach(([d, c]) => {
+  [[ndlg, "needs-close"], [adlg, "act-close"], [mdlg, "metrics-close"]].forEach(([d, c]) => {
     $(c).addEventListener("click", () => d.close());
     d.addEventListener("click", (e) => { if (e.target === d) d.close(); });  // a click on the backdrop
     d.addEventListener("close", () => { const o = drawerFrom.get(d); drawerFrom.delete(d); if (o && o.isConnected) o.focus({ preventScroll: true }); });
   });
   $("needs-btn").addEventListener("click", () => openDrawer(ndlg));
-  $("req-btn").addEventListener("click", () => openDrawer(rdlg));
   $("act-btn").addEventListener("click", () => openDrawer(adlg));
-  $("replan-back").addEventListener("click", () => { replanOpen = false; render(); const b = $("replan-btn"); if (b) b.focus(); });
 
   // metrics: burndown, velocity and gates, drawn when the modal opens (the charts measure their box)
   const INS_KEY = "board-metrics-v1";
@@ -3234,25 +2445,23 @@
     banner.hidden = true;
     const m = currentMilestone();
     const ph = shownPhase();
-    const panel = planShown() ? "replan" : ph;
+    const panel = ph;
     syncClock();
     keepFocus(() => {
-      // global: the lane tabs, Needs you, requests and activity; below, only the screen of the lane shown
-      ["map", "arch", ...LANES, "replan"].forEach((k) => { $(`phase-${k}`).hidden = k !== panel; });
+      // global: the lane tabs, Needs you and activity; below, only the screen of the lane shown
+      ["map", "arch", ...LANES].forEach((k) => { $(`phase-${k}`).hidden = k !== panel; });
       document.body.dataset.screen = panel;
-      renderImpediments(); renderHeader(); renderRequests(); renderFeed();
+      renderImpediments(); renderHeader(); renderFeed();
       applyView();
       if (panel === "map") renderMap();
       else if (panel === "arch") renderArch();
       else if (panel === "conception") renderConception();
       else if (panel === "planning") renderPlanning();
-      else if (panel === "replan") renderPlan();
       else if (panel === "construction") {
         renderTabs(); renderMilestone(m); renderStages(m); autoQaView(m);
         if (view === "qa") renderQaPanel(m); else renderKanban(m);
       } else if (panel === "releases") renderReleasesPanel();
       else renderStable();
-      if (panel !== "replan") $("planner").hidden = true;
       renderMetrics();
     });
     updateAttention();
@@ -3303,8 +2512,8 @@
   function tickUpdated() {
     if (!data || !data.ok) { $("updated").textContent = ""; return; }
     const runs = skillRuns(), parts = [];
-    const orch = runs.find((r) => ["autopilot", "worker"].includes(r.skill));
-    const work = [...runs].reverse().find((r) => !["autopilot", "worker", "board"].includes(r.skill));
+    const orch = runs.find((r) => r.skill === "autopilot");
+    const work = [...runs].reverse().find((r) => !["autopilot", "board"].includes(r.skill));
     if (orch) parts.push(tr("{v} for {d}", { v: orch.skill, d: dur((Date.now() - parseT(orch.started_at)) / 1000) }));
     if (work) parts.push(tr("{v} for {d}", { v: actionLabel(runCmd(work)).replace(/^Run /, ""), d: dur((Date.now() - parseT(work.started_at)) / 1000) }));
     const last = Math.max(0, ...[...(data.log || []), ...(data.feed || [])].map((r) => parseT(r.at)).filter(Number.isFinite));
@@ -3605,7 +2814,7 @@
     else if (!mode) docStack = [];
     docCur = { path, anchor: anchor || null };
     $("doc-title").textContent = DOC_NAME[path] || path.split("/").pop().replace(/\.md$/i, "");
-    fill($("doc-path"), h("code", { text: `.dev/${path}` }), copyBtn(`.dev/${path}`));
+    fill($("doc-path"), h("code", { text: `.dev/${path}` }));
     $("doc-back").hidden = !docStack.length;
     fill($("doc-body"), h("p", { class: "card-sub", text: tr("Loading…") }));
     if (!ddlg.open) (ddlg.showModal ? ddlg.showModal() : ddlg.setAttribute("open", ""));

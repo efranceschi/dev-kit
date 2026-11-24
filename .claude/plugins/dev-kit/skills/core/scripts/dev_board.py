@@ -8,14 +8,13 @@ Subcommands
           --port N (preferred port, default 8765; falls back to a free one) · --no-open · --open (force a tab
           even when the board was already running) · --idle-min N (auto-stop after N idle minutes, default 120)
           · --host IP (listen address, default 127.0.0.1; 0.0.0.0 or :: shares it with the network, see below;
-          a running board on another address is restarted) · --actions on|off (requests to Claude Code from the
-          page; on by default) · --trusted-host NAME (a host name the board also answers to, for a reverse proxy;
+          a running board on another address is restarted) · --trusted-host NAME (a host name the board also answers to, for a reverse proxy;
           repeatable, remembered for the project in .dev/run/board-config.json; "none" forgets them)
   stop    stop the board of this project (token-authenticated shutdown, then SIGTERM, then SIGKILL)
   status  print whether the board is running, its URL and PID (--json)
-  pane    what runs now, for the terminal status pane (hooks/status-pane.tsx): the board, the Autopilot (where it
-          runs, its round, its tasks and last action), the agents at work and what they work on, the requests and
-          the permission prompts waiting on the board (--json; read-only, no server needed)
+  pane    what runs now, for the terminal status pane (hooks/status-pane.tsx): the board, the Autopilot (running
+          in a session, its headless round, its tasks and last action) and the agents at work and what they work on
+          (--json; read-only, no server needed)
   serve   internal: the server process itself (spawned by start)
 
 One board per project: .dev/run/board.json holds {pid, port, token, url, root, started_at}; a lock file
@@ -23,16 +22,15 @@ One board per project: .dev/run/board.json holds {pid, port, token, url, root, s
 is alive, its command line is this script serving this root, and /api/ping on the port answers with the
 same token fingerprint. Anything else is a stale record and is removed.
 
-The server never writes the project's state, plan or questions: it reads .dev/ and writes only in .dev/run/ - its
-own files and, with actions on, requests to Claude Code through dev_worker.py (the request queue, the modes of the
-executor and the decisions on permission requests). The Claude Code session that executes the requests is the only
-one that changes the project. Every POST needs the per-run token (X-Board-Token), an allowed Host and, when sent,
-the page's own Origin; requests are JSON of at most 16 KB.
+The board is read-only: it reads .dev/ and writes only its own files in .dev/run/ (board.json, board.lock,
+board.log, board-config.json). It never changes the project and never starts Claude Code; every decision and every
+run happens in a Claude Code session. Its only POST is /api/shutdown, which needs the per-run token
+(X-Board-Token), an allowed Host and, when sent, the page's own Origin.
 By default it binds 127.0.0.1 and answers Host headers that are localhost or an IP literal (tunnels, forwards),
 refusing host names (DNS rebinding). With --host on a non-loopback address the board is "exposed": every
 request except /api/ping needs the access key (the per-run token) from ?key= - traded for an HttpOnly,
 SameSite=Strict cookie - so host names are accepted there. It is plain HTTP: for trusted networks only.
-The board is a single-user tool: whoever can open it can queue requests for Claude Code. Behind a reverse proxy
+Whoever can open a shared board sees the project and can stop the board. Behind a reverse proxy
 (which brings its own TLS and login), name the proxy's host with --trusted-host: that name alone is accepted in
 Host and Origin, so the DNS-rebinding protection stays for every other name.
 
@@ -66,7 +64,6 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))  # -I drops the script dir
 import dev_state as ds  # noqa: E402
-import dev_worker as dw  # noqa: E402
 import dev_diagram as dg  # noqa: E402
 
 ASSETS = SCRIPTS.parent / "shared" / "board"
@@ -104,9 +101,7 @@ def code_id() -> str:
 
 CODE_ID = code_id()
 WATCHED = ("state.json", "log.md", "open-questions.md", "costs/summary.json", "costs/milestones.json", "plan.md", "run/agents.jsonl",
-           "telemetry.jsonl", "run/inbox", "run/worker.json", "run/worker-mode.json", "run/approvals", "run/questions")
-REQ_PATH = re.compile(r"^/api/inbox/([PR]-\d{3,6})/cancel$")
-APPROVAL_PATH = re.compile(r"^/api/approvals/(A-[0-9a-f]{8,32})$")
+           "telemetry.jsonl", "run/questions")
 KIT_VERSION = ds.tel.kit_version()  # read once: it is the version of the code this server is actually running
 AGENT_STALE_S = 3600
 LINK_WINDOW_S = 30  # a hook start and a skill spawn of the same agent type this close may be the same agent
@@ -389,12 +384,15 @@ def open_questions(text: str) -> list[dict]:
 
 
 def question_options(root: Path, qs: list[dict]) -> list[dict]:
-    """Open questions with the answers the board offers (written by add-question --options)."""
+    """Open questions with the answers they offer (written by add-question --options), shown with the question."""
     for q in qs:
-        side = dw._read(root / ".dev" / "run" / "questions" / f"{q['id']}.json") or {}
+        try:
+            side = json.loads((root / ".dev" / "run" / "questions" / f"{q['id']}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            side = {}
+        side = side if isinstance(side, dict) else {}
         opts = [str(o) for o in side.get("options") or []][:6]
         q["options"], q["recommended"] = opts, side.get("recommended") if side.get("recommended") in opts else None
-        q["request"] = side.get("request")
     return qs
 
 
@@ -708,11 +706,6 @@ def open_runs(events: list[dict], now: float) -> list[dict]:
     return [o for o in open_ if now - _ts(o["started_at"]) < RUN_STALE_S]
 
 
-def manual_autopilot(root: Path) -> bool:
-    """/dev-kit:autopilot runs in a session of the user's (logged, not ended, not the board's own run)."""
-    return any(r["skill"] == "autopilot" and r.get("mode") != "board" for r in open_runs(_task_events(root), time.time()))
-
-
 def live_agents(root: Path, qa_default: str | None = None, tasks: dict | None = None) -> dict:
     """Running agents and the board node (task, or QA gate of a milestone) each one works on.
 
@@ -944,6 +937,17 @@ def user_feed(log_rows: list[dict], events: list[dict], tasks: dict) -> list[dic
     return sorted(rows, key=lambda r: _ts(r.get("at")), reverse=True)[:LOG_TAIL]
 
 
+def denied_permissions(root: Path) -> list[dict]:
+    """Permissions a round child was denied because nobody answered (dev_perms.py), for Needs you: information
+    only, cut to the tool, the agent, how it ended, the rule that would allow it and 120 characters of the target."""
+    try:
+        import dev_perms
+        return [{k: m.get(k) for k in ("key", "tool", "count", "how", "rule", "agent")} | {"target": str(m.get("target") or "")[:120]}
+                for m in dev_perms.misses(root)[:20]]
+    except Exception:  # noqa: BLE001 - a broken record never breaks the board
+        return []
+
+
 def build_state(root: Path, board: dict | None = None) -> dict:
     store = ds.Store(root)
     if not store.exists():
@@ -1015,7 +1019,6 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "progress": store.progress(),
         "current_milestone": ds.current_milestone(store),
         "next": {"task": nxt, "reason": why, "command": ds.next_command(store)},
-        "inbox": {**dw.snapshot(root), "actions": bool((board or {}).get("actions"))},
         "milestones": milestones, "tasks": tasks,
         "reviews": s.get("reviews") or {},
         "quality": ds.quality_cfg(store),
@@ -1023,6 +1026,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "backlog": backlog,
         "questions": [{**q, "task": ((s.get("question_meta") or {}).get(q["id"]) or {}).get("task")}
                       for q in question_options(root, open_questions(_read(store.dev / "open-questions.md")))],
+        "denied": denied_permissions(root),
         "log": sorted(log_tail(_read(store.dev / "log.md")) + live_feed(events), key=lambda r: _ts(r.get("at")), reverse=True)[:LOG_TAIL],
         "feed": user_feed(log_tail(_read(store.dev / "log.md"), 400), events, tasks),
         "costs": costs,
@@ -1050,44 +1054,9 @@ def build_state(root: Path, board: dict | None = None) -> dict:
                       for step, art in ds.STEP_ARTIFACT.items()},
         "agents": agents, "agent_roles": AGENT_ROLES,
         "kit": KIT_VERSION,
-        "board": {k: board.get(k) for k in ("pid", "port", "url", "started_at", "host", "exposed", "actions")} if board else None,
+        "board": {k: board.get(k) for k in ("pid", "port", "url", "started_at", "host", "exposed")} if board else None,
         "generated_at": ds.now(),
     }
-
-
-def release_decision_errors(root: Path, args: object) -> list[str]:
-    """A release decision is queued only for a release waiting for approval, once (read-only check)."""
-    rid = args.get("release") if isinstance(args, dict) else None
-    if not isinstance(rid, str) or not re.fullmatch(r"R\d{1,3}", rid):
-        return []  # dw.validate reports the field
-    store = ds.Store(root)
-    try:
-        store.load()
-    except SystemExit:
-        return ["the project state could not be read"]
-    st = ds.release_status(store, rid)
-    if st["status"] != "awaiting_approval":
-        return [f"{rid} is {st['status'].replace('_', ' ')}, not waiting for your approval"]
-    if any(x.get("action") == "release_decision" and (x.get("args") or {}).get("release") == rid
-           and x.get("status") in ("pending", "running", "needs_input") for x in dw.items(root)):
-        return [f"a decision on {rid} is already queued"]
-    return []
-
-
-def draft_errors(root: Path, args: object) -> list[str]:
-    """A plan draft checked against the current state before it is queued, so the page shows the reasons at once.
-    Read-only: the edit runs on a copy of the state and the plan text, and nothing is written."""
-    try:
-        ops = dw.validate("plan_draft", args)["ops"]
-    except dw.Invalid as e:
-        return e.errors
-    store = ds.Store(root)
-    try:
-        store.load()
-        _, _, errors, _ = ds.plan_edit(store, ops, _read(store.dev / "plan.md"))
-    except (SystemExit, ValueError) as e:
-        return [f"the plan could not be read: {e}"]
-    return errors
 
 
 def signature(root: Path) -> tuple:
@@ -1180,13 +1149,10 @@ class Board(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, addr, root: Path, token: str, idle_s: int, actions: str = "auto", trusted: list[str] | None = None):
+    def __init__(self, addr, root: Path, token: str, idle_s: int, trusted: list[str] | None = None):
         super().__init__(addr, Handler)
         self.root, self.token, self.idle_s = root, token, idle_s
         self.exposed = is_exposed(addr[0])  # listening beyond loopback: every request needs the access key
-        # requests to Claude Code: on unless turned off. The board is a single-user tool, and beyond loopback
-        # nobody reaches it without the access key
-        self.actions = actions != "off"
         self.trusted = set(trusted or [])  # host names of a reverse proxy in front of the board
         self.record: dict = {}
         self.stopping = threading.Event()
@@ -1342,56 +1308,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok() or not self._origin_ok():
             return self._json(403, {"ok": False, "error": "forbidden origin"})
         path = self.path.split("?", 1)[0]
-        known = path in ("/api/shutdown", "/api/inbox", "/api/worker/mode", "/api/autopilot") or REQ_PATH.match(path) or APPROVAL_PATH.match(path)
-        if not known:
+        if path != "/api/shutdown":  # the board is read-only: stopping it is the only thing a page may ask
             return self._json(404, {"ok": False, "error": "not found"})
         if not secrets.compare_digest(self.headers.get("X-Board-Token", ""), self.server.token):
             return self._json(403, {"ok": False, "error": "bad token"})
-        if path == "/api/shutdown":
-            self._json(202, {"ok": True, "stopping": True})
-            self.server.stop()
-            return
-        if not self.server.actions:
-            return self._json(403, {"ok": False, "error": "actions off",
-                                    "hint": "this board only shows the project; start it with --actions on to send requests to Claude Code"})
-        body = self._body()
-        if body is None:
-            return
-        root = self.server.root
-        try:
-            if path == "/api/inbox":
-                action, args = body.get("action"), body.get("args") or {}
-                if action == "plan_draft":
-                    errors = draft_errors(root, args)
-                    if errors:
-                        return self._json(422, {"ok": False, "error": "invalid draft", "errors": errors})
-                if action == "release_decision":
-                    errors = release_decision_errors(root, args)
-                    if errors:
-                        return self._json(409, {"ok": False, "error": "release not waiting", "errors": errors})
-                return self._json(201, {"ok": True, "item": dw.submit(root, action, args)})
-            if path == "/api/worker/mode":
-                return self._json(200, {"ok": True, "modes": dw.set_mode(root, body.get("paused"))})
-            if path == "/api/autopilot":  # the switch: {"on": true|false}, {"parallel": 1-6} or {"force_stop": true}
-                if body.get("force_stop") is True:
-                    return self._json(200, {"ok": True, "autopilot": dw.autopilot_force_stop(root)})
-                if "parallel" in body:
-                    return self._json(200, {"ok": True, "autopilot": dw.set_autopilot_parallel(root, body.get("parallel"))})
-                return self._json(200, {"ok": True, "autopilot": dw.set_autopilot(root, body.get("on"))})
-            m = REQ_PATH.match(path)
-            if m:
-                return self._json(200, {"ok": True, "item": dw.cancel(root, m.group(1))})
-            m = APPROVAL_PATH.match(path)
-            dw.decide(root, m.group(1), body.get("decision"))  # type: ignore[union-attr]
-            return self._json(200, {"ok": True})
-        except dw.Invalid as e:
-            return self._json(422, {"ok": False, "error": "invalid request", "errors": e.errors})
-        except dw.QueueFull as e:
-            return self._json(429, {"ok": False, "error": str(e)})
-        except KeyError:
-            return self._json(404, {"ok": False, "error": "unknown request"})
-        except ValueError as e:
-            return self._json(409, {"ok": False, "error": str(e)})
+        self._json(202, {"ok": True, "stopping": True})
+        self.server.stop()
 
     def _diagram(self):
         """The project's architecture diagram (docs/diagrams/architecture.svg), as an image: only that file, never
@@ -1409,27 +1331,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(413, {"ok": False, "error": f"too large ({size} bytes)"})
         self._send(200, p.read_bytes(), "image/svg+xml; charset=utf-8",
                    {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"})
-
-    def _body(self) -> dict | None:
-        """The JSON object of a POST, or None after answering the error (wrong type, too large, not JSON)."""
-        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
-            self._json(415, {"ok": False, "error": "send application/json"})
-            return None
-        try:
-            n = int(self.headers.get("Content-Length") or "0")
-        except ValueError:
-            n = -1
-        if n < 0 or n > dw.MAX_BODY:
-            self._json(413, {"ok": False, "error": f"a request is at most {dw.MAX_BODY} bytes"})
-            return None
-        try:
-            obj = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            obj = None
-        if not isinstance(obj, dict):
-            self._json(400, {"ok": False, "error": "the body must be a JSON object"})
-            return None
-        return obj
 
     def _events(self):
         srv = self.server
@@ -1465,24 +1366,23 @@ class Handler(BaseHTTPRequestHandler):
                 srv.clients -= 1
 
 
-def bind(host: str, port: int, root: Path, token: str, idle_s: int, actions: str = "auto",
-         trusted: list[str] | None = None) -> Board:
+def bind(host: str, port: int, root: Path, token: str, idle_s: int, trusted: list[str] | None = None) -> Board:
     cls = Board6 if ":" in host else Board
     try:
-        return cls((host, port), root, token, idle_s, actions, trusted)
+        return cls((host, port), root, token, idle_s, trusted)
     except OSError:
-        return cls((host, 0), root, token, idle_s, actions, trusted)
+        return cls((host, 0), root, token, idle_s, trusted)
 
 
 def cmd_serve(root: Path, a: argparse.Namespace) -> int:
     token = os.environ.pop("DEV_BOARD_TOKEN", "") or secrets.token_urlsafe(24)
     host = a.host or "127.0.0.1"
-    srv = bind(host, a.port, root, token, a.idle_min * 60, a.actions or "auto", sorted(set(a.trusted_host or [])))
+    srv = bind(host, a.port, root, token, a.idle_min * 60, sorted(set(a.trusted_host or [])))
     port = srv.server_address[1]
     conn = connect_addr(host)
     url = f"http://{hostport(conn, port)}/"
     srv.record = {"pid": os.getpid(), "port": port, "token": token, "url": url, "root": str(root),
-                  "host": host, "connect": conn, "exposed": srv.exposed, "actions": srv.actions,
+                  "host": host, "connect": conn, "exposed": srv.exposed,
                   "trusted_hosts": sorted(srv.trusted),
                   "code": CODE_ID, "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     if srv.exposed:
@@ -1499,10 +1399,6 @@ def cmd_serve(root: Path, a: argparse.Namespace) -> int:
     def watchdog():
         while not srv.stopping.wait(30):
             if srv.idle_s > 0 and srv.clients == 0 and time.monotonic() - srv.last_activity > srv.idle_s:
-                if dw.executor(root)["online"]:
-                    continue  # a Claude Code session is waiting for requests from this board: stay up for it
-                if dw.autopilot_on(root):
-                    continue  # the autopilot runs from this server: stay up while it is on
                 print(f"idle for {srv.idle_s // 60} min: stopping", flush=True)
                 srv.stop()
             if read_record(root) is None or (read_record(root) or {}).get("pid") != os.getpid():
@@ -1511,29 +1407,6 @@ def cmd_serve(root: Path, a: argparse.Namespace) -> int:
                 print("the kit was updated on disk: stopping; /dev-kit:board starts the new version", flush=True)
                 srv.stop()
     threading.Thread(target=watchdog, daemon=True).start()
-    auto = dw.AutoExecutor(root, SCRIPTS.parents[2], lambda: manual_autopilot(root)) if srv.actions else None
-
-    def executor_loop():  # the board starts its own executor: a request never waits for a manual /dev-kit:worker
-        while not srv.stopping.wait(1.5):
-            try:
-                auto.tick()
-            except Exception as e:  # noqa: BLE001 - the server keeps serving
-                print(f"executor: {e}", flush=True)
-        # a run in progress is left to finish its request: it writes only through dev_state and dev_worker
-    if auto:
-        threading.Thread(target=executor_loop, daemon=True).start()
-
-    def health_loop():  # the production health check (autonomy.production.health) runs while the board is up
-        while not srv.stopping.wait(60):
-            try:
-                st = ds.Store(root)
-                st.load()
-                if ds.health_cfg(st) is not None:
-                    subprocess.run([sys.executable, "-I", str(SCRIPTS / "dev_state.py"), "--root", str(root), "prod-check", "--due"],
-                                   capture_output=True, timeout=300, cwd=root)
-            except Exception as e:  # noqa: BLE001 - the server keeps serving
-                print(f"prod-check: {e}", flush=True)
-    threading.Thread(target=health_loop, daemon=True).start()
     print(f"serving {url} on {host} for {root} (pid {os.getpid()})" + (" · exposed: access key required" if srv.exposed else ""), flush=True)
     try:
         srv.serve_forever(poll_interval=0.5)
@@ -1566,8 +1439,6 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
             why = "the kit was updated since the running board started"
         elif rec and a.host and rec.get("host", "127.0.0.1") != a.host:
             why = f"the running board listens on {rec.get('host', '127.0.0.1')}, not {a.host}"
-        elif rec and a.actions and a.actions != "auto" and bool(rec.get("actions")) != (a.actions == "on"):
-            why = f"the running board has actions {'on' if rec.get('actions') else 'off'}"
         elif rec and sorted(rec.get("trusted_hosts") or []) != trusted:
             why = "the trusted host names changed"
         if why:
@@ -1584,8 +1455,7 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
             return 0
         log = open(run_dir(root) / "board.log", "a", encoding="utf-8")
         cmd = [sys.executable, "-I", str(Path(__file__).resolve()), "--root", str(root), "serve",
-               "--port", str(a.port), "--idle-min", str(a.idle_min), "--host", a.host or "127.0.0.1",
-               "--actions", a.actions or "auto"]
+               "--port", str(a.port), "--idle-min", str(a.idle_min), "--host", a.host or "127.0.0.1"]
         for name in trusted:
             cmd += ["--trusted-host", name]
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=str(root),
@@ -1614,10 +1484,8 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
 
 
 def print_exposure(rec: dict) -> None:
-    """Whether the page can queue requests, and for a board listening beyond loopback the access links and the
-    warning that goes with them."""
-    print("requests: on · buttons on the page queue them; /dev-kit:worker runs them in Claude Code" if rec.get("actions")
-          else "requests: off · the page only shows the project (start with --actions on to queue requests)")
+    """The trusted host names, and for a board listening beyond loopback the access links and the warning that goes
+    with them."""
     if rec.get("trusted_hosts"):
         print(f"trusted host names: {', '.join(rec['trusted_hosts'])} · the proxy in front of them is the board's only "
               "protection there: keep its own login on (--trusted-host none forgets them)")
@@ -1628,8 +1496,7 @@ def print_exposure(rec: dict) -> None:
         print(f"access link: {u}")
     if not rec.get("access_urls"):
         print(f"access link: http://<this machine's IP>:{rec['port']}/?key={rec['token']}")
-    print("keep the links private; restart without --host (or --host 127.0.0.1) to stop sharing" +
-          ("; with requests on, anyone with a link can also queue work for Claude Code" if rec.get("actions") else ""))
+    print("keep the links private; restart without --host (or --host 127.0.0.1) to stop sharing")
 
 
 def cmd_stop(root: Path, a: argparse.Namespace) -> int:
@@ -1691,7 +1558,7 @@ def cmd_status(root: Path, a: argparse.Namespace) -> int:
         with Lock(root):
             rec = live_record(root)
     out = {"running": bool(rec), **({k: rec.get(k) for k in ("url", "pid", "port", "started_at", "host", "exposed", "access_urls",
-                                                              "actions", "trusted_hosts")}
+                                                              "trusted_hosts")}
                                     if rec else {})}
     if a.json:
         print(json.dumps(out))
@@ -1703,19 +1570,44 @@ def cmd_status(root: Path, a: argparse.Namespace) -> int:
     return 0
 
 
+def round_view(root: Path) -> dict | None:
+    """The headless round running now (`dev_state.py round run`): skill, milestone, since when, the tasks it has in
+    progress or in an open slot, and its last action (.dev/run/round-activity.json, written by the fence hook).
+    `unregistered` is true when an implement round works with no task started (the state would say todo)."""
+    run = root / ".dev" / "run"
+
+    def rd(p: Path) -> dict:
+        try:
+            v = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return v if isinstance(v, dict) else {}
+    mk = rd(run / "round.json")
+    if not mk or not (ds._alive(mk.get("child")) or ds._alive(mk.get("pid"))):
+        return None
+    st = rd(root / ".dev" / "state.json")
+    tasks = st.get("tasks") if isinstance(st.get("tasks"), dict) else {}
+    scope = mk.get("scope")
+    ids = {k for k, v in tasks.items() if isinstance(v, dict) and v.get("status") == "in_progress" and (not scope or v.get("milestone") == scope)}
+    for f in sorted((run / "slots").glob("*.json")) if (run / "slots").is_dir() else []:
+        rec = rd(f)
+        if rec.get("task") and not rec.get("closed_at"):
+            ids.add(str(rec["task"]))
+    act = rd(run / "round-activity.json")
+    if act.get("round") != mk.get("round"):
+        act = {}
+    return {"skill": mk.get("skill"), "scope": scope, "since": mk.get("started"),
+            "tasks": sorted(ids, key=lambda x: int(x[2:]) if x[2:].isdigit() else 0),
+            "unregistered": mk.get("skill") == "implement" and not ids,
+            **({"last": {k: act.get(k) for k in ("at", "tool", "agent")}} if act else {})}
+
+
 def pane_data(root: Path) -> dict:
-    """What runs now, in one small read for the terminal status pane: never the server's token, never request text."""
+    """What runs now, in one small read for the terminal status pane: never the server's token."""
     rec = read_record(root)
-    board = {"running": bool(rec and dw._alive(rec.get("pid")))}
+    board = {"running": bool(rec and ds._alive(rec.get("pid")))}
     if board["running"]:
         board["url"] = rec.get("url")
-    ap = dw.autopilot_status(root)
-    rd = ap.get("round") or {}
-    autopilot = {k: ap.get(k) for k in ("on", "state", "where", "handoff", "since", "reason", "note", "parallel", "until") if ap.get(k) is not None}
-    if rd:
-        autopilot["round"] = {"skill": rd.get("skill"), "scope": rd.get("scope"), "since": rd.get("since"),
-                              "tasks": [t["id"] for t in rd.get("tasks") or []], "unregistered": bool(rd.get("unregistered")),
-                              **({"last": {k: (rd.get("last") or {}).get(k) for k in ("at", "tool", "agent")}} if rd.get("last") else {})}
     tasks: dict = {}
     try:
         store = ds.Store(root)
@@ -1732,14 +1624,15 @@ def pane_data(root: Path) -> dict:
     agents = [{"agent": a.get("agent"), "node": a.get("node"), "started_at": a.get("started_at")} for a in live.get("active") or []]
     runs = [{"skill": r.get("skill"), "scope": r.get("scope"), "started_at": r.get("started_at")} for r in live.get("runs") or []
             if r.get("skill") not in ("board",)]
-    snap = dw.snapshot(root, recent=1)
-    requests = [{"id": x["id"], "action": x["action"], "status": x["status"], **({"question": x["question"]} if x.get("question") else {})}
-                for x in snap["open"]]
-    approvals = [{"id": a.get("id"), "tool": a.get("tool"), "target": (a.get("target") or "")[:80], "seconds_left": a.get("seconds_left")}
-                 for a in snap["approvals"]]
-    ex = snap["executor"]
-    return {"board": board, "autopilot": autopilot, "agents": agents, "runs": runs, "requests": requests, "approvals": approvals,
-            "executor": {"state": ex.get("state"), "listening": ex.get("listening"), "auto": (ex.get("auto") or {}).get("state")}}
+    # the Autopilot is /dev-kit:autopilot running in a Claude Code session (its skill_start with no skill_end)
+    ap_run = next((r for r in runs if r["skill"] == "autopilot"), None)
+    autopilot: dict = {"on": bool(ap_run), "state": "running" if ap_run else "off"}
+    if ap_run and ap_run.get("started_at"):
+        autopilot["since"] = ap_run["started_at"]
+    rd = round_view(root)
+    if rd:
+        autopilot["round"] = rd
+    return {"board": board, "autopilot": autopilot, "agents": agents, "runs": runs}
 
 
 def cmd_pane(root: Path, a: argparse.Namespace) -> int:
@@ -1751,8 +1644,8 @@ def cmd_pane(root: Path, a: argparse.Namespace) -> int:
     else:
         ap = out["autopilot"]
         print(f"board {'up' if out['board']['running'] else 'down'} · autopilot {ap.get('state')}"
-              + (f" ({ap['where']})" if ap.get("where") else "") + f" · {len(out['agents'])} agent(s) · "
-              f"{len(out['requests'])} request(s) · {len(out['approvals'])} permission(s) waiting")
+              + (f" · round {ap['round']['skill']} {ap['round'].get('scope') or ''}".rstrip() if ap.get("round") else "")
+              + f" · {len(out['agents'])} agent(s)")
     return 0
 
 
@@ -1767,8 +1660,6 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--host", type=parse_bind, default=None,
                        help="IP address to listen on (default 127.0.0.1). 0.0.0.0 or :: shares the board with the "
                             "network: every request then needs the access key printed at start")
-        s.add_argument("--actions", choices=["auto", "on", "off"], default=None,
-                       help="let the page send requests to Claude Code (on by default; auto means on)")
         s.add_argument("--trusted-host", action="append", type=parse_host_name, metavar="NAME",
                        help="host name of a reverse proxy in front of the board (repeatable; remembered; 'none' forgets)")
         if name == "start":

@@ -51,13 +51,6 @@ def render(root: Path) -> str:
     oq = ds.count_open_questions(store)
     if oq:
         parts.append(f"? {oq}")
-    try:
-        import dev_worker as dw
-        waiting = sum(1 for x in dw.items(root) if x["status"] == "pending")
-        if waiting:
-            parts.append(f"▣ {waiting}")  # requests from the board, run with /dev-kit:worker
-    except Exception:  # noqa: BLE001
-        pass
     parts.append(f"next {ds.next_command(store)}")
     return " · ".join(parts)
 

@@ -454,10 +454,9 @@ class TestFixesMilestoneId(Base):
 
     def test_ids_are_accepted_everywhere(self) -> None:
         import dev_telemetry as tel
-        import dev_worker as dw
+        import dev_state as dsm
         self.assertTrue(tel.ID_RE.match("M5.1"))
-        dw.validate("run", {"command": "/dev-kit:qa M5.1"})
-        dw.validate("plan_draft", {"ops": [{"op": "move_task", "task": "T-001", "milestone": "M5.1"}]})
+        self.assertEqual(dsm.plan_ops_valid([{"op": "move_task", "task": "T-001", "milestone": "M5.1"}])[1], [])
         js = (CORE / "shared" / "board" / "board.js").read_text(encoding="utf-8")
         self.assertIn(r"M\d{1,3}(?:\.\d{1,2})?|R\d{1,3}", js)
 
@@ -465,23 +464,6 @@ class TestFixesMilestoneId(Base):
 # ------------------------------------------------------------------ item 15: P-nnn requests, "Round N"
 
 class TestRequestIds(Base):
-    def test_new_requests_are_p_and_old_r_files_are_shown_as_p(self) -> None:
-        import dev_worker as dw
-        self.setup_plan()
-        inbox = self.root / ".dev" / "run" / "inbox"
-        inbox.mkdir(parents=True)
-        (inbox / "R-001.json").write_text(json.dumps({"id": "R-001", "ts": "2026-11-20T00:00:00Z", "action": "run",
-                                                       "args": {"command": "/dev-kit:status"}, "by": "board"}), encoding="utf-8")
-        old = dw.item(self.root, "P-001")
-        self.assertEqual((old["id"], old["status"]), ("P-001", "pending"))
-        new = dw.submit(self.root, "run", {"command": "/dev-kit:status"})
-        self.assertEqual(new["id"], "P-002")
-        self.assertTrue((inbox / "P-002.json").exists())
-        self.assertEqual([x["id"] for x in dw.items(self.root)], ["P-001", "P-002"])
-        dw.cancel(self.root, "P-001")
-        self.assertTrue((inbox / "R-001.cancel").exists())
-        self.assertEqual(dw.item(self.root, "R-001")["status"], "cancelled")
-
     def test_no_release_like_ids_for_rounds_or_requests_in_the_board(self) -> None:
         import re
         js = (CORE / "shared" / "board" / "board.js").read_text(encoding="utf-8")

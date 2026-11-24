@@ -176,7 +176,7 @@ class RenderBase(Base):
         board = SCRIPTS / "dev_board.py"
         env = {k: v for k, v in self.env.items() if k != "DEV_KIT_NOW"}
         env["DEV_KIT_CLAUDE"] = __import__("shutil").which("true") or "/bin/true"  # never the real claude in a test
-        subprocess.run([sys.executable, "-I", str(board), "--root", str(self.root), "start", "--no-open", "--actions", "on", "--port", "0"],
+        subprocess.run([sys.executable, "-I", str(board), "--root", str(self.root), "start", "--no-open", "--port", "0"],
                        capture_output=True, text=True, env=env, check=True, timeout=60)
         try:
             url = json.loads((self.dev / "run" / "board.json").read_text(encoding="utf-8"))["url"]
@@ -223,15 +223,9 @@ class TestNeedsYouDecisions(Base):
         self.assertEqual(self.state()["tasks"][self.fix]["status"], "dropped")
         self.assertIn("Prices are display only in R1", (self.dev / "decisions.md").read_text(encoding="utf-8"))
 
-    def test_replan_and_the_board_request(self) -> None:
-        import dev_worker as dw
-        with self.assertRaises(dw.Invalid):
-            dw.validate("qa_decision", {"milestone": "M1", "decision": "accept"})  # accept needs the justification
-        with self.assertRaises(dw.Invalid):
-            dw.validate("qa_decision", {"milestone": "M1", "decision": "continue", "rounds": 9})
-        rid = dw.submit(self.root, "qa_decision", {"milestone": "M1", "decision": "replan"})["id"]
-        self.assertTrue(rid.startswith("P-"))
-        self.assertIn("next: /dev-kit:plan M1", self.ds("qa-decide", "--request", rid).stdout)
+    def test_replan(self) -> None:
+        self.assertIn("next: /dev-kit:plan M1", self.ds("qa-decide", "M1", "replan").stdout)
+        self.ds("qa-decide", "--request", "P-001", expect=2)  # 3.12: the board records no decision
 
     def test_blocked_task_unblock_skip_drop_and_hotfix_run(self) -> None:
         self.ds("block", "T-003", "--reason", "needs the API key")
@@ -283,7 +277,7 @@ class TestFeed(Base):
 
 @unittest.skipUnless(HAS_PLAYWRIGHT, "node and Playwright are needed to render the board")
 class TestNeedsYouRendered(RenderBase):
-    def test_buttons_for_rounds_used_up_and_blocked_task_and_no_dropped_hotfix(self) -> None:
+    def test_rounds_used_up_and_blocked_task_name_the_command_and_have_no_buttons(self) -> None:
         self.ds("start", "T-001"); self.ds("done", "T-001"); self.ds("start", "T-002"); self.ds("done", "T-002")
         self.ds("add-task", "--milestone", "M1", "--title", "Fix price", "--type", "fix", "--source", "qa/M1/report.md#F-1", "--files", "src/a1.py")
         for _ in range(4):
@@ -295,27 +289,24 @@ class TestNeedsYouRendered(RenderBase):
             f.write("- 2026-11-23T12:01:00Z cleanup killed=0 removed=2\n- 2026-11-23T12:02:00Z tip shown T-3 source=-\n")
         # Needs you and Activity are drawers opened from the top bar
         out = self.render([["click", "#needs-btn"], ["buttons", "#impediments button.btn", "needs"], ["text", "#impediments", "needs_text"], ["key", "Escape"],
-                           ["click", "#act-btn"], ["text", "#feed", "feed"], ["text", "#foot", "foot"]])
-        texts = [b["text"] for b in out["needs"]]
-        for label in ("Continue fixing (+1 round)", "Accept with an ADR *", "Replan", "Unblock", "Skip to the next milestone", "Drop *"):
-            self.assertTrue(any(t.startswith(label) for t in texts), (label, texts))
+                           ["click", "#act-btn"], ["text", "#feed", "feed"], ["text", "#foot", "foot"], ["buttons", "button.btn", "all"]])
+        self.assertEqual(out["needs"], [])  # read-only: nothing to press
+        self.assertIn("Decide in Claude Code with /dev-kit:qa M1", " ".join(out["needs_text"].split()))
+        self.assertIn("T-003", out["needs_text"])
         self.assertNotIn("Crash on pay", out["needs_text"])
+        self.assertFalse([b for b in out["all"] if b["text"].strip().startswith(("Run", "Approve", "Reject", "Send", "Copy"))], out["all"])
         self.assertNotIn("cleanup", out["feed"])
         self.assertNotIn("source=-", out["feed"])
         self.assertIn("T-001 done: Step 1", out["feed"])
         self.assertNotIn("pid", out["foot"])
+        self.assertIn("Read-only view of", out["foot"])
 
-    def test_the_run_button_of_a_running_qa_is_disabled(self) -> None:
+    def test_a_running_qa_shows_in_the_clock(self) -> None:
         self.ds("start", "T-001"); self.ds("done", "T-001"); self.ds("start", "T-002"); self.ds("done", "T-002")
         self.ds("gate", "M1", "pending", "--count-run", "--score", "80")
-        before = self.render([["click", "#ph-construction"], ["buttons", "button[data-cmd='/dev-kit:qa M1']", "qa"]])
-        self.assertTrue(before["qa"] and not before["qa"][0]["disabled"], before)
-        self.assertEqual(before["qa"][0]["text"].replace("\n", " ").replace("▶", "").strip(), "Run QA of M1")
-        self.assertEqual(before["qa"][0]["title"], "Run /dev-kit:qa M1 in Claude Code")
         self.ds("event", "skill_start", "--set", "skill=qa", "--set", "scope=M1")
-        out = self.render([["click", "#ph-construction"], ["buttons", "button[data-cmd='/dev-kit:qa M1']", "qa"], ["text", "#updated", "clock"]])
-        self.assertTrue(out["qa"] and all(b["disabled"] for b in out["qa"]), out)
-        self.assertIn("Running for", out["qa"][0]["text"])
+        out = self.render([["click", "#ph-construction"], ["buttons", "button[data-cmd]", "cmds"], ["text", "#updated", "clock"]])
+        self.assertEqual(out["cmds"], [])
         self.assertIn("QA of M1 for", out["clock"])
         self.assertIn("last event", out["clock"])
 
@@ -375,128 +366,6 @@ class TestReleaseReview(Base):
         self.assertEqual(pt["Release review"], "Revis\u00e3o da release")
 
 
-FAKE_CLAUDE = """#!/usr/bin/env python3
-import json, os, sys, time
-time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
-with open(os.environ["FAKE_OUT"], "a") as f:
-    f.write(json.dumps({"argv": sys.argv[1:], "project": os.environ.get("CLAUDE_PROJECT_DIR"),
-                        "child": os.environ.get("DEV_KIT_BOARD_CHILD")}) + "\\n")
-sys.exit(int(os.environ.get("FAKE_RC", "0")))
-"""
-
-
-class TestBoardStartsTheWorker(Base):
-    """The worker is part of the board: with no session listening, the board's server starts a headless worker
-    (`claude -p "/dev-kit:worker"`) for a waiting request, so a Needs-you action never waits for a manual step."""
-
-    def setUp(self) -> None:
-        super().setUp()
-        import dev_worker as dw
-        from unittest import mock
-        self.dw = dw
-        self.out = self.root / "fake-claude.jsonl"
-        fake = self.root / "fake-claude"
-        fake.write_text(FAKE_CLAUDE, encoding="utf-8")
-        fake.chmod(0o755)
-        env = {"DEV_KIT_CLAUDE": str(fake), "FAKE_OUT": str(self.out), "FAKE_RC": "0", "FAKE_SLEEP": "0"}
-        for p in (mock.patch.dict(os.environ, env), mock.patch.object(dw, "AUTO_GRACE_S", 0)):
-            p.start()
-            self.addCleanup(p.stop)
-        self.kit = CORE.parents[1]
-        self.ex = dw.AutoExecutor(self.root, self.kit)
-        self.addCleanup(self.ex.stop)
-
-    def finish(self) -> None:
-        self.ex.proc.wait(20)
-        self.ex.tick()
-
-    def runs(self) -> list[dict]:
-        return [json.loads(x) for x in self.out.read_text(encoding="utf-8").splitlines()] if self.out.exists() else []
-
-    def test_a_waiting_request_starts_a_headless_worker(self) -> None:
-        rid = self.dw.submit(self.root, "run", {"command": "/dev-kit:docs"})["id"]
-        self.ex.tick()
-        st = self.dw.auto_status(self.root)
-        self.assertEqual((st["state"], st["request"]), ("running", rid))
-        self.assertEqual(self.dw.snapshot(self.root)["executor"]["auto"]["state"], "running")
-        self.finish()
-        run = self.runs()[0]
-        self.assertEqual(run["argv"][:2], ["-p", "/dev-kit:worker"])
-        self.assertEqual(run["argv"][run["argv"].index("--plugin-dir") + 1], str(self.kit))
-        self.assertEqual(run["argv"][run["argv"].index("--permission-mode") + 1], "acceptEdits")  # 3.2 default
-        self.assertEqual((run["project"], run["child"]), (str(self.root), "1"))
-
-    def test_a_run_that_leaves_its_request_backs_off(self) -> None:
-        self.dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
-        self.ex.tick()
-        self.finish()  # the fake took nothing: the request is still pending
-        st = self.dw.auto_status(self.root)
-        self.assertEqual((st["state"], st["reason"]), ("waiting", "left the request pending"))
-        self.ex.tick()
-        self.assertEqual(len(self.runs()), 1)  # not again before the back-off
-        self.assertGreater(st["until"], __import__("time").time() + 10)
-
-    def test_a_failed_run_says_why(self) -> None:
-        os.environ["FAKE_RC"] = "3"
-        self.dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
-        self.ex.tick()
-        self.finish()
-        self.assertEqual(self.dw.auto_status(self.root)["reason"], "exit 3")
-
-    def test_a_finished_run_goes_idle(self) -> None:
-        rid = self.dw.submit(self.root, "run", {"command": "/dev-kit:docs"})["id"]
-        self.ex.tick()
-        self.assertEqual(self.dw.claim(self.root, "child")[0]["id"], rid)  # what the worker in the child does
-        self.dw.finish(self.root, rid, "done")
-        self.finish()
-        self.assertEqual(self.dw.auto_status(self.root)["state"], "idle")
-
-    def test_nothing_starts_without_a_request_or_while_paused(self) -> None:
-        self.ex.tick()
-        self.assertIsNone(self.ex.proc)
-        self.dw.set_mode(self.root, paused=True)
-        self.dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
-        self.ex.tick()
-        self.assertIsNone(self.ex.proc)
-        self.dw.set_mode(self.root, paused=False)
-        self.ex.tick()
-        self.assertIsNotNone(self.ex.proc)
-
-    def test_a_listening_session_keeps_priority(self) -> None:
-        self.dw.heartbeat(self.root, "s1", os.getpid())
-        self.dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
-        self.ex.tick()
-        self.assertIsNone(self.ex.proc)
-
-    def test_it_can_be_turned_off_and_configured(self) -> None:
-        self.ds("set", "autonomy.board_executor", "off")
-        self.dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
-        self.ex.tick()
-        self.assertIsNone(self.ex.proc)
-        self.assertEqual(self.dw.auto_status(self.root)["state"], "off")
-        self.ds("set", "autonomy.board_executor", '{"auto": true, "permission_mode": "default"}')
-        self.assertEqual(self.state()["autonomy"]["board_executor"],
-                         {"auto": True, "permission_mode": "default", "timeout_min": 180, "autopilot_timeout_min": 360})
-        self.ds("set", "autonomy.board_executor", '{"permission_mode": "yolo"}', expect=1)
-        self.ex.tick()
-        self.finish()
-        self.assertEqual(self.runs()[0]["argv"][self.runs()[0]["argv"].index("--permission-mode") + 1], "default")
-
-    def test_the_untouched_pre_3_2_default_takes_the_new_one(self) -> None:
-        st = self.state()
-        st["autonomy"]["board_executor"] = {"auto": True, "permission_mode": "default", "timeout_min": 180}
-        (self.root / ".dev" / "state.json").write_text(json.dumps(st), encoding="utf-8")
-        self.assertEqual(self.dw.auto_cfg(self.root)["permission_mode"], "acceptEdits")
-
-    def test_no_claude_binary_is_shown(self) -> None:
-        os.environ.pop("DEV_KIT_CLAUDE")
-        os.environ["PATH"] = str(self.root / "empty")
-        self.dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
-        self.ex.tick()
-        self.assertIsNone(self.ex.proc)
-        self.assertEqual(self.dw.snapshot(self.root)["executor"]["auto"]["state"], "no_claude")
-
-
 class TestRoundReasons(Base):
     def test_a_failed_round_keeps_its_reason_for_the_chip(self) -> None:
         self.ds("start", "T-001"); self.ds("done", "T-001"); self.ds("start", "T-002"); self.ds("done", "T-002")
@@ -519,21 +388,17 @@ class TestBoardVocabularyRendered(RenderBase):
         self.ds("add-task", "--milestone", "M1", "--title", "Fix price", "--type", "fix", "--source", "qa/M1/report.md#F-1", "--files", "src/a1.py")
         self.ds("gate", "M1", "pending", "--count-run", "--score", "97", "--note", "2 blockers")
         self.ds("start", "T-011"); self.ds("done", "T-011")
-        import dev_worker as dw
-        dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
 
     def test_r_and_a_number_only_ever_names_a_release(self) -> None:
         steps = []
         for tab in ("conception", "planning", "construction", "stable", "releases"):
             steps += [["click", f"#ph-{tab}"], ["text", "body", tab]]
-        steps += [["click", "#ph-construction"], ["click", "#tab-qa"], ["text", "body", "qa"], ["click", "#ph-map"], ["text", "body", "map"],
-                  ["click", "#req-btn"], ["text", "body", "requests"]]
+        steps += [["click", "#ph-construction"], ["click", "#tab-qa"], ["text", "body", "qa"], ["click", "#ph-map"], ["text", "body", "map"]]
         out = self.render(steps)
         releases = {r["id"] for r in self.state()["release_plan"]}
-        for k in ("conception", "planning", "construction", "stable", "releases", "qa", "map", "requests"):
+        for k in ("conception", "planning", "construction", "stable", "releases", "qa", "map"):
             ids = set(re.findall(r"\bR-?\d+\b", out[k]))
             self.assertTrue(ids <= releases, (k, ids - releases))
-        self.assertIn("P-001", out["requests"])  # board requests are P-nnn, in the Requests drawer
 
     def test_in_qa_the_milestone_state_is_in_one_place_and_the_qa_tab_opens(self) -> None:
         self.ds("event", "skill_start", "--set", "skill=qa", "--set", "scope=M1")
@@ -786,7 +651,7 @@ class TestBoardLanguageRendered(RenderBase):
                            ["eval", "String(window.__marker) + ' ' + document.documentElement.lang", "after"], ["text", "body", "en"],
                            ["eval", "localStorage.getItem('board-lang')", "kept"]], locale="en-US")
         self.assertEqual(out["lang"], "pt-BR")
-        for k in ("Construction", "Activity", "Requests", "Project lifecycle"):
+        for k in ("Construction", "Activity", "Needs you", "Project lifecycle"):
             self.assertNotEqual(pt[k], en[k])
             self.assertIn(pt[k].upper(), out["pt"].upper())
         self.assertNotIn("Activity", out["pt"])

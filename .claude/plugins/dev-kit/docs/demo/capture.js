@@ -14,7 +14,6 @@ const SHOTS = [  // file, color scheme, steps before the shot
   ['board-stable', 'light', [['click', '#ph-stable']]],
   ['board-pt-br', 'light', [['lang', 'pt-BR']]],
   ['board-needs-you', 'light', [['click', '#needs-btn']]],
-  ['board-autopilot', 'light', [['click', '#ap-btn']]],
 ];
 (async () => {
   const b = await chromium.launch();

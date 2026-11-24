@@ -43,22 +43,15 @@ export type LiveRound = {
 /** What runs now, built from `dev_board.py pane --json`. */
 export type LiveView = {
   board: boolean
+  /** /dev-kit:autopilot running in a Claude Code session ("running"), else "off" */
   autopilot: {
     on: boolean
     state: string
-    /** "session" when the board handed the run to the session that listens */
-    where?: string
-    handoff?: string
     since?: string
-    reason?: string
-    until?: number
     round?: LiveRound
   }
   agents: LiveAgent[]
   runs: { skill: string; scope?: string; startedAt?: string }[]
-  requests: { id: string; action: string; status: string; question?: string }[]
-  approvals: { tool: string; target: string; secondsLeft?: number }[]
-  executor: string
   readAt: number
 }
 
@@ -81,7 +74,7 @@ export type Snapshot = {
   issueCounts: Record<string, number>
   issues: IssueCard[]
   readAt: number
-  /** what runs now (the Autopilot, agents, board requests); absent until first read */
+  /** what runs now (the Autopilot, its round, the agents); absent until first read */
   live?: LiveView
 }
 

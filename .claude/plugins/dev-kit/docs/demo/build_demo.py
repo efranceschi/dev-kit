@@ -2,7 +2,7 @@
 
 usage: python3 -I build_demo.py PROJECT_DIR
 Every number, name and finding here is invented. The project is driven only through the kit's own scripts
-(dev_state.py, dev_worker.py), so the board shows exactly what a real project in that state would show.
+(dev_state.py), so the board shows exactly what a real project in that state would show.
 Then start the board on PROJECT_DIR and run node capture.js <board url> <images dir> (needs Playwright): see docs/maintainers.md.
 """
 from __future__ import annotations
