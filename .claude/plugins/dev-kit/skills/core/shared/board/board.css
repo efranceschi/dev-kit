@@ -1380,3 +1380,125 @@ dialog.modal[open] { animation: pop-in .18s ease-out; }
 .signal.stop .lamp { background: var(--critical); box-shadow: 0 0 8px var(--critical); }
 .signal.go .lamp { background: var(--good); box-shadow: 0 0 8px var(--good); }
 :root[data-motion="off"] .rail { display: none; }
+
+/* ---------- animations of the other blocks (3.10): conception steps, roadmap, backlog, scores, trophies, heartbeat, flags, lanes, empty states */
+:root[data-motion="still"] :is(.step-fun *, .road-strip *, .carrier *, .jump-lane *, .trophy *, .heartbeat *, .flag-pole *, .siren *, .bus, .empty-fun *, .arrived) { animation: none !important; transition: none !important; }
+.mascot .m-paper { fill: var(--surface-1); stroke: var(--text-secondary); stroke-width: 1.5; }
+.mascot .m-fold { fill: none; stroke: var(--text-secondary); stroke-width: 1.2; }
+.mascot .m-cap { fill: var(--ag-blue); } .mascot .m-bag { fill: var(--lane-construction); }
+
+/* conception: the agent writing the step, the reviewer reading it */
+.step-card.has-fun { position: relative; padding-right: 64px; }
+.step-fun { position: absolute; right: 8px; bottom: 6px; width: 48px; height: 46px; pointer-events: none; }
+.writer .m-ink { fill: none; stroke: var(--accent-b); stroke-width: 1.6; stroke-dasharray: 40; stroke-dashoffset: 0; }
+.writer .m-pen { transform-box: fill-box; transform-origin: bottom left; animation: k-write .4s ease-in-out infinite alternate var(--clk); }
+.writer .m-ink { animation: w-ink 3s linear infinite var(--clk); }
+@keyframes w-ink { from { stroke-dashoffset: 40; } to { stroke-dashoffset: 0; } }
+.reader .m-glasses { fill: #fff; stroke: #111; stroke-width: 1; }
+.reader .m-eyes { animation: r-read 2s ease-in-out infinite var(--clk); }
+@keyframes r-read { 0%, 100% { transform: translateX(-1.5px); } 50% { transform: translateX(1.5px); } }
+
+/* planning: the roadmap road */
+.road-strip { position: relative; height: 50px; margin-bottom: 8px; border-radius: 10px; overflow: hidden; flex: none;
+  background: color-mix(in srgb, var(--text-muted) 20%, var(--surface-2)); }
+.road-strip::after { content: ""; position: absolute; left: 0; right: 0; top: 56%; height: 2px; background: repeating-linear-gradient(90deg, var(--warning) 0 14px, transparent 14px 26px); opacity: .65; }
+.road-sign { position: absolute; top: 4px; transform: translateX(-50%); display: grid; justify-items: center; font: 700 10px var(--mono); color: var(--text-secondary); z-index: 1; }
+.road-sign b { padding: 0 4px; border-radius: 4px; background: var(--surface-1); border: 1px solid var(--border-strong); font-weight: 700; }
+.road-sign i { width: 2px; height: 8px; background: var(--text-muted); }
+.road-sign.done b { background: color-mix(in srgb, var(--good) 22%, var(--surface-1)); border-color: var(--good); }
+.road-sign.cur b { border-color: var(--lane-construction); color: var(--text-primary); }
+.road-car { position: absolute; bottom: 3px; width: 40px; height: 21px; left: calc(var(--to) - 20px); z-index: 2; }
+.road-car.drive { animation: r-drive 2.4s ease-out 1; }
+@keyframes r-drive { from { left: -46px; } to { left: calc(var(--to) - 20px); } }
+.road-car.drive .car-wheel { transform-box: fill-box; transform-origin: center; animation: t-spin .5s linear 5; }
+.road-car .car-body { fill: var(--ag-blue); } .car-glass { fill: color-mix(in srgb, var(--accent-b) 45%, var(--surface-1)); }
+.road-car .car-wheel circle { fill: #222; } .road-car .car-wheel path { stroke: #888; stroke-width: 1.4; }
+.road-cone { position: absolute; bottom: 4px; width: 11px; height: 15px; z-index: 1; }
+.road-cone .cone-body { fill: var(--lane-construction); } .road-cone .cone-band { stroke: #fff; stroke-width: 2; } .road-cone .cone-base { fill: var(--text-secondary); }
+
+/* planning: the backlog's mail carrier, an envelope when an issue arrives */
+.list-title .carrier { width: 34px; height: 26px; margin-left: auto; overflow: visible; }
+.carrier .m-env { opacity: 0; }
+.carrier.toss .m-env { animation: c-toss 1.6s ease-in 1 forwards; }
+.carrier.toss .m-arm { transform-box: fill-box; transform-origin: left center; animation: c-throw 1.6s ease-in-out 1; }
+@keyframes c-toss { 0% { opacity: 0; transform: translate(-14px, 8px); } 20% { opacity: 1; } 60% { opacity: 1; transform: translate(10px, -10px) rotate(20deg); } 100% { opacity: 0; transform: translate(26px, 22px) rotate(0); } }
+@keyframes c-throw { 0%, 15% { transform: rotate(40deg); } 35% { transform: rotate(-50deg); } 60%, 100% { transform: rotate(0); } }
+.list li.arrived { animation: c-land 1.8s ease-out 1; }
+@keyframes c-land { 0%, 55% { transform: none; box-shadow: none; } 62% { transform: translateY(3px); } 70% { transform: rotate(-1deg); } 78% { transform: rotate(1deg); }
+  86% { transform: none; box-shadow: 0 0 0 2px var(--accent-b); } 100% { box-shadow: none; } }
+
+/* scores: the high jump over the cut-off */
+.jump-lane { grid-column: 1 / -1; position: relative; height: 24px; margin-bottom: -6px; pointer-events: none; }
+.jumper { position: absolute; bottom: 0; width: 15px; height: 20px; left: calc(var(--to) - 8px); }
+.jumper.trip { left: calc(var(--cut) - 22px); transform: rotate(80deg) translateY(3px); }
+.jumper.clear { animation: j-clear 8s ease-in-out infinite var(--clk); }
+.jumper.trip { animation: j-trip 8s ease-in-out infinite var(--clk); }
+.jumper .leg-a, .jumper .leg-b { transform-box: fill-box; transform-origin: top center; }
+.jumper .leg-a { animation: m-leg .5s ease-in-out infinite alternate var(--clk); } .jumper .leg-b { animation: m-leg .5s ease-in-out infinite alternate-reverse var(--clk); }
+@keyframes j-clear { 0% { left: -16px; transform: none; } 22% { left: calc(var(--cut) - 26px); transform: none; } 28% { left: calc(var(--cut) - 8px); transform: translateY(-16px) rotate(-20deg); }
+  34% { left: calc(var(--cut) + 10px); transform: none; } 46%, 100% { left: calc(var(--to) - 8px); transform: none; } }
+@keyframes j-trip { 0% { left: -16px; transform: none; } 22% { left: calc(var(--cut) - 26px); transform: none; } 27% { left: calc(var(--cut) - 16px); transform: translateY(-6px) rotate(-10deg); }
+  32%, 100% { left: calc(var(--cut) - 22px); transform: rotate(80deg) translateY(3px); } }
+
+/* releases: the trophy shelf */
+.trophy-shelf { display: flex; gap: 12px; align-items: flex-end; padding: 2px 6px 0; margin-bottom: 8px; border-bottom: 4px solid var(--surface-3); flex: none; }
+.trophy { display: grid; justify-items: center; gap: 1px; }
+.trophy svg { width: 26px; height: 30px; overflow: visible; }
+.trophy-label { font: 700 10px var(--mono); color: var(--text-muted); }
+.trophy .tr-cup { fill: var(--ag-yellow); } .trophy .tr-ear { fill: none; stroke: var(--ag-yellow); stroke-width: 2.4; } .trophy .tr-base { fill: var(--text-secondary); }
+.trophy .tr-shine { fill: #fff; opacity: 0; animation: tr-shine 6s ease-in-out infinite var(--clk); }
+.trophy:nth-child(2) .tr-shine { animation-delay: calc(var(--clk) - 1.5s); } .trophy:nth-child(3) .tr-shine { animation-delay: calc(var(--clk) - 3s); }
+.trophy:nth-child(4) .tr-shine { animation-delay: calc(var(--clk) - 4.5s); }
+@keyframes tr-shine { 0%, 70%, 100% { opacity: 0; } 80% { opacity: 1; } }
+.trophy.next .tr-cup { fill: none; stroke: var(--text-muted); stroke-width: 1.6; stroke-dasharray: 3 2; } .trophy.next .tr-ear { stroke: var(--text-muted); stroke-width: 1.4; } .trophy.next .tr-base { fill: var(--text-muted); }
+
+/* stable: the health check's heartbeat */
+.heartbeat { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.hb-heart { width: 22px; height: 20px; flex: none; }
+.hb-heart path { fill: var(--critical); }
+.heartbeat:not(.down) .hb-heart { transform-origin: center; animation: hb-beat 1s ease-in-out infinite var(--clk); }
+.heartbeat.down .hb-heart path { fill: var(--text-muted); }
+@keyframes hb-beat { 0%, 40%, 100% { transform: scale(1); } 15% { transform: scale(1.22); } 28% { transform: scale(1.08); } }
+.hb-trace { flex: 1 1 auto; min-width: 0; height: 40px; }
+.hb-line { fill: none; stroke: var(--good); stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.heartbeat:not(.down) .hb-line { stroke-dasharray: 100; animation: hb-draw 3s linear infinite var(--clk); }
+.heartbeat.down .hb-line { stroke: var(--text-muted); }
+.hb-bad { fill: none; stroke: var(--critical); stroke-width: 2.4; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+@keyframes hb-draw { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+
+/* stable: release flags on their poles */
+.list li:has(> .flag-pole) { grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; }
+.list li:has(> .flag-pole) > .sub { grid-column: 2 / -1; }
+.flag-pole { width: 30px; height: 26px; overflow: visible; }
+.flag-pole .fp-pole { fill: var(--text-secondary); }
+.flag-pole .fp-cloth { transform-box: fill-box; transform-origin: left center; fill: var(--good); }
+.flag-pole.f-on .fp-cloth { animation: fp-wave 1.2s ease-in-out infinite alternate var(--clk); }
+.flag-pole:not(.f-on) .fp-cloth { fill: var(--text-muted); transform: translateY(12px) scaleY(.7); opacity: .6; }
+@keyframes fp-wave { from { transform: skewY(-6deg); } to { transform: skewY(6deg) scaleX(.9); } }
+
+/* stable: the expedite siren and the standard bus */
+.branch-row:has(> .siren, > .bus) { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+.flow.compact .siren, .flow.compact .bus { display: none; }
+.flow.compact .branch-row:has(> .siren, > .bus) { grid-template-columns: minmax(0, 1fr) auto; }
+.siren { width: 20px; height: 17px; overflow: visible; }
+.siren .sr-light { fill: var(--critical); } .siren .sr-base { fill: var(--text-secondary); }
+.siren .sr-beam { fill: var(--critical); opacity: .35; }
+.siren .sr-beam.b1 { animation: sr-beam 1s steps(1) infinite var(--clk); } .siren .sr-beam.b2 { animation: sr-beam 1s steps(1) infinite calc(var(--clk) - .5s); }
+@keyframes sr-beam { 0% { opacity: .5; } 50% { opacity: 0; } }
+.bus { width: 26px; height: 15px; animation: m-bob .5s ease-in-out infinite alternate var(--clk); }
+.bus .bus-body { fill: var(--ag-blue); } .bus .bus-wheel { fill: #222; }
+
+/* good empty states: resting in a hammock, sweeping an empty column */
+.empty-fun { display: block; width: 72px; height: 43px; margin: 0 auto 4px; overflow: visible; }
+.empty.good:has(.empty-fun)::before { content: none; }
+.col-empty:has(.empty-fun) { display: grid; justify-items: center; }
+.empty-fun .ef-post { stroke: var(--text-muted); stroke-width: 3; stroke-linecap: round; }
+.empty-fun .ef-net { fill: none; stroke: var(--lane-construction); stroke-width: 3; }
+.empty-fun .ef-skin { fill: var(--ag-green); } .empty-fun .ef-body { fill: none; stroke: var(--ag-green); stroke-width: 7; stroke-linecap: round; }
+.empty-fun .ef-hammock { transform-box: view-box; transform-origin: 42px 6px; animation: ef-swing 4s ease-in-out infinite var(--clk); }
+@keyframes ef-swing { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+.empty-fun .ef-stick { stroke: var(--text-secondary); stroke-width: 2.4; stroke-linecap: round; } .empty-fun .ef-straw { fill: var(--ag-yellow); }
+.empty-fun .ef-broom { transform-box: fill-box; transform-origin: top center; animation: ef-sweep .8s ease-in-out infinite alternate var(--clk); }
+.empty-fun .ef-dust circle { fill: var(--text-muted); animation: ef-dust .8s ease-out infinite var(--clk); }
+@keyframes ef-sweep { from { transform: rotate(-18deg); } to { transform: rotate(14deg); } }
+@keyframes ef-dust { from { opacity: .7; transform: none; } to { opacity: 0; transform: translate(10px, -6px); } }

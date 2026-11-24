@@ -2,6 +2,21 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.10.0 — 2026-11-24
+
+The animations reach the other blocks of the board, from a second round of prototypes Eduardo picked from (he left out a "done" stamp on finished conception steps).
+
+### Added
+- **Conception steps:** a step being written shows its agent writing on a clipboard, the lines appearing; a step waiting for its review shows the reviewer reading it with glasses.
+- **Roadmap road:** above the Roadmap list, a road with a sign per milestone (green once closed) and a car parked at the current milestone next to a work cone; the car drives in when the current milestone changes.
+- **Backlog mail carrier:** the issue queue has a mail carrier who throws an envelope when a new issue arrives, and the new row shakes as it lands.
+- **High jump on every score bar** with a cut-off (plan review, release checks, QA scores): a mascot runs to the cut-off mark and clears it when the score passes, or trips before it when it does not.
+- **Release trophies:** the Stable Releases block shows a trophy per released version on a shelf, and the next release as a dashed one.
+- **Production heartbeat:** the health check shows a beating heart while production is healthy and a trace with a spike per check, red where a check failed; the heart stops while production fails.
+- **Flag poles** on the release flags (up and waving when on, lowered and grey when off), a **siren** on the Expedite lane while a hotfix is open and a **bus** on the Standard lane while something waits for the next milestone.
+- **Good empty states:** an empty column shows a mascot sweeping, and "Nothing blocked" or an empty list that is good news shows one resting in a hammock.
+- All of them follow Menu > Animations (Full, Still, Off) and the system's reduce-motion setting.
+
 ## 3.9.0 — 2026-11-24
 
 Eduardo picked, from live prototypes, the waiting animations that make the board show its work with some personality, with a menu setting to tone them down.

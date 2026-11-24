@@ -469,6 +469,126 @@
     return h("div", { class: "rail", role: "img", "aria-label": label, title: label }, h("span", { class: "rail-track" }), sig, train);
   }
 
+  // ---- the other blocks (3.10): writer and reviewer on conception steps, the roadmap road, the backlog's mail carrier,
+  // the high jump over a score's cut-off, release trophies, the health check's heartbeat, flag poles, the expedite siren, empty states
+  const face = (cx, cy, r) => [s("circle", { cx: String(cx), cy: String(cy), r: String(r) }),
+    s("circle", { cx: String(cx + r * 0.3), cy: String(cy - r * 0.1), r: String(r * 0.22), class: "m-eye" }), s("circle", { cx: String(cx - r * 0.35), cy: String(cy - r * 0.1), r: String(r * 0.22), class: "m-eye" }),
+    s("circle", { cx: String(cx + r * 0.35), cy: String(cy - r * 0.05), r: String(r * 0.11), class: "m-pupil" }), s("circle", { cx: String(cx - r * 0.3), cy: String(cy - r * 0.05), r: String(r * 0.11), class: "m-pupil" })];
+  /** A conception step being written: its agent writes on a clipboard, the lines appear. */
+  function stepWriter(name) {
+    return s("svg", { class: `mascot step-fun writer ag-${agColor(name)}`, viewBox: "0 0 46 44", "aria-hidden": "true" },
+      s("rect", { x: "22", y: "14", width: "20", height: "26", rx: "2", class: "m-paper" }),
+      s("path", { d: "M25 21 H39 M25 26 H39 M25 31 H34", pathLength: "40", class: "m-ink" }),
+      face(12, 12, 7), s("rect", { x: "6", y: "20", width: "12", height: "14", rx: "4" }),
+      s("path", { d: "M9 34 V42 M15 34 V42", class: "m-limb" }), s("path", { d: "M16 26 L26 30", class: "m-limb m-pen" }));
+  }
+  /** A conception step waiting for its review: the reviewer reads it with glasses, eyes going left and right. */
+  function stepReader(name) {
+    return s("svg", { class: `mascot step-fun reader ag-${agColor(name)}`, viewBox: "0 0 46 44", "aria-hidden": "true" },
+      s("circle", { cx: "22", cy: "12", r: "8" }),
+      s("g", { class: "m-eyes" }, s("circle", { cx: "19", cy: "12", r: "3", class: "m-glasses" }), s("circle", { cx: "26", cy: "12", r: "3", class: "m-glasses" }),
+        s("circle", { cx: "19.5", cy: "13", r: "1", class: "m-pupil" }), s("circle", { cx: "26.5", cy: "13", r: "1", class: "m-pupil" })),
+      s("rect", { x: "15", y: "21", width: "14", height: "14", rx: "4" }),
+      s("rect", { x: "8", y: "24", width: "28", height: "12", rx: "2", class: "m-paper" }), s("path", { d: "M22 24 V36", class: "m-fold" }));
+  }
+  /** The roadmap as a road: a sign per milestone (green once closed), the car parked at the current one, which drives in when it changes. */
+  let roadSeen = null;
+  function roadStrip(ms) {
+    if (!funOn() || !ms.length) return null;
+    const cur = Math.max(0, ms.findIndex((m) => m.id === data.current_milestone));
+    const at = (i) => ((i + 0.5) / ms.length) * 100;
+    const drive = roadSeen !== null && roadSeen !== data.current_milestone;
+    roadSeen = data.current_milestone;
+    const car = s("svg", { class: `road-car${drive ? " drive" : ""}`, viewBox: "0 0 46 24" },
+      s("path", { d: "M4 14 L10 6 H30 L38 14 H43 Q45 14 45 16 V19 H2 V16 Q2 14 4 14 Z", class: "car-body" }),
+      s("path", { d: "M12 8 H20 V14 H8 Z M22 8 H29 L35 14 H22 Z", class: "car-glass" }),
+      [11, 35].map((x) => s("g", { class: "car-wheel" }, s("circle", { cx: String(x), cy: "19", r: "4.5" }), s("path", { d: `M${x - 3} 19 H${x + 3}` }))));
+    car.style.setProperty("--to", `${at(cur)}%`);
+    const cone = s("svg", { class: "road-cone", viewBox: "0 0 12 16" }, s("path", { d: "M6 0 L11 14 H1 Z", class: "cone-body" }), s("path", { d: "M3.5 8 H8.5", class: "cone-band" }),
+      s("rect", { x: "0", y: "14", width: "12", height: "2", class: "cone-base" }));
+    cone.style.left = `calc(${at(cur)}% + 26px)`;
+    return h("div", { class: "road-strip", "aria-hidden": "true" },
+      ms.map((m, i) => { const sg = h("span", { class: `road-sign${isClosed(m) ? " done" : ""}${i === cur ? " cur" : ""}` }, h("b", { text: m.id }), h("i")); sg.style.left = `${at(i)}%`; return sg; }),
+      isClosed(ms[cur]) ? null : cone, car);
+  }
+  /** The backlog's mail carrier: when a new issue reaches the queue, an envelope flies in and the new row shakes. */
+  let issuesSeen = null;
+  function mailCarrier(toss) {
+    return s("svg", { class: `mascot carrier ag-orange${toss ? " toss" : ""}`, viewBox: "0 0 80 62", "aria-hidden": "true" },
+      s("rect", { x: "9", y: "2", width: "22", height: "6", rx: "2", class: "m-cap" }), s("rect", { x: "5", y: "7", width: "26", height: "3", rx: "1.5", class: "m-cap" }),
+      face(19, 17, 8), s("rect", { x: "11", y: "26", width: "16", height: "18", rx: "5" }),
+      s("path", { d: "M9 30 L3 46", class: "m-limb" }), s("rect", { x: "0", y: "40", width: "14", height: "12", rx: "3", class: "m-bag" }),
+      s("path", { d: "M26 30 L36 26", class: "m-limb m-arm" }), s("path", { d: "M15 44 V58 M23 44 V58", class: "m-limb" }),
+      s("g", { class: "m-env" }, s("rect", { x: "38", y: "16", width: "16", height: "11", rx: "2", class: "m-paper" }), s("path", { d: "M38 17 L46 23 L54 17", class: "m-fold" })));
+  }
+  /** A score bar with a cut-off as a high-jump lane: the mascot clears the mark when the score passes, trips before it when not. */
+  function jumpLane(score, cut, ok, bad) {
+    if (!funOn() || score == null || (!ok && !bad)) return null;
+    const j = s("svg", { class: `mascot jumper ag-pink ${bad ? "trip" : "clear"}`, viewBox: "0 0 30 40", "aria-hidden": "true" },
+      s("g", { class: "m-body" }, face(13, 9, 7), s("rect", { x: "8", y: "16", width: "10", height: "12", rx: "4" }), s("path", { d: "M17 19 L25 14 M9 19 L3 24", class: "m-limb" })),
+      s("path", { d: "M11 27 L11 38", class: "m-limb leg-a" }), s("path", { d: "M15 27 L15 38", class: "m-limb leg-b" }));
+    const lane = h("div", { class: "jump-lane", "aria-hidden": "true" }, j);
+    lane.style.setProperty("--cut", `${Math.min(100, cut)}%`);
+    lane.style.setProperty("--to", `${Math.min(100, Math.max(0, score))}%`);
+    return lane;
+  }
+  /** Released versions as trophies on a shelf, the next planned release as a dashed one. */
+  function trophyShelf(rel) {
+    if (!funOn() || !rel.length) return null;
+    const next = relPlan().find((r) => r.status !== "released");
+    const cup = (label, empty) => h("span", { class: `trophy${empty ? " next" : ""}` },
+      s("svg", { viewBox: "0 0 34 40" },
+        s("path", { d: "M8 3 H26 V12 Q26 22 17 23 Q8 22 8 12 Z", class: "tr-cup" }), s("path", { d: "M8 6 H3 Q3 14 9 15 M26 6 H31 Q31 14 25 15", class: "tr-ear" }),
+        empty ? null : s("rect", { x: "14", y: "23", width: "6", height: "7", class: "tr-cup" }),
+        s("rect", { x: "9", y: "30", width: "16", height: "6", rx: "1.5", class: "tr-base" }), empty ? null : s("path", { d: "M12 6 L14 6 L12 16 L10 16 Z", class: "tr-shine" })),
+      h("span", { class: "trophy-label", text: label }));
+    return h("div", { class: "trophy-shelf", "aria-hidden": "true" }, rel.slice(-5).map((r) => cup(r.tag || r.version || "")), next ? cup(next.id, true) : null);
+  }
+  /** The health check as a heartbeat: a heart that beats while production is healthy, a trace with a spike per check (red when it failed). */
+  function heartbeat(hc) {
+    if (!funOn() || !hc || !hc.last) return null;
+    const hist = (hc.history || []).slice(-12);
+    const n = Math.max(1, hist.length), w = 400 / n;
+    let d = "M0 30", bad = "";
+    hist.forEach((c, i) => {
+      const x = i * w, m = x + w / 2;
+      d += ` H${(m - 8).toFixed(1)}`;
+      const spike = c.ok ? ` L${(m - 4).toFixed(1)} 10 L${m.toFixed(1)} 48 L${(m + 4).toFixed(1)} 30` : ` L${(m - 3).toFixed(1)} 38 L${(m + 1).toFixed(1)} 22 L${(m + 4).toFixed(1)} 30`;
+      d += spike;
+      if (!c.ok) bad += ` M${(m - 8).toFixed(1)} 30${spike}`;
+    });
+    d += " H400";
+    return h("div", { class: `heartbeat${hc.last.ok ? "" : " down"}`, "aria-hidden": "true" },
+      s("svg", { class: "hb-heart", viewBox: "0 0 22 20" }, s("path", { d: "M11 19 C-6 8 3 -4 11 4 C19 -4 28 8 11 19 Z" })),
+      s("svg", { class: "hb-trace", viewBox: "0 0 400 56", preserveAspectRatio: "none" }, s("path", { d, pathLength: "100", class: "hb-line" }), bad ? s("path", { d: bad, class: "hb-bad" }) : null));
+  }
+  /** A release flag on its pole: up and waving when on, lowered and grey when off. */
+  const flagPole = (state) => (funOn() ? s("svg", { class: `flag-pole f-${state}`, viewBox: "0 0 40 34", "aria-hidden": "true" },
+    s("rect", { x: "3", y: "2", width: "2.4", height: "32", class: "fp-pole" }), s("path", { d: "M5 3 H30 L25 10 L30 17 H5 Z", class: "fp-cloth" })) : null);
+  /** The expedite lane's siren while a hotfix is open, the standard lane's bus while something waits for the next milestone. */
+  function laneFun(k, count) {
+    if (!funOn() || !count) return null;
+    if (k === "expedite") return s("svg", { class: "siren", viewBox: "0 0 26 22", "aria-hidden": "true" },
+      s("path", { d: "M13 8 L0 0 V16 Z", class: "sr-beam b1" }), s("path", { d: "M13 8 L26 0 V16 Z", class: "sr-beam b2" }),
+      s("path", { d: "M7 18 Q7 6 13 6 Q19 6 19 18 Z", class: "sr-light" }), s("rect", { x: "5", y: "18", width: "16", height: "4", rx: "1.5", class: "sr-base" }));
+    if (k === "standard") return s("svg", { class: "bus", viewBox: "0 0 40 22", "aria-hidden": "true" },
+      s("rect", { x: "1", y: "2", width: "36", height: "15", rx: "4", class: "bus-body" }), s("path", { d: "M5 5 H11 V10 H5 Z M14 5 H20 V10 H14 Z M23 5 H29 V10 H23 Z", class: "car-glass" }),
+      s("circle", { cx: "9", cy: "18", r: "3.5", class: "bus-wheel" }), s("circle", { cx: "29", cy: "18", r: "3.5", class: "bus-wheel" }));
+    return null;
+  }
+  /** Good empty states: a mascot resting in a hammock (nothing blocked, nothing waiting) or sweeping (an empty column). */
+  function emptyFun(kind) {
+    if (!funOn()) return null;
+    if (kind === "rest") return s("svg", { class: "empty-fun rest", viewBox: "0 0 84 50", "aria-hidden": "true" },
+      s("path", { d: "M4 2 V48 M80 2 V48", class: "ef-post" }),
+      s("g", { class: "ef-hammock" }, s("path", { d: "M4 8 Q42 40 80 8", class: "ef-net" }), s("circle", { cx: "30", cy: "22", r: "6", class: "ef-skin" }),
+        s("path", { d: "M27 22 q1.5 1.5 3 0 M31 21 q1.5 1.5 3 0", class: "m-line" }), s("path", { d: "M34 26 Q46 32 58 24", class: "ef-body" })));
+    return s("svg", { class: "mascot empty-fun sweep ag-blue", viewBox: "0 0 84 50", "aria-hidden": "true" },
+      s("g", { class: "ef-dust" }, s("circle", { cx: "58", cy: "44", r: "2" }), s("circle", { cx: "63", cy: "42", r: "1.5" })),
+      face(34, 12, 7), s("rect", { x: "28", y: "20", width: "12", height: "14", rx: "4" }), s("path", { d: "M31 34 V46 M37 34 V46", class: "m-limb" }),
+      s("g", { class: "ef-broom" }, s("path", { d: "M42 22 L54 42", class: "ef-stick" }), s("path", { d: "M50 40 L60 46 L56 48 L48 44 Z", class: "ef-straw" })));
+  }
+
   // ------------------------------------------------------------------ header
   // ------------------------------------------------------------------ what Claude Code runs now: skills (outermost first) and agents
   const skillRuns = () => ((data && data.agents && data.agents.runs) || []).filter((r) => r.skill !== "board");  // the board is not work
@@ -1189,7 +1309,8 @@
         h("div", { class: "col-head" }, h("span", { class: `swatch st-${st.key}`, "aria-hidden": "true" }), st.label,
           h("span", { class: "count", text: String(list.length) })),
         h("div", { class: `col-cards${filtering ? " scroll" : ""}`, "data-clamp": filtering ? null : "cards" },
-          list.length ? list.map(taskCard) : h("div", { class: "col-empty", text: filtering ? tr("No match") : st.key === "blocked" ? tr("Nothing blocked") : tr("Empty") })),
+          list.length ? list.map(taskCard) : h("div", { class: "col-empty" }, filtering ? null : emptyFun(st.key === "blocked" ? "rest" : "sweep"),
+            h("span", { text: filtering ? tr("No match") : st.key === "blocked" ? tr("Nothing blocked") : tr("Empty") }))),
         h("button", { type: "button", class: "col-more", id: `more-${st.key}`, hidden: true, onclick: all }));
     }));
     clampSoon();
@@ -1433,7 +1554,7 @@
   const phaseTag = (p) => h("button", { type: "button", class: "phase-tag", title: tr("Open {v}", { v: PHASE_NAME[p] }), text: PHASE_NAME[p], onclick: () => setPhase(p) });
   function listBlock(title, items, emptyText, good, phase) {
     return h("div", {}, h("div", { class: "list-title" }, title, items.length ? h("span", { class: "chip", text: String(items.length) }) : null, phase ? phaseTag(phase) : null),
-      items.length ? h("ul", { class: "list" }, items) : h("div", { class: `empty${good ? " good" : ""}`, text: emptyText }));
+      items.length ? h("ul", { class: "list" }, items) : h("div", { class: `empty${good ? " good" : ""}` }, good && emptyText ? emptyFun("rest") : null, h("span", { text: emptyText })));
   }
 
   /** The phase an open question belongs to, from the skill that raised it. */
@@ -1910,7 +2031,7 @@
     return h("div", { class: "dod-row" }, h("span", { class: "name" }, name, " ",
       h("span", { class: `badge ${ok ? "good" : bad ? "bad" : "neutral"}`, text: ok ? `✓ ${verdict}` : bad ? tr("✕ below cut-off") : verdict || "pending" }),
       links && links.length ? h("span", { class: "dod-links" }, links) : null),
-      h("span", { class: "score", text: score != null ? `${score} / ${cut}` : `— / ${cut}` }), mm);
+      h("span", { class: "score", text: score != null ? `${score} / ${cut}` : `— / ${cut}` }), jumpLane(score, cut, ok, bad), mm);
   }
 
   // the document a review judged, and the review's own report when there is one
@@ -2086,8 +2207,9 @@
     const files = (data.artifacts || {})[x.key] || [];
     const running = runsAt(`step:${x.key}`);
     const c = x.state === "review" ? STEP_REVIEW_CMD[x.key] : ["todo", "doing", "stale"].includes(x.state) ? STEP_CMD[x.key] : null;
-    return h("div", { class: `step-card s-${x.state}${running.length ? " running" : ""}` },
-      runBanner(running),
+    const fun = !funOn() ? null : x.state === "doing" || (running.length && x.state !== "review") ? stepWriter("architect") : x.state === "review" ? stepReader("requirements-reviewer") : null;
+    return h("div", { class: `step-card s-${x.state}${running.length ? " running" : ""}${fun ? " has-fun" : ""}` },
+      runBanner(running), fun,
       h("div", { class: "step-top" }, h("span", { class: "step-mark", "aria-hidden": "true", text: STEP_MARK[x.state] }),
         h("strong", { text: STEP_TITLE[x.key] || x.key }), h("span", { class: `chip step-st s-${x.state}`, text: STEP_WORD[x.state] })),
       h("p", { class: "card-sub", text: STEP_ABOUT[x.key] || "" }),
@@ -2257,7 +2379,14 @@
     const curIdx = ms.findIndex((m) => m.id === data.current_milestone);
     const later = ms.slice(curIdx + 1).map((m) => ({ m, left: tasksOf(m).filter((t) => t.status !== "done").length })).filter((x) => x.left);
     const laterTasks = later.reduce((n, x) => n + x.left, 0);
-    const backBody = () => [listBlock(tr("Issue queue"), queued.map(issueLi), tr("No issues waiting."), true),
+    const fresh = issuesSeen ? queued.filter((i) => !issuesSeen.has(i.id)).map((i) => i.id) : [];
+    issuesSeen = new Set(queued.map((i) => i.id));
+    const queueBlock = () => {
+      const qb = listBlock(tr("Issue queue"), queued.map((i) => { const li = issueLi(i); if (funOn() && fresh.includes(i.id)) li.classList.add("arrived"); return li; }), tr("No issues waiting."), true);
+      if (funOn()) qb.firstChild.append(mailCarrier(fresh.length > 0));
+      return qb;
+    };
+    const backBody = () => [queueBlock(),
       scheduled.length ? listBlock(tr("Scheduled issues"), scheduled.map(([id, v]) => issueLi({ id, c: v.class, ...v })), "") : null,
       listBlock(tr("Later milestones"), later.map(({ m, left }) => h("li", { class: "has-btn" },
         h("button", { type: "button", class: "row-btn", title: tr("Show {id} in construction", { id: m.id }), onclick: () => { closeList(); openMilestone(m.id); } },
@@ -2267,7 +2396,7 @@
     const kpi = (label, value) => h("div", { class: "kpi" }, h("span", { class: "fact-label", text: label }), h("strong", { text: String(value) }));
     fill($("pl-tiles"),
       tile({ title: tr("Roadmap"), count: ms.length || null, sub: ms.length ? tr("{closed} of {v} closed", { closed, v: plural(ms.length, "milestone") }) : "",
-        body: ms.length ? h("ol", { class: "list road" }, roadRows()) : h("div", { class: "empty" }, tr("No milestones yet. They appear after "), cmd("/dev-kit:plan"), "."), all: () => h("ol", { class: "list road" }, roadRows()) }),
+        body: ms.length ? [roadStrip(ms), h("ol", { class: "list road" }, roadRows())] : h("div", { class: "empty" }, tr("No milestones yet. They appear after "), cmd("/dev-kit:plan"), "."), all: () => h("ol", { class: "list road" }, roadRows()) }),
       tile({ title: tr("Backlog"), count: queued.length + laterTasks || null, sub: tr("{v} · {v2} in later milestones", { v: plural(queued.length, "queued issue"), v2: plural(laterTasks, "task") }),
         body: [runBanner(runsAt("backlog")), ...backBody()], all: backBody,
         foot: actionsOn() ? h("button", { type: "button", class: "link-btn", text: tr("＋ New issue"), onclick: newIssue }) : null }),
@@ -2301,7 +2430,7 @@
   function branchNode(n) {
     return h("li", { class: "fnode k-branch" }, h("div", { class: "branch", role: "group", "aria-label": n.label },
       n.branch.map(([k, name, what, count]) => h("button", { type: "button", class: `branch-row b-${k}`, title: what, onclick: () => setPhase(k === "change" ? "conception" : "planning") },
-        h("strong", { text: name }), h("span", { class: "branch-what", text: what }), h("span", { class: `branch-n${count ? " on" : ""}`, text: String(count) })))));
+        laneFun(k, count), h("strong", { text: name }), h("span", { class: "branch-what", text: what }), h("span", { class: `branch-n${count ? " on" : ""}`, text: String(count) })))));
   }
   function renderStable() {
     const nodes = stableNodes();
@@ -2350,7 +2479,7 @@
       tile({ title: tr("Release checks"), sub: tr("Cut-off: reviews {review_min_overall} · usability {min_overall}", { review_min_overall: data.quality.review_min_overall, min_overall: data.quality.min_overall }),
         body: [runBanner(runsAt("checks")), reviewList(["ux", "docs", ...others], tr("No checks."))], all: () => reviewList(["ux", "docs", ...others], tr("No checks.")) }),
       tile({ title: tr("Releases"), count: rel.length || null, sub: tr("Newest first"),
-        body: [runBanner(runsAt("releases")), rel.length ? h("ul", { class: "list" }, relRows()) : h("div", { class: "empty", text: tr("No release yet. Closed milestones wait for the next release.") })], all: () => h("ul", { class: "list" }, relRows()) }));
+        body: [runBanner(runsAt("releases")), trophyShelf(rel), rel.length ? h("ul", { class: "list" }, relRows()) : h("div", { class: "empty", text: tr("No release yet. Closed milestones wait for the next release.") })], all: () => h("ul", { class: "list" }, relRows()) }));
   }
 
   /** The production health check (autonomy.production.health): the last result and the short history as dots. */
@@ -2365,6 +2494,7 @@
       last ? h("p", { class: "hc-last" }, h("span", { class: `badge ${last.ok ? "good" : "bad"}`, text: last.ok ? tr("✓ healthy") : tr("✕ failing") }), " ",
         h("span", { class: "sub", text: [last.at && Number.isFinite(parseT(last.at)) ? fmtDT(parseT(last.at)) : null, last.detail,
           hc.streak > 1 ? tr("{n} in a row", { n: hc.streak }) : null, last.issue ? last.issue : null].filter(Boolean).join(" · ") })) : null,
+      heartbeat(hc),
       last ? h("p", { class: "hc-hist" }, dots) : h("p", { class: "pending-line" }, tr("Not run yet: the board runs it while it is open, or run "), cmd("/dev-kit:deploy --health")));
   }
   /** Release flags (autonomy.release_flags): which release is switched on in production. */
@@ -2372,7 +2502,7 @@
     const fl = data.flags || [];
     if (!fl.length) return null;
     const word = tmap({ on: N_("on"), off: N_("off"), removed: N_("removed") });
-    return h("ul", { class: "list" }, fl.map((f) => h("li", {}, h("span", { class: "id", text: f.release }), h("span", {}, h("code", { text: f.name })),
+    return h("ul", { class: "list" }, fl.map((f) => h("li", {}, flagPole(f.state), h("span", { class: "id", text: f.release }), h("span", {}, h("code", { text: f.name })),
       h("span", { class: `badge ${f.state === "on" ? "good" : ""}`, text: word[f.state] || f.state }),
       f.cleanup_task && f.cleanup_task !== "pending" ? h("span", { class: "sub", text: tr("removal: {id}", { id: f.cleanup_task }) }) : null)));
   }
