@@ -24,11 +24,13 @@ Subcommands (executor side)
                 silent process that prints one line when a request waits for the armed session it runs under, and
                 again every 10 minutes while nobody takes it. Each line reaches Claude as a notification, so an
                 idle session starts working. Prints nothing in any other session. (--once: one pass, for tests)
-  continue-next continuous mode: queue the project's next step when the mode is on, nothing is queued and nothing
-                needs the user; exit 3 with the reason otherwise
+  autopilot     the board's autopilot: on | off | status (--json). On, the board's server runs /dev-kit:autopilot
+                headless, one milestone per run, until a release waits for approval (AutoExecutor)
+  autopilot-exit  written by /dev-kit:autopilot --board as its last step: --reason milestone_done|waiting_for_user|
+                release_approval|stable|stopped|until_reached [--note TEXT]; the board reads it to decide the next run
 
 Files, all in <project>/.dev/run/, each with one writer, written atomically (tmp + rename):
-  inbox/P-nnn.json        the request, immutable (board, or continuous mode); before 3.0 named R-nnn (still read,
+  inbox/P-nnn.json        the request, immutable (board); before 3.0 named R-nnn (still read,
                           and shown as P-nnn: R<n> is reserved for releases)
   inbox/P-nnn.state.json  status, timestamps, note (executor); absent = pending
   inbox/P-nnn.cancel      cancel flag (board); a pending request is cancelled at once, a running one at the next
@@ -36,8 +38,12 @@ Files, all in <project>/.dev/run/, each with one writer, written atomically (tmp
   worker.json             executor heartbeat (executor)
   worker-armed.json       the Claude Code process that listens (executor: arm)
   worker-watch.json       the listener's own heartbeat (watch)
-  worker-continuous.json  the last step continuous mode queued, or why it stopped (executor)
-  worker-mode.json        paused and continuous modes (board)
+  worker-mode.json        the paused queue (board)
+  worker-auto.json        what the headless worker started by the board is doing (board server)
+  autopilot.json          the board's autopilot switch: on or off, kept across board restarts (board)
+  autopilot.stop          off was asked while a run is open: it finishes its step and ends (board)
+  autopilot-run.json      what the board's autopilot runner is doing, and why it waits or stopped (board server)
+  autopilot-exit.json     how the last autopilot run ended (the autopilot skill, autopilot-exit)
   approvals/A-*.json      a permission request of Claude Code while it runs a board request (the PermissionRequest
                           hook): tool, the command or path cut to 300 characters, the rule Claude Code suggests;
                           approvals/A-*.decision: allow | allow_session | deny (board). Both are removed once the
@@ -73,8 +79,7 @@ ONLINE_S = 15 * 60            # an executor seen this recently counts as online 
 WATCH_BEAT_S = 20             # how often the listener refreshes its heartbeat
 WATCH_FRESH_S = 90            # a listener not seen for this long is not listening
 REMIND_S = 600                # a request nobody took is announced again after this long
-THINK_S = 10                  # how often an idle listener looks for the next step of continuous mode
-CONTINUE_OK = ("implement", "qa", "review", "docs", "usability")  # steps continuous mode takes on its own
+THINK_S = 10                  # how often an idle listener scans the queue again even when no file changed
 APPROVAL_WAIT_S = 600         # a permission request nobody answers on the board is denied after this long
 APPROVAL_TARGET = 300         # characters of the command or path shown on the board
 FINISHED = ("done", "failed", "cancelled", "stale")
@@ -491,31 +496,19 @@ def cancel(root: Path, rid: str) -> dict:
 
 def modes(root: Path) -> dict:
     m = _read(run_dir(root) / "worker-mode.json") or {}
-    return {"paused": m.get("paused") is True, "continuous": m.get("continuous") is True}
+    return {"paused": m.get("paused") is True}
 
 
-def set_mode(root: Path, paused: object = None, continuous: object = None) -> dict:
+def set_mode(root: Path, paused: object = None) -> dict:
     path = run_dir(root) / "worker-mode.json"
-    since = _since(_read(path) or {})
     m = modes(root)
-    for k, v in (("paused", paused), ("continuous", continuous)):
-        if v is not None:
-            if not isinstance(v, bool):
-                raise Invalid([f"{k} must be true or false"])
-            m[k] = v
-    if continuous is True:
-        since = time.time()  # turning it on (again) clears whatever had stopped it
+    if paused is not None:
+        if not isinstance(paused, bool):
+            raise Invalid(["paused must be true or false"])
+        m["paused"] = paused
     _ensure(root)
-    _write(path, {**m, "continuous_since": since if m["continuous"] else None, "at": now()})
+    _write(path, {**m, "at": now()})
     return m
-
-
-def _since(raw: dict) -> float:
-    """When continuous mode was last turned on (epoch seconds with fractions: a stop and a "go on" can share a second)."""
-    try:
-        return float(raw.get("continuous_since") or 0)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def _mtime(path: Path) -> float:
@@ -597,6 +590,9 @@ def board_run(root: Path) -> dict | None:
     process is one of our parents (a hook or a subagent's hook of that session). None anywhere else."""
     w = _read(run_dir(root) / "worker.json") or {}
     if w.get("state") != "running" or not w.get("item") or not w.get("pid"):
+        ap = _read(run_dir(root) / AP_RUN) or {}
+        if ap.get("state") == "running" and ap.get("pid") and int(ap["pid"]) in ancestors()[1:]:
+            return {"id": "autopilot", "action": "autopilot", "status": "running"}  # the board's autopilot run
         return None
     if int(w["pid"]) not in ancestors()[1:]:
         return None
@@ -663,7 +659,6 @@ def wait_decision(root: Path, aid: str, wait_s: float, request: str | None = Non
 def executor(root: Path) -> dict:
     """The executor as the board shows it: listening (a request wakes it), working, idle, paused, or offline."""
     w = _read(run_dir(root) / "worker.json") or {}
-    raw = _read(run_dir(root) / "worker-mode.json") or {}
     m = modes(root)
     seen = _ts(w.get("last_seen"))
     if not w or w.get("state") == "offline":
@@ -674,10 +669,8 @@ def executor(root: Path) -> dict:
         live = time.time() - seen < ONLINE_S
     hears = listening(root)
     state = (w.get("state") or "idle") if live else ("idle" if hears else "offline")
-    cont = _read(run_dir(root) / "worker-continuous.json") or {}
-    stopped = cont.get("stopped") if m["continuous"] and float(cont.get("at_s") or 0) >= _since(raw) else None
-    return {"state": state, "online": live or hears, "listening": hears, "paused": m["paused"], "continuous": m["continuous"],
-            "continuous_stopped": stopped, "item": w.get("item") if live else None, "last_seen": w.get("last_seen")}
+    return {"state": state, "online": live or hears, "listening": hears, "paused": m["paused"],
+            "item": w.get("item") if live else None, "last_seen": w.get("last_seen")}
 
 
 # --------------------------------------------------------------------------- the board runs its own executor
@@ -685,20 +678,35 @@ def executor(root: Path) -> dict:
 # session takes requests, it opens one headless (`claude -p "/dev-kit:worker"`, the same mechanism as the rounds of
 # §17), which works through the queue and ends when it is empty. Permissions still come to Needs you (the plugin's
 # PermissionRequest hook). A session that listens (/dev-kit:board, /dev-kit:worker) keeps priority.
+#
+# The board's autopilot (3.2) uses the same runner: while its switch is on, the server runs the kit's own
+# `/dev-kit:autopilot --milestones 1 --board` headless, one milestone per run, and starts the next run when one ends,
+# until a release waits for the user's approval or the project is stable. A run that ends because only work that
+# needs the user is left (Needs you) waits until something the user decides lands in .dev, then a new run starts.
+# Board requests go first: one `claude` changes the project at a time.
 
 AUTO_FILE = "worker-auto.json"
 AUTO_GRACE_S = 4                # a listening session gets this long to take a new request first
 AUTO_BACKOFF_S = (30, 120, 600) # after a run that failed (or left its request pending), wait before the next one
-AUTO_DEFAULTS = {"auto": True, "permission_mode": "default", "timeout_min": 180}
+AUTO_DEFAULTS = {"auto": True, "permission_mode": "acceptEdits", "timeout_min": 180, "autopilot_timeout_min": 360}
 AUTO_MODES = ("default", "acceptEdits", "plan", "auto", "bypassPermissions", "dontAsk")
+AP_FILE, AP_RUN, AP_STOP, AP_EXIT = "autopilot.json", "autopilot-run.json", "autopilot.stop", "autopilot-exit.json"
+AP_COMMAND = "/dev-kit:autopilot --milestones 1 --board"
+AP_EXIT_REASONS = ("milestone_done", "waiting_for_user", "release_approval", "stable", "stopped", "until_reached")
+AP_WAITS = {"waiting_for_user": "waiting_user", "release_approval": "release", "stable": "stable"}  # exit reason -> state
+AP_MAX_FAILS = 3                # failed runs in a row before the autopilot stops and says why
 
 
 def auto_cfg(root: Path) -> dict:
-    """autonomy.board_executor in state.json: auto (on), permission_mode, timeout_min."""
+    """autonomy.board_executor in state.json: auto (the headless worker on), permission_mode, timeout_min (worker),
+    autopilot_timeout_min."""
     st = _read(root / ".dev" / "state.json") or {}
-    cfg = {**AUTO_DEFAULTS, **(((st.get("autonomy") or {}).get("board_executor")) or {})}
+    own = ((st.get("autonomy") or {}).get("board_executor")) or {}
+    if own == {"auto": True, "permission_mode": "default", "timeout_min": 180}:
+        own = {}  # the default written by kits before 3.2, never changed: the 3.2 defaults apply
+    cfg = {**AUTO_DEFAULTS, **own}
     if cfg.get("permission_mode") not in AUTO_MODES:
-        cfg["permission_mode"] = "default"
+        cfg["permission_mode"] = AUTO_DEFAULTS["permission_mode"]
     return cfg
 
 
@@ -715,69 +723,151 @@ def auto_status(root: Path) -> dict:
     return st
 
 
-class AutoExecutor:
-    """Started by the board's server; tick() runs every second or two on its thread."""
+def autopilot_on(root: Path) -> bool:
+    raw = _read(run_dir(root) / AP_FILE)
+    if raw is None:  # before 3.2 the nearest thing was "Go on by itself" (continuous mode): it carries over
+        return (_read(run_dir(root) / "worker-mode.json") or {}).get("continuous") is True
+    return raw.get("on") is True
 
-    def __init__(self, root: Path, kit: Path) -> None:
+
+def _ap_since(root: Path) -> float:
+    try:
+        return float((_read(run_dir(root) / AP_FILE) or {}).get("since_s") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def autopilot_status(root: Path) -> dict:
+    """The board's autopilot as the switch shows it. state: off · idle (on, about to start a run) · running · stopping
+    (off asked, the run finishes its step) · waiting_user (only work that needs the user is left) · release (a release
+    waits for approval) · stable · waiting_session (another session works on the project) · backoff (a run failed,
+    retry at `until`) · stopped (it will not start again until switched on again; `reason` says why)."""
+    on = autopilot_on(root)
+    st = _read(run_dir(root) / AP_RUN) or {}
+    state = st.get("state") or "idle"
+    alive = state == "running" and _alive(st.get("pid"))
+    if state == "running" and not alive:
+        state = "idle"
+    if alive and (not on or (run_dir(root) / AP_STOP).exists()):
+        state = "stopping"
+    elif not on:
+        state = "off"
+    elif state == "stopped" and float(st.get("at_s") or 0) < _ap_since(root):
+        state = "idle"  # switched on again since it stopped
+    keep = ("reason", "pid", "since", "milestone", "runs", "fails", "until", "note", "last_exit", "at")
+    return {"on": on, "state": state, "command": AP_COMMAND, **{k: st.get(k) for k in keep if st.get(k) is not None}}
+
+
+def set_autopilot(root: Path, on: object) -> dict:
+    """The board's switch. Off while a run is open asks it to finish its step and end (autopilot.stop)."""
+    if not isinstance(on, bool):
+        raise Invalid(["on must be true or false"])
+    _ensure(root)
+    _write(run_dir(root) / AP_FILE, {"on": on, "since_s": time.time(), "at": now()})
+    stop = run_dir(root) / AP_STOP
+    st = _read(run_dir(root) / AP_RUN) or {}
+    if on:
+        stop.unlink(missing_ok=True)
+    elif st.get("state") == "running" and _alive(st.get("pid")):
+        stop.write_text(now(), encoding="utf-8")
+    return autopilot_status(root)
+
+
+def autopilot_exit(root: Path, reason: str, note: str | None = None) -> dict:
+    """The autopilot skill's last step in board mode: why this run ended, so the board knows what comes next."""
+    if reason not in AP_EXIT_REASONS:
+        raise Invalid([f"reason must be one of {', '.join(AP_EXIT_REASONS)}"])
+    errors: list[str] = []
+    rec = {"reason": reason, "note": clean(note, "note", 200, errors, required=False) or None, "at": now(), "at_s": time.time()}
+    if errors:
+        raise Invalid(errors)
+    _ensure(root)
+    _write(run_dir(root) / AP_EXIT, rec)
+    return rec
+
+
+def autopilot_stop_asked(root: Path) -> bool:
+    return (run_dir(root) / AP_STOP).exists() or not autopilot_on(root)
+
+
+def _ap_sig(root: Path) -> list:
+    """What changes when the user decides something: the queue (answers, decisions), questions and the state."""
+    out = []
+    for p in (inbox_dir(root), run_dir(root) / "questions", root / ".dev" / "open-questions.md", root / ".dev" / "state.json"):
+        try:
+            st = p.stat()
+            out.append([st.st_mtime_ns, st.st_size])
+        except OSError:
+            out.append(None)
+    return out
+
+
+def _state_at(root: Path) -> str | None:
+    """A fingerprint of the project's state and plan: a run that changed neither made no progress."""
+    import hashlib
+    h = hashlib.sha256()
+    for f in ("state.json", "plan.md"):
+        try:
+            h.update((root / ".dev" / f).read_bytes())
+        except OSError:
+            h.update(b"-")
+    return h.hexdigest()[:16]
+
+
+def _backoff(fails: int) -> float:
+    return AUTO_BACKOFF_S[min(fails, len(AUTO_BACKOFF_S)) - 1]
+
+
+class AutoExecutor:
+    """Started by the board's server; tick() runs every second or two on its thread. It runs one headless Claude Code
+    at a time: the worker for a waiting request first, else the autopilot while its switch is on. `other_autopilot`
+    (from the board) says whether /dev-kit:autopilot runs in a session of its own, which the board never doubles."""
+
+    def __init__(self, root: Path, kit: Path, other_autopilot=None) -> None:
         self.root, self.kit = root, kit
+        self.other_autopilot = other_autopilot or (lambda: False)
         self.proc: subprocess.Popen | None = None
+        self.kind: str | None = None   # "worker" or "autopilot" while a run is open
         self.started = 0.0
         self.fails = 0
         self.next_try = 0.0
         self.log = None
         self.runs = 0
         self.request: str | None = None
+        self.ap_fails = 0
+        self.ap_next = 0.0
+        self.ap_before: object = None   # state.json updated_at when the autopilot run started
 
+    # ---------------------------------------------------------------- status files
     def _status(self, state: str, **extra) -> None:
         _ensure(self.root)
         _write(run_dir(self.root) / AUTO_FILE, {"state": state, "at": now(), "runs": self.runs, "fails": self.fails, **extra})
 
-    def _reap(self) -> None:
-        if not self.proc:
-            return
-        rc = self.proc.poll()
-        cfg = auto_cfg(self.root)
-        if rc is None:
-            if time.time() - self.started > float(cfg["timeout_min"]) * 60:
-                self.stop()
-                self.fails += 1
-                self.next_try = time.time() + AUTO_BACKOFF_S[min(self.fails, len(AUTO_BACKOFF_S)) - 1]
-                self._status("waiting", reason="timeout", until=self.next_try)
-            return
-        mine = next((x for x in items(self.root) if x["id"] == self.request), None)
-        if self.log:
-            self.log.close()
-            self.log = None
-        self.proc = None
-        if rc != 0 or (mine is not None and mine["status"] == "pending"):  # failed, or never took its request
-            self.fails += 1
-            self.next_try = time.time() + AUTO_BACKOFF_S[min(self.fails, len(AUTO_BACKOFF_S)) - 1]
-            self._status("waiting", reason=f"exit {rc}" if rc else "left the request pending", until=self.next_try, log=".dev/run/worker-auto.log")
-        else:
-            self.fails = 0
-            self._status("idle", last_exit=rc)
+    def _ap(self, state: str, **extra) -> None:
+        old = _read(run_dir(self.root) / AP_RUN) or {}
+        if old.get("state") == state and all(old.get(k) == v for k, v in extra.items()) and state != "running":
+            return  # nothing new: keep the file (and its time) as it is
+        _ensure(self.root)
+        rec = {"state": state, "at": now(), "at_s": time.time(), "runs": old.get("runs", 0), "fails": self.ap_fails, **extra}
+        _write(run_dir(self.root) / AP_RUN, rec)
 
-    def tick(self) -> None:
-        self._reap()
-        if self.proc:
-            return
-        cfg = auto_cfg(self.root)
-        if not cfg.get("auto"):
-            return self._status("off")
-        if modes(self.root)["paused"] or executor(self.root)["online"]:
-            return
-        x = claimable(self.root)
-        if x is None or time.time() - _ts(x.get("ts")) < AUTO_GRACE_S or time.time() < self.next_try:
-            return
+    # ---------------------------------------------------------------- runs
+    def _spawn(self, kind: str, prompt: str, mode: str, tag: str) -> bool:
         exe = claude_exe()
         if not exe:
-            return self._status("no_claude")
-        cmd = [exe, "-p", "/dev-kit:worker", "--plugin-dir", str(self.kit), "--output-format", "json",
-               "--permission-mode", cfg["permission_mode"]]
+            if kind == "worker":
+                self._status("no_claude")
+            else:
+                self._ap("stopped", reason="no_claude")
+            return False
+        cmd = [exe, "-p", prompt, "--plugin-dir", str(self.kit), "--output-format", "json", "--permission-mode", mode]
         env = {**os.environ, "CLAUDE_PROJECT_DIR": str(self.root), "DEV_KIT_BOARD_CHILD": "1"}
+        if kind == "autopilot":
+            env["DEV_KIT_AUTOPILOT"] = "board"
         _ensure(self.root)
-        self.log = open(run_dir(self.root) / "worker-auto.log", "ab")
-        self.log.write(f"\n--- {now()} {' '.join(cmd[:3])} (for {x['id']})\n".encode())
+        name = "worker-auto.log" if kind == "worker" else "autopilot.log"
+        self.log = open(run_dir(self.root) / name, "ab")
+        self.log.write(f"\n--- {now()} {' '.join(cmd[:3])} ({tag})\n".encode())
         self.log.flush()
         try:
             self.proc = subprocess.Popen(cmd, cwd=self.root, env=env, stdin=subprocess.DEVNULL, stdout=self.log,
@@ -785,11 +875,150 @@ class AutoExecutor:
         except OSError as e:
             self.log.close()
             self.log = None
-            self.fails += 1
-            self.next_try = time.time() + AUTO_BACKOFF_S[min(self.fails, len(AUTO_BACKOFF_S)) - 1]
-            return self._status("waiting", reason=str(e)[:200], until=self.next_try)
-        self.started, self.runs, self.request = time.time(), self.runs + 1, x["id"]
-        self._status("running", pid=self.proc.pid, since=now(), request=x["id"])
+            if kind == "worker":
+                self.fails += 1
+                self.next_try = time.time() + _backoff(self.fails)
+                self._status("waiting", reason=str(e)[:200], until=self.next_try)
+            else:
+                self._ap_failed(str(e)[:200])
+            return False
+        self.kind, self.started = kind, time.time()
+        return True
+
+    def _close_log(self) -> None:
+        if self.log:
+            self.log.close()
+            self.log = None
+
+    def _reap(self) -> bool:
+        """True when a run ended (or was ended) here: the next one starts at the next tick, not in this one."""
+        if self.proc is None:
+            return self._reap_adopted()
+        rc = self.proc.poll()
+        if rc is None:
+            cfg = auto_cfg(self.root)
+            limit = float(cfg["timeout_min"] if self.kind == "worker" else cfg["autopilot_timeout_min"]) * 60
+            if time.time() - self.started > limit:
+                kind = self.kind
+                self.stop()
+                if kind == "worker":
+                    self.fails += 1
+                    self.next_try = time.time() + _backoff(self.fails)
+                    self._status("waiting", reason="timeout", until=self.next_try)
+                else:
+                    self._ap_failed("timeout")
+                return True
+            return False
+        self._close_log()
+        kind, self.proc, self.kind = self.kind, None, None
+        if kind == "worker":
+            mine = next((x for x in items(self.root) if x["id"] == self.request), None)
+            if rc != 0 or (mine is not None and mine["status"] == "pending"):  # failed, or never took its request
+                self.fails += 1
+                self.next_try = time.time() + _backoff(self.fails)
+                self._status("waiting", reason=f"exit {rc}" if rc else "left the request pending", until=self.next_try,
+                             log=".dev/run/worker-auto.log")
+            else:
+                self.fails = 0
+                self._status("idle", last_exit=rc)
+        else:
+            self._ap_ended(rc)
+        return True
+
+    def _reap_adopted(self) -> bool:
+        """An autopilot run left by an earlier board process (the board restarted while it ran): watch its pid."""
+        st = _read(run_dir(self.root) / AP_RUN) or {}
+        if st.get("state") == "running" and not _alive(st.get("pid")):
+            self.started = float(st.get("started_s") or 0)
+            self.ap_before = st.get("state_before")
+            self._ap_ended(None)
+            return True
+        return False
+
+    def _ap_failed(self, why: str) -> None:
+        self.ap_fails += 1
+        if self.ap_fails >= AP_MAX_FAILS:
+            self._ap("stopped", reason="failed", note=f"{self.ap_fails} runs in a row failed ({why}); see .dev/run/autopilot.log")
+        else:
+            self.ap_next = time.time() + _backoff(self.ap_fails)
+            self._ap("backoff", reason="failed", note=why, until=self.ap_next)
+
+    def _ap_ended(self, rc: int | None) -> None:
+        stop = run_dir(self.root) / AP_STOP
+        ex = _read(run_dir(self.root) / AP_EXIT) or {}
+        if float(ex.get("at_s") or 0) < self.started - 5:
+            ex = {}  # written by an earlier run
+        if stop.exists() or not autopilot_on(self.root):
+            stop.unlink(missing_ok=True)
+            self.ap_fails = 0
+            return self._ap("off", last_exit=rc, reason="switched_off")
+        reason = ex.get("reason")
+        if not reason or (rc not in (0, None)):
+            return self._ap_failed(f"exit {rc}" if rc else "ended without saying why")
+        self.ap_fails = 0
+        note = ex.get("note")
+        if reason in AP_WAITS:
+            return self._ap(AP_WAITS[reason], reason=reason, note=note, sig=_ap_sig(self.root), last_exit=rc)
+        if reason in ("milestone_done", "until_reached") and _state_at(self.root) == self.ap_before:
+            return self._ap("stopped", reason="no_change", note=note, last_exit=rc)
+        self._ap("idle", reason=reason, note=note, last_exit=rc)  # milestone done: the next run starts at the next tick
+
+    def _start_worker(self) -> bool:
+        cfg = auto_cfg(self.root)
+        if not cfg.get("auto"):
+            self._status("off")
+            return False
+        if modes(self.root)["paused"] or executor(self.root)["online"]:
+            return False
+        x = claimable(self.root)
+        if x is None or time.time() - _ts(x.get("ts")) < AUTO_GRACE_S or time.time() < self.next_try:
+            return False
+        if not self._spawn("worker", "/dev-kit:worker", cfg["permission_mode"], f"for {x['id']}"):
+            return False
+        self.runs, self.request = self.runs + 1, x["id"]
+        self._status("running", pid=self.proc.pid, since=now(), request=x["id"])  # type: ignore[union-attr]
+        return True
+
+    def _start_autopilot(self) -> None:
+        root = self.root
+        if not autopilot_on(root):
+            (run_dir(root) / AP_STOP).unlink(missing_ok=True)
+            st = _read(run_dir(root) / AP_RUN) or {}
+            if st and st.get("state") != "off":
+                self._ap("off")
+            return
+        st = autopilot_status(root)
+        raw = _read(run_dir(root) / AP_RUN) or {}
+        if st["state"] in ("stopped", "running", "stopping"):
+            return
+        if st["state"] == "backoff" and time.time() < float(raw.get("until") or 0):
+            return
+        if raw.get("state") in AP_WAITS.values() and float(raw.get("at_s") or 0) >= _ap_since(root) and raw.get("sig") == _ap_sig(root):
+            return  # waits for the user: nothing they decide has landed yet
+        ex = executor(root)
+        if ex["state"] == "running":
+            return self._ap("waiting_session", reason="request_running")
+        if claimable(root) is not None and not modes(root)["paused"]:
+            return  # a request goes first
+        if self.other_autopilot():
+            return self._ap("waiting_session", reason="other_session")
+        self.ap_before = _state_at(root)
+        if not self._spawn("autopilot", AP_COMMAND, auto_cfg(root)["permission_mode"], "autopilot"):
+            return
+        runs = int(raw.get("runs") or 0) + 1
+        _write(run_dir(root) / AP_RUN, {"state": "running", "at": now(), "at_s": time.time(), "pid": self.proc.pid,  # type: ignore[union-attr]
+                                         "since": now(), "started_s": self.started, "state_before": self.ap_before,
+                                         "runs": runs, "fails": self.ap_fails})
+
+    def tick(self) -> None:
+        if self._reap() or self.proc:
+            return
+        st = _read(run_dir(self.root) / AP_RUN) or {}
+        if st.get("state") == "running" and _alive(st.get("pid")):
+            return  # adopted: a run from an earlier board process is still going
+        if self._start_worker():
+            return
+        self._start_autopilot()
 
     def stop(self) -> None:
         if self.proc and self.proc.poll() is None:
@@ -801,10 +1030,23 @@ class AutoExecutor:
                     os.killpg(self.proc.pid, signal.SIGKILL)
                 except OSError:
                     pass
-        if self.log:
-            self.log.close()
-            self.log = None
-        self.proc = None
+        self._close_log()
+        self.proc, self.kind = None, None
+
+
+def autopilot_force_stop(root: Path) -> dict:
+    """The switch's "Force stop": switch off and end the open run now (its process group), wherever it was started."""
+    set_autopilot(root, False)
+    st = _read(run_dir(root) / AP_RUN) or {}
+    pid = st.get("pid")
+    if st.get("state") == "running" and _alive(pid):
+        try:
+            os.killpg(int(pid), signal.SIGTERM)
+        except OSError:
+            pass
+    (run_dir(root) / AP_STOP).unlink(missing_ok=True)
+    _write(run_dir(root) / AP_RUN, {**st, "state": "off", "reason": "force_stopped", "at": now(), "at_s": time.time()})
+    return autopilot_status(root)
 
 
 def snapshot(root: Path, recent: int = 15) -> dict:
@@ -813,6 +1055,7 @@ def snapshot(root: Path, recent: int = 15) -> dict:
     open_ = [x for x in all_ if x["status"] in OPEN]
     done = [x for x in all_ if x["status"] not in OPEN][-recent:][::-1]
     return {"open": open_, "recent": done, "executor": {**executor(root), "auto": auto_status(root)}, "approvals": approvals(root),
+            "autopilot": autopilot_status(root),
             "limits": {"open": MAX_OPEN, "body": MAX_BODY}}
 
 
@@ -931,73 +1174,6 @@ def wait(root: Path, timeout: float, poll: float = 1.0) -> dict | None:
         time.sleep(min(poll, max(0.05, deadline - time.monotonic())))
 
 
-def continue_next(root: Path) -> tuple[dict | None, str]:
-    """Continuous mode: queue the project's next step when the mode is on, nothing is queued and nothing needs the
-    user. Returns (request, "") or (None, why); a reason that needs the user is kept for the board.
-
-    It stops, and says why, when: a request or an open question waits for an answer, a task is blocked, a checkpoint
-    (Confirm PRD or plan) waits, the last request failed or a continuous one was cancelled, the milestone it was
-    working on closed (one milestone per go), the next step is not one it takes alone (deploy, release, plan...), or the last step changed nothing.
-    Turning the mode on again on the board clears a stop."""
-    raw = _read(run_dir(root) / "worker-mode.json") or {}
-    if raw.get("continuous") is not True:
-        return None, "continuous mode is off"
-    if raw.get("paused") is True:
-        return None, "the queue is paused on the board"
-    import dev_state as ds  # the project's next step is dev_state's to say
-    store = ds.Store(root)
-    try:
-        store.load()
-    except SystemExit:
-        return None, "the project state could not be read"
-    path = run_dir(root) / "worker-continuous.json"
-    since = _since(raw)
-    with _Lock(root):
-        all_ = items(root)
-        if any(x["status"] in ("pending", "running") for x in all_):
-            return None, "a request is already queued"
-        rec = _read(path) or {}
-        if float(rec.get("at_s") or 0) < since:
-            rec = {}  # turned on again since: start fresh
-        ended = lambda x: max(_mtime(inbox_dir(root) / f"{_stem(root, x['id'])}.state.json"),  # noqa: E731
-                              _mtime(inbox_dir(root) / f"{_stem(root, x['id'])}.cancel"))
-        gate = lambda m: (store.milestones().get(m) or {}).get("gate", "pending")  # noqa: E731
-        waiting = [x for x in all_ if x["status"] == "needs_input"]
-        last = next((x for x in reversed(all_) if x["status"] in ("done", "failed")
-                     or (x["status"] == "cancelled" and x.get("by") == "continuous")), None)
-        blocked = sorted(t for t, v in store.tasks().items() if v.get("status") == "blocked")
-        questions = ds.count_open_questions(store)
-        cur = ds.current_milestone(store)
-        cmd = ds.next_command(store)
-        skill = cmd.split()[0].removeprefix("/dev-kit:")
-        stop = None
-        if waiting:
-            stop = f"{waiting[0]['id']} waits for your answer"
-        elif questions:
-            stop = f"{questions} open question{'s' if questions != 1 else ''} wait{'' if questions != 1 else 's'} for your answer"
-        elif blocked:
-            stop = f"{blocked[0]} is blocked" + (f" (and {len(blocked) - 1} more)" if len(blocked) > 1 else "")
-        elif cps := ds.checkpoint_needs(store):
-            stop = f"{cps[0]['title']} waits for you"
-        elif last and last["status"] != "done" and ended(last) >= since:
-            stop = f"{last['id']} {'failed' if last['status'] == 'failed' else 'was cancelled'}"
-        elif rec.get("milestone") and rec.get("gate") == "pending" and gate(rec["milestone"]) != "pending":
-            stop = f"{rec['milestone']} is closed; turn it on again for the next milestone"
-        elif skill not in CONTINUE_OK or not any(rx.match(cmd) for rx in RUN_COMMANDS):
-            stop = f"the next step is {cmd}, which is yours to start"
-        elif rec.get("command") == cmd and rec.get("state_at") == store.state.get("updated_at"):
-            stop = f"{cmd} changed nothing; look at its result"
-        if stop:
-            if rec.get("stopped") != stop:
-                _write(path, {**rec, "at_s": rec.get("at_s") or time.time(), "stopped": stop, "at": now()})
-            return None, stop
-        rid = _enqueue(root, "run", {"command": cmd}, "continuous")
-        _write(path, {"milestone": cur, "gate": gate(cur) if cur else None, "command": cmd,
-                      "state_at": store.state.get("updated_at"), "request": rid, "at_s": time.time(), "at": now(),
-                      "stopped": None})
-    return item(root, rid), ""
-
-
 def _watch_sig(root: Path) -> tuple:
     out = []
     for p in (inbox_dir(root), run_dir(root) / "worker-mode.json", run_dir(root) / "worker.json",
@@ -1021,7 +1197,7 @@ def watch(root: Path, poll: float = 2.0, once: bool = False, emit=None, grace: f
     path = run_dir(root) / "worker-watch.json"
     first: dict[str, float] = {}
     told: dict[str, float] = {}
-    beat = think = scanned = 0.0
+    beat = scanned = 0.0
     sig: tuple | None = None
     nxt: dict | None = None
     wrote = False
@@ -1045,12 +1221,6 @@ def watch(root: Path, poll: float = 2.0, once: bool = False, emit=None, grace: f
                 if cur != sig or t - scanned >= THINK_S:
                     sig, scanned = cur, t
                     nxt = None if m["paused"] else claimable(root)
-                    if nxt is None and m["continuous"] and not m["paused"] and not busy and t - think >= THINK_S:
-                        think = t
-                        try:
-                            nxt, _ = continue_next(root)
-                        except Exception:  # noqa: BLE001 - the listener outlives a bad state file
-                            nxt = None
                 if nxt and not m["paused"]:
                     rid = nxt["id"]
                     seen, last = first.setdefault(rid, t), told.get(rid)
@@ -1105,7 +1275,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("arm"); s.add_argument("--pid", type=int, required=True); s.add_argument("--wait", type=float, default=0)
     sub.add_parser("disarm")
     s = sub.add_parser("watch"); s.add_argument("--once", action="store_true"); s.add_argument("--poll", type=float, default=2.0)
-    sub.add_parser("continue-next")
+    s = sub.add_parser("autopilot"); s.add_argument("what", choices=("on", "off", "status")); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("autopilot-exit"); s.add_argument("--reason", required=True); s.add_argument("--note")
     a = p.parse_args(argv)
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import dev_state as ds
@@ -1130,10 +1301,14 @@ def main(argv: list[str] | None = None) -> int:
             disarm(root)
             print("disarmed")
             return 0
-        if a.cmd == "continue-next":
-            x, why = continue_next(root)
-            print(f"queued {describe(x)}" if x else f"not continuing: {why}")
-            return 0 if x else 3
+        if a.cmd == "autopilot":
+            st = autopilot_status(root) if a.what == "status" else set_autopilot(root, a.what == "on")
+            _print(st, a.json, f"autopilot {'on' if st['on'] else 'off'} · {st['state']}" + (f" · {st['reason']}" if st.get("reason") else ""))
+            return 0
+        if a.cmd == "autopilot-exit":
+            rec = autopilot_exit(root, a.reason, a.note)
+            print(f"autopilot run ended: {rec['reason']}")
+            return 0
         if a.cmd == "list":
             xs = [x for x in items(root) if a.all or x["status"] in OPEN]
             _print({"items": xs}, a.json, "\n".join(describe(x) for x in xs) or "no requests")
@@ -1169,7 +1344,7 @@ def main(argv: list[str] | None = None) -> int:
             e = snap["executor"]
             _print(snap, a.json, f"executor {e['state']}" + (" · listening" if e["listening"] else "")
                    + (" · queue paused" if e["paused"] else "")
-                   + (" · continuous" + (f" (stopped: {e['continuous_stopped']})" if e["continuous_stopped"] else "") if e["continuous"] else "")
+                   + f" · autopilot {snap['autopilot']['state']}"
                    + f" · {len(snap['open'])} open request(s)"
                    + (f" · {len(snap['approvals'])} approval(s) waiting" if snap["approvals"] else ""))
     except Invalid as e:

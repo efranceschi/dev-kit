@@ -25,9 +25,11 @@
     </div>
 
     <div class="top-mid">
-      <div class="pop-wrap" id="run-wrap">
-        <button type="button" class="run-now idle" id="run-btn" aria-haspopup="true" aria-expanded="false" aria-controls="run-pop"></button>
-        <div class="popover run-pop" id="run-pop" hidden></div>
+      <div class="pop-wrap ap-wrap" id="ap-wrap" hidden>
+        <button type="button" class="ap-switch" id="ap-switch" role="switch" aria-checked="false" aria-label="Autopilot" data-i18n-aria-label="Autopilot"
+          title="Runs /dev-kit:autopilot from the board, one milestone per run, until a release waits for your approval" data-i18n-title="Runs /dev-kit:autopilot from the board, one milestone per run, until a release waits for your approval"><span class="ap-knob" aria-hidden="true"></span></button>
+        <button type="button" class="ap-state off" id="ap-btn" aria-haspopup="true" aria-expanded="false" aria-controls="ap-pop"><span class="ap-name" data-i18n="Autopilot">Autopilot</span><span class="ap-word" id="ap-word"></span></button>
+        <div class="popover ap-pop" id="ap-pop" hidden></div>
       </div>
       <span class="updated" id="updated" aria-live="off"></span>
     </div>
@@ -44,9 +46,12 @@
         <svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17"><path d="M3 12h4l3-8 4 16 3-8h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span class="top-btn-label" data-i18n="Activity">Activity</span>
       </button>
-      <span class="live" id="live" role="status" aria-live="polite">
-        <span class="dot" aria-hidden="true"></span><span id="live-text" class="live-text" data-i18n-once="Connecting…">Connecting…</span>
-      </span>
+      <div class="pop-wrap live-wrap" id="live-wrap">
+        <button type="button" class="live" id="live" aria-haspopup="true" aria-expanded="false" aria-controls="live-pop">
+          <span class="dot" aria-hidden="true"></span><span id="live-text" class="live-text" role="status" aria-live="polite" data-i18n-once="Connecting…">Connecting…</span><span class="live-n" id="live-n" hidden></span>
+        </button>
+        <div class="popover right live-pop" id="live-pop" hidden></div>
+      </div>
       <button type="button" class="btn btn-icon" id="theme-btn" aria-label="Switch to light theme" title="Switch to light theme">
         <svg class="ico-sun" aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <svg class="ico-moon" aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
@@ -72,7 +77,7 @@
             <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
             <span data-i18n="Stop server">Stop server</span>
           </button>
-          <p class="pop-note" data-i18n="The board changes nothing by itself: requests are run by Claude Code (/dev-kit:worker). It stops by itself when no tab is open.">The board changes nothing by itself: requests are run by Claude Code (/dev-kit:worker). It stops by itself when no tab is open.</p>
+          <p class="pop-note" data-i18n="The board changes the project only through Claude Code: requests run /dev-kit:worker and the Autopilot switch runs /dev-kit:autopilot. It stops by itself when no tab is open and the Autopilot is off.">The board changes the project only through Claude Code: requests run /dev-kit:worker and the Autopilot switch runs /dev-kit:autopilot. It stops by itself when no tab is open and the Autopilot is off.</p>
         </div>
       </div>
     </div>
@@ -214,7 +219,6 @@
       <div class="req-tools">
         <button type="button" class="btn btn-sm" id="new-issue-btn" aria-haspopup="dialog" data-i18n="＋ New issue">＋ New issue</button>
         <button type="button" class="btn btn-sm" id="pause-btn" aria-pressed="false" data-i18n-once="Pause queue">Pause queue</button>
-        <button type="button" class="btn btn-sm toggle" id="cont-btn" aria-pressed="false" title="After each request, Claude Code starts the project's next step by itself, until something needs you or the milestone closes" data-i18n="Go on by itself" data-i18n-title="After each request, Claude Code starts the project&#x27;s next step by itself, until something needs you or the milestone closes">Go on by itself</button>
       </div>
       <p class="card-sub req-hint" id="req-hint"></p>
       <ol class="list req-list" id="req-list" aria-live="polite"></ol>

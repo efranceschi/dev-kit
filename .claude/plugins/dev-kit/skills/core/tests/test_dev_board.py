@@ -606,7 +606,7 @@ class BoardTest(unittest.TestCase):
         self.assertNotIn("request", out)
         self.board("start", check=True)
         ex = json.loads(request(self.record()["port"], "GET", "/api/state")[1])["inbox"]["executor"]
-        self.assertEqual((ex["listening"], ex["online"], ex["state"], ex["continuous_stopped"]), (True, True, "idle", None))
+        self.assertEqual((ex["listening"], ex["online"], ex["state"]), (True, True, "idle"))
 
     def test_hooks_tell_about_board_requests_once(self):
         hook = CORE / "scripts" / "dev_agent_hook.py"
@@ -644,7 +644,7 @@ class BoardTest(unittest.TestCase):
         d = json.loads(request(self.record()["port"], "GET", "/api/state")[1])
         self.assertEqual([d["tasks"][t]["seq"] for t in ("T-001", "T-002")], [1, 2])
         html = request(self.record()["port"], "GET", "/")[1].decode()
-        for el in ('id="req-card"', 'id="view-switch"', 'id="planner"', 'id="issue-dialog"', 'id="toast"', 'id="cont-btn"'):
+        for el in ('id="req-card"', 'id="view-switch"', 'id="planner"', 'id="issue-dialog"', 'id="toast"', 'id="ap-switch"', 'id="live-pop"'):
             self.assertIn(el, html)
         # the lane tabs are the page's navigation (3.1: the lanes of the flow diagram, plus the map); one panel per lane
         self.assertIn('id="phases" role="tablist"', html)

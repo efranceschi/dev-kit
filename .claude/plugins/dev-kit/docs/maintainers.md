@@ -29,7 +29,8 @@ How the plugin is built, tested and documented. Users do not need this page.
                                  lifecycle() derives the project phase (conventions §19) for status, next command,
                                  status line, banner and board: never stored except as a cache in state.json
     scripts/dev_worker.py        the board's request queue to Claude Code: validation, lifecycle, executor, modes, approvals,
-                                 the listener (watch, arm) and continuous mode (continue-next)
+                                 the listener (watch, arm), and the AutoExecutor the board server runs: the headless
+                                 worker and the board's autopilot (autopilot on|off|status, autopilot-exit)
     scripts/dev_risk.py          risk tier of a task (signals, weights, floors) and risk profile of a milestone, predicted ×
                                  real rows (imported by dev_state.py and dev_router.py; no command line)
     scripts/dev_router.py        model/effort router with feedback loops over .dev/router.json: route, observe, learn, explain,

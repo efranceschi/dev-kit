@@ -26,7 +26,7 @@ In the session that started the board (`/dev-kit:board`), the plugin's monitor a
 ## Loop
 1. Log `DS event skill_start --set skill=worker` (`conventions.md` §13). `DW list`: a request shown as `running` that this session is not working on was cut short by an interrupted turn; close it first with `DW finish <id> --status failed --note "interrupted"`.
 2. `DW claim --session "claude-$PPID" --pid $PPID --json`.
-   - Exit 3: nothing is waiting, or the queue is paused on the board. Run `DW continue-next`: exit 0 means continuous mode queued the project's next step, so go back to step 2; exit 3 (the mode is off, or it stopped and says why) → go to step 6 and repeat its reason in the report.
+   - Exit 3: nothing is waiting, or the queue is paused on the board → go to step 6. (Going on with the project by itself is the board's Autopilot switch, which runs `/dev-kit:autopilot`, not this skill.)
    - Exit 4: another live session is the executor of this project. Say so and stop; never run requests from two sessions.
 3. `DW show <id>` and act on its `action`:
    - `run`: invoke the skill of the command with the Skill tool (`/dev-kit:qa M3` → skill `dev-kit:qa`, args `M3`) and follow it fully, in board mode.

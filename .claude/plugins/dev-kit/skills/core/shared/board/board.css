@@ -134,8 +134,13 @@ code { font-family: var(--mono); font-size: 0.92em; background: var(--surface-3)
 .pop-title { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); font-weight: 650; margin-bottom: 8px; }
 .pop-note { font-size: 12px; color: var(--text-muted); margin-top: 8px; max-width: 220px; }
 .top-actions { display: flex; align-items: center; gap: 12px; flex: none; }
-.live { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary);
+.live { font: inherit; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); cursor: pointer;
   padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-1); white-space: nowrap; }
+.live:hover, .live[aria-expanded="true"] { border-color: var(--border-strong); color: var(--text-primary); }
+.live-n { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; font-size: 11px; font-weight: 650; display: inline-grid; place-items: center;
+  background: color-mix(in srgb, var(--good) 22%, var(--surface-2)); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.live-pop { min-width: 300px; max-width: min(520px, 92vw); }
+.live-pop .pop-note { max-width: none; }
 .live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--todo); }
 .live.on .dot { background: var(--good); animation: pulse 2s infinite; }
 .live.off .dot { background: var(--critical); }
@@ -669,7 +674,29 @@ dialog p { color: var(--text-secondary); }
 .md [data-anchor] { scroll-margin-top: 80px; }
 .md .md-hit { background: color-mix(in srgb, var(--warning) 22%, transparent); border-radius: 6px; transition: background 1.2s ease; }
 
-/* ---------- what runs now, in the top bar (2.2.2) */
+/* ---------- the Autopilot switch, in the top bar (3.2.0) */
+.ap-wrap { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface-2); padding: 3px 4px 3px 4px; }
+.ap-switch { position: relative; width: 36px; height: 22px; border-radius: 999px; border: 0; padding: 0; cursor: pointer; flex: none;
+  background: color-mix(in srgb, var(--text-muted) 45%, var(--surface-1)); transition: background .15s ease; }
+.ap-switch .ap-knob { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.35); transition: left .15s ease; }
+.ap-switch.on { background: var(--good); }
+.ap-switch.on .ap-knob { left: 17px; }
+.ap-switch:focus-visible, .ap-state:focus-visible { outline: 2px solid var(--accent-a); outline-offset: 2px; }
+.ap-state { font: inherit; font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px; min-height: 24px; border: 0; background: none;
+  color: var(--text-secondary); cursor: pointer; white-space: nowrap; max-width: min(40vw, 420px); }
+.ap-state .ap-name { font-weight: 650; color: var(--text-primary); }
+.ap-state .ap-word { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ap-state.on .ap-word { color: var(--good); }
+.ap-state.wait .ap-word { color: var(--warning); }
+.ap-state.bad .ap-word { color: var(--critical); }
+.ap-state .agent-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ap-pop { min-width: 300px; max-width: min(460px, 92vw); }
+.ap-pop .pop-note { max-width: none; }
+.ap-line { font-size: 13px; margin: 0 0 6px; }
+.ap-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+@media (max-width: 700px) { .ap-state .ap-word { display: none; } }
+
+/* ---------- what runs now: the list under Live (2.2.2; the top-bar chip it had until 3.1 is gone) */
 .run-now { font: inherit; font-size: 12.5px; display: inline-flex; align-items: center; gap: 8px; max-width: min(46vw, 560px); padding: 4px 12px; min-height: 30px;
   border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
 .run-now.on { color: var(--text-primary); border-color: color-mix(in srgb, var(--accent-a) 60%, var(--border-strong)); background: color-mix(in srgb, var(--accent-a) 14%, var(--surface-2)); }

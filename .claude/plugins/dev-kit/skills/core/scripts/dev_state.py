@@ -180,7 +180,7 @@ DEFAULT_AUTONOMY = {
     "pipeline": {"releases_ahead": 1, "milestone_overlap": True},
     # the board's server starts a headless worker session itself (`claude -p "/dev-kit:worker"`) when a request waits
     # and no session takes requests (§17); permission_mode is passed to it, timeout_min ends a run that hangs
-    "board_executor": {"auto": True, "permission_mode": "default", "timeout_min": 180},
+    "board_executor": {"auto": True, "permission_mode": "acceptEdits", "timeout_min": 180, "autopilot_timeout_min": 360},
     # feature flags per planned release (conventions.md §21): off by default; when on, every release R<n> has the
     # flag release_R<n>, its feature tasks wrap the new behaviour in it, approved milestones go to production with the
     # flag off (production.when per_milestone_flagged), and approving the release turns it on. provider = how the
@@ -502,11 +502,12 @@ def check_autonomy_field(field: str, val: object) -> object:
                  "/dev-kit:architecture records it")
     elif field == "board_executor":
         modes = ("default", "acceptEdits", "plan", "auto", "bypassPermissions", "dontAsk")
-        if (not isinstance(val, dict) or set(val) - {"auto", "permission_mode", "timeout_min"}
-                or not isinstance(val.get("auto", True), bool) or val.get("permission_mode", "default") not in modes
-                or not isinstance(val.get("timeout_min", 180), int) or isinstance(val.get("timeout_min", 180), bool)
-                or not 5 <= val.get("timeout_min", 180) <= 1440):
-            fail(f'autonomy.board_executor must be {{"auto": true | false, "permission_mode": {" | ".join(modes)}, "timeout_min": 5-1440}}')
+        mins = lambda k, d: isinstance(val.get(k, d), int) and not isinstance(val.get(k, d), bool) and 5 <= val.get(k, d) <= 1440  # noqa: E731
+        if (not isinstance(val, dict) or set(val) - {"auto", "permission_mode", "timeout_min", "autopilot_timeout_min"}
+                or not isinstance(val.get("auto", True), bool) or val.get("permission_mode", "acceptEdits") not in modes
+                or not mins("timeout_min", 180) or not mins("autopilot_timeout_min", 360)):
+            fail(f'autonomy.board_executor must be {{"auto": true | false, "permission_mode": {" | ".join(modes)}, "timeout_min": 5-1440, '
+                 f'"autopilot_timeout_min": 5-1440}}')
     elif field == "ci":
         if (not isinstance(val, dict) or set(val) - {"provider", "required", "timeout_min"}
                 or val.get("provider", "auto") not in CI_PROVIDERS or not isinstance(val.get("required", True), bool)
@@ -5593,7 +5594,7 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
                      "board_executor", "release_flags"):
             if top == "board_executor" and not isinstance(parsed, dict):
                 if val not in ("on", "off", "true", "false", "yes", "no"):
-                    fail('autonomy.board_executor must be on | off or {"auto": true, "permission_mode": "default", "timeout_min": 180}')
+                    fail('autonomy.board_executor must be on | off or {"auto": true, "permission_mode": "acceptEdits", "timeout_min": 180}')
                 parsed = {"auto": val in ("on", "true", "yes")}
             elif top == "local_deploy" and not isinstance(parsed, dict):
                 parsed = {"mode": val}

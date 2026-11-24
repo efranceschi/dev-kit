@@ -423,7 +423,7 @@ class TestBoardStartsTheWorker(Base):
         run = self.runs()[0]
         self.assertEqual(run["argv"][:2], ["-p", "/dev-kit:worker"])
         self.assertEqual(run["argv"][run["argv"].index("--plugin-dir") + 1], str(self.kit))
-        self.assertEqual(run["argv"][run["argv"].index("--permission-mode") + 1], "default")
+        self.assertEqual(run["argv"][run["argv"].index("--permission-mode") + 1], "acceptEdits")  # 3.2 default
         self.assertEqual((run["project"], run["child"]), (str(self.root), "1"))
 
     def test_a_run_that_leaves_its_request_backs_off(self) -> None:
@@ -474,12 +474,19 @@ class TestBoardStartsTheWorker(Base):
         self.ex.tick()
         self.assertIsNone(self.ex.proc)
         self.assertEqual(self.dw.auto_status(self.root)["state"], "off")
-        self.ds("set", "autonomy.board_executor", '{"auto": true, "permission_mode": "acceptEdits"}')
-        self.assertEqual(self.state()["autonomy"]["board_executor"], {"auto": True, "permission_mode": "acceptEdits", "timeout_min": 180})
+        self.ds("set", "autonomy.board_executor", '{"auto": true, "permission_mode": "default"}')
+        self.assertEqual(self.state()["autonomy"]["board_executor"],
+                         {"auto": True, "permission_mode": "default", "timeout_min": 180, "autopilot_timeout_min": 360})
         self.ds("set", "autonomy.board_executor", '{"permission_mode": "yolo"}', expect=1)
         self.ex.tick()
         self.finish()
-        self.assertEqual(self.runs()[0]["argv"][self.runs()[0]["argv"].index("--permission-mode") + 1], "acceptEdits")
+        self.assertEqual(self.runs()[0]["argv"][self.runs()[0]["argv"].index("--permission-mode") + 1], "default")
+
+    def test_the_untouched_pre_3_2_default_takes_the_new_one(self) -> None:
+        st = self.state()
+        st["autonomy"]["board_executor"] = {"auto": True, "permission_mode": "default", "timeout_min": 180}
+        (self.root / ".dev" / "state.json").write_text(json.dumps(st), encoding="utf-8")
+        self.assertEqual(self.dw.auto_cfg(self.root)["permission_mode"], "acceptEdits")
 
     def test_no_claude_binary_is_shown(self) -> None:
         os.environ.pop("DEV_KIT_CLAUDE")

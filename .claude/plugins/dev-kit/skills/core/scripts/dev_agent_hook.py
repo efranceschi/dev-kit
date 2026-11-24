@@ -16,9 +16,9 @@ Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit, Permis
   set of waiting requests changed since the last notice. Only ids and counts: the text of a request never enters
   the session from here. Silent while a session listens (the plugin's monitor, armed by /dev-kit:board, announces
   each request by itself).
-- PermissionRequest, only while this session runs a request from the board and a board is up to answer on: the
-  permission goes to the board (tool, and the command or path cut to 300 characters, kept in .dev/run/approvals/
-  until answered), the hook waits up to 10 minutes for Allow, Allow for this session or Deny, and answers Claude
+- PermissionRequest, only while this session runs a request from the board, or is the board's autopilot run, and a
+  board is up to answer on: the permission goes to the board (tool, and the command or path cut to 300 characters,
+  kept in .dev/run/approvals/ until answered), the hook waits up to 10 minutes for Allow, Allow for this session or Deny, and answers Claude
   Code with it; no answer is a denial. Anywhere else it returns nothing and Claude Code's own prompt applies.
 
 - PreToolUse (Agent tool), SubagentStart, SubagentStop: the session log's agent_spawn / agent_end events
@@ -372,6 +372,12 @@ def permission(root: Path, dev: Path, payload: dict) -> dict | None:
                "timeout": f"Nobody answered this permission on the dev-kit board within {max(1, round(wait_s / 60))} minutes, so it "
                           f"is denied ({rid}). Do not retry it now: finish what does not need it, or finish the request as "
                           "failed with a note naming the permission that was missing."}[got]
+        if rid == "autopilot":  # the board's autopilot run: no request to finish, the run parks what needs it
+            why = {"deny": "Denied by the user on the dev-kit board. Do not retry this action: go on with work that does not need it, "
+                           "and block the task that does with the reason.",
+                   "timeout": f"Nobody answered this permission on the dev-kit board within {max(1, round(wait_s / 60))} minutes, so it "
+                              "is denied. Do not retry it now: block the task that needs it with the reason (it shows in Needs you) "
+                              "and go on with independent work."}.get(got, why)
         decision = {"behavior": "deny", "message": why}
     return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}
 

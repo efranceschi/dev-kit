@@ -694,12 +694,18 @@ def open_runs(events: list[dict], now: float) -> list[dict]:
     for e in events:
         ev = e.get("event")
         if ev == "skill_start":
-            open_.append({"skill": e.get("skill"), "scope": e.get("scope"), "session": e.get("session"), "started_at": e.get("ts")})
+            open_.append({"skill": e.get("skill"), "scope": e.get("scope"), "session": e.get("session"), "started_at": e.get("ts"),
+                          "mode": e.get("args_kind")})
         elif ev == "skill_end":
             match = [o for o in open_ if o["session"] == e.get("session") and o["skill"] == e.get("skill")]
             if match:
                 open_.remove(match[-1])
     return [o for o in open_ if now - _ts(o["started_at"]) < RUN_STALE_S]
+
+
+def manual_autopilot(root: Path) -> bool:
+    """/dev-kit:autopilot runs in a session of the user's (logged, not ended, not the board's own run)."""
+    return any(r["skill"] == "autopilot" and r.get("mode") != "board" for r in open_runs(_task_events(root), time.time()))
 
 
 def live_agents(root: Path, qa_default: str | None = None, tasks: dict | None = None) -> dict:
@@ -1322,7 +1328,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok() or not self._origin_ok():
             return self._json(403, {"ok": False, "error": "forbidden origin"})
         path = self.path.split("?", 1)[0]
-        known = path in ("/api/shutdown", "/api/inbox", "/api/worker/mode") or REQ_PATH.match(path) or APPROVAL_PATH.match(path)
+        known = path in ("/api/shutdown", "/api/inbox", "/api/worker/mode", "/api/autopilot") or REQ_PATH.match(path) or APPROVAL_PATH.match(path)
         if not known:
             return self._json(404, {"ok": False, "error": "not found"})
         if not secrets.compare_digest(self.headers.get("X-Board-Token", ""), self.server.token):
@@ -1351,7 +1357,11 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json(409, {"ok": False, "error": "release not waiting", "errors": errors})
                 return self._json(201, {"ok": True, "item": dw.submit(root, action, args)})
             if path == "/api/worker/mode":
-                return self._json(200, {"ok": True, "modes": dw.set_mode(root, body.get("paused"), body.get("continuous"))})
+                return self._json(200, {"ok": True, "modes": dw.set_mode(root, body.get("paused"))})
+            if path == "/api/autopilot":  # the switch: {"on": true|false}, or {"force_stop": true}
+                if body.get("force_stop") is True:
+                    return self._json(200, {"ok": True, "autopilot": dw.autopilot_force_stop(root)})
+                return self._json(200, {"ok": True, "autopilot": dw.set_autopilot(root, body.get("on"))})
             m = REQ_PATH.match(path)
             if m:
                 return self._json(200, {"ok": True, "item": dw.cancel(root, m.group(1))})
@@ -1458,6 +1468,8 @@ def cmd_serve(root: Path, a: argparse.Namespace) -> int:
             if srv.idle_s > 0 and srv.clients == 0 and time.monotonic() - srv.last_activity > srv.idle_s:
                 if dw.executor(root)["online"]:
                     continue  # a Claude Code session is waiting for requests from this board: stay up for it
+                if dw.autopilot_on(root):
+                    continue  # the autopilot runs from this server: stay up while it is on
                 print(f"idle for {srv.idle_s // 60} min: stopping", flush=True)
                 srv.stop()
             if read_record(root) is None or (read_record(root) or {}).get("pid") != os.getpid():
@@ -1466,7 +1478,7 @@ def cmd_serve(root: Path, a: argparse.Namespace) -> int:
                 print("the kit was updated on disk: stopping; /dev-kit:board starts the new version", flush=True)
                 srv.stop()
     threading.Thread(target=watchdog, daemon=True).start()
-    auto = dw.AutoExecutor(root, SCRIPTS.parents[2]) if srv.actions else None
+    auto = dw.AutoExecutor(root, SCRIPTS.parents[2], lambda: manual_autopilot(root)) if srv.actions else None
 
     def executor_loop():  # the board starts its own executor: a request never waits for a manual /dev-kit:worker
         while not srv.stopping.wait(1.5):

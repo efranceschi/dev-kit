@@ -1,7 +1,7 @@
 ---
 name: autopilot
 description: Autonomous end-to-end build driver - starting from the interview brief, runs conception (PRD, architecture, UX, UI) and planning, then the construction cycle (implement -> QA gate -> fix loops per milestone) and the next release (usability audit, docs, release) until the project is stable, pausing only for always-ask decisions, unresolvable blockers or exceeded fix rounds. Resumes from the current lifecycle step. Use when the user wants the application built with minimal interaction ("build it", "continue autonomously", "run until QA").
-argument-hint: "[--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N]"
+argument-hint: "[--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N] [--board]"
 disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob, Agent, AskUserQuestion, Skill
 ---
@@ -13,13 +13,13 @@ Kit root (`<KIT>` in shared files and agents): `${CLAUDE_SKILL_DIR}/../core`. In
 Input: $ARGUMENTS
 State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" status --short --quiet-if-missing`
 
-Let `DS` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}"`.
+Let `DS` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}"` and `DW` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_worker.py" --root "${CLAUDE_PROJECT_DIR}"`.
 
 ## Preconditions
 `.dev/brief.md` exists and the interview was confirmed (the lifecycle step is past `interview`, i.e. `artifact mark brief` was recorded). If not, invoke `interview` first and come back; never build from an unconfirmed brief.
 
 ## Driver loop
-Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` and the autonomy policy from `DS status --json`. Start a session log: `DS event session_start --set trigger=autopilot` and `skill_start` (`conventions.md` §13); run `DS cleanup` once to clear processes left by an earlier run. Then repeat until the `--until` target, or until the lifecycle is `stable`:
+Read `${CLAUDE_SKILL_DIR}/../core/shared/conventions.md` and the autonomy policy from `DS status --json`. Start a session log: `DS event session_start --set trigger=autopilot` and `skill_start` (`--set args_kind=board` with `--board`; `conventions.md` §13); run `DS cleanup` once to clear processes left by an earlier run. Then repeat until the `--until` target, or until the lifecycle is `stable`:
 
 The project lifecycle is derived by `dev_state.py` (`conventions.md` §19): read `phase` and `step` from `DS status --json` (`lifecycle.phases` has the state of every step). In conception and planning, run the step's skill when the step is `todo`, `doing` or `stale`, and its review when it is `review`. Construction runs the milestone cycle and the next release.
 
@@ -43,6 +43,13 @@ When conception is reopened by a scope change (`reopened` in `DS status --json`)
 **Rounds outside this session** (`conventions.md` §17): run every `implement --milestone <M>` and every `qa <M>` round as `DS round run implement <M> --permission-mode <this session's mode>` and `DS round run qa <M> --permission-mode <mode>`, and route on the JSON summary it prints (`verdict`, `score`, `fix_tasks`, `next`); never open the child's reports here, only name them. Exit 3 (`claude` not on PATH) → plan B: run the skill in this session as below, and treat `--milestones` as 1 unless the user gave it.
 
 `--until` targets: `prd`, `architecture`, `plan` stop once that step is done; `design` stops after review `design` passes; `qa` stops after the gate of `--milestone` (default: the current one); `usability` and `docs` stop after that part of the next release; `release` runs until the release is recorded. `--milestones N` stops after N milestone gates pass in this run (with `deploy` done when it applies), with the progress line and the command to resume (`/dev-kit:autopilot`) in a new session or after `/clear`: the state in `.dev/` is all a resume needs, and a fresh context is much cheaper per turn than a long one (`conventions.md` §17).
+
+## Board mode (`--board`)
+The board's **Autopilot** switch starts this skill headless (`claude -p "/dev-kit:autopilot --milestones 1 --board"`, `dev_worker.py` AutoExecutor) and starts the next run when this one ends. Nobody is at the console and AskUserQuestion does not exist here, so with `--board`:
+- **Questions go to the board.** Every point that would ask the user, here or in any skill this run invokes (an AskUserQuestion, a pause point with action `ask`, an `always_ask` decision, a model escalation to approve), becomes a question in Needs you instead: `DS add-question "<question>" --options "<a>|<b>" --recommended "<a>" --skill <skill>` (2 to 6 short answers, the recommended one first, `conventions.md` §9), and `DS block <T-nnn> --reason "needs decision: <Q-nnn>"` for the task that waits on it. Tell every skill you invoke that it runs in board mode with the same rule. Then go on with every task and milestone step that does not depend on the answer (**Do not stop for a person** above); never wait for an answer inside this run. Permission prompts reach the board by themselves (the plugin's hook); a denied one is not retried: block the task that needs it with the reason and go on.
+- **Off on the board.** At every safe point (between tasks, before a QA round, before a commit, before the next row of the table) run `DW autopilot status --json`: when `state` is `stopping` or `off`, finish the step in progress without starting another (commit only finished, green work), then end the run with reason `stopped`.
+- **One milestone per run.** `--milestones 1` ends the run once a gate passes (with `deploy` done when it applies); the board starts the next run with a fresh context.
+- **End of the run.** The run's very last command, after the report, says why it ended, so the board knows what comes next: `DW autopilot-exit --reason <reason> --note "<ids and counts only>"`, with reason `milestone_done` (the gate passed), `waiting_for_user` (all that is left needs an answer, a confirmation or a decision in Needs you), `release_approval` (a release waits for the user's approval), `stable` (nothing is open), `until_reached` (the `--until` target) or `stopped` (switched off on the board). Skip the last-line suggestion of the report: nobody reads this console.
 
 ## Quality control (score and cut-off)
 - Every checkpoint above is scored 0–100 by independent agents through `dev_score.py`; the cut-offs come from `autonomy.quality` (set in the interview). The driver never advances past a checkpoint whose review or gate is not `pass`; `dev_state.py` refuses a pass below the cut-off.
@@ -80,6 +87,7 @@ Report in the user's language: what was built (milestones, tasks, commits), gate
 - Never run `release` for real with `public_exposure` implications without an explicit yes recorded in the brief, asked now, or `pause_policy.public_exposure` preauthorized for that target.
 - Never bypass a gate silently; `--skip-gate` always leaves an ADR.
 - Never rewrite git history.
+- Never call AskUserQuestion with `--board`: the question goes to Needs you (Board mode above).
 
 **Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:autopilot` to resume, or `/dev-kit:interview --gaps` when it parked questions. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
 

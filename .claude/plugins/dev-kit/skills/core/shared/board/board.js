@@ -248,7 +248,8 @@
     pops.push({ btn, pop, close });
   }
   popover($("menu-btn"), $("menu-pop"));
-  popover($("run-btn"), $("run-pop"));
+  popover($("ap-btn"), $("ap-pop"));
+  popover($("live"), $("live-pop"));
   document.addEventListener("click", (e) => pops.forEach((p) => { if (!p.pop.hidden && !p.pop.contains(e.target) && !p.btn.contains(e.target)) p.close(); }));
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
@@ -312,7 +313,7 @@
 
   // ------------------------------------------------------------------ header
   // ------------------------------------------------------------------ what Claude Code runs now: skills (outermost first) and agents
-  const skillRuns = () => ((data && data.agents && data.agents.runs) || []);
+  const skillRuns = () => ((data && data.agents && data.agents.runs) || []).filter((r) => r.skill !== "board");  // the board is not work
   const runCmd = (r) => `/dev-kit:${r.skill}${r.scope ? ` ${r.scope}` : ""}`;
   const since = (t) => h("span", { class: "agent-time", "data-start": t, text: dur((Date.now() - parseT(t)) / 1000) });
   // Every skill that runs has a place on the board, so work that is not a task card is visible where it happens.
@@ -358,38 +359,99 @@
       ags.length ? h("span", { class: "rb-agents" }, ags.map((a) => h("span", { class: "agent-chip" }, agentBits(a, true)))) : null);
   }
 
+  // ------------------------------------------------------------------ Live: the connection, and on hover or click what runs now
+  /** Headless runs the board's server started (the autopilot, the worker), then the skills of the session log (the
+   * board itself is not work) and the agents. */
+  function liveRuns() {
+    const out = [];
+    const ap = inbox().autopilot || {};
+    if (ap.state === "running" || ap.state === "stopping") out.push({ cmd: ap.command || "/dev-kit:autopilot", since: ap.since, by: tr("started by the Autopilot switch") });
+    const au = inbox().executor.auto || {};
+    if (au.state === "running") out.push({ cmd: "/dev-kit:worker", since: au.since, by: au.request ? tr("started by the board for {id}", { id: au.request }) : tr("started by the board") });
+    return out;
+  }
   function renderRunning() {
-    const runs = skillRuns(), ags = activeAgents();
-    const btn = $("run-btn");
+    const runs = skillRuns(), ags = activeAgents(), heads = liveRuns();
     const nx = data.next && data.next.command;
-    if (!runs.length && !ags.length) {
-      btn.className = "run-now idle";
-      fill(btn, h("span", { class: "rn-dot", "aria-hidden": "true" }), tr("Idle"));
-      btn.setAttribute("aria-label", tr("Nothing is running now"));
-      fill($("run-pop"), h("p", { class: "pop-title", text: tr("Nothing is running now") }),
-        nx && !runningRun(nx) ? h("p", { class: "pop-note top" }, tr("Next step: "), cmd(nx)) : null,
-        h("p", { class: "pop-note", text: tr("Skills and agents show here while Claude Code runs them (from the session log).") }));
-      return;
-    }
-    const chain = runs.slice(-2).map(runCmd);
-    btn.className = "run-now on";
-    fill(btn, h("span", { class: "rn-dot", "aria-hidden": "true" }), h("span", { class: "rn-label", text: chain.length ? chain.join(" › ") : "agents" }),
-      ags.length ? h("span", { class: "rn-count", text: plural(ags.length, "agent") }) : null,
-      runs.length ? since(runs[0].started_at) : null);
-    btn.setAttribute("aria-label", tr("Running now: {v}{v2}. Show details", { v: runs.map(runCmd).join(", ") || tr("agents"), v2: ags.length ? `, ${plural(ags.length, "agent")}` : "" }));
-    fill($("run-pop"), h("p", { class: "pop-title", text: tr("Running now") }),
+    const n = heads.length + runs.length + ags.length;
+    const badge = $("live-n");
+    badge.hidden = !n;
+    badge.textContent = String(n);
+    $("live").setAttribute("aria-label", n ? tr("Live: {v} running. Show what runs", { v: String(n) }) : tr("Live: nothing running. Show details"));
+    fill($("live-pop"), h("p", { class: "pop-title", text: n ? tr("Running now") : tr("Nothing is running now") }),
+      heads.length ? h("ul", { class: "rn-list" }, heads.map((r) => h("li", {}, h("code", { text: r.cmd }), r.since ? h("span", { class: "card-sub" }, tr(" for "), since(r.since)) : null,
+        h("span", { class: "card-sub", text: `· ${r.by}` })))) : null,
       runs.length ? h("ol", { class: "rn-list" }, runs.map((r, i) => h("li", { class: i ? "nested" : null },
         h("code", { text: runCmd(r) }), h("span", { class: "card-sub" }, tr(" for "), since(r.started_at))))) : null,
       ags.length ? [h("p", { class: "pop-title", text: plural(ags.length, "agent") }), h("ul", { class: "rn-list" }, ags.map((a) => h("li", {},
         h("span", { class: "agent-chip" }, agentBits(a, true)),
         a.node ? (TASK_RE.test(a.node) ? h("button", { type: "button", class: "tid-btn", text: a.node, onclick: () => openTask(a.node) })
           : h("span", { class: "chip", text: a.node.replace("GATE:", "QA ") })) : h("span", { class: "card-sub", text: tr("not linked") }))))] : null,
-      h("p", { class: "pop-note", text: tr("From the session log: a skill shows from its start until it ends.") }));
+      !n && nx && !runningRun(nx) ? h("p", { class: "pop-note top" }, tr("Next step: "), cmd(nx)) : null,
+      h("p", { class: "pop-note", text: tr("Skills and agents show here while Claude Code runs them (from the session log); Live means this page is connected to the board's server.") }));
   }
+  // hover opens it too (a click keeps it open; touch screens use the click)
+  (() => {
+    const wrap = $("live-wrap"), btn = $("live"), pop = $("live-pop");
+    let byHover = false, t = 0;
+    wrap.addEventListener("mouseenter", () => { clearTimeout(t); if (pop.hidden) { pops.forEach((p) => p.close()); pop.hidden = false; btn.setAttribute("aria-expanded", "true"); byHover = true; } });
+    wrap.addEventListener("mouseleave", () => { if (byHover) t = setTimeout(() => { pop.hidden = true; btn.setAttribute("aria-expanded", "false"); byHover = false; }, 250); });
+    btn.addEventListener("click", () => { if (byHover) { byHover = false; pop.hidden = false; btn.setAttribute("aria-expanded", "true"); } }, true);
+  })();
+
+  // ------------------------------------------------------------------ the Autopilot switch: /dev-kit:autopilot run by the board (dev_worker AutoExecutor)
+  const AP_WORD = tmap({ off: N_("off"), idle: N_("starting"), running: N_("running"), stopping: N_("finishing the step"), waiting_user: N_("waiting for you"),
+    release: N_("waiting for your approval"), stable: N_("project stable"), waiting_session: N_("waiting for another session"), backoff: N_("retrying soon"), stopped: N_("stopped") });
+  const AP_CLASS = { off: "off", idle: "on", running: "on", stopping: "wait", waiting_user: "wait", release: "wait", stable: "off", waiting_session: "wait", backoff: "bad", stopped: "bad" };
+  const AP_REASON = tmap({ milestone_done: N_("the last run closed a milestone"), waiting_for_user: N_("only work that needs you is left: answer in Needs you and it starts again"),
+    release_approval: N_("a release waits for your approval in Needs you"), stable: N_("nothing is open"), until_reached: N_("the last run reached its target"),
+    switched_off: N_("switched off"), force_stopped: N_("force-stopped"), no_change: N_("the last run changed nothing: look at its log"), failed: N_("a run failed"),
+    request_running: N_("a Claude Code session runs a board request"), other_session: N_("/dev-kit:autopilot runs in another session"),
+    no_claude: N_("the claude command was not found") });
+  function renderAutopilot() {
+    const wrap = $("ap-wrap");
+    wrap.hidden = !actionsOn();
+    if (wrap.hidden) return;
+    const ap = inbox().autopilot || { on: false, state: "off" };
+    const sw = $("ap-switch");
+    sw.setAttribute("aria-checked", String(Boolean(ap.on)));
+    sw.classList.toggle("on", Boolean(ap.on));
+    const st = $("ap-btn");
+    st.className = `ap-state ${AP_CLASS[ap.state] || "off"}`;
+    const waitN = ap.state === "waiting_user" ? needsN : 0;
+    fill($("ap-word"), AP_WORD[ap.state] || ap.state, ap.state === "running" && ap.since ? [" · ", since(ap.since)] : null, waitN ? ` · ${waitN}` : null);
+    st.setAttribute("aria-label", tr("Autopilot: {v}. Show details", { v: AP_WORD[ap.state] || ap.state }));
+    const reason = ap.reason ? (AP_REASON[ap.reason] || ap.reason) : null;
+    fill($("ap-pop"), h("p", { class: "pop-title", text: tr("Autopilot") }),
+      h("p", { class: "ap-line" }, h("strong", { text: AP_WORD[ap.state] || ap.state }), reason ? ` · ${reason}` : null,
+        ap.state === "backoff" && ap.until ? ` · ${tr("next try at {v}", { v: new Date(ap.until * 1000).toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" }) })}` : null),
+      ap.note ? h("p", { class: "card-sub", text: ap.note }) : null,
+      h("p", { class: "pop-note top" }, tr("Runs "), h("code", { text: ap.command || "/dev-kit:autopilot --milestones 1 --board" }),
+        tr(" headless, one milestone per run, until a release waits for your approval. Questions and permissions go to Needs you. Output: "), h("code", { text: ".dev/run/autopilot.log" })),
+      ap.runs ? h("p", { class: "card-sub", text: plural(ap.runs, "run") }) : null,
+      h("div", { class: "ap-actions" },
+        ap.state === "waiting_user" || ap.state === "release" ? h("button", { type: "button", class: "btn btn-sm", text: tr("Open Needs you"), onclick: goNeeds }) : null,
+        h("button", { type: "button", class: "btn btn-sm", text: ap.on ? (ap.state === "stopped" ? tr("Start again") : tr("Turn off")) : tr("Turn on"),
+          onclick: () => setAutopilot(ap.state === "stopped" ? true : !ap.on) }),
+        ap.state === "running" || ap.state === "stopping" ? h("button", { type: "button", class: "btn btn-sm btn-danger", text: tr("Force stop"), onclick: forceStop }) : null));
+  }
+  async function setAutopilot(on) {
+    try {
+      const d = await api("/api/autopilot", { on });
+      toast(on ? tr("Autopilot on: the board starts /dev-kit:autopilot in a few seconds.")
+        : d.autopilot && d.autopilot.state === "stopping" ? tr("Autopilot off: the run finishes its step, then stops.") : tr("Autopilot off."));
+      load();
+    } catch (e) { toast(e.message, true); }
+  }
+  async function forceStop() {
+    try { await api("/api/autopilot", { force_stop: true }); toast(tr("Autopilot stopped now.")); load(); } catch (e) { toast(e.message, true); }
+  }
+  $("ap-switch").addEventListener("click", () => { const ap = inbox().autopilot || {}; setAutopilot(ap.state === "stopped" ? true : !ap.on); });
 
   function renderHeader() {
     $("project").textContent = data.project;
     renderRunning();
+    renderAutopilot();
     $("kit-ver").textContent = data.kit && data.kit !== "unknown" ? `v${data.kit}` : "";
     $("bf-mode").textContent = data.brownfield ? tr("existing project · {v} · since {v2}", { v: data.brownfield.mode || "feature", v2: data.brownfield.baseline_ref || "baseline" }) : "";
     renderPhaseTabs();
@@ -2221,11 +2283,7 @@
     pb.hidden = !ib.actions;
     pb.setAttribute("aria-pressed", String(Boolean(ib.executor.paused)));
     pb.textContent = ib.executor.paused ? tr("Resume queue") : tr("Pause queue");
-    const cb = $("cont-btn");
-    cb.hidden = !ib.actions;
-    cb.setAttribute("aria-pressed", String(Boolean(ib.executor.continuous)));
     const waiting = ib.open.filter((x) => x.status === "pending").length;
-    const stopped = ib.executor.continuous && ib.executor.continuous_stopped;
     const line = (...kids) => h("span", { class: "hint-line" }, kids);
     fill($("req-hint"),
       !ib.actions ? line(tr("This board only shows the project: requests are off (start it with --actions on).")) : null,
@@ -2233,9 +2291,6 @@
       ib.actions && !takesIt(ib.executor) && waiting && (ib.executor.auto || {}).state !== "no_claude" ? line(tr("{v} waiting. In Claude Code, run ", { v: plural(waiting, "request") }), h("span", { class: "cmd" }, h("code", { text: "/dev-kit:worker" }), copyBtn("/dev-kit:worker"))) : null,
       ib.actions && !ib.executor.online && !waiting && !autoOn(ib.executor) ? line(tr("No Claude Code session is listening. Run "), h("span", { class: "cmd" }, h("code", { text: "/dev-kit:board" }), copyBtn("/dev-kit:board")), tr(" in one: requests then start by themselves.")) : null,
       ib.actions && ib.executor.paused ? line(tr("Paused: Claude Code finishes what it is doing and takes nothing new.")) : null,
-      ib.actions && ib.executor.continuous && !stopped ? line(tr("Going on by itself: after each step Claude Code starts the next one, until something needs you or the milestone closes.")) : null,
-      stopped ? h("span", { class: "hint-line bad" }, tr("It stopped going on by itself: {stopped}. ", { stopped }),
-        h("button", { type: "button", class: "link-btn", text: tr("Go on"), onclick: () => setContinuous(true) })) : null,
       ib.actions && !ib.open.length && !ib.recent.length ? line(tr("Nothing queued. Use ▶ next to a command, answer a question, add an issue, or plan by dragging cards.")) : null);
     const row = (x, open) => h("li", { class: `req s-${x.status}` },
       h("span", { class: "id", text: x.id }),
@@ -2254,15 +2309,6 @@
     const paused = !inbox().executor.paused;
     try { await api("/api/worker/mode", { paused }); toast(paused ? tr("Queue paused.") : tr("Queue resumed.")); load(); } catch (e) { toast(e.message, true); }
   });
-  async function setContinuous(on) {
-    try {
-      await api("/api/worker/mode", { continuous: on });
-      toast(on ? tr("Going on by itself. {v}", { v: takesIt(inbox().executor) ? tr("Claude Code starts the next step.") : tr("It starts when a Claude Code session listens (/dev-kit:board).") })
-        : tr("It now waits for you after each request."));
-      load();
-    } catch (e) { toast(e.message, true); }
-  }
-  $("cont-btn").addEventListener("click", () => setContinuous(!inbox().executor.continuous));
 
   // the tab says when something waits on the user: "(2) Needs you" in the title and a dot on the icon
   let needsN = 0;

@@ -170,8 +170,8 @@ class WorkerTest(unittest.TestCase):
         dw.set_mode(self.root, paused=True)
         self.assertEqual(dw.claim(self.root, "s1"), (None, "the queue is paused on the board"))
         self.assertIsNone(dw.wait(self.root, 0.2, 0.05))
-        dw.set_mode(self.root, paused=False, continuous=True)
-        self.assertEqual(dw.modes(self.root), {"paused": False, "continuous": True})
+        dw.set_mode(self.root, paused=False)
+        self.assertEqual(dw.modes(self.root), {"paused": False})
         self.assertEqual(dw.wait(self.root, 1)["id"], "P-001")
         with self.assertRaises(dw.Invalid):
             dw.set_mode(self.root, paused="yes")
@@ -346,8 +346,6 @@ class WorkerTest(unittest.TestCase):
                                  capture_output=True, text=True, timeout=10)
         self.assertEqual((nowhere.returncode, nowhere.stdout, nowhere.stderr), (0, "", ""))
 
-    # ------------------------------------------------------------------ continuous mode
-
     def plan(self):
         state = [sys.executable, "-I", str(STATE), "--root", str(self.root)]
         (self.root / ".dev" / "plan.md").write_text(
@@ -361,77 +359,6 @@ class WorkerTest(unittest.TestCase):
                      ["review", "plan", "pass", "--score", "90"], ["checkpoint", "confirm", "plan"]):
             subprocess.run(state + args, check=True, capture_output=True)
         return lambda *a: subprocess.run(state + list(a), check=True, capture_output=True, text=True)
-
-    def test_continuous_queues_the_next_step_once(self):
-        ds = self.plan()
-        self.assertEqual(dw.continue_next(self.root), (None, "continuous mode is off"))
-        dw.set_mode(self.root, continuous=True)
-        x, why = dw.continue_next(self.root)
-        self.assertEqual((x["args"], x["by"], why), ({"command": "/dev-kit:implement"}, "continuous", ""))
-        self.assertEqual(dw.continue_next(self.root), (None, "a request is already queued"))
-        dw.claim(self.root, "s1")
-        dw.finish(self.root, x["id"], "done")
-        # the step changed nothing in the project: asking for it again would loop
-        _, why = dw.continue_next(self.root)
-        self.assertIn("changed nothing", why)
-        self.assertIn("changed nothing", dw.executor(self.root)["continuous_stopped"])
-        ds("start", "T-001")
-        ds("done", "T-001")
-        self.assertEqual(dw.continue_next(self.root)[0]["args"], {"command": "/dev-kit:qa M1"})
-        self.assertIsNone(dw.executor(self.root)["continuous_stopped"])
-        self.assertIn("not continuing: a request is already queued", self.cli("continue-next", expect=3).stdout)
-        dw.set_mode(self.root, paused=True)
-        self.assertEqual(dw.continue_next(self.root)[1], "the queue is paused on the board")
-
-    def test_continuous_stops_when_something_needs_the_user(self):
-        ds = self.plan()
-        dw.set_mode(self.root, continuous=True)
-        ds("add-question", "Which database?")
-        self.assertIn("1 open question waits for your answer", dw.continue_next(self.root)[1])
-        ds("answer-question", "Q-001", "--answer", "Postgres")
-        ds("block", "T-002", "--reason", "needs a key")
-        self.assertEqual(dw.continue_next(self.root)[1], "T-002 is blocked")
-        ds("unblock", "T-002")
-        x, _ = dw.continue_next(self.root)
-        dw.claim(self.root, "s1")
-        dw.finish(self.root, x["id"], "failed", note="tests red")
-        self.assertEqual(dw.continue_next(self.root)[1], f"{x['id']} failed")
-        dw.set_mode(self.root, continuous=True)  # "Go on" on the board
-        y, _ = dw.continue_next(self.root)
-        self.assertEqual(y["args"], {"command": "/dev-kit:implement"})
-        dw.cancel(self.root, y["id"])
-        self.assertEqual(dw.continue_next(self.root)[1], f"{y['id']} was cancelled")
-
-    def test_continuous_takes_one_milestone_per_go_and_leaves_some_steps_to_the_user(self):
-        ds = self.plan()
-        dw.set_mode(self.root, continuous=True)
-        ds("start", "T-001")
-        ds("done", "T-001")
-        x, _ = dw.continue_next(self.root)  # /dev-kit:qa M1, queued while the gate of M1 is pending
-        dw.claim(self.root, "s1")
-        ds("gate", "M1", "passed", "--score", "95")
-        dw.finish(self.root, x["id"], "done")
-        self.assertEqual(dw.continue_next(self.root)[1], "M1 is closed; turn it on again for the next milestone")
-        dw.set_mode(self.root, continuous=True)
-        self.assertEqual(dw.continue_next(self.root)[0]["args"], {"command": "/dev-kit:implement"})
-        dw.cancel(self.root, "P-002")
-        dw.set_mode(self.root, continuous=True)
-        ds("start", "T-002")
-        ds("done", "T-002")
-        ds("gate", "M2", "passed", "--score", "95")
-        ds("review", "docs", "pass", "--score", "95")
-        ds("release-submit", "R1")
-        ds("release-decide", "R1", "--approve")
-        ds("release-record", "--version", "1.0.0", "--release", "R1")
-        self.assertEqual(dw.continue_next(self.root)[1], "the next step is /dev-kit:backlog, which is yours to start")
-
-    def test_listener_starts_continuous_steps_when_idle(self):
-        self.plan()
-        dw.arm(self.root, os.getppid())
-        self.assertEqual(self.heard(), [])
-        dw.set_mode(self.root, continuous=True)
-        self.assertEqual(self.heard(), ["dev-kit board: request P-001 is waiting; /dev-kit:worker runs the board's requests"])
-        self.assertEqual(dw.item(self.root, "P-001")["by"], "continuous")
 
 
 if __name__ == "__main__":

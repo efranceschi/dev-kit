@@ -2,6 +2,28 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.2.0 — 2026-11-24
+
+The board drives the project: an **Autopilot** switch in the top bar runs `/dev-kit:autopilot` from the board. Until now nothing moved unless a session ran the autopilot or a request was queued, and the top bar suggested otherwise.
+
+### Added
+- **Autopilot switch** (top bar, where the "running" chip was): on, the board's server runs the kit's own `/dev-kit:autopilot --milestones 1 --board` headless (`claude -p`, output in `.dev/run/autopilot.log`), one milestone per run with a fresh context, and starts the next run when one closes a milestone, until a release waits for your approval or the project is stable. Next to it, what it is doing: running (for how long), finishing the step, waiting for you (with the Needs-you count), waiting for your approval, waiting for another session, retrying soon, stopped (and why). Its popover has Turn on/off, Start again, Open Needs you and Force stop.
+- **`/dev-kit:autopilot --board`** (board mode): every question, here or in a skill it invokes, goes to Needs you as a question with answers to pick (AskUserQuestion does not exist in `claude -p`), the task that waits is blocked, and the run goes on with independent work; when only such work is left it ends with `dev_worker.py autopilot-exit --reason waiting_for_user`, and the board starts it again once you answer or decide something. At every safe point it checks `dev_worker.py autopilot status`: switched off, it finishes the step in progress (green work only) and ends. Permission prompts of the run go to Needs you like a request's (no answer in 10 minutes = denied, and the task is blocked with the reason).
+- `dev_worker.py autopilot on|off|status` and `autopilot-exit --reason milestone_done|waiting_for_user|release_approval|stable|stopped|until_reached`; board API `POST /api/autopilot` (`{"on": bool}` or `{"force_stop": true}`).
+- **Live** opens, on hover or click, the list of what runs now: the autopilot run and the headless worker the board started (with the request), the skills of the session log and the agents, with a count on the pill.
+
+### Changed
+- One `claude` changes the project at a time: board requests run first, between autopilot runs; a `/dev-kit:autopilot` you run yourself in a session is never doubled (the board waits for it). The switch is kept in `.dev/run/autopilot.json`, so a board restart resumes it (a run still going is adopted, not started twice), and the board does not stop for idleness while it is on.
+- `autonomy.board_executor`: `permission_mode` defaults to `acceptEdits` (the worker too; projects still on the untouched 3.x default get it), and `autopilot_timeout_min` (default 360) bounds one autopilot run.
+- A run that ends without progress (state and plan unchanged) stops the autopilot with that reason instead of looping; three failed runs in a row stop it too (30 s, 2 min, 10 min apart).
+
+### Removed
+- **"Go on by itself"** (continuous mode) on the Requests card and `dev_worker.py continue-next`: the Autopilot switch replaces it. A project that had it on starts with the Autopilot on.
+- The "running" chip of the top bar (its list moved under Live).
+
+### Fixed
+- `/dev-kit:board` logs its `skill_end`: the board showed itself as a skill running for up to 4 hours (`/dev-kit:board › /dev-kit:board 2h13m`); the board's own runs are no longer listed as work.
+
 ## 3.1.1 — 2026-11-24
 
 ### Docs
