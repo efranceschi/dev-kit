@@ -85,6 +85,7 @@ WATCH_BEAT_S = 20             # how often the listener refreshes its heartbeat
 WATCH_FRESH_S = 90            # a listener not seen for this long is not listening
 REMIND_S = 600                # a request nobody took is announced again after this long
 THINK_S = 10                  # how often an idle listener scans the queue again even when no file changed
+PARKED_S = 300                # a session whose turn ended this long ago, with no agent left, is parked (works on nothing)
 HOLD_IDLE_S = 60               # an idle executor that does not listen still holds the queue for this long (between two requests)
 APPROVAL_WAIT_S = 600         # a permission request nobody answers on the board is denied after this long
 APPROVAL_TARGET = 300         # characters of the command or path shown on the board
@@ -448,6 +449,8 @@ def item(root: Path, rid: str) -> dict | None:
 def _executor_gone(root: Path, st: dict) -> bool:
     if st.get("pid") and not _alive(st["pid"]):
         return True
+    if st.get("pid") and parked(root, st["pid"]) and not listening(root):
+        return True  # its session is open but its turn ended for good: nobody works on it
     w = _read(run_dir(root) / "worker.json") or {}
     seen = max(_ts(st.get("claimed_at")), _ts(w.get("last_seen")) if w.get("session") == st.get("session") else 0)
     return time.time() - seen > STALE_S
@@ -676,16 +679,76 @@ def executor(root: Path) -> dict:
         live = time.time() - seen < ONLINE_S
     hears = listening(root)
     state = (w.get("state") or "idle") if live else ("idle" if hears else "offline")
-    return {"state": state, "online": live or hears, "listening": hears, "holds": hears or (live and _holds(w)),
+    return {"state": state, "online": live or hears, "listening": hears, "holds": hears or (live and _holds(w, root)),
             "paused": m["paused"], "item": w.get("item") if live else None, "last_seen": w.get("last_seen")}
 
 
-def _holds(w: dict) -> bool:
+# --------------------------------------------------------------------------- is a session still at work?
+# A Claude Code session that runs a request or the board's Autopilot run keeps its pid alive for as long as it stays
+# open, even after the user interrupted it or its turn simply ended. The plugin's hooks tell the difference: Stop ends
+# a turn; a prompt, a tool call or a subagent starting or stopping means it works again. They write
+# .dev/run/sessions/<pid>.json only for a session the queue or the Autopilot names (worker.json, autopilot-run.json).
+
+SESSIONS_DIR = "sessions"
+AP_RUN_FILE = "autopilot-run.json"  # = AP_RUN, defined with the board's own executor below
+
+
+def _tracked_pid(root: Path) -> int | None:
+    """The executor or Autopilot session this process runs under (a hook of it, or of one of its subagents)."""
+    pids = set()
+    for f in ("worker.json", AP_RUN_FILE):
+        try:
+            pid = int((_read(run_dir(root) / f) or {}).get("pid") or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        if pid > 1:
+            pids.add(pid)
+    if not pids:
+        return None
+    return next((p for p in ancestors()[1:] if p in pids), None)
+
+
+def note_session(root: Path, kind: str, agent_id: str | None = None) -> None:
+    """Called by the hooks: kind stop (the turn ended), or prompt | tool | agent_start | agent_stop (it works)."""
+    pid = _tracked_pid(root)
+    if pid is None:
+        return
+    d = run_dir(root) / SESSIONS_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"{pid}.json"
+    rec = _read(path) or {"pid": pid}
+    t = time.time()
+    agents = {k: v for k, v in (rec.get("agents") or {}).items() if isinstance(v, (int, float)) and t - v < STALE_S}
+    if kind == "stop":
+        rec["stop_s"] = t
+    else:
+        rec["active_s"] = t
+        if kind == "agent_start" and agent_id:
+            agents[agent_id] = t
+        elif kind == "agent_stop" and agent_id:
+            agents.pop(agent_id, None)
+    rec["agents"] = agents
+    _write(path, rec)
+
+
+def parked(root: Path, pid: object) -> bool:
+    """True when the session `pid` is open but works on nothing: its last turn ended PARKED_S ago or more, with no
+    subagent still running. Unknown (no hook ever wrote for it) is never parked."""
+    try:
+        rec = _read(run_dir(root) / SESSIONS_DIR / f"{int(pid)}.json") or {}  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    stop = float(rec.get("stop_s") or 0)
+    return bool(stop) and stop >= float(rec.get("active_s") or 0) and not rec.get("agents") and time.time() - stop >= PARKED_S
+
+
+def _holds(w: dict, root: Path | None = None) -> bool:
     """Whether a live executor still takes the queue: while it works on a request, or for a moment after one (its loop
     claims the next). An idle session that does not listen never wakes for a new request by itself, so it must not
-    keep the board's own worker away, nor refuse a worker that comes after it."""
+    keep the board's own worker away, nor refuse a worker that comes after it. Nor must a session that was running a
+    request when its turn ended for good (interrupted): it is parked, and holds nothing."""
     if w.get("state") in ("running", "sleeping") or w.get("item"):
-        return True
+        return not (root is not None and w.get("pid") and parked(root, w["pid"]))
     return time.time() - _ts(w.get("idle_since") or w.get("last_seen")) < HOLD_IDLE_S
 
 
@@ -703,7 +766,9 @@ def _holds(w: dict) -> bool:
 
 AUTO_FILE = "worker-auto.json"
 AUTO_GRACE_S = 4                # a listening session gets this long to take a new request first
-AUTO_BACKOFF_S = (30, 120, 600) # after a run that failed (or left its request pending), wait before the next one
+AUTO_BACKOFF_S = (30, 120, 600) # after an Autopilot run that failed, wait before the next one
+WORKER_BACKOFF_S = (15, 30, 60) # after a worker run that failed (or left its request pending): a request never waits long
+TAKE_S = 30                     # a listening or just-idle session gets this long to take a request, then the board's worker does
 AUTO_DEFAULTS = {"auto": True, "permission_mode": "acceptEdits", "timeout_min": 180, "autopilot_timeout_min": 360,
                  "autopilot_in_session": True}
 AUTO_MODES = ("default", "acceptEdits", "plan", "auto", "bypassPermissions", "dontAsk")
@@ -759,7 +824,7 @@ def who_takes(root: Path) -> tuple[str | None, str | None]:
     if not _alive(rec.get("pid")):
         return None, "the board is not running"
     ap = _read(run_dir(root) / AP_RUN) or {}
-    if ap.get("state") == "running" and _alive(ap.get("pid")):
+    if ap.get("state") == "running" and _alive(ap.get("pid")) and not (ap.get("where") == "session" and parked(root, ap.get("pid"))):
         return "autopilot", ("they run when the Autopilot run ends (one Claude Code changes the project at a time); "
                              "switching the Autopilot off on the board runs them after its current step")
     if not rec.get("actions", True):
@@ -958,8 +1023,8 @@ def _state_at(root: Path) -> str | None:
     return h.hexdigest()[:16]
 
 
-def _backoff(fails: int) -> float:
-    return AUTO_BACKOFF_S[min(fails, len(AUTO_BACKOFF_S)) - 1]
+def _backoff(fails: int, steps: tuple = AUTO_BACKOFF_S) -> float:
+    return steps[min(fails, len(steps)) - 1]
 
 
 class AutoExecutor:
@@ -1029,7 +1094,7 @@ class AutoExecutor:
             self.log = None
             if kind == "worker":
                 self.fails += 1
-                self.next_try = time.time() + _backoff(self.fails)
+                self.next_try = time.time() + _backoff(self.fails, WORKER_BACKOFF_S)
                 self._status("waiting", reason=str(e)[:200], until=self.next_try)
             else:
                 self._ap_failed(str(e)[:200])
@@ -1055,7 +1120,7 @@ class AutoExecutor:
                 self.stop()
                 if kind == "worker":
                     self.fails += 1
-                    self.next_try = time.time() + _backoff(self.fails)
+                    self.next_try = time.time() + _backoff(self.fails, WORKER_BACKOFF_S)
                     self._status("waiting", reason="timeout", until=self.next_try)
                 else:
                     self._ap_failed("timeout")
@@ -1067,7 +1132,7 @@ class AutoExecutor:
             mine = next((x for x in items(self.root) if x["id"] == self.request), None)
             if rc != 0 or (mine is not None and mine["status"] == "pending"):  # failed, or never took its request
                 self.fails += 1
-                self.next_try = time.time() + _backoff(self.fails)
+                self.next_try = time.time() + _backoff(self.fails, WORKER_BACKOFF_S)
                 self._status("waiting", reason=f"exit {rc}" if rc else "left the request pending", until=self.next_try,
                              log=".dev/run/worker-auto.log")
             else:
@@ -1097,6 +1162,9 @@ class AutoExecutor:
         if st.get("handoff") == "pending" and (time.time() - float(st.get("at_s") or 0) > HANDOFF_WAIT_S or not listening(self.root)):
             self.handoff_skip_until = time.time() + HANDOFF_WAIT_S  # it never took it: the next run is headless
             self._ap("idle", reason="session_did_not_take", note="the listening session did not take the run")
+            return True
+        if st.get("handoff") == "taken" and parked(self.root, st.get("pid")):
+            self._ap_failed("the session's turn ended without ending the run")  # interrupted: the next run starts again
             return True
         limit = float(auto_cfg(self.root)["autopilot_timeout_min"]) * 60
         if time.time() - self.started > limit:
@@ -1137,11 +1205,17 @@ class AutoExecutor:
         if not cfg.get("auto"):
             self._status("off")
             return False
-        if modes(self.root)["paused"] or executor(self.root)["holds"]:
+        if modes(self.root)["paused"]:
             return False
         x = claimable(self.root)
-        if x is None or time.time() - _ts(x.get("ts")) < AUTO_GRACE_S or time.time() < self.next_try:
+        if x is None or time.time() < self.next_try:
             return False
+        waited = time.time() - _ts(x.get("ts"))
+        ex = executor(self.root)
+        if ex["holds"] and ex["state"] == "running":
+            return False  # a session works on a request now: one request at a time
+        if waited < (TAKE_S if ex["holds"] else AUTO_GRACE_S):
+            return False  # a listening (or just idle) executor gets TAKE_S to take it; nobody else gets the grace only
         if not self._spawn("worker", "/dev-kit:worker", cfg["permission_mode"], f"for {x['id']}"):
             return False
         self.runs, self.request = self.runs + 1, x["id"]
@@ -1285,7 +1359,7 @@ def _other_executor(root: Path, session: str | None) -> dict | None:
         live = time.time() - _ts(w.get("last_seen")) < ONLINE_S
     if not live:
         return None
-    if _holds(w):
+    if _holds(w, root):
         return w
     a = armed(root)  # an idle session that listens is woken by the board: it keeps the queue
     return w if listening(root) and a and f"claude-{a['pid']}" == w.get("session") else None
@@ -1294,10 +1368,13 @@ def _other_executor(root: Path, session: str | None) -> dict | None:
 def claim(root: Path, session: str | None = None, pid: int | None = None) -> tuple[dict | None, str]:
     with _Lock(root):
         other = _other_executor(root, session)
+        if other and os.environ.get("DEV_KIT_BOARD_CHILD") == "1" and other.get("state") != "running":
+            other = None  # the board's worker started because nobody took the request: an idle session does not stop it
         if other:
             return None, f"another session ({other.get('session')}) is the executor of this project"
         ap = _read(run_dir(root) / AP_RUN) or {}
-        if ap.get("state") == "running" and _alive(ap.get("pid")) and not (ap.get("where") == "session" and pid and int(pid) == int(ap["pid"])):
+        if (ap.get("state") == "running" and _alive(ap.get("pid")) and not (ap.get("where") == "session" and parked(root, ap.get("pid")))
+                and not (ap.get("where") == "session" and pid and int(pid) == int(ap["pid"]))):
             return None, "another session (the board's Autopilot run) changes the project; the requests run when it ends"
         all_ = items(root)
         for x in all_:  # a stale request is closed once, so it never runs twice
@@ -1493,7 +1570,7 @@ def main(argv: list[str] | None = None) -> int:
             while not listening(root) and time.monotonic() < end:
                 time.sleep(0.3)
             print(f"armed: {rec['session']} · " + ("listening: a request on the board starts work here" if listening(root)
-                                                  else "not listening: run /dev-kit:worker when the board has requests"))
+                                                  else "not listening: the board's own worker runs the requests (it takes one within a minute)"))
             return 0
         if a.cmd == "disarm":
             disarm(root)
@@ -1557,6 +1634,12 @@ def main(argv: list[str] | None = None) -> int:
                    + f" · autopilot {snap['autopilot']['state']}"
                    + f" · {len(snap['open'])} open request(s)"
                    + (f" · {len(snap['approvals'])} approval(s) waiting" if snap["approvals"] else ""))
+            if snap["open"]:
+                taker, why = who_takes(root)
+                print({"listener": "requests: the session that listens takes them",
+                       "executor": "requests: the executor working on the queue takes them",
+                       "board": "requests: the board's own worker takes them (it starts a few seconds after a request)",
+                       "autopilot": f"requests: {why}"}.get(taker or "", f"requests: nobody takes them: {why}; run /dev-kit:worker"))
     except Invalid as e:
         print("dev_worker: " + "; ".join(e.errors), file=sys.stderr)
         return 1

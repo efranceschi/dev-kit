@@ -434,7 +434,7 @@ class TestBoardStartsTheWorker(Base):
         self.assertEqual((st["state"], st["reason"]), ("waiting", "left the request pending"))
         self.ex.tick()
         self.assertEqual(len(self.runs()), 1)  # not again before the back-off
-        self.assertGreater(st["until"], __import__("time").time() + 20)
+        self.assertGreater(st["until"], __import__("time").time() + 10)
 
     def test_a_failed_run_says_why(self) -> None:
         os.environ["FAKE_RC"] = "3"

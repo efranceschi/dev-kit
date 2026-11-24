@@ -96,6 +96,78 @@ class TestIdleSessionDoesNotHoldTheQueue(QueueBase):
         self.assertEqual(dw.claim(self.root, "claude-2")[0], None)
 
 
+class TestTheBoardsWorkerAlwaysComes(QueueBase):
+    """3.8.1, field case 3: after `/dev-kit:board restart` the session was armed but its monitor never started, and
+    P-009 to P-011 waited with no worker. A request now waits for a session only while that session works on a
+    request; a listening or just-idle one gets TAKE_S to take it, then the board's worker runs it."""
+
+    def old_request(self, age: float = 120) -> str:
+        rid = dw.submit(self.root, "run", {"command": "/dev-kit:docs"})["id"]
+        f = self.run_dir / "inbox" / f"{rid}.json"
+        rec = json.loads(f.read_text(encoding="utf-8"))
+        rec["ts"] = ago(age)
+        f.write_text(json.dumps(rec), encoding="utf-8")
+        return rid
+
+    def listen(self) -> None:
+        (self.run_dir / "worker-armed.json").write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
+        (self.run_dir / "worker-watch.json").write_text(json.dumps({"pid": os.getpid(), "watch_pid": os.getpid(), "last_seen": dw.now()}),
+                                                       encoding="utf-8")
+        self.assertTrue(dw.listening(self.root))
+
+    def test_a_listening_session_that_does_not_take_it_in_time(self) -> None:
+        self.listen()
+        rid = self.old_request(5)
+        self.ex.tick()
+        self.assertIsNone(self.ex.proc)  # its monitor announces it first
+        f = self.run_dir / "inbox" / f"{rid}.json"
+        rec = json.loads(f.read_text(encoding="utf-8"))
+        rec["ts"] = ago(dw.TAKE_S + 5)
+        f.write_text(json.dumps(rec), encoding="utf-8")
+        self.ex.tick()
+        self.assertIsNotNone(self.ex.proc)
+        with mock.patch.dict(os.environ, {"DEV_KIT_BOARD_CHILD": "1"}):
+            dw.heartbeat(self.root, f"claude-{os.getpid()}", os.getpid(), "idle")
+            x, why = dw.claim(self.root, "claude-board", 1)
+        self.assertIsNotNone(x, why)  # an idle listener never refuses the board's worker
+
+    def test_a_session_working_on_a_request_keeps_the_next_one(self) -> None:
+        dw.submit(self.root, "run", {"command": "/dev-kit:docs"})
+        dw.claim(self.root, "claude-1", os.getpid())
+        self.old_request(3600)
+        self.ex.tick()
+        self.assertIsNone(self.ex.proc)
+
+    def test_a_session_that_stopped_mid_request_is_parked(self) -> None:
+        first = dw.submit(self.root, "run", {"command": "/dev-kit:docs"})["id"]
+        dw.claim(self.root, "claude-1", os.getpid())
+        sessions = self.run_dir / dw.SESSIONS_DIR
+        sessions.mkdir(parents=True, exist_ok=True)
+        t = time.time() - dw.PARKED_S - 5
+        (sessions / f"{os.getpid()}.json").write_text(json.dumps({"pid": os.getpid(), "stop_s": t, "active_s": t - 1, "agents": {}}),
+                                                     encoding="utf-8")
+        self.assertTrue(dw.parked(self.root, os.getpid()))
+        self.assertEqual(dw.item(self.root, first)["status"], "stale")
+        self.old_request(120)
+        self.ex.tick()
+        self.assertIsNotNone(self.ex.proc)
+
+    def test_hooks_note_the_turns_of_a_tracked_session(self) -> None:
+        dw.heartbeat(self.root, "claude-x", os.getppid(), "running", "P-001")  # this test runs under that "session"
+        dw.note_session(self.root, "agent_start", "a1")
+        dw.note_session(self.root, "stop")
+        rec = json.loads((self.run_dir / dw.SESSIONS_DIR / f"{os.getppid()}.json").read_text(encoding="utf-8"))
+        self.assertEqual(list(rec["agents"]), ["a1"])  # a subagent still runs: not parked however long
+        dw.note_session(self.root, "agent_stop", "a1")
+        dw.note_session(self.root, "stop")
+        self.assertFalse(dw.parked(self.root, os.getppid()))  # not long enough yet
+        rec = json.loads((self.run_dir / dw.SESSIONS_DIR / f"{os.getppid()}.json").read_text(encoding="utf-8"))
+        (self.run_dir / "worker.json").unlink()
+        dw.note_session(self.root, "tool")  # untracked now: nothing written
+        self.assertEqual(json.loads((self.run_dir / dw.SESSIONS_DIR / f"{os.getppid()}.json").read_text(encoding="utf-8")).get("active_s"),
+                         rec.get("active_s"))
+
+
 class TestHooksSayWhoTakesIt(QueueBase):
     def test_quiet_when_the_board_takes_it(self) -> None:
         self.board_up()

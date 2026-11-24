@@ -454,6 +454,14 @@ def main() -> int:
         if not (dev / "state.json").is_file():
             return 0
         out = None
+        kind = {"Stop": "stop", "UserPromptSubmit": "prompt", "SubagentStart": "agent_start", "SubagentStop": "agent_stop",
+                "PreToolUse": "tool"}.get(name)
+        if kind:
+            try:  # whether the executor's session still works (dev_worker.parked): never breaks a hook
+                import dev_worker as dw
+                dw.note_session(root, kind, tok(payload.get("agent_id")) if kind.startswith("agent") else None)
+            except Exception:  # noqa: BLE001
+                pass
         if name in EVENTS:
             record_agent(dev, EVENTS[name], payload)
             if name in ("SubagentStart", "SubagentStop"):

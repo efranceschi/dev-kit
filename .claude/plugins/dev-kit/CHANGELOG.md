@@ -2,6 +2,19 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.8.1 — 2026-11-24
+
+Field report: after `/dev-kit:board restart` the session was armed as the board's listener but its monitor never started, and P-009, P-010 and P-011 waited with no worker. Eduardo's rule: a request from the board never waits in the queue because no worker takes it; the board's worker is there whenever the board is.
+
+### Fixed
+- **The board's worker always comes.** Only a session that is working on a request now makes the board's worker wait. A session that listens, or that has just gone idle, gets 30 seconds to take a new request (its monitor announces it); after that the board starts its own headless worker, whose claim is no longer refused by an idle session. Before, a session armed without a running monitor, or one that had run a request and was then interrupted, could hold the queue for as long as it stayed open.
+- **A session that stopped in the middle of a request no longer holds it.** The hooks now record when the session that runs a request (or the board's Autopilot run in a session) ends a turn and when it works again (a prompt, a tool call, a subagent starting or stopping), in `.dev/run/sessions/<pid>.json`. When its last turn ended 5 minutes ago or more with no subagent still running, the session is parked: the request it left running becomes stale and the board's worker takes the next one; an Autopilot run it left open ends as failed and starts again.
+- Failed headless worker runs retry after 15 s, 30 s, then every minute (before: 30 s, 2 min, then 10 min).
+- `DW arm` without a monitor says the board's own worker runs the requests, and `dev_worker.py status` says who takes the waiting requests (or why nobody does).
+
+### Tests
+- `test_queue_taken.py`: a listening session that does not take a request in time, a session working on a request keeps the next one, a session parked mid-request, and the hooks' record of a tracked session's turns.
+
 ## 3.8.0 — 2026-11-24
 
 ### Added

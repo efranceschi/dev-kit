@@ -233,6 +233,11 @@ def main() -> int:
     try:
         payload = json.load(sys.stdin)
         root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ".")
+        try:  # a tool call: the session works (dev_worker.parked)
+            import dev_worker as dw
+            dw.note_session(root, "tool")
+        except Exception:  # noqa: BLE001 - never breaks the fence
+            pass
         out = decide(payload, root)
         if out:
             print(json.dumps(out))
