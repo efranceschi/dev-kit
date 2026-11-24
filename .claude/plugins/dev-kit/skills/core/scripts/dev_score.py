@@ -395,6 +395,11 @@ def evaluate(inputs: list[Path], quality: dict, kind: str, scope: str, previous:
             entry["auditors"].append(auditor)
         if data.get("carried"):
             entry["carried"] = True  # not re-run this round: its result was kept (conventions.md §18)
+        if data.get("incomplete"):
+            # the auditor stalled or ran out of time (`dev_state.py qa-watch --settle`): its dimension is not judged
+            # this round, the gate cannot pass, no fix task comes from it, and the next round re-runs only it
+            entry["incomplete"] = str(data["incomplete"])[:160]
+            problems.append(f"{auditor} did not finish ({entry['incomplete']}): the next round re-runs it")
         for f in findings:
             if not isinstance(f, dict):
                 continue
@@ -542,7 +547,7 @@ def render(res: dict) -> str:
              f"{'dimension':<14}{'score':>6}{'min':>6}  {'crit':>4}{'high':>5}{'med':>5}{'low':>5}  auditors"]
     for d, v in sorted(res["dimensions"].items()):
         c = v["counts"]
-        mark = "" if v["ok"] else "  <-- below minimum"
+        mark = f"  <-- did not finish ({v['incomplete']})" if v.get("incomplete") else ("" if v["ok"] else "  <-- below minimum")
         lines.append(f"{d:<14}{v['score']:>6}{v['min']:>6}  {c['critical']:>4}{c['high']:>5}{c['medium']:>5}{c['low']:>5}  {', '.join(v['auditors'])}{mark}")
     lines += ["", f"overall {res['overall']} (cut-off {res['cutoff']}) -> {res['verdict'].upper()}"]
     if res.get("delta"):
@@ -627,8 +632,10 @@ def consolidate(inputs: list[Path], quality: dict, kind: str, scope: str, previo
             for g in group:
                 g["same_as"] = [x["id"] for x in group if x is not g]
     carried = sorted(a for d, v in res["dimensions"].items() if v.get("carried") for a in v["auditors"])
+    incomplete = sorted(a for d, v in res["dimensions"].items() if v.get("incomplete") for a in v["auditors"])
     return {"scope": scope, "kind": kind, "round": round_n, "verdict": res["verdict"], "overall": res["overall"],
             "findings": findings, "deferred": deferred, "disputed": disputed, "legacy": res.get("legacy", []), "carried": carried,
+            "incomplete": incomplete,
             "delta": res.get("delta"), "convergence": res.get("convergence")}
 
 
@@ -648,16 +655,43 @@ CODE_DIMENSIONS = {"code", "security", "tests", "spec", "performance"}
 NON_CODE = re.compile(r"(^|/)\.dev/|\.(md|mdx|rst|txt|png|jpe?g|gif|svg|ico)$|(^|/)docs?/")
 
 
-def select(auditors: list[str], previous: list[dict], changed: list[str]) -> dict:
+def delivered(raw_dir: Path, head: str) -> dict[str, str]:
+    """Auditors whose result an earlier round (interrupted, or failed only because another auditor did not finish)
+    already delivered on this exact commit: a valid file in raw/, `sha` equal to `head` (a prefix of 7 or more
+    characters on either side), not carried, not incomplete. Auditing the same commit again finds the same thing, so
+    they are kept as they are instead of being spawned again (`--full` re-runs them). Returns auditor -> file name."""
+    out: dict[str, str] = {}
+    head = (head or "").strip().lower()
+    if len(head) < 7 or not raw_dir.is_dir():
+        return out
+    for path in sorted(raw_dir.glob("*.json")):
+        try:
+            data, _ = read_result(path)
+            data, _, errors = normalize(data, path)
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+        if errors or not isinstance(data, dict) or data.get("carried") or data.get("incomplete"):
+            continue
+        sha = str(data.get("sha") or "").strip().lower()
+        if len(sha) < 7 or not (sha.startswith(head) or head.startswith(sha)):
+            continue
+        out.setdefault(str(data.get("auditor")), path.name)
+    return out
+
+
+def select(auditors: list[str], previous: list[dict], changed: list[str], keep: dict[str, str] | None = None) -> dict:
     open_dims: dict[str, int] = {}
     for f in previous:
         d = finding_dimension(f)
         if d:
             open_dims[d] = open_dims.get(d, 0) + 1
-    rerun, carry = [], []
+    rerun, carry, kept = [], [], []
     for aud in auditors:
         d = AUDITOR_DIMENSION.get(aud)
         if d is None:
+            continue
+        if keep and aud in keep:
+            kept.append({"auditor": aud, "file": keep[aud], "why": "already delivered on this commit"})
             continue
         if open_dims.get(d):
             rerun.append({"auditor": aud, "why": f"{open_dims[d]} open finding(s)"})
@@ -671,15 +705,22 @@ def select(auditors: list[str], previous: list[dict], changed: list[str]) -> dic
             rerun.append({"auditor": aud, "why": f"{len(hits)} changed file(s) in its dimension", "files": hits[:50]})
         else:
             carry.append(aud)
-    return {"rerun": rerun, "carry": carry, "changed": len(changed)}
+    return {"rerun": rerun, "carry": carry, "keep": kept, "changed": len(changed)}
 
 
 def cmd_select(a: argparse.Namespace) -> int:
     try:
-        previous = load_previous(Path(a.previous))
+        previous = load_previous(Path(a.previous)) if a.previous else []
     except (OSError, ValueError, json.JSONDecodeError) as e:
         print(f"dev_score: cannot read --previous: {e}", file=sys.stderr)
         return 2
+    keep = delivered(Path(a.raw_dir), a.head) if a.raw_dir and a.head else {}
+    auditors = [x.strip() for x in a.auditors.split(",") if x.strip()]
+    if not a.previous:  # round 1 (or a retry of it): every auditor runs, except the ones already delivered
+        res = {"rerun": [{"auditor": x, "why": "first round"} for x in auditors if x not in keep],
+               "carry": [], "keep": [{"auditor": x, "file": keep[x], "why": "already delivered on this commit"}
+                                     for x in auditors if x in keep], "changed": None}
+        return print_select(res, a.json)
     if a.changed_from:
         changed = [x.strip() for x in Path(a.changed_from).read_text(encoding="utf-8").splitlines() if x.strip()]
     else:
@@ -688,10 +729,15 @@ def cmd_select(a: argparse.Namespace) -> int:
             print(f"dev_score: git diff {a.since}..HEAD failed: {r.stderr.strip()}", file=sys.stderr)
             return 2
         changed = [x for x in r.stdout.splitlines() if x.strip()]
-    res = select([x.strip() for x in a.auditors.split(",") if x.strip()], previous, changed)
-    if a.json:
+    return print_select(select(auditors, previous, changed, keep), a.json)
+
+
+def print_select(res: dict, as_json: bool) -> int:
+    if as_json:
         print(json.dumps(res, indent=2))
     else:
+        for x in res["keep"]:
+            print(f"keep {x['auditor']}: {x['why']} ({x['file']}); do not spawn it")
         for x in res["rerun"]:
             print(f"rerun {x['auditor']}: {x['why']}")
         for x in res["carry"]:
@@ -783,7 +829,10 @@ def main(argv: list[str] | None = None) -> int:
     k.add_argument("--round", type=int, required=True); k.add_argument("--out-dir", required=True)
     k.add_argument("--root", default="."); k.add_argument("--previous"); k.add_argument("--challenges"); k.add_argument("inputs", nargs="+")
     e = sub.add_parser("select")
-    e.add_argument("--previous", required=True); e.add_argument("--auditors", required=True)
+    e.add_argument("--previous", help="consolidated findings of the previous round; without it, every auditor runs (round 1)")
+    e.add_argument("--auditors", required=True)
+    e.add_argument("--raw-dir", help="the round's raw/ folder: auditors an interrupted round delivered on --head are kept")
+    e.add_argument("--head", help="the commit this round audits (git rev-parse HEAD)")
     e.add_argument("--since"); e.add_argument("--changed-from"); e.add_argument("--root", default=".")
     e.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
@@ -792,8 +841,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "consolidate":
         return cmd_consolidate(a)
     if a.cmd == "select":
-        if not a.since and not a.changed_from:
-            print("dev_score: select needs --since <sha> or --changed-from <file>", file=sys.stderr)
+        if a.previous and not a.since and not a.changed_from:
+            print("dev_score: select --previous needs --since <sha> or --changed-from <file>", file=sys.stderr)
             return 2
         return cmd_select(a)
     paths = [Path(x) for x in a.inputs]

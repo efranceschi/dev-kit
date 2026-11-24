@@ -276,6 +276,11 @@
       "exit_code": "num",
       "reconciled": "num"
     },
+    "auditor_stalled": {
+      "scope": "tok",
+      "agent": "tok",
+      "idle_s": "num"
+    },
     "pipeline": {
       "transition": "tok",
       "requalify": "num"

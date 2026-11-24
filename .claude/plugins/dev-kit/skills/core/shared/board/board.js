@@ -1574,6 +1574,7 @@
     const heldByQa = (t) => isFix(t) && /rounds_exhausted/.test(t.blocked_reason || "");
     const blocked = Object.entries(data.tasks).filter(([, t]) => t.status === "blocked" && !heldByQa(t) && t.lane !== "hotfix");
     const approvals = actionsOn() ? inbox().approvals : [];
+    const denied = actionsOn() ? (inbox().denied || []) : [];
     const waitingRel = relPlan().filter((r) => r.status === "awaiting_approval");
     const allNeeds = b.needs || [];
     const cneeds = allNeeds.filter((x) => x.kind === "checkpoint");
@@ -1581,11 +1582,11 @@
     const lneeds = allNeeds.filter((x) => x.kind === "lesson");
     const hneeds = allNeeds.filter((x) => x.kind === "prod_health");
     const qneeds = allNeeds.filter((x) => !["checkpoint", "debt_over_cap", "lesson", "prod_health"].includes(x.kind));
-    const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length + waitingRel.length + allNeeds.length;
+    const n = blocked.length + data.questions.length + hot.length + stuck.length + approvals.length + denied.length + waitingRel.length + allNeeds.length;
     // which phase each item belongs to: the tabs show the count, the rows a tag that opens the phase
     const cpPrd = cneeds.filter((x) => x.target === "prd").length;
     needsBy = { conception: cpPrd, planning: qneeds.length + cneeds.length - cpPrd, construction: blocked.length + hot.length + stuck.length + dneeds.length, stable: hneeds.length, releases: waitingRel.length };
-    if (approvals.length) needsBy[data.phase] = (needsBy[data.phase] || 0) + approvals.length;
+    if (approvals.length + denied.length) needsBy[data.phase] = (needsBy[data.phase] || 0) + approvals.length + denied.length;
     data.questions.forEach((q) => { needsBy[questionPhase(q)] += 1; });
     // the strip exists only while something needs the user; warnings alone ride along but do not open it
     const nb = $("needs-btn");
@@ -1601,6 +1602,7 @@
     if (!n) { fill($("impediments"), h("div", { class: "empty good needs-empty" }, h("strong", { text: tr("Nothing needs you now.") }), h("span", { text: tr("Questions, confirmations, approvals and blocked work show up here.") }))); return; }
     fill($("impediments"),
       approvals.length ? listBlock(tr("Claude Code asks permission"), approvals.map(approvalRow), "") : null,
+      denied.length ? listBlock(tr("Denied because nobody answered"), denied.map(deniedRow), "") : null,
       hneeds.length ? listBlock(tr("Production is failing its health check"), hneeds.map(healthRow), "", false, "stable") : null,
       waitingRel.length ? listBlock(tr("Releases waiting for your approval"), waitingRel.map((r) => h("li", {}, h("span", { class: "id", text: r.id }),
         h("span", { text: tr("{title} · {v} closed", { title: r.title, v: plural(r.closed.length, "milestone") }) }),
@@ -2598,7 +2600,7 @@
   const RUN_RES = [/^\/dev-kit:implement(?: (?:T-\d{3,5}|--milestone M\d{1,3}(?:\.\d{1,2})?))?$/, /^\/dev-kit:qa M\d{1,3}(?:\.\d{1,2})?$/, /^\/dev-kit:review (?:prd|design|plan|docs)$/,
     /^\/dev-kit:(?:interview|prd|architecture|ux|ui|plan|docs|usability|costs|backlog|status|release)$/, /^\/dev-kit:interview --gaps$/, /^\/dev-kit:deploy(?: M\d{1,3}(?:\.\d{1,2})?)?$/,
     /^\/dev-kit:diagram(?: update)?$/];
-  const EMPTY_INBOX = { open: [], recent: [], executor: { state: "offline", online: false, paused: false }, approvals: [], actions: false };
+  const EMPTY_INBOX = { open: [], recent: [], executor: { state: "offline", online: false, paused: false }, approvals: [], denied: [], actions: false };
   const inbox = () => (data && data.inbox) || EMPTY_INBOX;
   const actionsOn = () => Boolean(inbox().actions);
   function runnable(c) { return actionsOn() && RUN_RES.some((r) => r.test(c)); }
@@ -2792,6 +2794,14 @@
         h("button", { type: "button", class: "btn btn-sm btn-danger", text: tr("Deny"), onclick: (e) => decide("deny", e.currentTarget) })),
       a.rule ? h("span", { class: "sub" }, tr("For this session it would allow: "), h("code", { text: a.rule })) : null,
       h("span", { class: "sub approval-left", "data-deadline": String(deadline), text: leftText(deadline - Date.now()) }));
+  }
+  /** A permission an unattended run was denied because nobody answered (information only: the board does not act). */
+  function deniedRow(m) {
+    return h("li", {}, h("span", { class: "id", text: m.tool || "tool" }), h("span", { class: "mono-wrap", text: m.target || "" }),
+      m.agent ? h("span", { class: "chip", text: m.agent }) : null,
+      h("span", { class: "sub", text: m.how === "auditor_skipped"
+        ? tr("The auditor went on without it; the round did not stop.") : tr("Denied after the wait; what needed it stopped.") }),
+      m.rule ? h("span", { class: "sub" }, tr("Rule to allow it: "), h("code", { text: m.rule })) : null);
   }
   setInterval(() => document.querySelectorAll(".approval-left[data-deadline]").forEach((el) => { el.textContent = leftText(Number(el.dataset.deadline) - Date.now()); }), 1000);
 

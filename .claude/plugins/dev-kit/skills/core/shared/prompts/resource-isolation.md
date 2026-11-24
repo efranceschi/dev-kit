@@ -17,7 +17,12 @@ Several agents may run at the same time on the same host, against the same proje
 - Before your final message, stop exactly the PIDs you recorded (`kill <pid>`), check they are gone, and remove your pid file. Leave nothing running in the background. The orchestrator runs `dev_state.py cleanup` after you as a safety net, not as your cleanup.
 
 ## Long commands
-A command that takes minutes (integration suite, build, scan, data load): start it in the background with its output in your scratch folder (`cmd > .dev/tmp/<name>-<N>/run.log 2>&1 & echo $! >> .dev/run/<name>-<N>.pids`), read code while it runs, then wait for it with `wait <pid>` or a bounded poll of the log. When your prompt has `Time budget: <min>`, stop starting new commands when it is spent and report what you measured.
+A command that takes minutes (integration suite, build, scan, data load): start it in the background with its output in your scratch folder (`cmd > .dev/tmp/<name>-<N>/run.log 2>&1 & echo $! >> .dev/run/<name>-<N>.pids`), read code while it runs, then wait for it with a bounded poll of the log (`timeout 600 sh -c 'until grep -q DONE .dev/tmp/<name>-<N>/run.log; do sleep 5; done'`), never an unbounded `wait`. When your prompt has `Time budget: <min>`, stop starting new commands when it is spent and report what you measured: past the budget the fence lets you only write your result.
+
+Every script you write yourself (a benchmark, a size check) lives in your scratch folder and runs under a limit: `timeout 300 node .dev/tmp/<name>-<N>/bench.mjs`. The fence denies an auditor's scratch script run without `timeout`, because a script that hangs holds the whole QA round.
+
+## Permissions
+Nobody may be at the console. The kit's safe set runs without asking (`dev_perms.py`): read-only git (`git show`, `git blame`, `git grep`…), file inspection (`ls`, `wc`, `du`, `stat`, `head`, `tail`, `grep`, `rg`, `jq`, `diff`), sizes (`gzip -c <file> | wc -c`, `brotli -c`), the dependency scanners, and your timed scratch scripts. Prefer them. A command outside the set may be denied after a short wait: never retry it or look for a way around it; measure another way, or leave the check out and name it in `stats.not_run` of your result.
 
 ## Files and git
 - Format and lint **only the files you changed** (`ruff format <files>`, `ruff check <files>`, `prettier --write <files>`, `eslint <files>`). Never run a formatter on the whole tree.

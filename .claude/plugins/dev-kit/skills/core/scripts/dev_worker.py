@@ -1307,8 +1307,14 @@ def snapshot(root: Path, recent: int = 15) -> dict:
     all_ = items(root)
     open_ = [x for x in all_ if x["status"] in OPEN]
     done = [x for x in all_ if x["status"] not in OPEN][-recent:][::-1]
+    try:
+        import dev_perms
+        denied = [{k: m.get(k) for k in ("key", "tool", "count", "how", "rule", "agent")} | {"target": str(m.get("target") or "")[:120]}
+                  for m in dev_perms.misses(root)[:20]]
+    except Exception:  # noqa: BLE001 - a broken record never breaks the board
+        denied = []
     return {"open": open_, "recent": done, "executor": {**executor(root), "auto": auto_status(root)}, "approvals": approvals(root),
-            "autopilot": autopilot_status(root),
+            "denied": denied, "autopilot": autopilot_status(root),
             "limits": {"open": MAX_OPEN, "body": MAX_BODY}}
 
 

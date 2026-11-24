@@ -16,7 +16,7 @@ Use exactly these key names and values: `state` (not `status`) in `previous`, th
   "scope": "M1 | T-003 | path/",
   "sha": "the Audited commit given in the prompt (or git rev-parse HEAD)",
   "summary": "one sentence",
-  "stats": {"files_reviewed": 12, "tests_run": true, "tests_passed": 48, "tests_failed": 0},
+  "stats": {"files_reviewed": 12, "tests_run": true, "tests_passed": 48, "tests_failed": 0, "not_run": ["checks you could not do (a denied permission, the time budget), optional"]},
   "findings": [
     {
       "id": "F-001",

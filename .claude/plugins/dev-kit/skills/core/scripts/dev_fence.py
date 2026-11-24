@@ -22,6 +22,11 @@ agent without a slot, a project without .dev/state.json) passes untouched.
   checkout included, and so is a Bash command run from outside it, except `cd` into it, a read-only look, a kit script
   or a command that names the worktree (`git -C <wt>`).
 
+- Auditors (the read-only kit agents): every tool call is a heartbeat in .dev/run/agent-beats.json (`dev_state.py
+  qa-watch` reads it); a measurement script in .dev/tmp/ must run under `timeout`; once the auditor's time budget
+  (autonomy.quality.watchdog.auditor_budget_min, from its SubagentStart) is spent, only writing its result file and
+  `dev_score.py check` pass, so a stuck audit ends with what it verified.
+
 Bash in general (`sed -i`, a script) is not covered: `dev_state.py slot check <n> --since <sha>` compares the agent's
 diff with the same list at integration and fails it on a file outside.
 
@@ -167,6 +172,72 @@ def note_activity(dev: Path, payload: dict, rnd: str) -> None:
     os.replace(tmp, p)
 
 
+AUDITORS = {"a11y-auditor", "code-reviewer", "copy-reviewer", "data-reviewer", "deps-auditor", "design-reviewer",
+            "docs-reviewer", "ops-reviewer", "performance-auditor", "requirements-reviewer", "security-auditor",
+            "spec-tracer", "test-auditor", "usability-auditor", "visual-reviewer"}
+SCRATCH_RUN = re.compile(r"(?:^|[;&|]\s*)(?:node|python3?|bun|deno\s+run|npx\s+tsx|tsx)\s+(?:\./)?\.dev/tmp/")
+WRAP_UP_OK = re.compile(r"dev_score\.py\s+check\b")
+
+
+def watchdog_cfg(dev: Path) -> dict:
+    q = (read_json(dev / "state.json").get("autonomy") or {}).get("quality") or {}
+    wd = q.get("watchdog") if isinstance(q.get("watchdog"), dict) else {}
+    try:
+        return {"auditor_budget_min": int(os.environ.get("DEV_KIT_AUDITOR_BUDGET_MIN") or wd.get("auditor_budget_min", 30)),
+                "stall_min": int(wd.get("stall_min", 20))}
+    except (TypeError, ValueError):
+        return {"auditor_budget_min": 30, "stall_min": 20}
+
+
+def _age_s(iso: str) -> float | None:
+    from datetime import datetime, timezone
+    try:
+        t = datetime.strptime(str(iso), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return (datetime.now(timezone.utc) - t).total_seconds()
+
+
+def beat(dev: Path, aid: str, bound: dict, agent: str, payload: dict) -> None:
+    """An auditor's heartbeat: its last tool call, in .dev/run/agent-beats.json (read by `dev_state.py qa-watch`)."""
+    from datetime import datetime, timezone
+    p = dev / "run" / "agent-beats.json"
+    cur = read_json(p)
+    ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    what = " ".join(str(ti.get("description") or ti.get("command") or ti.get("file_path") or ti.get("pattern") or "").split())[:120]
+    cur[aid] = {"agent": agent, "scope": bound.get("scope"), "started": bound.get("at"), "tool": str(payload.get("tool_name") or ""),
+                "what": what, "last": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    cur = dict(list(cur.items())[-100:])
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".beat.tmp")
+    tmp.write_text(json.dumps(cur, indent=1), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def auditor_guard(dev: Path, payload: dict, agent: str, bound: dict) -> dict | None:
+    """The time budget of an auditor (autonomy.quality.watchdog.auditor_budget_min): once it is spent, only writing
+    the result file and `dev_score.py check` are allowed, so a stuck audit ends with what it verified instead of
+    holding the whole round. A measurement script in .dev/tmp/ must run under `timeout`, so it cannot hang."""
+    tool = str(payload.get("tool_name") or "")
+    ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    cmd = str(ti.get("command") or "") if tool == "Bash" else ""
+    if cmd and SCRATCH_RUN.search(cmd) and not re.search(r"\btimeout\s+", cmd):
+        return deny(dev, "dev-kit: run a measurement script under a time limit, e.g. `timeout 300 node .dev/tmp/<you>-<N>/bench.mjs`: "
+                         "a script that hangs would hold the whole QA round (resource-isolation.md).", "untimed_script", agent,
+                    bound.get("scope"), tool)
+    age = _age_s(str(bound.get("at") or ""))
+    budget = watchdog_cfg(dev)["auditor_budget_min"] * 60
+    if age is None or age <= budget:
+        return None
+    if tool in EDIT_TOOLS and re.search(r"\.dev/(?:qa|review)/.+\.json$", str(ti.get("file_path") or "").replace("\\", "/")):
+        return None
+    if cmd and WRAP_UP_OK.search(cmd):
+        return None
+    return deny(dev, f"dev-kit: your time budget ({budget // 60} min) is spent. Stop auditing now: write your result to your "
+                     "Output file with what you verified (name what you could not finish in `stats.not_run`), validate it "
+                     "with dev_score.py check, and end with your short summary.", "budget_spent", agent, bound.get("scope"), tool)
+
+
 def decide(payload: dict, root: Path) -> dict | None:
     dev = root / ".dev"
     if payload.get("hook_event_name") != "PreToolUse" or not (dev / "state.json").is_file():
@@ -196,6 +267,14 @@ def decide(payload: dict, root: Path) -> dict | None:
     tool = str(payload.get("tool_name") or "")
     ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     wt = str(slot.get("worktree") or "")
+    if agent in AUDITORS:
+        try:
+            beat(dev, aid, bound, agent, payload)
+        except Exception:  # noqa: BLE001 - the heartbeat must never break the fence
+            pass
+        out = auditor_guard(dev, payload, agent, bound)
+        if out:
+            return out
     if tool == "Bash":
         if not slot and agent not in kit_agents():
             return None

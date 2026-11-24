@@ -233,6 +233,9 @@ DEFAULT_AUTONOMY = {
         "hard_floor": {"enabled": True},
         # Deferred findings still open across milestones, past which a gate close asks the user (Needs you).
         "deferred_cap": {"total": 20, "medium": 10},
+        # How long one auditor may work before the fence makes it write its result, and how long a QA round may go
+        # without any tool call before it counts as stalled (qa-watch, round run; conventions.md §17).
+        "watchdog": {"auditor_budget_min": 30, "stall_min": 20},
     },
 }
 
@@ -544,6 +547,10 @@ def check_autonomy_field(field: str, val: object) -> object:
         if (not isinstance(dc, dict) or set(dc) - {"total", "medium"}
                 or not all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 1000 for v in dc.values())):
             fail('autonomy.quality.deferred_cap must be {"total": 20, "medium": 10} (0 turns a cap off)')
+        wd = val.get("watchdog", {})
+        if (not isinstance(wd, dict) or set(wd) - {"auditor_budget_min", "stall_min"}
+                or not all(isinstance(v, int) and not isinstance(v, bool) and 5 <= v <= 240 for v in wd.values())):
+            fail('autonomy.quality.watchdog must be {"auditor_budget_min": 30, "stall_min": 20} (minutes, 5 to 240)')
     elif field == "ui":
         if not isinstance(val, dict) or set(val) - set(UI_KEYS) or not all(isinstance(v, bool) for v in val.values()):
             fail(f"autonomy.ui must be an object with true/false values for {', '.join(UI_KEYS)}")
@@ -2538,8 +2545,8 @@ def round_summary(store: Store, skill: str, scope: str, before: dict, rc: int, d
 
 def headless_allowed_tools(store: Store, kit: Path | None = None) -> list[str]:
     """What a headless session of the kit may run without asking (§17): the kit's own scripts, the git commands of
-    the orchestrator, `cd`, and the project's commands of architecture.md §8 (tests, lint, type-check). Everything
-    else still goes to Needs you."""
+    the orchestrator, `cd`, the project's commands of architecture.md §8 (tests, lint, type-check) and the safe set
+    of audits (dev_perms.safe_rules). Everything else still goes to Needs you."""
     kit = kit or Path(__file__).resolve().parents[3]
     out = [f"Bash(python3 -I *{kit}/skills/*core/scripts/dev_*.py*)", "Bash(cd *)"]
     for verb in ("status", "diff", "log", "show", "rev-parse", "add", "commit", "check-ignore", "ls-files"):
@@ -2552,7 +2559,133 @@ def headless_allowed_tools(store: Store, kit: Path | None = None) -> list[str]:
         c = cmd.strip().strip("`").strip()
         if c and c not in ("-", "n/a") and not re.search(r"[;&|<>`$()]", c) and len(c) <= 200:
             out.append(f"Bash({c}*)")
+    import dev_perms  # the kit's safe set for audits: read-only inspection and timed scratch measurements
+    out += dev_perms.safe_rules()
     return list(dict.fromkeys(out))
+
+
+AUDITOR_AGENTS = ("a11y-auditor", "code-reviewer", "copy-reviewer", "data-reviewer", "deps-auditor", "design-reviewer",
+                  "docs-reviewer", "ops-reviewer", "performance-auditor", "requirements-reviewer", "security-auditor",
+                  "spec-tracer", "test-auditor", "usability-auditor", "visual-reviewer")
+
+
+def _iso_age(iso: object, ref: float | None = None) -> float | None:
+    try:
+        t = datetime.strptime(str(iso), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+    return max(0.0, (ref or time.time()) - t)
+
+
+def watchdog(store: Store) -> dict:
+    wd = quality_cfg(store).get("watchdog") or {}
+    out = {"auditor_budget_min": int(wd.get("auditor_budget_min", 30)), "stall_min": int(wd.get("stall_min", 20))}
+    with contextlib.suppress(ValueError):
+        if os.environ.get("DEV_KIT_STALL_S"):
+            out["stall_s"] = max(1.0, float(os.environ["DEV_KIT_STALL_S"]))
+    out.setdefault("stall_s", out["stall_min"] * 60.0)
+    return out
+
+
+def qa_auditors(store: Store, scope: str, since: float | None = None) -> list[dict]:
+    """The auditors of a milestone's current QA round and where each one is (conventions.md §17): `delivered` (its
+    raw file was written after it started, or it ended), `working` (a tool call within stall_min), `stalled`
+    (silent for longer, or past its time budget plus stall_min). From the hooks' records: agent-slots.json (start),
+    agent-beats.json (last tool call), agents.jsonl (end). Only the latest start of each auditor counts."""
+    run = store.dev / "run"
+    slots = _read_json(run / "agent-slots.json")
+    beats = _read_json(run / "agent-beats.json")
+    ended = set()
+    with contextlib.suppress(OSError):
+        for line in (run / "agents.jsonl").read_text(encoding="utf-8").splitlines():
+            with contextlib.suppress(json.JSONDecodeError):
+                r = json.loads(line)
+                if r.get("event") == "agent_stop" and r.get("agent_id"):
+                    ended.add(str(r["agent_id"]).lower())
+    wd = watchdog(store)
+    ref = time.time()
+    floor = since if since is not None else ref - 12 * 3600
+    latest: dict[str, tuple[str, dict]] = {}
+    for aid, b in slots.items():
+        if not isinstance(b, dict) or b.get("scope") != scope or b.get("agent") not in AUDITOR_AGENTS:
+            continue
+        age = _iso_age(b.get("at"), ref)
+        if age is None or ref - age < floor:
+            continue
+        cur = latest.get(b["agent"])
+        if not cur or str(b.get("at")) >= str(cur[1].get("at")):
+            latest[b["agent"]] = (aid, b)
+    raw = store.dev / "qa" / scope / "raw"
+    out = []
+    for agent, (aid, b) in sorted(latest.items()):
+        started = ref - (_iso_age(b.get("at"), ref) or 0.0)
+        files = [f for f in raw.glob(f"{agent}*.json") if f.stat().st_mtime >= started - 1] if raw.is_dir() else []
+        bt = beats.get(aid) if isinstance(beats.get(aid), dict) else {}
+        idle = _iso_age(bt.get("last") or b.get("at"), ref) or 0.0
+        elapsed = ref - started
+        if files or aid.lower() in ended:
+            status = "delivered" if files else "ended_without_result"
+        elif idle > wd["stall_s"] or elapsed > wd["auditor_budget_min"] * 60 + wd["stall_s"]:
+            status = "stalled"
+        else:
+            status = "working"
+        out.append({"agent": agent, "agent_id": aid, "status": status, "elapsed_s": round(elapsed), "idle_s": round(idle),
+                    "last": (bt.get("tool") or None), "output": str(files[0].relative_to(store.root)) if files else None})
+    return out
+
+
+def settle_auditor(store: Store, scope: str, agent: str, why: str) -> Path:
+    """Write the result of an auditor that did not finish as incomplete: its dimension is not judged this round,
+    the gate cannot pass, no fix task comes from it, and the next round re-runs only it (`dev_score.py select`)."""
+    raw = store.dev / "qa" / scope / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    p = raw / f"{agent}.json"
+    sha = ""
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        sha = subprocess.run(["git", "-C", str(store.root), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=20).stdout.strip()
+    atomic_write(p, json.dumps({"auditor": agent, "scope": scope, "sha": sha, "incomplete": why[:160],
+                                "summary": f"{agent} did not finish: {why}"[:200], "findings": [], "verdict": "fail"}, indent=2) + "\n")
+    return p
+
+
+def cmd_qa_watch(store: Store, a: argparse.Namespace) -> None:
+    """qa-watch M [--wait S] [--settle] [--json]: where each auditor of the round is (delivered, working, stalled),
+    waiting up to S seconds (at most 540) while any is still working and none stalled. --settle writes the result of
+    each stalled one, and of one that ended without a file, as incomplete (conventions.md §17)."""
+    store.load()
+    if a.milestone not in store.milestones():
+        fail(f"unknown milestone {a.milestone}")
+    since = None
+    if a.since:
+        since = time.time() - (_iso_age(a.since) or 0.0)
+    deadline = time.monotonic() + max(0, min(540, a.wait or 0))
+    while True:
+        rows = qa_auditors(store, a.milestone, since)
+        working = [r for r in rows if r["status"] == "working"]
+        stuck = [r for r in rows if r["status"] in ("stalled", "ended_without_result")]
+        if not working or stuck or time.monotonic() >= deadline:
+            break
+        time.sleep(min(10.0, max(0.2, deadline - time.monotonic())))
+    settled = []
+    if a.settle:
+        wd = watchdog(store)
+        for r in stuck:
+            why = ("ended without writing its result" if r["status"] == "ended_without_result"
+                   else f"no tool call for {round(r['idle_s'] / 60)} min" if r["idle_s"] > wd["stall_s"]
+                   else f"past its {wd['auditor_budget_min']} min budget")
+            settled.append(str(settle_auditor(store, a.milestone, r["agent"], why).relative_to(store.root)))
+            store.event("auditor_stalled", scope=a.milestone, agent=r["agent"], idle_s=r["idle_s"])
+    out = {"milestone": a.milestone, "auditors": rows, "working": len(working), "stalled": [r["agent"] for r in stuck],
+           "settled": settled}
+    if a.json:
+        print(json.dumps(out, indent=2))
+        return
+    for r in rows:
+        print(f"{r['agent']}: {r['status']} · {round(r['elapsed_s'] / 60)} min · last call {round(r['idle_s'] / 60)} min ago"
+              + (f" · {r['output']}" if r["output"] else ""))
+    if stuck:
+        print(f"stalled: {', '.join(out['stalled'])}" + (f" · settled as incomplete: {', '.join(settled)}" if settled else
+                                                          " · stop them and run qa-watch again with --settle"))
 
 
 def round_parked_path(store: Store) -> Path:
@@ -2599,12 +2732,14 @@ def cmd_round(store: Store, a: argparse.Namespace) -> None:
     round_parked_path(store).unlink(missing_ok=True)
     t0 = time.monotonic()
     parked: dict = {}
+    stalled: dict = {}
     try:
         with log.open("w", encoding="utf-8") as fh:
             proc = subprocess.Popen(cmd, cwd=store.root, env=env, stdout=fh, stderr=subprocess.STDOUT, start_new_session=True)
             atomic_write(round_marker(store), json.dumps({"pid": os.getpid(), "child": proc.pid, "skill": a.skill,
                                                           "scope": a.scope, "round": rid, "started": started}) + "\n")
             deadline = t0 + a.timeout * 60 if a.timeout else None
+            stall_s = watchdog(store)["stall_s"]
             rc = None
             while rc is None:
                 try:
@@ -2613,7 +2748,14 @@ def cmd_round(store: Store, a: argparse.Namespace) -> None:
                     pk = _read_json(round_parked_path(store))
                     if pk.get("round") == rid:
                         parked = pk  # a permission went unanswered: the round stops here (§17)
-                    if parked or (deadline and time.monotonic() > deadline):
+                    # heartbeat: the round's last tool call (orchestrator or agent); none for stall_min = stalled
+                    act = _read_json(store.dev / "run" / "round-activity.json")
+                    beat = time.time() - (_iso_age(act.get("at")) or 0.0) if act.get("round") == rid else None
+                    last = max(beat or 0.0, time.time() - (time.monotonic() - t0))
+                    if not parked and time.time() - last > stall_s:
+                        stalled = {"idle_s": round(time.time() - last), "what": act.get("what") if beat else None,
+                                   "agent": act.get("agent") if beat else None}
+                    if parked or stalled or (deadline and time.monotonic() > deadline):
                         with contextlib.suppress(OSError):
                             os.killpg(proc.pid, signal.SIGTERM)
                         try:
@@ -2622,13 +2764,16 @@ def cmd_round(store: Store, a: argparse.Namespace) -> None:
                             with contextlib.suppress(OSError):
                                 os.killpg(proc.pid, signal.SIGKILL)
                             proc.wait()
-                        rc = 125 if parked else 124
+                        rc = 125 if parked else 126 if stalled else 124
     except OSError as e:
         round_marker(store).unlink(missing_ok=True)
         fail(f"cannot start the child session: {e}", 3)
     round_marker(store).unlink(missing_ok=True)
     why = (f"round {rid} stopped: nobody answered the permission for {parked.get('tool') or 'a tool'} "
            f"({str(parked.get('target') or '')[:80]})" if parked else
+           f"round {rid} stalled: no tool call for {round(stalled['idle_s'] / 60)} min"
+           + (f" (last: {stalled.get('agent') or 'orchestrator'} {str(stalled.get('what') or '')[:60]})" if stalled.get("what") else "")
+           if stalled else
            f"round {rid} ended with exit code {rc}" if rc else f"round {rid} ended with the task unfinished")
     with store.transaction():
         rec = reconcile(store, a.scope, started, why)
@@ -2637,6 +2782,16 @@ def cmd_round(store: Store, a: argparse.Namespace) -> None:
     if parked:
         out["parked"] = {"tool": parked.get("tool"), "target": parked.get("target")}
         out["verdict"] = "parked"
+    if a.skill == "qa":  # what the next round reuses and what it re-runs (dev_score.py select --raw-dir)
+        rows = qa_auditors(store, a.scope, time.time() - (time.monotonic() - t0) - 5)
+        out["auditors"] = {"delivered": [r["agent"] for r in rows if r["status"] == "delivered"],
+                           "undelivered": [r["agent"] for r in rows if r["status"] != "delivered"]}
+        if stalled:
+            for ag in out["auditors"]["undelivered"]:
+                settle_auditor(store, a.scope, ag, why[:160])
+    if stalled:
+        out["stalled"] = stalled
+        out["verdict"] = "stalled"
     tel.safe_emit(store.dev, "round_run", {"skill": a.skill, "scope": a.scope, "outcome": "ok" if rc == 0 else "failed",
                                            "verdict": out["verdict"], "score": out["score"], "fix_tasks": len(out["fix_tasks"]),
                                            "tasks_done": len(out["tasks_done"]), "exit_code": rc, "duration_s": out["duration_s"],
@@ -7917,6 +8072,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("forecast"); s.set_defaults(fn=cmd_forecast); s.add_argument("--json", action="store_true")
     s = sub.add_parser("pipeline"); s.set_defaults(fn=cmd_pipeline)
     s.add_argument("action", choices=["status", "worktree", "integrate"]); s.add_argument("branch", nargs="?")
+    s.add_argument("--json", action="store_true")
+    s = sub.add_parser("qa-watch"); s.set_defaults(fn=cmd_qa_watch); s.add_argument("milestone")
+    s.add_argument("--wait", type=int, default=0, help="seconds to wait while auditors work (at most 540)")
+    s.add_argument("--since", help="ISO time the round started (default: the last 12 hours)")
+    s.add_argument("--settle", action="store_true", help="write stalled auditors' results as incomplete")
     s.add_argument("--json", action="store_true")
     s = sub.add_parser("round"); s.set_defaults(fn=cmd_round); s.add_argument("action", choices=["run"])
     s.add_argument("skill"); s.add_argument("scope"); s.add_argument("--permission-mode")

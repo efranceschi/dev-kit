@@ -2,6 +2,23 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.11.0 — 2026-11-24
+
+Field report from M4: the performance-auditor ran a benchmark of its own that never returned, and in the next round `gzip -c` (to measure bundle sizes) asked a permission nobody saw. After 10 minutes the whole round stopped and the 8 auditors that had delivered were run again. Auditors no longer hold a QA round.
+
+### Added
+- **The kit's safe set of commands** (`dev_perms.py`): read-only git (`git show`, `git blame`, `git grep`…), file inspection (`ls`, `wc`, `du`, `stat`, `head`, `tail`, `grep`, `rg`, `jq`, `diff`), sizes (`gzip -c <file> | wc -c`, `brotli -c`), the dependency scanners and an auditor's own scripts in `.dev/tmp/` run under `timeout`. The PermissionRequest hook allows them at once in any unattended run (a round child, the board's worker or Autopilot), and headless runs get them as `--allowedTools`. A command line counts only when every part is in the set and nothing writes a file (no `>`, no `$(…)`).
+- **`dev_perms.py show | apply`**: lists the set, what `.claude/settings*.json` lack and the permissions denied while nobody answered; `apply` merges allow rules into `.claude/settings.local.json` (never a deny rule or a mode). `/dev-kit:start` offers it once and `/dev-kit:settings` explains it, so nobody edits the file by hand.
+- **Denied permissions are kept**: every permission denied because nobody answered in time is recorded (`.dev/run/permission-misses.json`) with the rule that would allow it. `dev_perms.py show` lists them, `apply --miss <key>` writes the rule, and the board shows them, read-only, under "Denied because nobody answered" in Needs you. Before, they vanished when the 10 minutes ran out.
+- **Auditor heartbeat and time budget**: every tool call of an auditor is a heartbeat (`.dev/run/agent-beats.json`); its prompt has `Time budget:` (`autonomy.quality.watchdog.auditor_budget_min`, default 30) and once it is spent the fence lets it only write its result. A scratch script run without `timeout` is denied with the command to use.
+- **`dev_state.py qa-watch <M>`**: where each auditor of the round is (`delivered`, `working`, `stalled` after `watchdog.stall_min`, default 20, with no tool call); QA waits with it instead of waiting blind, and `--settle` writes a stalled auditor's result as `incomplete`: its dimension is not judged, the gate cannot pass, no fix task comes from it.
+- **`round run` stops a silent round** (no tool call for `stall_min`) with `verdict: stalled`, settles the auditors that did not deliver and lists `auditors.delivered` / `undelivered`; autopilot runs that QA round once more right away.
+
+### Changed
+- An auditor's permission outside the safe set waits at most 2 minutes on the board, is then denied for that call only (the auditor measures another way or names the check in `stats.not_run`) and never parks the round. The orchestrator's and implementers' permissions still park it as before.
+- `dev_score.py select` takes `--raw-dir` and `--head`: an auditor that already delivered a valid result on the same commit is kept (`keep`) instead of spawned again, in round 1 too (`--previous` is now optional). `score` and `consolidate` report incomplete auditors.
+- The fence hook also sees Read, Grep, Glob, WebFetch and WebSearch (heartbeat and budget).
+
 ## 3.10.0 — 2026-11-24
 
 The animations reach the other blocks of the board, from a second round of prototypes Eduardo picked from (he left out a "done" stamp on finished conception steps).

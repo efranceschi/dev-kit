@@ -16,10 +16,13 @@ Wired to the SessionStart, SubagentStart, SubagentStop, UserPromptSubmit, Permis
   set of waiting requests changed since the last notice. Only ids and counts: the text of a request never enters
   the session from here. Silent while a session listens (the plugin's monitor, armed by /dev-kit:board, announces
   each request by itself).
-- PermissionRequest, only while this session runs a request from the board, or is the board's autopilot run, and a
-  board is up to answer on: the permission goes to the board (tool, and the command or path cut to 300 characters,
+- PermissionRequest, in an unattended run (a request from the board, the board's autopilot run, a round child):
+  a Bash command made only of the kit's safe set (dev_perms.py: read-only inspection, a timed measurement script in
+  .dev/tmp/) is allowed at once. Otherwise, with a board up to answer on, the permission goes to the board (tool, and the command or path cut to 300 characters,
   kept in .dev/run/approvals/ until answered), the hook waits up to 10 minutes for Allow, Allow for this session or Deny, and answers Claude
-  Code with it; no answer is a denial. Anywhere else it returns nothing and Claude Code's own prompt applies.
+  Code with it; no answer is a denial, kept in .dev/run/permission-misses.json for Needs you ("Always allow in this
+  project"). An auditor's request waits at most 2 minutes and never parks the round: denied, the auditor goes on
+  without that command. Anywhere else it returns nothing and Claude Code's own prompt applies.
 
 - PreToolUse (Agent tool), SubagentStart, SubagentStop: the session log's agent_spawn / agent_end events
   (conventions.md §13), written here so no skill has to: agent, model and effort (from the kit agent's frontmatter,
@@ -87,6 +90,11 @@ def subagent_transcript(payload: dict) -> str | None:
 SLOT_RE = re.compile(r"(?m)^\s*Slot:\s*(\d{1,3})\b")
 SCOPE_RE = re.compile(r"(?m)^\s*Scope:\s*(T-\d{1,5}|M\d{1,3}(?:\.\d{1,2})?|hotfix-T-\d{1,5})\b")
 AGENT_TOOLS = ("Agent", "Task")
+# the read-only kit agents: a permission of theirs never parks a round, and waits at most AUDITOR_WAIT_S (§17)
+AUDITOR_AGENTS = {"a11y-auditor", "code-reviewer", "copy-reviewer", "data-reviewer", "deps-auditor", "design-reviewer",
+                  "docs-reviewer", "ops-reviewer", "performance-auditor", "requirements-reviewer", "security-auditor",
+                  "spec-tracer", "test-auditor", "usability-auditor", "visual-reviewer"}
+AUDITOR_WAIT_S = 120
 KIT_DIR = Path(__file__).resolve().parents[3]
 
 
@@ -351,25 +359,38 @@ def permission(root: Path, dev: Path, payload: dict) -> dict | None:
     board (Allow, Allow for this session, Deny), because nobody may be at the console. No answer within 10 minutes
     is a denial. Outside a board request, or with no board to answer on, nothing is returned and Claude Code's own
     prompt handles it as usual."""
+    import dev_perms
     import dev_worker as dw
     tool = str(payload.get("tool_name") or "")
     if not tool or tool in ("AskUserQuestion", "ExitPlanMode"):
         return None  # a question goes to the board as a question (board mode), never as a permission
     run = dw.board_run(root)
-    if not run or not board_takes_requests(dev):
-        return None
+    rnd = os.environ.get("DEV_KIT_ROUND_ID") or ""
     ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     target = next((str(ti[k]) for k in ("command", "file_path", "notebook_path", "url", "path", "pattern", "query") if ti.get(k)),
                   "") or json.dumps(ti, ensure_ascii=False)
+    if (run or rnd) and tool == "Bash" and dev_perms.is_safe(str(ti.get("command") or "")):
+        # the kit's safe set (read-only inspection, a timed measurement script in .dev/tmp/): nobody may be at the
+        # console in an unattended run, and an audit must never wait 10 minutes for `gzip -c a.js | wc -c` (§17)
+        return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
+    agent = str(payload.get("agent_type") or "").removeprefix("dev-kit:")
+    auditor = agent in AUDITOR_AGENTS
     keep, label = session_rules(payload.get("permission_suggestions"))
+    if not run or not board_takes_requests(dev):
+        if rnd:  # a round child with no board to answer on: Claude Code would deny it anyway; remember it for later
+            with_miss(root, tool, target, agent, "no_board", label, rnd)
+        return None
     try:
         wait_s = min(float(dw.APPROVAL_WAIT_S), max(1.0, float(os.environ.get("DEV_KIT_APPROVAL_WAIT_S") or dw.APPROVAL_WAIT_S)))
+        if auditor:  # an auditor can always go on without one command: it never holds the round for 10 minutes
+            wait_s = min(wait_s, max(1.0, float(os.environ.get("DEV_KIT_AUDITOR_WAIT_S") or AUDITOR_WAIT_S)))
     except ValueError:
-        wait_s = float(dw.APPROVAL_WAIT_S)
+        wait_s = float(AUDITOR_WAIT_S if auditor else dw.APPROVAL_WAIT_S)
     rid = run["id"]
-    rnd = os.environ.get("DEV_KIT_ROUND_ID") or ""
     parked = dev / "run" / "round-parked.json"
-    if rnd:
+    if rnd and auditor:
+        pass  # an auditor's permission never parks the round, and an earlier park does not deny it at once
+    elif rnd:
         try:
             prev = json.loads(parked.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -381,6 +402,14 @@ def permission(root: Path, dev: Path, payload: dict) -> dict | None:
                                                "now with one line; the round's reconciliation blocks the tasks with the reason."}}}
     aid = dw.request_approval(root, tool, target, rid, label, wait_s)
     got = dw.wait_decision(root, aid, wait_s, rid)
+    if got == "timeout":  # nobody saw it: kept (dev_perms.py show, the board's Needs you) until allowed or dismissed
+        with_miss(root, tool, target, agent, "auditor_skipped" if auditor else "no_answer", label, rnd or rid)
+    if got == "timeout" and auditor:
+        return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {
+            "behavior": "deny", "message": f"Nobody answered this permission on the dev-kit board within {max(1, round(wait_s / 60))} "
+                                           "minute(s), so it is denied. Do not retry it or ask again: measure another way with "
+                                           "read-only commands, or leave this check out and name it in `stats.not_run` of "
+                                           "your result, then finish your audit as usual. The round goes on."}}}
     if got == "timeout" and rnd:
         try:
             tmp = parked.with_suffix(".tmp")
@@ -411,6 +440,14 @@ def permission(root: Path, dev: Path, payload: dict) -> dict | None:
                               "and go on with independent work."}.get(got, why)
         decision = {"behavior": "deny", "message": why}
     return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}
+
+
+def with_miss(root: Path, tool: str, target: str, agent: str, how: str, label: str | None, where: str) -> None:
+    try:
+        import dev_perms
+        dev_perms.record_miss(root, tool, target, agent or None, how, label, where)
+    except Exception:  # noqa: BLE001 - the record is a convenience; it never breaks the hook
+        pass
 
 
 def trace(dev: Path, name: str, payload: dict, out: dict | None, started: float) -> None:

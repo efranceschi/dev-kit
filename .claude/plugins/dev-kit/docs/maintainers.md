@@ -23,7 +23,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     SKILL.md                     marker (disable-model-invocation: true, user-invocable: false)
     scripts/dev_state.py         state: init, sync-plan, next, start, done, block, unblock, drop, add-task, add-question,
                                  fix-tasks, freeze, affected, hard-floor, ci, debt, gate, review, checkpoint, artifact, stale, xref, tests, ledger, brief, tier, set-risk, risk-profile,
-                                 risk-report, lock, strings, contrast, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
+                                 risk-report, lock, qa-watch, strings, contrast, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
                                  preview, deploy, cleanup, event, feedback, telemetry, tip, tips, notify,
                                  board plan edits (move-task, new-milestone, reorder, plan-apply), answer-question, release-record;
                                  lifecycle() derives the project phase (conventions §19) for status, next command,
@@ -31,6 +31,9 @@ How the plugin is built, tested and documented. Users do not need this page.
     scripts/dev_worker.py        the board's request queue to Claude Code: validation, lifecycle, executor, modes, approvals,
                                  the listener (watch, arm), and the AutoExecutor the board server runs: the headless
                                  worker and the board's autopilot (autopilot on|off|status, autopilot-exit)
+    scripts/dev_perms.py         the permissions an unattended run needs: the kit's safe set for audits (read-only inspection,
+                                 sizes, scanners, timed .dev/tmp/ scripts), show / apply to .claude/settings*.json, and the
+                                 permissions denied while nobody answered (Needs you); used by the PermissionRequest hook
     scripts/dev_risk.py          risk tier of a task (signals, weights, floors) and risk profile of a milestone, predicted ×
                                  real rows (imported by dev_state.py and dev_router.py; no command line)
     scripts/dev_router.py        model/effort router with feedback loops over .dev/router.json: route, observe, learn, explain,
