@@ -2,6 +2,17 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.4.0 — 2026-11-24
+
+### Added
+- **Execution time on finished work** (board): a done task card shows how long the task took ("took 40m", from `started_at` to `done_at`), in the task details too; a closed milestone says it next to "closed" in its header, on its Closed step, in the milestone picker's tooltip, on the Replan screen and in its release's Milestones block ("took 7.0 h", from its first task's start to the gate); a released release says it next to "released" ("released in 4.4 d", from the first task of its milestones to the release) and in the release picker's tooltip. The tooltips add the working time (parallel work counted once). Spans of two days or more read in days; durations of a day or more on the live timers read as `1d02h`.
+
+### Docs
+- `stages.md` and `concepts.md` describe the execution time; new screenshot `board-release-done.png` (R1 released), and the others taken again on 3.4.0. `capture.js` takes the new shot.
+
+### Tests
+- `test_v3_board.py`: the board shows the execution time on done cards, closed milestones and released releases, with its strings in both catalogs.
+
 ## 3.3.1 — 2026-11-24
 
 ### Docs

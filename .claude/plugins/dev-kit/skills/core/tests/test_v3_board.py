@@ -795,5 +795,22 @@ class TestBoardLanguageRendered(RenderBase):
         self.assertEqual(out["kept"], "en")
 
 
+class TestExecutionTime(unittest.TestCase):
+    """Finished work says how long it took: done task cards (and their details), closed milestones, released releases."""
+
+    def test_board_shows_how_long_finished_work_took(self):
+        js = (BOARD / "board.js").read_text(encoding="utf-8")
+        self.assertIn('const taskTook = (t) => (t && t.status === "done" ? secsBetween(t.started_at, t.done_at) : null);', js)
+        self.assertEqual(js.count('tr("took {v}", { v: dur(taskTook('), 2)  # task card and task details
+        self.assertIn("m && isClosed(m) ? msTiming(m) : null", js)
+        self.assertIn('if (!r || r.status !== "released") return null;', js)
+        for use in ('tr(" · closed in {v}"', 'msTook(m) ? tr("took {v}"', 'tr(" in {v}", { v: rt.text })'):
+            self.assertIn(use, js)
+        for lang in ("en", "pt-BR"):
+            cat = json.loads((BOARD / "i18n" / f"{lang}.json").read_text(encoding="utf-8"))["strings"]
+            for k in ("took {v}", " · closed in {v}", " in {v}", "{v} d", "Execution time: from start to done"):
+                self.assertIn(k, cat, lang)
+
+
 if __name__ == "__main__":
     unittest.main()

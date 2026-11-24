@@ -10,6 +10,7 @@ const SHOTS = [  // file, color scheme, steps before the shot
   ['board-planning', 'light', [['click', '#ph-planning']]],
   ['board-milestones', 'light', [['click', '#ph-construction']]],
   ['board-releases', 'light', [['click', '#ph-releases']]],
+  ['board-release-done', 'light', [['click', '#ph-releases'], ['click', '#rel-R1']]],
   ['board-stable', 'light', [['click', '#ph-stable']]],
   ['board-pt-br', 'light', [['lang', 'pt-BR']]],
   ['board-needs-you', 'light', [['click', '#needs-btn']]],

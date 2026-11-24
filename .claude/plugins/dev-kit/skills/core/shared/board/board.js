@@ -148,8 +148,16 @@
   const stLabel = (x) => String(x || "").replace("_", " ");
   function dur(sec) {
     sec = Math.max(0, Math.round(sec));
-    return sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m` : `${Math.floor(sec / 3600)}h${String(Math.floor((sec % 3600) / 60)).padStart(2, "0")}m`;
+    return sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m` : sec < 86400 ? `${Math.floor(sec / 3600)}h${String(Math.floor((sec % 3600) / 60)).padStart(2, "0")}m`
+      : `${Math.floor(sec / 86400)}d${String(Math.floor((sec % 86400) / 3600)).padStart(2, "0")}h`;
   }
+  /** Seconds from a to b (two timestamps), or null when one is missing. */
+  function secsBetween(a, b) {
+    const x = parseT(a), y = parseT(b);
+    return Number.isFinite(x) && Number.isFinite(y) ? Math.max(0, (y - x) / 1000) : null;
+  }
+  /** How long a finished task ran: started -> done (null while it is not done). */
+  const taskTook = (t) => (t && t.status === "done" ? secsBetween(t.started_at, t.done_at) : null);
   function agoShort(t) {
     const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
     return sec < 60 ? tr("now") : sec < 3600 ? tr("{v}m ago", { v: Math.floor(sec / 60) }) : sec < 86400 ? tr("{v}h ago", { v: Math.floor(sec / 3600) }) : sec < 7 * 86400 ? tr("{v}d ago", { v: Math.floor(sec / 86400) }) : fmtDate(t);
@@ -730,12 +738,14 @@
         const done = x.status === "released", sel = x.id === r.id;
         const ver = (data.releases || []).filter((v) => v.release === x.id).map((v) => v.tag || v.version).pop();
         return h("button", { type: "button", role: "tab", id: `rel-${x.id}`, "aria-selected": String(sel), tabindex: sel ? "0" : "-1", class: `sel-btn${done ? " ok" : ""}${sel ? " sel" : ""}${x.status === "awaiting_approval" ? " wait" : ""}`,
-          title: `${x.id} · ${x.title}: ${REL_WORD[x.status]}`, onclick: () => { relView = x.id; render(); $(`rel-${x.id}`) && $(`rel-${x.id}`).focus(); } },
+          title: `${x.id} · ${x.title}: ${REL_WORD[x.status]}${relTook(x) ? ` · ${tr("took {v}", { v: relTook(x).text })}` : ""}`, onclick: () => { relView = x.id; render(); $(`rel-${x.id}`) && $(`rel-${x.id}`).focus(); } },
         h("strong", { text: x.id }), done ? h("span", { class: "sel-meta", text: `✓ ${ver || ""}`.trim() }) : h("span", { class: "sel-meta", text: `${x.closed.length}/${x.milestones.length}` }));
       }))));
     const rej = (r.history || []).filter((x) => x.event === "rejected");
     const waiting = r.status === "in_progress" ? r.milestones.filter((id) => { const m = data.milestones.find((x) => x.id === id); return m && !isClosed(m); }) : [];
+    const rt = relTook(r);
     const sub = [h("strong", { text: `${r.id} · ${r.title || r.id}` }), ` · ${REL_WORD[r.status] || r.status}`,
+      rt ? h("span", { class: "took", title: rt.title, text: tr(" in {v}", { v: rt.text }) }) : "",
       waiting.length ? tr(" · starts when {v} pass their gate", { v: waiting.join(", ") }) : ""];
     const nodes = relNodes(r);
     const here = nodes.find((n) => n.here);
@@ -758,7 +768,7 @@
         fact(tr("Milestones"), tr("{closed_n}/{live_n} closed", { closed_n: r.closed.length, live_n: t.live.length })),
         fact(tr("QA gates"), tr("{gates}/{live_n} passed", { gates: t.gates, live_n: t.live.length })),
         fact(tr("Cost"), t.spend ? t.spend.text : "—", t.spend && t.spend.title),
-        fact(tr("Time"), fmtH(t.work), t.elapsed != null ? tr("{v} from the first task to {v2}", { v: fmtH(t.elapsed), v2: r.status === "released" || r.status === "ready_for_review" ? tr("the last gate") : "now" }) : tr("No task started")),
+        fact(tr("Time"), fmtH(t.work), rt ? rt.title : t.elapsed != null ? tr("{v} from the first task to {v2}", { v: fmtH(t.elapsed), v2: r.status === "released" || r.status === "ready_for_review" ? tr("the last gate") : "now" }) : tr("No task started")),
         fact(tr("Pace"), t.pace != null ? tr("{v} tasks/h", { v: t.pace.toFixed(1) }) : "—", tr("Tasks done per working hour, parallel work counted once")))];
     const msRows = () => t.ms.map((m) => {
       const x = milestoneInfo(m), tm = msTiming(m), sp = msSpend(m.id), q = qaState(m);
@@ -766,7 +776,7 @@
         h("span", { class: "id", text: m.id }), h("span", { text: m.title || "" }),
         h("span", { class: `chip${isClosed(m) ? " good" : ""}`, text: isClosed(m) ? tr("gate {gate}{v}", { gate: GATE_WORD[m.gate] || m.gate, v: m.score != null ? ` · ${m.score}` : "" }) : q.running ? tr("QA running") : tr("{done}/{total} tasks", { done: x.done, total: x.total }) }),
         q.qa.runs > 1 ? h("span", { class: "chip", text: plural(q.qa.runs - 1, "fix round") }) : null,
-        h("span", { class: "sub", text: [tm ? fmtH(tm.work) : null, sp ? sp.text : null].filter(Boolean).join(" · ") })));
+        h("span", { class: "sub", title: msTook(m) ? msTook(m).title : null, text: [msTook(m) ? tr("took {v}", { v: msTook(m).text }) : tm ? fmtH(tm.work) : null, sp ? sp.text : null].filter(Boolean).join(" · ") })));
     });
     const fixes = t.ts.filter((x) => x.type === "fix");
     const issues = Object.entries(((data.backlog || {}).issues) || {}).filter(([, i]) => ids.has(i.scheduled_in)).map(([id, i]) => ({ id, ...i }));
@@ -832,7 +842,7 @@
       const now = m.id === data.current_milestone;
       return h("button", {
         role: "tab", type: "button", id: `tab-${m.id}`, class: `sel-btn${closed ? " ok" : ""}${now ? " now" : ""}${m.id === cur ? " sel" : ""}${x.active || inQa ? " active" : ""}`,
-        "aria-selected": String(m.id === cur), "aria-controls": "main", tabindex: m.id === cur ? "0" : "-1", title: tr("{v} · gate {gate}", { v: m.title || m.id, gate: m.gate }),
+        "aria-selected": String(m.id === cur), "aria-controls": "main", tabindex: m.id === cur ? "0" : "-1", title: tr("{v} · gate {gate}", { v: m.title || m.id, gate: m.gate }) + (msTook(m) ? ` · ${tr("took {v}", { v: msTook(m).text })}` : ""),
         onclick: () => selectMilestone(m.id, true),
       }, h("strong", { text: m.id }),
       closed ? h("span", { class: "sel-meta", "aria-hidden": "true", text: "✓" }) : x.total ? h("span", { class: "sel-meta", text: `${x.done}/${x.total}` }) : null,
@@ -871,8 +881,9 @@
     const st = m ? stagesOf(m) : [];
     const closedNow = st.length && st.at(-1).state === "done";
     const prog = m ? weightedProgress(m) : null;
-    $("ms-pct").textContent = !m ? "" : closedNow ? tr(" · closed") : prog.runs ? tr(" · QA round {runs}", { runs: prog.runs }) : "";
-    $("ms-pct").title = m ? tr("{v}% of the milestone: tasks {pct}% (70% of the bar), QA {v2}% (30%)", { v: Math.round(prog.total * 100), pct, v2: Math.round(prog.qa * 100) }) : "";
+    const took = closedNow ? msTook(m) : null;
+    $("ms-pct").textContent = !m ? "" : closedNow ? (took ? tr(" · closed in {v}", { v: took.text }) : tr(" · closed")) : prog.runs ? tr(" · QA round {runs}", { runs: prog.runs }) : "";
+    $("ms-pct").title = took ? took.title : m ? tr("{v}% of the milestone: tasks {pct}% (70% of the bar), QA {v2}% (30%)", { v: Math.round(prog.total * 100), pct, v2: Math.round(prog.qa * 100) }) : "";
     const order = ["done", "in_progress", "blocked", "todo"];
     const label = (k) => STATUS.find((x) => x.key === k).label;
     const tot = Math.max(1, ts.length);
@@ -946,6 +957,7 @@
         t.acceptance ? h("span", { title: tr("Acceptance criteria"), text: tr("{acceptance} AC", { acceptance: t.acceptance }) }) : null,
         t.status === "in_progress" && t.started_at ? h("span", { text: tr("started {v}", { v: ago(parseT(t.started_at)) }) }) : null,
         t.status === "done" && t.done_at ? h("span", { text: tr("done {v}", { v: fmtDT(parseT(t.done_at)) }) }) : null,
+        taskTook(t) != null ? h("span", { class: "took", title: tr("Execution time: from start to done"), text: tr("took {v}", { v: dur(taskTook(t)) }) }) : null,
         t.commit ? h("span", { class: "tid", title: tr("Commit"), text: t.commit.slice(0, 7) }) : null));
   }
 
@@ -1106,6 +1118,25 @@
     const end = closed && Number.isFinite(parseT(m.passed_at)) ? parseT(m.passed_at) : closed && dones.length ? Math.max(...dones) : now;
     return { elapsed: Math.max(0, end - span.start) / 36e5, work: work / 36e5, open: !closed };
   }
+  /** Execution time of a closed milestone: from its first task's start to its gate (null while open or never started). */
+  function msTook(m) {
+    const tm = m && isClosed(m) ? msTiming(m) : null;
+    return tm ? { text: fmtTook(tm.elapsed), title: tr("Execution time: {v} from the first task to the gate, {v2} working", { v: fmtTook(tm.elapsed), v2: fmtH(tm.work) }) } : null;
+  }
+  /** Execution time of a released release: from the first task of its milestones to the release (null before). */
+  function relTook(r) {
+    if (!r || r.status !== "released") return null;
+    const span = workSpan(relMs(r).flatMap(tasksOf).filter((t) => t.status !== "dropped"));
+    if (!span) return null;
+    const ev = ((data.release_history || {})[r.id] || []).filter((x) => x.event === "released").map((x) => x.at)
+      .concat((data.releases || []).filter((v) => v.release === r.id).map((v) => v.at)).map(parseT).filter(Number.isFinite);
+    const gates = relMs(r).map((m) => parseT(m.passed_at)).filter(Number.isFinite);
+    const end = ev.length ? Math.max(...ev) : gates.length ? Math.max(...gates) : null;
+    if (end == null) return null;
+    const h0 = Math.max(0, end - span.start) / 36e5;
+    return { text: fmtTook(h0), title: tr("Execution time: {v} from the first task to the release, {v2} working", { v: fmtTook(h0), v2: fmtH(span.work / 36e5) }) };
+  }
+  const fmtTook = (x) => (x != null && x >= 48 ? tr("{v} d", { v: (x / 24).toFixed(1) }) : fmtH(x));  // long spans read better in days
   const fmtH = (x) => (x == null ? "—" : x < 1 ? `${Math.max(1, Math.round(x * 60))} min` : x < 100 ? `${x.toFixed(1)} h` : `${Math.round(x)} h`);
   /** Cost when it was measured, otherwise tokens when they were, otherwise null (dev_cost.py writes milestones.json). */
   function msSpend(id) {
@@ -1542,7 +1573,8 @@
       cmd: !deploying && deployOn && passed && !(dep && dep.status === "ok") ? "/dev-kit:deploy" : null });
     const closed = passed && (!deployOn || (dep && dep.status === "ok"));
     st.push({ key: "close", name: tr("Closed"), tasks: [], state: closed ? "done" : "upcoming",
-      note: closed ? (m.passed_at && Number.isFinite(parseT(m.passed_at)) ? fmtDate(parseT(m.passed_at)) : tr("Milestone closed")) : "" });
+      note: closed ? [m.passed_at && Number.isFinite(parseT(m.passed_at)) ? fmtDate(parseT(m.passed_at)) : tr("Milestone closed"),
+        msTook(m) ? tr("took {v}", { v: msTook(m).text }) : null].filter(Boolean).join(" · ") : "" });
     // stages that do not apply are not drawn: no smoke without a local preview, no deploy unless it is per milestone;
     // the smoke test runs inside QA, so it is a line of the QA stage
     const smoke = st.find((y) => y.key === "smoke"), qa = st.find((y) => y.key === "qa");
@@ -2602,7 +2634,8 @@
     const el = h("li", { class: `pcard${movable ? " movable" : " locked"}${m.gate === "pending" ? "" : " s-done"}`, "data-id": mid, draggable: movable ? "true" : null,
       title: movable ? tr("Drag to another release, or use Move…") : tr("Stays here: {why}", { why }) },
       h("div", { class: "tcard-top" }, h("span", { class: "tid", text: mid }),
-        h("span", { class: "chip", text: m.gate === "pending" ? plural(ts.length, "task") : tr("gate {v}", { v: m.gate }) })),
+        h("span", { class: "chip", text: m.gate === "pending" ? plural(ts.length, "task") : tr("gate {v}", { v: m.gate }) }),
+        msTook(m) ? h("span", { class: "took", title: msTook(m).title, text: tr("took {v}", { v: msTook(m).text }) }) : null),
       h("div", { class: "tcard-title", text: m.title || mid, title: m.title || null }), sel);
     if (movable) {
       el.addEventListener("dragstart", (e) => { dragging = { kind: "ms", id: mid, from: rel.id }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", mid); el.classList.add("dragging"); });
@@ -2959,7 +2992,8 @@
       h("div", { class: "tcard-top" }, h("span", { class: `chip st-chip s-${d.status}`, text: stLabel(d.status) }), h("span", { class: "chip", text: d.type }),
         d.lane ? h("span", { class: `chip lane-${d.lane}`, text: d.lane }) : null, h("span", { class: "chip", text: d.milestone }),
         d.started_at ? h("span", { text: tr("started {v}", { v: fmtDT(parseT(d.started_at)) }) }) : null,
-        d.done_at ? h("span", { text: tr("done {v}", { v: fmtDT(parseT(d.done_at)) }) }) : null),
+        d.done_at ? h("span", { text: tr("done {v}", { v: fmtDT(parseT(d.done_at)) }) }) : null,
+        taskTook(d) != null ? h("span", { class: "took", title: tr("Execution time: from start to done"), text: tr("took {v}", { v: dur(taskTook(d)) }) }) : null),
       agentsOn(d.id).length ? h("div", { class: "tcard-agents td-sec" }, agentsOn(d.id).map((x) => h("span", { class: "agent-chip" }, agentBits(x)))) : null,
       d.blocked_reason ? h("div", { class: "reason td-sec", text: d.blocked_reason }) : null,
       section(tr("Origin"), d.issue ? h("p", {}, h("span", { class: "tid", text: d.issue.id }), ` ${d.issue.title || ""}`,

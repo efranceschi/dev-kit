@@ -105,7 +105,7 @@ Construction, one milestone after the other: pull the issues, implement, QA, gat
 
 **Run** the board's **Autopilot** switch (it runs one milestone per run and starts the next by itself), or `/dev-kit:autopilot` in a session. By hand: `/dev-kit:implement --milestone M1`, then `/dev-kit:qa M1`; repeat `implement` and `qa` while the gate creates fix tasks. Set how many tasks are built at once on the Autopilot card, or with `--parallel N`.
 
-**The board shows** tab 3 Milestones: the milestones grouped by release in a picker; for the one picked, its stages (pull issues, implement, QA, gate, deploy) with where it is, one line with its goal, progress and **forecast** (the probable finish, a later "by" date and the cost to finish), and the task board in four columns (to do, in progress, blocked, done) with the agents running on each card. **QA** shows the rounds and their scores; **Metrics** opens burndown, velocity and gates.
+**The board shows** tab 3 Milestones: the milestones grouped by release in a picker; for the one picked, its stages (pull issues, implement, QA, gate, deploy) with where it is, one line with its goal, progress and **forecast** (the probable finish, a later "by" date and the cost to finish), and the task board in four columns (to do, in progress, blocked, done) with the agents running on each card. Finished work says how long it took: each done card shows its execution time (from start to done), and a closed milestone shows it next to "closed" and on its Closed step (from its first task to the gate; the working time is in the tooltip). **QA** shows the rounds and their scores; **Metrics** opens burndown, velocity and gates.
 
 ![The Milestones tab: M4 in implementation with two implementers, the forecast and the task board](images/board-milestones.png)
 
@@ -140,6 +140,10 @@ When every milestone of a release is closed, it is checked, audited and waits fo
 **The board shows** tab 3 Releases: the release picked with its stages (checks, audit, review, your approval, production, released) and the rejection loop, its numbers, its milestones, what holds it back, and its quality and documents. When it waits for you, **Approve** and **Reject** are there and in Needs you, and the Autopilot says "waiting for your approval".
 
 ![The Releases tab: R2 picked, its stages as a flow with the rejection loop, its numbers, milestones, what holds it back and its documents](images/board-releases.png)
+
+A released release says how long it took next to "released" (from the first task of its milestones to the release; the working time is in the tooltip), and each of its milestones shows its own.
+
+![The Releases tab with R1 released: "released in" its execution time, and how long each milestone took](images/board-release-done.png)
 
 **Needs you**
 
