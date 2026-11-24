@@ -2,6 +2,13 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.12.2 — 2026-11-24
+
+Field report: in a milestone's QA block, the fix chips of the To do column ran over the Done column, and the Done chips ran out of the card (Eduardo's screenshot).
+
+### Fixed
+- The fix chips of a milestone's QA block fit their column: the task title takes the room left and ends in an ellipsis, at any width and in both themes. Hovering a chip shows the whole title.
+
 ## 3.12.1 — 2026-11-24
 
 Field report: on a running step of a flow, the pulsing ring was drawn over the "now" tag (Eduardo's screenshot).

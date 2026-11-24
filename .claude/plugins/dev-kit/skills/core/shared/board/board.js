@@ -1877,7 +1877,7 @@
       : h("div", { class: "empty good", text: x.passed ? tr("None: the gate passed") : tr("No blocking finding open") });
     const cols = ["todo", "in_progress", "blocked", "done"].map((k) => [k, x.fixes.filter((t) => t.status === k)]).filter(([, v]) => v.length);
     const fixes = cols.length ? h("div", { class: "qa-fixes" }, cols.map(([k, v]) => h("div", { class: `qa-fix-col s-${k}` },
-      h("div", { class: "list-title", text: `${stLabel(k)} ${v.length}` }), v.map((t) => h("button", { type: "button", class: "run-chip", "data-tid": t.id, onclick: () => openTask(t.id) },
+      h("div", { class: "list-title", text: `${stLabel(k)} ${v.length}` }), v.map((t) => h("button", { type: "button", class: "run-chip", "data-tid": t.id, title: `${t.id} ${t.title || ""}`, onclick: () => openTask(t.id) },
         h("span", { class: "tid", text: t.id }), h("span", { class: "run-title", text: t.title })))))) : h("div", { class: "empty", text: tr("No fix tasks") });
     const hf = m.hard_floor && m.hard_floor.checks ? h("ul", { class: "list" }, Object.entries(m.hard_floor.checks).map(([n, c]) => h("li", {},
       h("span", { class: "id", text: c.status === "fail" ? "✕" : c.status === "pass" ? "✓" : "–" }), h("span", { text: n }),

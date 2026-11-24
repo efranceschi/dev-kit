@@ -648,7 +648,10 @@ code.cmd { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-w
 .qa-panel { display: grid; gap: 14px; }
 .qa-sect .list-title { margin-bottom: 6px; }
 .qa-fixes { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
-.qa-fix-col { display: grid; gap: 4px; align-content: start; }
+.qa-fix-col { display: grid; gap: 4px; align-content: start; min-width: 0; }
+/* a fix chip fits its column: the title takes the room left and ends in an ellipsis */
+.qa-fix-col > .run-chip { min-width: 0; justify-self: start; }
+.qa-fix-col .run-title { max-width: none; flex: 1 1 auto; text-align: left; }
 
 /* production health check and release flags (Stable) */
 .hc { margin-top: 12px; }
