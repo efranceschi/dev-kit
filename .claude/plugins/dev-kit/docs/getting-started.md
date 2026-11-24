@@ -43,6 +43,14 @@ This finishes **conception** (PRD, architecture, UX/UI specs, each reviewed) and
 
 Now the project is in **construction**. It implements each milestone test-first (one commit per task), runs the quality gate (`qa`), fixes what failed and moves to the next milestone. A gate passes only with the hard floor met (build, tests, no secrets), the milestone's `exit_check` passing and every scored dimension at or above the cut-off. Questions that need you show up on the board with a recommended answer; what you ask there is run by the board's own worker, so you do not need a Claude Code session open. Building and QA belong to each milestone, so the project phase stays `construction` the whole time; `/dev-kit:status` says which milestone (`construction · M2`). Prefer to drive it yourself? After each document, its review: `/dev-kit:prd` → `/dev-kit:review prd` → `/dev-kit:architecture` → `/dev-kit:ux` → `/dev-kit:ui` → `/dev-kit:review design` → `/dev-kit:plan` → `/dev-kit:review plan`; then `/dev-kit:implement --milestone M1` and `/dev-kit:qa M1`. `release` checks that every review passed.
 
+**Let the board drive it.** Instead of running `/dev-kit:autopilot` in a session, turn on the **Autopilot** switch in the board's top bar. The board runs the autopilot headless (`claude -p`), one milestone per run with a fresh context, and starts the next run by itself until a release waits for your approval or the project is stable. Questions and permission prompts go to **Needs you**; when only work that needs you is left the switch says "waiting for you", and the next run starts as soon as you answer. Turned off, the run finishes its step and stops. The same card sets **Implementers at once** (1 to 6, default 3: how many tasks are built in parallel, each in its own worktree), applied from the next batch; `/dev-kit:autopilot --parallel N` does the same from a session. Only one autopilot drives a project at a time.
+
+![The board's Autopilot card: running, the command it runs, Implementers at once, Turn off and Force stop](images/board-autopilot.png)
+
+Needs you, the red button in the top bar, holds everything that waits for you: questions with the recommended answer first, Confirm PRD and Confirm plan, release approvals and permission prompts.
+
+![The Needs you drawer with an open question and its answers](images/board-needs-you.png)
+
 ## Already have a project?
 
 Run `/dev-kit:start <the change you want>` in the repository root (commit pending work first). In a codebase that was not built with dev-kit, `start` first runs an **onboarding**: it tags the current commit `dev-kit-baseline`, writes `.dev/discovery.md` (stack, commands, your commit/version/CHANGELOG conventions, existing docs and ADRs), records the current test results in `.dev/qa/baseline.md`, and asks for an entry mode and the number of the first milestone (default `M1`; continue your own numbering if you have one):
@@ -61,6 +69,7 @@ Nothing in your code, docs or history is changed by the onboarding. From then on
 |---|---|
 | where the project stands (lifecycle phase and step, next release) | `/dev-kit:status` |
 | a live board in the browser (or on your phone), with a forecast to finish | `/dev-kit:board` (`--host 0.0.0.0` to share it) |
+| the board to drive the build by itself | its **Autopilot** switch |
 | change autonomy, cut-offs, flags, the health check | `/dev-kit:settings` |
 | what is pending and what to do next | `/dev-kit:backlog` |
 | report a bug or an idea | `/dev-kit:issue "what happens"` |
@@ -90,4 +99,4 @@ With no milestone open, no issue queued and everything released, the project is 
 
 The phase is worked out from `.dev/` (artifacts, reviews, gates, issues, releases), never typed in, so it always matches the work: see [concepts](concepts.md#lifecycle-conception-planning-construction-19).
 
-Next: [recipes](recipes.md) for common tasks, [concepts](concepts.md) for how it works, [skills](skills.md) for every command.
+Next: [stage by stage](stages.md) for what each stage expects from you and how to get unstuck (and how to come from 2.x), [recipes](recipes.md) for common tasks, [concepts](concepts.md) for how it works, [skills](skills.md) for every command.

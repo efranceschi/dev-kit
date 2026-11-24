@@ -2,6 +2,16 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.3.1 — 2026-11-24
+
+### Docs
+- **Stage by stage** (`docs/stages.md`), a new page that walks through every stage of the flow diagram (conception, planning, milestones, releases, stable and maintenance) with the same four parts each: what to run, what the board shows, what needs you (the interview, Confirm PRD, Confirm plan, questions and permissions in Needs you, decisions after failed gates, Approve or Reject a release) and how to get unstuck. It opens with the two ways to drive (the board's Autopilot switch or a session), what each word next to the switch means and what to do, Implementers at once, Needs you and Live, and ends with coming from 2.x (the in-place migration: backup, R0, review and Confirm plan, `--annotate-exit`). Linked from both READMEs, `GET_STARTED.md` and `getting-started.md`.
+- **3.2 and 3.3 in the docs**: `GET_STARTED.md` and `getting-started.md` show how to let the board drive the build with the Autopilot switch and set the implementers at once; `concepts.md` describes the switch and the top bar instead of the removed "running" chip and "Go on by itself"; both READMEs list the Autopilot; troubleshooting has rows for "waiting for you", "stopped", "waiting for another session", a manual autopilot that defers to the board and an overloaded machine; the recipe "Drive the work from the board" no longer mentions "Go on by itself", and a new recipe "Let the board drive the build" and glossary entries (Autopilot switch, implementers at once, Needs you) come from `help.json`; the e2e and autonomy checklists check the switch instead of continuous mode.
+- **Screenshots** taken again on 3.3.1 (the top bar now has the Autopilot switch), with four new ones: the Conception and Milestones lanes, the Autopilot card and the Needs you drawer. `docs/demo/autopilot_running.py` shows the demo board's Autopilot as running without starting Claude Code, and `capture.js` takes the new shots.
+
+### Tests
+- `test_v3_docs.py`: every stage of `stages.md` has its four parts, every state of the Autopilot switch in `board.js` is explained there, and the entry pages link it.
+
 ## 3.3.0 — 2026-11-24
 
 ### Added

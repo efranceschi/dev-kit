@@ -43,7 +43,13 @@ This writes and reviews the PRD, architecture, UX/UI design and implementation p
 /dev-kit:autopilot
 ```
 
-The kit implements the plan milestone by milestone, with tests, and runs a quality gate at the end of each one: a hard floor (build, tests, no secrets), the milestone's `exit_check` and a score per dimension. It pauses only for decisions that need you; questions show up in **Needs you** with a recommended answer. You can close Claude Code: what you ask on the board is run by the board's own worker.
+The kit implements the plan milestone by milestone, with tests, and runs a quality gate at the end of each one: a hard floor (build, tests, no secrets), the milestone's `exit_check` and a score per dimension. It pauses only for decisions that need you; questions show up in **Needs you** with a recommended answer.
+
+**Or let the board drive it.** On the board, turn on the **Autopilot** switch in the top bar: the board runs the autopilot itself, headless, one milestone per run, until a release waits for your approval. Questions and permission prompts wait in Needs you while independent work goes on, and the next run starts as soon as you answer. Its card sets **Implementers at once** (1 to 6, default 3), how many tasks are built in parallel. You can close Claude Code meanwhile. What each word next to the switch means: [stage by stage](.claude/plugins/dev-kit/docs/stages.md#two-ways-to-drive).
+
+<p align="center">
+  <img src=".claude/plugins/dev-kit/docs/images/board-milestones.png" alt="The board's Milestones lane: the Autopilot switch on and running, M4 in implementation with two implementer agents, its forecast and the task board in four columns" width="900">
+</p>
 
 ## 5. Release, then keep evolving
 
@@ -69,6 +75,7 @@ From there the product keeps living: `/dev-kit:issue "what happens"` sends a bug
 | know what to do next, or ask a "how do I...?" question | `/dev-kit:help` |
 | see progress and blockers | `/dev-kit:status` |
 | watch it live in the browser | `/dev-kit:board` |
+| let the board drive the build | the **Autopilot** switch on the board |
 | report a bug or ask for a change | `/dev-kit:issue "what happens"` |
 | see everything still pending | `/dev-kit:backlog` |
 | put an approved milestone in production | `/dev-kit:deploy` |
@@ -87,6 +94,7 @@ From there the product keeps living: `/dev-kit:issue "what happens"` sends a bug
   <img src=".claude/plugins/dev-kit/docs/images/board-pt-br.png" alt="The same board in Portuguese" width="900">
 </p>
 
-- **Stuck or lost?** Run `/dev-kit:help`, or see [troubleshooting](.claude/plugins/dev-kit/docs/troubleshooting.md).
+- **Coming from dev-kit 2.x?** Update the plugin and run `/dev-kit:start`: the project moves to 3.x in place (a backup goes to `.dev/backup/`), and you confirm the plan regrouped into releases. Details: [coming from 2.x](.claude/plugins/dev-kit/docs/stages.md#6-coming-from-dev-kit-2x).
+- **Stuck or lost?** Run `/dev-kit:help`, see [stage by stage](.claude/plugins/dev-kit/docs/stages.md) (what each stage expects from you and how to get unstuck) or [troubleshooting](.claude/plugins/dev-kit/docs/troubleshooting.md).
 
-Next: the longer [getting-started guide](.claude/plugins/dev-kit/docs/getting-started.md) and the [recipes](.claude/plugins/dev-kit/docs/recipes.md).
+Next: the longer [getting-started guide](.claude/plugins/dev-kit/docs/getting-started.md), [stage by stage](.claude/plugins/dev-kit/docs/stages.md) and the [recipes](.claude/plugins/dev-kit/docs/recipes.md).

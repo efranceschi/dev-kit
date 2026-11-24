@@ -24,7 +24,7 @@ To try it without installing: `claude --plugin-dir .claude/plugins/dev-kit`. The
 /dev-kit:autopilot                   # builds milestone by milestone, with quality gates
 ```
 
-Step by step: [getting started](docs/getting-started.md).
+Step by step: [getting started](docs/getting-started.md). What each stage expects from you: [stage by stage](docs/stages.md).
 
 ## What do you want to do?
 
@@ -37,7 +37,8 @@ Step by step: [getting started](docs/getting-started.md).
 | build it step by step | `/dev-kit:prd` → `review prd` → `architecture` → `ux` → `ui` → `review design` → `plan` → `review plan` → `implement` → `qa` |
 | see where things stand | `/dev-kit:status` |
 | watch it live in the browser | `/dev-kit:board` (`/dev-kit:board stop` to stop) |
-| drive it from the board | buttons on `/dev-kit:board`: the board's own worker runs the requests (or `/dev-kit:worker` in a session) |
+| let the board drive the build | the **Autopilot** switch on `/dev-kit:board`: one milestone per run, questions in Needs you, implementers at once on its card |
+| ask for one thing from the board | buttons on `/dev-kit:board`: the board's own worker runs the requests (or `/dev-kit:worker` in a session) |
 | report a bug or ask for an improvement | `/dev-kit:issue "what happens"` |
 | see everything pending | `/dev-kit:backlog` |
 | put it in production | `/dev-kit:deploy` |
@@ -70,6 +71,7 @@ Full picture: [concepts](docs/concepts.md) and the [flow diagram](docs/dev-kit-f
 | Page | For |
 |---|---|
 | [getting-started](docs/getting-started.md) | your first project |
+| [stages](docs/stages.md) | each stage of the flow: what to run, what the board shows, what needs you, how to get unstuck; coming from 2.x |
 | [recipes](docs/recipes.md) | "how do I…?" (bug, overnight run, costs, deploy, resume…) |
 | [skills](docs/skills.md) | every skill: when, arguments, examples, outputs |
 | [agents](docs/agents.md) | every agent: role, model tier, who calls it |

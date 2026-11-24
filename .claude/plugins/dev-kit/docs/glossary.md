@@ -8,6 +8,7 @@
 | **access link** | The private URL printed by /dev-kit:board --host 0.0.0.0; other devices open the shared board only through it. |
 | **ADR** | Architecture decision record in .dev/decisions.md; source auto, user, interview, policy, discovered or imported. |
 | **API-equivalent cost** | Estimated US$ of the tokens at API prices; on subscription plans nothing is billed per token. |
+| **Autopilot switch** | The switch in the board's top bar that runs /dev-kit:autopilot headless, one milestone per run, until a release waits for your approval or the project is stable; its questions and permission prompts go to Needs you. |
 | **Baseline** | The git tag dev-kit-baseline set by the onboarding: everything before it is legacy, everything after it is new work that QA scores. |
 | **Brownfield** | An existing project not built with dev-kit. start runs the onboarding (baseline tag, discovery, test baseline, entry mode); audits score only the changes since the baseline and legacy problems become issues (conventions §16). |
 | **buffer** | Share of each milestone (default 20%) reserved for queued issues. |
@@ -31,6 +32,7 @@
 | **gate** | The quality check at the end of a milestone (qa): passes only with no critical/high findings and every score above its cut-off. |
 | **hard floor** | What every milestone gate needs before any score counts: the build passes, the test suite passes and no secret is in the diff. |
 | **hotfix** | Expedite lane for critical/high bugs in delivered work: one at a time, scoped QA, patch release. |
+| **implementers at once** | How many tasks of a milestone are built in parallel, each in its own worktree (1 to 6, default 3), set on the board's Autopilot card or with /dev-kit:autopilot --parallel N; applies from the next batch. |
 | **lane** | Priority lane of a task: hotfix runs first, then cool-down, then the plan. |
 | **legacy** | A finding in code that existed before dev-kit (existing projects): reported with "legacy": true, never scored, turned into an issue. |
 | **lifecycle** | Where the project is: conception (interview, PRD, architecture, UX, UI) → planning (plan) → construction (milestones and the next release) → stable. A cycle, not a line: a scope change reopens conception and planning while construction goes on; a bug or improvement goes straight to construction. Derived from .dev/, never set by hand. |
@@ -41,6 +43,7 @@
 | **milestone** | A cadence step M1, M2… inside construction; the next one starts only after the previous gate passes. Building and QA belong to the milestone, not to the project phase. Issues never renumber milestones. |
 | **model ladder** | Agents start on their base model and effort; failed dimensions are re-run one step higher, with consent. |
 | **n/a review** | A review that does not apply (e.g. design with no new UI); recorded with a note, it satisfies prerequisites and is not graded. |
+| **Needs you** | The board's red button and drawer with everything waiting for you: questions, Confirm PRD and Confirm plan, release approvals, permission prompts and offers on the issue queue. |
 | **next release** | The first planned release not released yet; when all its milestones have passed their gates, release audits it and writes its release review for your approval. Releases cut before 3.0 are kept under R0. |
 | **out of scope finding** | A problem in shared code the milestone did not change; it becomes an issue and does not score in the gate. |
 | **output file** | Where an auditor writes its result (given in its prompt); the kit validates it, and the agent answers in a few lines. |

@@ -34,12 +34,16 @@
 | Board: "Access link required" | It was shared with `--host` and opened without the key | Open the `access link:` URL; `/dev-kit:board status` prints it again |
 | Board: a host name is refused | DNS rebinding protection | Open it by IP or `localhost` (SSH tunnel: `ssh -N -L 8765:127.0.0.1:<port> <host>`); behind your reverse proxy, `/dev-kit:board --trusted-host <its host name>` |
 | Board behind a proxy: buttons answer "forbidden origin" | The proxy's host name is not trusted | `/dev-kit:board --trusted-host <name>` (without scheme or port) |
-| Board stopped by itself | No open tab and no session listening for 2 hours | Start it again; `--idle-min N` changes the limit (0 = never) |
+| Board stopped by itself | No open tab, no session listening and the Autopilot off, for 2 hours | Start it again; `--idle-min N` changes the limit (0 = never) |
 | Board: requests stay "waiting" | No Claude Code session is listening | Run `/dev-kit:board` in the project's Claude Code session (it then listens), or `/dev-kit:worker` to run the queue once; the Requests card says "Claude Code: not running" until one does |
 | Board: "Claude Code: open, not listening" | That session ran `/dev-kit:worker` but did not open the board, or its Claude Code has no plugin monitors | Run `/dev-kit:board` there; if it still says "not listening", update Claude Code, and meanwhile `/dev-kit:worker` runs the queue when you ask |
 | Board: a permission waits in Needs you | Claude Code needs it for the request it runs | Allow, Allow for this session (the rule shown, until the session ends) or Deny; with no answer it is denied after 10 minutes |
 | The terminal still asks for permissions during a board request | No board is running, or the request is not a board request | Start the board with `/dev-kit:board`; outside board requests the terminal prompt applies as usual |
-| Board: "It stopped going on by itself" | Continuous mode met something that needs you; the card says what | Deal with it, then "Go on" |
+| Board: the Autopilot says "waiting for you" | Only work that needs you is left | Answer the items in Needs you; the next run starts by itself |
+| Board: the Autopilot says "stopped" | Three runs failed in a row, or a run changed nothing; its card says which | Read `.dev/run/autopilot.log` and Needs you, fix the cause, then Start again |
+| Board: the Autopilot says "waiting for another session" | A board request, or a `/dev-kit:autopilot` started in a session, is working on the project | Nothing: it starts when that one ends |
+| `/dev-kit:autopilot` in a session says the board drives the project | The board's Autopilot switch is on: one autopilot per project | Turn the switch off to drive from the session, or run it with only `--parallel N` to change the implementers of the board's run |
+| The machine is overloaded during a build | Several implementers at once | Lower Implementers at once on the Autopilot card (applies from the next batch), or `/dev-kit:autopilot --parallel 1` |
 | Board: "actions off" or no ▶ buttons | It was started with `--actions off` | `/dev-kit:board --actions on` |
 | Board: "another session is the executor" | Two Claude Code sessions ran `/dev-kit:worker` | Keep one; the other is refused while the first is alive |
 | Board: "started by another version" | The kit was updated while it ran | `/dev-kit:board stop`, then start it again |

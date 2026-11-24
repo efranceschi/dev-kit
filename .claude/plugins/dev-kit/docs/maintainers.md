@@ -90,7 +90,7 @@ The board is the one part that ships translated text. Its catalogs are `shared/b
 
 ## Documentation
 
-- Hand-written: `README.md`, `docs/getting-started.md`, `docs/concepts.md`, `docs/troubleshooting.md`, this page, `docs/e2e-checklist.md`.
+- Hand-written: `README.md`, `docs/getting-started.md`, `docs/stages.md`, `docs/concepts.md`, `docs/troubleshooting.md`, this page, `docs/e2e-checklist.md`.
 - Generated from `skills/core/shared/help.json` and the frontmatter: `docs/skills.md`, `docs/agents.md`, `docs/recipes.md`, `docs/glossary.md`. Never edit them by hand.
 - Adding or changing a skill: add or update its entry in `help.json` (category, one_line, when, args, examples, produces, related), then:
 
@@ -101,7 +101,7 @@ python3 -I skills/core/scripts/dev_docs.py build
 The lint runs `dev_docs.py check`, which fails if a skill has no catalog entry, the catalog names a skill that does not exist, an example does not use its own skill, or a generated doc is stale.
 
 - Flow diagram: `docs/dev-kit-flow.svg` is plain SVG edited by hand: a `viewBox` and no fixed size, text as `<text>`, no embedded image, colours as CSS classes with a dark variant in its `<style>` (the test `test_v3_docs.py` checks this). Keep it in step with the lifecycle in `concepts.md`.
-- Board screenshots (`.github/assets/dev-kit-board*.png`, `docs/images/board-*.png`) come from the real board fed by a fictional project, Larder, with made-up data. To refresh them: `python3 -I docs/demo/build_demo.py /tmp/demo/larder` (builds the project through `dev_state.py` commands), start the board on it with `DEV_KIT_CLAUDE=/bin/true python3 -I skills/core/scripts/dev_board.py --root /tmp/demo/larder start --no-open --port 0 --actions on` (the fake binary keeps its worker from starting Claude), then `node docs/demo/capture.js <url> <out dir>` with the `url` from `/tmp/demo/larder/.dev/run/board.json` (Playwright, 1440×1000 at 2×), and copy the PNGs into place. Stop the board with `dev_board.py --root /tmp/demo/larder stop`.
+- Board screenshots (`.github/assets/dev-kit-board*.png`, `docs/images/board-*.png`) come from the real board fed by a fictional project, Larder, with made-up data. To refresh them: `python3 -I docs/demo/build_demo.py /tmp/demo/larder` (builds the project through `dev_state.py` commands), start the board on it with `DEV_KIT_CLAUDE=/bin/true python3 -I skills/core/scripts/dev_board.py --root /tmp/demo/larder start --no-open --port 0 --actions on` (the fake binary keeps its worker from starting Claude), show its Autopilot as running with `python3 -I docs/demo/autopilot_running.py /tmp/demo/larder <pid>` (the board's `pid` from `/tmp/demo/larder/.dev/run/board.json`), then `node docs/demo/capture.js <url> <out dir>` with the `url` from `/tmp/demo/larder/.dev/run/board.json` (Playwright, 1440×1000 at 2×), and copy the PNGs into place (`board-construction*.png` become `.github/assets/dev-kit-board*.png`; the others go to `docs/images/`, and each must be embedded in `GET_STARTED.md`, `docs/getting-started.md` or `docs/stages.md`). Stop the board with `dev_board.py --root /tmp/demo/larder stop`.
 
 ## Verification
 

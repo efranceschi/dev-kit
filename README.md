@@ -15,10 +15,10 @@ The diagram reads top to bottom, one lane per stage. **Conception** (interview, 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/dev-kit-board-dark.png">
-    <img src=".github/assets/dev-kit-board.png" alt="dev-kit board of a sample project, Larder: the lanes of the flow as tabs (conception and planning done, the milestones lane current with M4 at 3 of 6 tasks, releases 1 of 3 released, stable), a red Needs you button with one item, the stages of M4 as a flow (pull issues done, implement in progress with two implementer agents, QA, gate, deploy) and the task board in four columns of equal height" width="900">
+    <img src=".github/assets/dev-kit-board.png" alt="dev-kit board of a sample project, Larder: the Autopilot switch on and running for 24 minutes, the lanes of the flow as tabs (conception and planning done, the milestones lane current with M4 at 3 of 6 tasks, releases 1 of 3 released, stable), a red Needs you button with one item, the stages of M4 as a flow (pull issues done, implement in progress with two implementer agents, QA, gate, deploy) and the task board in four columns of equal height" width="900">
   </picture>
   <br>
-  <sub><code>/dev-kit:board</code> shows the build in <b>real time</b> in your browser: one screen per lane of the flow, laid out like the diagram: where the project is, what needs you, the stage of the milestone or release with what is running in it, a forecast to finish and the task board; details, metrics and activity one click away. More screenshots in the <a href="GET_STARTED.md">quickstart</a>.</sub>
+  <sub><code>/dev-kit:board</code> shows the build in <b>real time</b> in your browser and, with its <b>Autopilot</b> switch on, drives it: one screen per lane of the flow, laid out like the diagram: where the project is, what needs you, the stage of the milestone or release with what is running in it, a forecast to finish and the task board; details, metrics and activity one click away. More screenshots in the <a href="GET_STARTED.md">quickstart</a>.</sub>
 </p>
 
 ## What it does
@@ -29,10 +29,11 @@ The diagram reads top to bottom, one lane per stage. **Conception** (interview, 
 - **Planned releases with one human gate**: the plan groups milestones into releases (R1, R2…: a complete value journey each, 2–5 milestones, a risky delivery ends one). Milestones run on their own; when a release is complete, `/dev-kit:release` audits it, writes a release review and waits for you to approve (production deploy, smoke, release) or reject with what must change (a fixes milestone in the same release).
 - **Checkpoints where your judgement matters**: after their reviews pass, you confirm the PRD and the plan on the board (or ask for changes) before the cycle goes on. Each milestone has an `exit_check` (a test, a command or acceptance criteria) that must pass at its gate, besides a hard floor of build, tests and secrets.
 - **Deploy without release** (optional): with release flags, each milestone can go to production behind its release's flag, turned on only after you approve the release; a production health check runs on a schedule and opens an urgent issue when it fails.
+- **Autopilot from the board**: an **Autopilot** switch in the board's top bar runs the whole build headless, one milestone per run, until a release waits for your approval; questions and permission prompts wait in Needs you while independent work goes on, and **Implementers at once** (1 to 6) sets how many tasks are built in parallel. You can close Claude Code meanwhile.
 - **Adjustable autonomy**: from supervised (asks at each decision, always with a recommendation) to unattended (parks what needs you and keeps going).
 - **Bugs and ideas** found at any time are classified and routed with `/dev-kit:issue`, without renumbering the plan: bugs and improvements go straight to construction; a scope change reopens conception and planning while the current milestone keeps going.
 - **Existing projects too**: in a codebase not built with dev-kit, `/dev-kit:start` first tags a baseline and learns the project (stack, commands, your commit and version conventions, existing docs). You pick a mode (new feature, maintenance only, or import your own PRD/specs); audits then judge only what changed, and old problems become issues instead of blocking.
-- **Live board**: `/dev-kit:board` shows the build in the browser, drawn like the diagram above: one tab per lane, each screen fitting the window, a Map of the whole flow one click away, a red **Needs you** button when something waits for you, and details, metrics and activity in panels instead of long pages. It runs on this machine or is shared on your network with a private link, in English or Portuguese, light or dark. It answers questions, confirms checkpoints, approves releases and allows or denies tool requests, and its built-in worker runs what you ask there without a Claude Code session open.
+- **Live board**: `/dev-kit:board` shows the build in the browser, drawn like the diagram above: one tab per lane, each screen fitting the window, a Map of the whole flow one click away, a red **Needs you** button when something waits for you, the **Autopilot** switch, a **Live** list of what runs now, and details, metrics and activity in panels instead of long pages. It runs on this machine or is shared on your network with a private link, in English or Portuguese, light or dark. It answers questions, confirms checkpoints, approves releases and allows or denies tool requests, and its built-in worker runs what you ask there without a Claude Code session open.
 - **Deploy, costs and feedback**: production deploys with backup and smoke checks (`/dev-kit:deploy`), token cost per stage (`/dev-kit:costs`) and a graded evaluation of each session (`/dev-kit:feedback`).
 - **Resumable**: state lives in `.dev/` and is reconciled with git on every `/dev-kit:start`.
 
@@ -89,6 +90,7 @@ Full documentation lives in [`.claude/plugins/dev-kit/docs/`](.claude/plugins/de
 | Page | For |
 |---|---|
 | [getting-started](.claude/plugins/dev-kit/docs/getting-started.md) | a step-by-step first project |
+| [stages](.claude/plugins/dev-kit/docs/stages.md) | each stage of the flow (conception, planning, milestones, releases, stable, coming from 2.x): what to run, what the board shows, what needs you, how to get unstuck |
 | [recipes](.claude/plugins/dev-kit/docs/recipes.md) | "how do I...?" (report a bug, overnight run, costs, deploy, resume) |
 | [skills](.claude/plugins/dev-kit/docs/skills.md) | every skill: when to use it, arguments, examples, outputs |
 | [agents](.claude/plugins/dev-kit/docs/agents.md) | every agent and who calls it |

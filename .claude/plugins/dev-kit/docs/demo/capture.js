@@ -6,10 +6,14 @@ const [url, dir] = process.argv.slice(2);
 const SHOTS = [  // file, color scheme, steps before the shot
   ['board-construction', 'light', []],
   ['board-construction-dark', 'dark', []],
+  ['board-conception', 'light', [['click', '#ph-conception']]],
   ['board-planning', 'light', [['click', '#ph-planning']]],
+  ['board-milestones', 'light', [['click', '#ph-construction']]],
   ['board-releases', 'light', [['click', '#ph-releases']]],
   ['board-stable', 'light', [['click', '#ph-stable']]],
   ['board-pt-br', 'light', [['lang', 'pt-BR']]],
+  ['board-needs-you', 'light', [['click', '#needs-btn']]],
+  ['board-autopilot', 'light', [['click', '#ap-btn']]],
 ];
 (async () => {
   const b = await chromium.launch();

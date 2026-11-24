@@ -987,7 +987,7 @@
       "steps": [
         "Choose 'unattended with floors' in the interview, or later: /dev-kit:settings run overnight without asking",
         "Cover permission prompts: /fewer-permission-prompts and --permission-mode acceptEdits",
-        "Run inside tmux: claude --permission-mode acceptEdits \"/dev-kit:autopilot\"",
+        "Run inside tmux: claude --permission-mode acceptEdits \"/dev-kit:autopilot\", or turn on the board's Autopilot switch (it runs headless with acceptEdits, and its prompts wait in Needs you)",
         "In the morning: /dev-kit:status, /dev-kit:backlog, /dev-kit:costs, /dev-kit:interview --gaps"
       ]
     },
@@ -1213,8 +1213,29 @@
       ],
       "steps": [
         "/dev-kit:board in a Claude Code session opens the board and makes that session listen (keep it open, e.g. in tmux); away from the machine use an SSH tunnel, --host 0.0.0.0 with the access link, or --trusted-host behind your reverse proxy",
-        "on the board: Run next to a command, New issue, answer a question in Needs you, Plan to drag tasks and issues between milestones (or milestones between releases) and Send, or Go on by itself",
-        "each request starts in the listening session by itself; questions come back to the board with answers to pick. With no session listening, the board starts a headless Claude Code session for them by itself"
+        "on the board: Run next to a command, New issue, answer a question in Needs you, Replan the milestones to drag tasks and issues between milestones (or milestones between releases) and Send",
+        "each request starts in the listening session by itself; questions come back to the board with answers to pick. With no session listening, the board starts a headless Claude Code session for them by itself",
+        "to let the board drive the whole build, turn on its Autopilot switch (next recipe)"
+      ]
+    },
+    {
+      "id": "board-autopilot",
+      "title": "Let the board drive the build (Autopilot switch)",
+      "topics": [
+        "autopilot switch",
+        "board autopilot",
+        "drive",
+        "headless",
+        "parallel",
+        "implementers",
+        "waiting for you",
+        "stopped"
+      ],
+      "steps": [
+        "/dev-kit:board, then turn on the Autopilot switch in the top bar: the board runs /dev-kit:autopilot headless, one milestone per run, until a release waits for your approval or the project is stable; you can close the Claude Code session",
+        "questions and permission prompts go to Needs you; when only work that needs you is left the switch says waiting for you, and the next run starts once you answer",
+        "Implementers at once on the Autopilot card (1 to 6, default 3) sets how many tasks are built in parallel, from the next batch; /dev-kit:autopilot --parallel N does the same from a session",
+        "stopped: its card says why (three failed runs or a run that changed nothing); read .dev/run/autopilot.log, fix the cause, then Start again. Turning it off lets the run finish its step; Force stop ends it now"
       ]
     },
     {
@@ -1426,6 +1447,18 @@
     {
       "term": "session log",
       "definition": ".dev/telemetry.jsonl: structured, high-level events of the run, without project data."
+    },
+    {
+      "term": "Autopilot switch",
+      "definition": "The switch in the board's top bar that runs /dev-kit:autopilot headless, one milestone per run, until a release waits for your approval or the project is stable; its questions and permission prompts go to Needs you."
+    },
+    {
+      "term": "implementers at once",
+      "definition": "How many tasks of a milestone are built in parallel, each in its own worktree (1 to 6, default 3), set on the board's Autopilot card or with /dev-kit:autopilot --parallel N; applies from the next batch."
+    },
+    {
+      "term": "Needs you",
+      "definition": "The board's red button and drawer with everything waiting for you: questions, Confirm PRD and Confirm plan, release approvals, permission prompts and offers on the issue queue."
     },
     {
       "term": "Baseline",

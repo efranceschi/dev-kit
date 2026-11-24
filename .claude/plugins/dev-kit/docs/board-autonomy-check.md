@@ -37,7 +37,7 @@ Do these one at a time, and for each one write in `.dev/run/autonomy-check/manua
 3. **Deny.** Queue `/dev-kit:status` with ▶ (or any other runnable command), and while it runs, if a permission appears, click **Deny**. Note what Claude did next.
 4. **Timeout.** If you can, let one permission go unanswered: it should be denied after 10 minutes. Note when the terminal moved on.
 5. **Tab alert.** With a question or permission waiting, note the tab's title and icon.
-6. **Go on by itself.** Turn it on. Note which steps started alone and the reason shown when it stopped.
+6. **Autopilot.** Turn on the Autopilot switch in the top bar. Note which steps ran, what the word next to the switch said along the way (running, waiting for you, stopped…) and the reason in its card when it stopped.
 
 ## 4. Collect and send
 

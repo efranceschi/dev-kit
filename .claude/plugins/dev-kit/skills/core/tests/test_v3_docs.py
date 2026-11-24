@@ -71,9 +71,34 @@ class TestDocImages(unittest.TestCase):
         self.assertGreaterEqual(seen, 10)
 
     def test_the_screenshots_are_embedded_somewhere(self) -> None:
-        text = "".join(p.read_text(encoding="utf-8") for p in [REPO / "GET_STARTED.md", DOCS / "getting-started.md"])
+        text = "".join(p.read_text(encoding="utf-8") for p in [REPO / "GET_STARTED.md", DOCS / "getting-started.md", DOCS / "stages.md"])
         for img in (DOCS / "images").glob("*.png"):
             self.assertIn(f"images/{img.name}", text)
+
+
+class TestStagesGuide(unittest.TestCase):
+    """docs/stages.md walks through every stage of the flow, and says what each one expects from the user."""
+
+    def test_every_stage_has_its_how_to(self) -> None:
+        text = (DOCS / "stages.md").read_text(encoding="utf-8")
+        sections = re.split(r"^## ", text, flags=re.M)
+        stages = {s.split("\n", 1)[0]: s for s in sections[1:]}
+        for title in ("1. Conception", "2. Planning", "3. Milestones", "4. Releases", "5. Stable and maintenance", "6. Coming from dev-kit 2.x"):
+            self.assertIn(title, stages)
+        for title in ("1. Conception", "2. Planning", "3. Milestones", "4. Releases", "5. Stable and maintenance"):
+            for part in ("**Run**", "**The board shows**", "**Needs you**", "**Unstuck**"):
+                self.assertIn(part, stages[title], f"{title}: {part}")
+
+    def test_the_autopilot_states_match_the_board(self) -> None:
+        text = (DOCS / "stages.md").read_text(encoding="utf-8")
+        js = (CORE / "shared" / "board" / "board.js").read_text(encoding="utf-8")
+        words = re.search(r"const AP_WORD = tmap\(\{(.*?)\}\);", js, re.S).group(1)
+        for word in re.findall(r'N_\("([^"]+)"\)', words):
+            self.assertIn(word, text, f"stages.md does not explain the Autopilot state '{word}'")
+
+    def test_linked_from_the_entry_points(self) -> None:
+        for page in (REPO / "README.md", REPO / "GET_STARTED.md", KIT / "README.md", DOCS / "getting-started.md"):
+            self.assertIn("stages.md", page.read_text(encoding="utf-8"), page.name)
 
 
 class TestDemoProject(unittest.TestCase):
