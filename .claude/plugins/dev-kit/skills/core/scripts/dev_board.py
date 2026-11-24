@@ -1358,9 +1358,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(201, {"ok": True, "item": dw.submit(root, action, args)})
             if path == "/api/worker/mode":
                 return self._json(200, {"ok": True, "modes": dw.set_mode(root, body.get("paused"))})
-            if path == "/api/autopilot":  # the switch: {"on": true|false}, or {"force_stop": true}
+            if path == "/api/autopilot":  # the switch: {"on": true|false}, {"parallel": 1-6} or {"force_stop": true}
                 if body.get("force_stop") is True:
                     return self._json(200, {"ok": True, "autopilot": dw.autopilot_force_stop(root)})
+                if "parallel" in body:
+                    return self._json(200, {"ok": True, "autopilot": dw.set_autopilot_parallel(root, body.get("parallel"))})
                 return self._json(200, {"ok": True, "autopilot": dw.set_autopilot(root, body.get("on"))})
             m = REQ_PATH.match(path)
             if m:

@@ -1,7 +1,7 @@
 ---
 name: autopilot
 description: Autonomous end-to-end build driver - starting from the interview brief, runs conception (PRD, architecture, UX, UI) and planning, then the construction cycle (implement -> QA gate -> fix loops per milestone) and the next release (usability audit, docs, release) until the project is stable, pausing only for always-ask decisions, unresolvable blockers or exceeded fix rounds. Resumes from the current lifecycle step. Use when the user wants the application built with minimal interaction ("build it", "continue autonomously", "run until QA").
-argument-hint: "[--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N] [--board]"
+argument-hint: "[--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N] [--parallel N] [--board]"
 disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob, Agent, AskUserQuestion, Skill
 ---
@@ -16,6 +16,8 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 Let `DS` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}"` and `DW` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_worker.py" --root "${CLAUDE_PROJECT_DIR}"`.
 
 ## Preconditions
+**One autopilot per project.** Without `--board`, run `DW autopilot status --json` first. When its `state` is `running` or `stopping`, the board's Autopilot already drives this project: never start a second driver (two would start the same tasks). If the user only gave `--parallel N`, apply it to the run in progress with `DW autopilot parallel N` (it takes effect at its next batch) and say so; otherwise say that the board's Autopilot is running, that it can be followed on the board, and that it is turned off with the switch or `DW autopilot off` (its run finishes the step in progress), then stop. Likewise, when another session of yours is already running `/dev-kit:autopilot` on this project, do not start a second one.
+
 `.dev/brief.md` exists and the interview was confirmed (the lifecycle step is past `interview`, i.e. `artifact mark brief` was recorded). If not, invoke `interview` first and come back; never build from an unconfirmed brief.
 
 ## Driver loop
@@ -30,7 +32,7 @@ The project lifecycle is derived by `dev_state.py` (`conventions.md` §19): read
 | conception · ux | - | `ux` | ui |
 | conception · ui | - | `ui` | `review design` until pass |
 | planning · plan | `design` (UI products) | `plan` (`plan replan` when `plan.md` already has tasks) | `review plan` until pass |
-| construction · M<n> | `plan` | at the start of each milestone `DS pull-issues <M>` (issue buffer, §15); then `implement --milestone <current> --parallel N` whenever the brief allows parallel work and `DS next --batch N` returns more than one task (N from the brief, default 3), else `implement --milestone <current>`; log a `skill_end` for `implement` at the end of each milestone so the time of every milestone is recorded (`conventions.md` §13) | milestone complete → `qa <M>` |
+| construction · M<n> | `plan` | at the start of each milestone `DS pull-issues <M>` (issue buffer, §15); then `implement --milestone <current> --parallel auto` whenever the brief allows parallel work and `DS next --batch auto` returns more than one task, else `implement --milestone <current>` (`auto` = the number of implementers set on the board's Autopilot card, `.dev/run/autopilot.json`, 1 to 6, default 3, read again before every batch; `--parallel N` given to this run replaces it with N); log a `skill_end` for `implement` at the end of each milestone so the time of every milestone is recorded (`conventions.md` §13) | milestone complete → `qa <M>` |
 | construction · M<n>, tasks done, gate pending | - | `qa <M>` (scores the milestone; local preview per §11 when enabled) | gate passed → `DS cooldown <M>` (if on, §15) → `deploy <M>` if `autonomy.production.when` is `per_milestone` or `per_milestone_flagged` (§12; flagged: the milestone ships with its release's flag off), then the next milestone; gate pending → implement (fix tasks) and re-run qa; rounds > `max_fix_rounds_per_gate` → pause |
 | construction · release | - | the next release (`lifecycle.release`): `usability` when it says `todo` (score recorded as review `ux`; fail → implement the fix tasks, re-audit), then `docs all` and `review docs` until pass, then `release` | stable (or the next milestone when one was planned meanwhile) | Every release is planned (`conventions.md` §19): `release` submits the release for approval and autopilot stops there, reporting the release review; it never approves or rejects. It resumes when the user decided (`status` `deploying_prod`: run `release` to finish it; a rejection opened the fixes milestone: implement and QA it, then `release` again).
 | construction · issues | - | none: queued issues wait to be scheduled (`backlog`); stop and show them | - |

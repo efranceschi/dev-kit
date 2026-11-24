@@ -2,6 +2,16 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.3.0 — 2026-11-24
+
+### Added
+- **Implementers at once** on the Autopilot card: − N + from 1 to 6 (default 3; 1 = one task at a time), with how many implementers run now. Kept on this machine in `.dev/run/autopilot.json` (`parallel`), next to the switch; `dev_worker.py autopilot parallel N` and `POST /api/autopilot {"parallel": N}` do the same. Only implementers: QA keeps its rule (light auditors together, heavy ones `nproc ÷ 3`).
+- `dev_state.py next --batch auto`: the batch size is that number (the JSON says `batch_size`). `implement --parallel auto` runs it again before every batch, so a change on the card applies from the next batch while running implementers finish; `--parallel N` given by hand still wins for its run. The autopilot (board or by hand) and its implement rounds use `auto`, so the "N from the brief" that no question ever set is gone.
+- `/dev-kit:autopilot --parallel N`.
+
+### Changed
+- **One autopilot per project**: `/dev-kit:autopilot` started by hand while the board's Autopilot is running no longer tries to start a second driver. With only `--parallel N` it applies N to the run in progress (from its next batch) and says so; otherwise it says the board's Autopilot drives the project and how to turn it off.
+
 ## 3.2.0 — 2026-11-24
 
 The board drives the project: an **Autopilot** switch in the top bar runs `/dev-kit:autopilot` from the board. Until now nothing moved unless a session ran the autopilot or a request was queued, and the top bar suggested otherwise.

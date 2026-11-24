@@ -429,11 +429,29 @@
       h("p", { class: "pop-note top" }, tr("Runs "), h("code", { text: ap.command || "/dev-kit:autopilot --milestones 1 --board" }),
         tr(" headless, one milestone per run, until a release waits for your approval. Questions and permissions go to Needs you. Output: "), h("code", { text: ".dev/run/autopilot.log" })),
       ap.runs ? h("p", { class: "card-sub", text: plural(ap.runs, "run") }) : null,
+      parallelRow(ap),
       h("div", { class: "ap-actions" },
         ap.state === "waiting_user" || ap.state === "release" ? h("button", { type: "button", class: "btn btn-sm", text: tr("Open Needs you"), onclick: goNeeds }) : null,
         h("button", { type: "button", class: "btn btn-sm", text: ap.on ? (ap.state === "stopped" ? tr("Start again") : tr("Turn off")) : tr("Turn on"),
           onclick: () => setAutopilot(ap.state === "stopped" ? true : !ap.on) }),
         ap.state === "running" || ap.state === "stopping" ? h("button", { type: "button", class: "btn btn-sm btn-danger", text: tr("Force stop"), onclick: forceStop }) : null));
+  }
+  /** Implementers at once (1-6, default 3): `implement` reads it before every batch, so a change applies from the next one. */
+  function parallelRow(ap) {
+    const n = ap.parallel || 3, [lo, hi] = ap.parallel_range || [1, 6];
+    const busy = activeAgents().filter((a) => a.agent === "implementer").length;
+    const step = (d, label) => h("button", { type: "button", class: "btn btn-sm ap-step", text: d < 0 ? "−" : "+", "aria-label": label,
+      disabled: (d < 0 ? n <= lo : n >= hi) ? "" : null, onclick: () => setParallel(n + d) });
+    return h("div", { class: "ap-par" },
+      h("div", { class: "ap-par-row" }, h("span", { class: "ap-par-label", id: "ap-par-label", text: tr("Implementers at once") }),
+        h("span", { class: "ap-stepper", role: "group", "aria-labelledby": "ap-par-label" }, step(-1, tr("Fewer implementers")),
+          h("output", { class: "ap-par-n", "aria-live": "polite", text: String(n) }), step(1, tr("More implementers"))),
+        h("span", { class: "card-sub", text: tr("{v} running now", { v: String(busy) }) })),
+      h("p", { class: "pop-note", text: n === 1 ? tr("1 = one task at a time.")
+        : tr("Applies from the next batch. Only tasks with no file in common run together. More at once costs no more tokens, but uses more CPU and disk and reaches the account's usage limits sooner.") }));
+  }
+  async function setParallel(n) {
+    try { await api("/api/autopilot", { parallel: n }); toast(tr("{v} implementers at once, from the next batch.", { v: String(n) })); load(); } catch (e) { toast(e.message, true); }
   }
   async function setAutopilot(on) {
     try {

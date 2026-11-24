@@ -24,8 +24,9 @@ Subcommands (executor side)
                 silent process that prints one line when a request waits for the armed session it runs under, and
                 again every 10 minutes while nobody takes it. Each line reaches Claude as a notification, so an
                 idle session starts working. Prints nothing in any other session. (--once: one pass, for tests)
-  autopilot     the board's autopilot: on | off | status (--json). On, the board's server runs /dev-kit:autopilot
-                headless, one milestone per run, until a release waits for approval (AutoExecutor)
+  autopilot     the board's autopilot: on | off | status | parallel [N] (--json). On, the board's server runs
+                /dev-kit:autopilot headless, one milestone per run, until a release waits for approval (AutoExecutor);
+                parallel N (1-6, default 3) = implementers at once, read by `dev_state.py next --batch auto`
   autopilot-exit  written by /dev-kit:autopilot --board as its last step: --reason milestone_done|waiting_for_user|
                 release_approval|stable|stopped|until_reached [--note TEXT]; the board reads it to decide the next run
 
@@ -695,6 +696,7 @@ AP_COMMAND = "/dev-kit:autopilot --milestones 1 --board"
 AP_EXIT_REASONS = ("milestone_done", "waiting_for_user", "release_approval", "stable", "stopped", "until_reached")
 AP_WAITS = {"waiting_for_user": "waiting_user", "release_approval": "release", "stable": "stable"}  # exit reason -> state
 AP_MAX_FAILS = 3                # failed runs in a row before the autopilot stops and says why
+AP_PARALLEL = (1, 6, 3)         # implementers at once: min, max, default (the Autopilot card; dev_state next --batch auto)
 
 
 def auto_cfg(root: Path) -> dict:
@@ -737,6 +739,28 @@ def _ap_since(root: Path) -> float:
         return 0.0
 
 
+def autopilot_parallel(root: Path) -> int:
+    n = (_read(run_dir(root) / AP_FILE) or {}).get("parallel")
+    lo, hi, default = AP_PARALLEL
+    return n if isinstance(n, int) and not isinstance(n, bool) and lo <= n <= hi else default
+
+
+def set_autopilot_parallel(root: Path, n: object) -> dict:
+    """Implementers at once, for this machine: `implement` reads it before each batch (`next --batch auto`), in a
+    run of the board or one started by hand, so a change applies from the next batch."""
+    lo, hi, _ = AP_PARALLEL
+    if isinstance(n, str) and n.strip().isdigit():
+        n = int(n)
+    if not isinstance(n, int) or isinstance(n, bool) or not lo <= n <= hi:
+        raise Invalid([f"parallel must be a whole number from {lo} to {hi}"])
+    _ensure(root)
+    raw = _read(run_dir(root) / AP_FILE)
+    if raw is None:  # first write keeps what the switch means now (continuous mode carried over)
+        raw = {"on": autopilot_on(root), "since_s": time.time()}
+    _write(run_dir(root) / AP_FILE, {**raw, "parallel": n, "at": now()})
+    return autopilot_status(root)
+
+
 def autopilot_status(root: Path) -> dict:
     """The board's autopilot as the switch shows it. state: off · idle (on, about to start a run) · running · stopping
     (off asked, the run finishes its step) · waiting_user (only work that needs the user is left) · release (a release
@@ -755,7 +779,8 @@ def autopilot_status(root: Path) -> dict:
     elif state == "stopped" and float(st.get("at_s") or 0) < _ap_since(root):
         state = "idle"  # switched on again since it stopped
     keep = ("reason", "pid", "since", "milestone", "runs", "fails", "until", "note", "last_exit", "at")
-    return {"on": on, "state": state, "command": AP_COMMAND, **{k: st.get(k) for k in keep if st.get(k) is not None}}
+    return {"on": on, "state": state, "command": AP_COMMAND, "parallel": autopilot_parallel(root), "parallel_range": list(AP_PARALLEL[:2]),
+            **{k: st.get(k) for k in keep if st.get(k) is not None}}
 
 
 def set_autopilot(root: Path, on: object) -> dict:
@@ -763,7 +788,7 @@ def set_autopilot(root: Path, on: object) -> dict:
     if not isinstance(on, bool):
         raise Invalid(["on must be true or false"])
     _ensure(root)
-    _write(run_dir(root) / AP_FILE, {"on": on, "since_s": time.time(), "at": now()})
+    _write(run_dir(root) / AP_FILE, {**(_read(run_dir(root) / AP_FILE) or {}), "on": on, "since_s": time.time(), "at": now()})
     stop = run_dir(root) / AP_STOP
     st = _read(run_dir(root) / AP_RUN) or {}
     if on:
@@ -1275,7 +1300,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("arm"); s.add_argument("--pid", type=int, required=True); s.add_argument("--wait", type=float, default=0)
     sub.add_parser("disarm")
     s = sub.add_parser("watch"); s.add_argument("--once", action="store_true"); s.add_argument("--poll", type=float, default=2.0)
-    s = sub.add_parser("autopilot"); s.add_argument("what", choices=("on", "off", "status")); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("autopilot"); s.add_argument("what", choices=("on", "off", "status", "parallel")); s.add_argument("n", nargs="?")
+    s.add_argument("--json", action="store_true")
     s = sub.add_parser("autopilot-exit"); s.add_argument("--reason", required=True); s.add_argument("--note")
     a = p.parse_args(argv)
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -1302,8 +1328,12 @@ def main(argv: list[str] | None = None) -> int:
             print("disarmed")
             return 0
         if a.cmd == "autopilot":
-            st = autopilot_status(root) if a.what == "status" else set_autopilot(root, a.what == "on")
-            _print(st, a.json, f"autopilot {'on' if st['on'] else 'off'} · {st['state']}" + (f" · {st['reason']}" if st.get("reason") else ""))
+            if a.what == "parallel":
+                st = set_autopilot_parallel(root, a.n) if a.n is not None else autopilot_status(root)
+            else:
+                st = autopilot_status(root) if a.what == "status" else set_autopilot(root, a.what == "on")
+            _print(st, a.json, f"autopilot {'on' if st['on'] else 'off'} · {st['state']}" + (f" · {st['reason']}" if st.get("reason") else "")
+                   + f" · {st['parallel']} implementer(s) at once")
             return 0
         if a.cmd == "autopilot-exit":
             rec = autopilot_exit(root, a.reason, a.note)

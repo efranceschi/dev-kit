@@ -267,5 +267,53 @@ class TestKeptAndShown(Base):
         self.assertIn("--board", (CORE.parent / "autopilot" / "SKILL.md").read_text(encoding="utf-8"))
 
 
+class TestParallel(Base):
+    """3.3: implementers at once, set on the Autopilot card (1-6, default 3), read by `next --batch auto` before every batch."""
+
+    def plan6(self) -> None:
+        tasks = "".join(f"### T-{n:03d} T{n}\n- status: todo\n- deps: \n- type: feature\n- acceptance:\n  - AC-{n}: x\n"
+                        f"- test_notes: t\n- files: src/f{n}.py\n\n" for n in range(1, 8))
+        (self.root / ".dev" / "plan.md").write_text("# Plan\n\n## R1 — First\n\n## M1 — One\nOne.\n\n" + tasks, encoding="utf-8")
+        self.ds("sync-plan")
+
+    def batch(self) -> dict:
+        return json.loads(self.ds("next", "--batch", "auto", "--json"))
+
+    def test_default_three_and_the_card_changes_the_next_batch(self) -> None:
+        self.plan6()
+        self.assertEqual(dw.autopilot_status(self.root)["parallel"], 3)
+        b = self.batch()
+        self.assertEqual((len(b["tasks"]), b["batch_size"]), (3, 3))
+        dw.set_autopilot_parallel(self.root, 6)
+        self.assertEqual(len(self.batch()["tasks"]), 6)
+        self.assertIn("1 implementer(s) at once", self.cli("autopilot", "parallel", "1"))
+        self.assertEqual(len(self.batch()["tasks"]), 1)
+        self.assertEqual(len(json.loads(self.ds("next", "--batch", "4", "--json"))["tasks"]), 4)  # an explicit N still wins
+
+    def test_limits_and_the_switch_kept_apart(self) -> None:
+        for bad in (0, 7, "x", True, 2.5):
+            with self.assertRaises(dw.Invalid):
+                dw.set_autopilot_parallel(self.root, bad)
+        dw.set_autopilot(self.root, True)
+        dw.set_autopilot_parallel(self.root, "5")
+        self.assertTrue(dw.autopilot_on(self.root))  # changing the number never touches the switch
+        dw.set_autopilot(self.root, False)
+        self.assertEqual(dw.autopilot_parallel(self.root), 5)  # nor the switch the number
+
+    def test_first_write_keeps_continuous_mode_carried_over(self) -> None:
+        (self.root / ".dev" / "run").mkdir(exist_ok=True)
+        (self.root / ".dev" / "run" / "worker-mode.json").write_text(json.dumps({"continuous": True}))
+        dw.set_autopilot_parallel(self.root, 2)
+        self.assertTrue(dw.autopilot_on(self.root))
+
+    def test_skills_read_it_before_every_batch_and_never_double_the_autopilot(self) -> None:
+        impl = (CORE.parent / "implement" / "SKILL.md").read_text(encoding="utf-8")
+        auto = (CORE.parent / "autopilot" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("next --batch <N or auto>", impl)
+        self.assertIn("--parallel auto", auto)
+        self.assertIn("One autopilot per project", auto)
+        self.assertIn("DW autopilot parallel N", auto)
+
+
 if __name__ == "__main__":
     unittest.main()

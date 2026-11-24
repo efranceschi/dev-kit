@@ -452,6 +452,10 @@
           "meaning": "stop after N approved gates, to resume in a fresh session (cheaper long runs)"
         },
         {
+          "arg": "--parallel N",
+          "meaning": "implementers at once for this run (1-6); without it, the number set on the board's Autopilot card (default 3). With the board's Autopilot running, it changes that run's number instead"
+        },
+        {
           "arg": "--board",
           "meaning": "how the board's Autopilot switch runs it: headless, questions go to Needs you, ends saying why (you do not type it)"
         }
@@ -497,7 +501,7 @@
         },
         {
           "arg": "--parallel N",
-          "meaning": "N isolated implementers in git worktrees"
+          "meaning": "N isolated implementers in git worktrees; --parallel auto takes the number set on the board's Autopilot card (default 3)"
         },
         {
           "arg": "--skip-gate",

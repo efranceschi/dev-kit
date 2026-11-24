@@ -1701,9 +1701,30 @@ def pick_batch(store: Store, milestone: str | None, n: int) -> tuple[list[str], 
     return chosen, ""
 
 
+PARALLEL_MIN, PARALLEL_MAX, PARALLEL_DEFAULT = 1, 6, 3  # implementers at once (the board's Autopilot card, 3.3)
+
+
+def parallel_setting(store: Store) -> int:
+    """Implementers at once set on this machine (.dev/run/autopilot.json `parallel`, the Autopilot card), or 3."""
+    try:
+        n = json.loads((store.dev / "run" / "autopilot.json").read_text(encoding="utf-8")).get("parallel")
+    except (OSError, ValueError, AttributeError):
+        n = None
+    return n if isinstance(n, int) and not isinstance(n, bool) and PARALLEL_MIN <= n <= PARALLEL_MAX else PARALLEL_DEFAULT
+
+
 def cmd_next(store: Store, a: argparse.Namespace) -> None:
     store.load()
-    if getattr(a, "batch", None):
+    if getattr(a, "batch", None) is not None:
+        if a.batch == "auto":
+            a.batch = parallel_setting(store)
+        else:
+            try:
+                a.batch = int(a.batch)
+            except ValueError:
+                fail("--batch takes a number or auto")
+            if a.batch < 1:
+                fail("--batch must be 1 or more")
         batch, why = pick_batch(store, a.milestone, a.batch)
         maybe = maybe_false_deps(store, a.milestone, batch) if len(batch) < a.batch else []
         hint = [f"maybe false dependency: {m['task']} waits only on {', '.join(m['waits_on'])} (in progress); review it before waiting" for m in maybe]
@@ -1717,7 +1738,7 @@ def cmd_next(store: Store, a: argparse.Namespace) -> None:
         if a.json:
             m0 = store.tasks()[batch[0]]["milestone"]
             ah = None if store.gate_open_for(m0)[0] else ahead_branch(store, m0)
-            print(json.dumps({"tasks": [{"task": t, **store.tasks()[t]} for t in batch], **({"maybe_false_deps": maybe} if maybe else {}),
+            print(json.dumps({"tasks": [{"task": t, **store.tasks()[t]} for t in batch], "batch_size": a.batch, **({"maybe_false_deps": maybe} if maybe else {}),
                               **({"branch": ah["branch"], "ahead_of": ah["waits_for"]} if ah else {})}, ensure_ascii=False))
         else:
             for t in batch:
@@ -7299,7 +7320,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--note"); s.add_argument("--force", action="store_true"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("next"); s.set_defaults(fn=cmd_next)
     s.add_argument("--milestone"); s.add_argument("--json", action="store_true")
-    s.add_argument("--batch", type=int, help="up to N ready tasks that can run in parallel")
+    s.add_argument("--batch", help="up to N ready tasks that can run in parallel; auto = the number set on the board's Autopilot card (.dev/run/autopilot.json, default 3)")
 
     s = sub.add_parser("start"); s.set_defaults(fn=cmd_start); s.add_argument("task"); s.add_argument("--force", action="store_true")
     s = sub.add_parser("done"); s.set_defaults(fn=cmd_done); s.add_argument("task"); s.add_argument("--commit"); s.add_argument("--force", action="store_true")

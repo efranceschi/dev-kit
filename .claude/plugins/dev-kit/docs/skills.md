@@ -339,13 +339,14 @@ Drives the build on its own: conception and planning, then milestone after miles
 
 **When:** After the interview, when you want the app built with minimal interaction (also overnight).
 
-**Usage:** `/dev-kit:autopilot [--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N] [--board]`
+**Usage:** `/dev-kit:autopilot [--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N] [--parallel N] [--board]`
 
 | Argument | Meaning |
 |---|---|
 | `--until step` | stop at a step: prd, architecture, design, plan, qa, usability, docs or release (e.g. plan, to review the documents first) |
 | `--milestone M1` | build only one milestone |
 | `--milestones N` | stop after N approved gates, to resume in a fresh session (cheaper long runs) |
+| `--parallel N` | implementers at once for this run (1-6); without it, the number set on the board's Autopilot card (default 3). With the board's Autopilot running, it changes that run's number instead |
 | `--board` | how the board's Autopilot switch runs it: headless, questions go to Needs you, ends saying why (you do not type it) |
 
 **Examples:**
@@ -371,7 +372,7 @@ Implements ready tasks test-first, full suite, one commit per task; hotfix lane 
 |---|---|
 | `T-003` | one task |
 | `--milestone M1 | --tasks N` | a milestone or N tasks |
-| `--parallel N` | N isolated implementers in git worktrees |
+| `--parallel N` | N isolated implementers in git worktrees; --parallel auto takes the number set on the board's Autopilot card (default 3) |
 | `--skip-gate` | work past a pending gate (records an ADR and sets the gate skipped) |
 | `--round-child` | internal: the milestone runs in a child session started by `dev_state.py round run` |
 
