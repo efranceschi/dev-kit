@@ -13,6 +13,11 @@ agent without a slot, a project without .dev/state.json) passes untouched.
 - Bash (every kit agent, slot or not): `git commit --no-verify` / `-n`, `git push --force` / `-f`, `git rebase` and
   `git reset --hard` are denied. The orchestrator uses the kit's scripts, never these.
 
+- In a headless round (`dev_state.py round run`, DEV_KIT_ROUND_ID set), the orchestrator itself: applying a task's
+  worktree by hand (`git apply`/`am`/`cherry-pick`, `git checkout|restore` from a dev-kit/T-nnn branch, `cp`/`rsync`
+  out of a worktrees/ folder) is denied; `slot apply` and `start T-nnn --resume` do it and record the start. Every
+  tool call of the round (orchestrator and agents) also leaves its last action in .dev/run/round-activity.json, which
+  the board shows while the round runs.
 - With a worktree (`slot open --worktree`, the slot records it): an edit outside the worktree is denied, the main
   checkout included, and so is a Bash command run from outside it, except `cd` into it, a read-only look, a kit script
   or a command that names the worktree (`git -C <wt>`).
@@ -41,6 +46,10 @@ GIT_DENY = [
     ("git_rebase", re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?rebase\b")),
     ("git_reset_hard", re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?reset\b[^;&|\n]*--hard\b")),
 ]
+MANUAL_ADOPT = re.compile(
+    r"\bgit\s+(?:-C\s+\S+\s+)?(?:apply|am|cherry-pick)\b"
+    r"|\bgit\s+(?:-C\s+\S+\s+)?(?:checkout|restore|merge)\b[^;&|\n]*dev-kit/T-\d+"
+    r"|\b(?:cp|rsync|ditto)\b[^;&|\n]*worktrees/")
 KIT_AGENTS = None
 
 
@@ -142,12 +151,41 @@ def deny(dev: Path, reason: str, code: str, agent: str, scope: object, tool: str
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}
 
 
+def note_activity(dev: Path, payload: dict, rnd: str) -> None:
+    """The round's last action, for the board: tool, a short description, who (the orchestrator or an agent)."""
+    from datetime import datetime, timezone
+    ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    tool = str(payload.get("tool_name") or "")
+    what = ti.get("description") or ti.get("command") or ti.get("file_path") or ti.get("notebook_path") or ti.get("prompt") or ""
+    what = " ".join(str(what).split())[:140]
+    rec = {"round": rnd, "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "tool": tool, "what": what,
+           "agent": str(payload.get("agent_type") or "").removeprefix("dev-kit:") or None}
+    p = dev / "run" / "round-activity.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rec), encoding="utf-8")
+    os.replace(tmp, p)
+
+
 def decide(payload: dict, root: Path) -> dict | None:
     dev = root / ".dev"
     if payload.get("hook_event_name") != "PreToolUse" or not (dev / "state.json").is_file():
         return None
     aid = str(payload.get("agent_id") or "").lower()
+    rnd = os.environ.get("DEV_KIT_ROUND_ID") or ""
+    if rnd:
+        try:
+            note_activity(dev, payload, rnd)
+        except Exception:  # noqa: BLE001 - the board's view must never break the fence
+            pass
     if not aid:
+        if rnd and payload.get("tool_name") == "Bash":
+            ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+            if MANUAL_ADOPT.search(str(ti.get("command") or "")):
+                return deny(dev, "dev-kit: a round never applies a task's worktree by hand: it would work on the task without "
+                                 "recording its start. Use `dev_state.py start T-nnn --resume` (inline task: it applies the "
+                                 "earlier attempt, staged) or `slot open N --task T-nnn --worktree` + `slot apply N` "
+                                 "(implementer), conventions.md §17.", "manual_adopt", "orchestrator", None, "Bash")
         return None  # the main session: never fenced
     bound = read_json(dev / "run" / "agent-slots.json").get(aid) or {}
     agent = str(bound.get("agent") or payload.get("agent_type") or "").removeprefix("dev-kit:").lower()

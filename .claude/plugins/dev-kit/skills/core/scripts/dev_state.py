@@ -19,7 +19,7 @@ Subcommands
                 writes .dev/qa/M/risk-report.md (--all: every milestone; --json)
   next          print the next task to work on (fix tasks first, deps satisfied, gate respected); --batch N: tasks
                 that can run in parallel (no common files, one serialising file at most)
-  start T       mark task in_progress
+  start T       mark task in_progress (--resume: take over an earlier attempt's worktree or dev-kit/T-nnn, §17)
   done T        mark task done (optionally --commit SHA)
   block T       mark task blocked (--reason; --blocked-by I-nnn pauses it until the replan of that scope change)
   forecast [--json]   probable (P50) and late (P85) finish and cost to finish per open milestone and release,
@@ -40,7 +40,8 @@ Subcommands
                 its changes into the main checkout, conventions §17
   reconcile [--milestone M] [--since ISO] [--adopt T-nnn] [--json]   after a round or a session that stopped: close
                 the slots left open, block the tasks left in_progress (Previous attempt in the ledger), remove clean
-                worktrees; --adopt moves a task's changes from the main checkout into its worktree, conventions §17
+                worktrees; with --since, a todo task committed since then is done and one left changed is moved to its
+                worktree and blocked; --adopt moves a task's changes from the main checkout into its worktree, §17
   affected      pending tasks whose acceptance cites changed ACs (--acs AC-4,AC-7 [--json]), conventions §15
   unblock T     blocked -> todo
   drop T        drop a task removed by a replan (--reason); it no longer counts for milestones or release
@@ -1783,12 +1784,22 @@ def cmd_next(store: Store, a: argparse.Namespace) -> None:
 
 def cmd_start(store: Store, a: argparse.Namespace) -> None:
     store.load()
+    if getattr(a, "resume", False):
+        resume_task(store, a.task, a.force)
+        return
+    start_task(store, a.task, a.force)
+
+
+def start_task(store: Store, tid: str, force: bool, keep_started: bool = False, via: str | None = None) -> dict | None:
+    """in_progress, with the task's tier and route recorded. `keep_started` keeps the first start of a task resumed
+    from an earlier attempt (its execution time counts from there); `via` names the command that started it."""
+    a = argparse.Namespace(task=tid, force=force)
     t = store.task(a.task)
     if t["status"] in FINISHED:
         fail(f"{a.task} is already {t['status']}")
     if t["status"] == "in_progress":
         print(f"{a.task} already in_progress")
-        return
+        return None
     others = [x for x in store.in_progress() if x != a.task]
     if others and not a.force:
         fail(f"{others[0]} is already in_progress; finish it or use --force for parallel work")
@@ -1807,7 +1818,7 @@ def cmd_start(store: Store, a: argparse.Namespace) -> None:
     r = safe_route(store, a.task)
     t["status"] = "in_progress"
     issue_sync(store, t)
-    t["started_at"] = now()
+    t["started_at"] = (t.get("started_at") if keep_started else None) or now()
     t["blocked_reason"] = None
     if ahead:
         t["branch"] = ahead["branch"]
@@ -1817,17 +1828,19 @@ def cmd_start(store: Store, a: argparse.Namespace) -> None:
                      "arm": r["final_arm"], "routed": r["final_arm"] != r["arm"], "context": r["route"]["context"],
                      "signals": sorted({s["signal"] for s in r["reasons"]}), "at": now()}
     store.save()
-    store.log(f"start {a.task} {t['title']}" + (f" tier={r['tier']} arm={r['final_arm']}" if r else ""))
+    store.log(f"start {a.task} {t['title']}" + (f" tier={r['tier']} arm={r['final_arm']}" if r else "") + (f" (by {via})" if via else ""))
     store.event("task", task=a.task, transition="start", type=t.get("type"), milestone=t.get("milestone"), parallel=bool(a.force and others),
                 tier=risk.tier_token(r["tier"]) if r else None, risk_score=r["score"] if r else None)
     if r:
         store.event("route", context=tel_ctx(r["route"]["context"]), rule_tier=risk.tier_token(r["tier"]),
                     arm=r["final_arm"].replace("/", "."), reason_code=r["route"]["reason_code"], explore=bool(r["route"]["explore"]))
-    print(f"{a.task} in_progress: {t['title']}" + (f" · {r['final_model']} / {r['final_effort']} ({r['tier']})" if r else ""))
+    print(f"{a.task} in_progress: {t['title']}" + (f" · {r['final_model']} / {r['final_effort']} ({r['tier']})" if r else "")
+          + (f" · started by {via}" if via else ""))
     if ahead:
         print(f"  ahead of {ahead['waits_for']}: work on branch {ahead['branch']} in its own worktree "
               f"(`pipeline worktree {ahead['branch']}`), never on the main branch; it is integrated when {ahead['waits_for']} "
               + ("is released" if ahead["kind"] == "release" else "passes its gate") + " (§19)")
+    return r
 
 
 def safe_route(store: Store, tid: str) -> dict | None:
@@ -1871,7 +1884,8 @@ def cmd_done(store: Store, a: argparse.Namespace) -> None:
     if t["status"] == "dropped":
         fail(f"{a.task} was dropped; add a new task instead")
     if t["status"] != "in_progress" and not a.force:
-        fail(f"{a.task} is {t['status']}, not in_progress (use --force to override)")
+        fail(f"{a.task} is {t['status']}, not in_progress: run `start {a.task}` first (`start {a.task} --resume` takes over an "
+             "earlier attempt). --force only corrects the record of work already committed")
     t["status"] = "done"
     t["done_at"] = now()
     if a.commit:
@@ -1880,6 +1894,11 @@ def cmd_done(store: Store, a: argparse.Namespace) -> None:
     store.save()
     if t.get("scope_after_freeze") and t.get("files"):
         drop_ledger_files(store, t["files"])
+    rs = t.get("resumed_from") or {}
+    if rs.get("worktree"):
+        why = remove_worktree(store, Path(rs["worktree"]), rs.get("branch"), rs.get("applied"), rs.get("base_sha"))
+        print(f"note: the earlier attempt's worktree {rs['worktree']} was kept ({why})" if why
+              else f"earlier attempt's worktree {rs['worktree']} and branch {rs.get('branch')} removed")
     store.log(f"done {a.task} commit={a.commit or '-'}")
     store.event("task", task=a.task, transition="done", type=t.get("type"), milestone=t.get("milestone"))
     safe_observe(store, a.task, "done")
@@ -2522,7 +2541,7 @@ def headless_allowed_tools(store: Store, kit: Path | None = None) -> list[str]:
     else still goes to Needs you."""
     kit = kit or Path(__file__).resolve().parents[3]
     out = [f"Bash(python3 -I *{kit}/skills/*core/scripts/dev_*.py*)", "Bash(cd *)"]
-    for verb in ("status", "diff", "log", "show", "rev-parse", "add", "commit", "apply", "check-ignore", "ls-files"):
+    for verb in ("status", "diff", "log", "show", "rev-parse", "add", "commit", "check-ignore", "ls-files"):
         out += [f"Bash(git {verb}*)", f"Bash(git -C * {verb}*)"]
     try:
         arch = (store.dev / "architecture.md").read_text(encoding="utf-8", errors="replace")
@@ -2923,7 +2942,15 @@ def open_worktree(store: Store, tid: str, t: dict) -> dict:
     if not base_sha:
         fail(f"cannot resolve the work branch {base_ref} (set autonomy.git.base_branch)")
     exists = _gitc(store.root, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}", timeout=30).returncode == 0
-    reused = False
+    reused = foreign = False
+    other = branch_worktree(store, br) if exists and not wt.exists() else None
+    if other:
+        # an earlier attempt made elsewhere (Claude Code's own isolation before 3.5.0: .claude/worktrees/T-nnn):
+        # `git worktree add` would refuse the branch, so the kit works in that worktree instead
+        why = check_base(store, br, t)
+        if why:
+            fail(f"refusing the worktree of {tid} at {other}: {why}")
+        wt, foreign = other, True
     if wt.exists():
         reused = True
     else:
@@ -2941,7 +2968,110 @@ def open_worktree(store: Store, tid: str, t: dict) -> dict:
     top = (_gitc(wt, "rev-parse", "--show-toplevel", timeout=30).stdout or "").strip()
     if not top or os.path.realpath(top) != os.path.realpath(wt):
         fail(f"{wt} is not a worktree of its own (git says {top or 'nothing'})")
-    return {"worktree": str(wt), "branch": br, "base_ref": base_ref, "base_sha": base_sha, "reused": reused}
+    return {"worktree": str(wt), "branch": br, "base_ref": base_ref, "base_sha": base_sha, "reused": reused, "foreign": foreign}
+
+
+def branch_worktree(store: Store, br: str) -> Path | None:
+    """The worktree (other than the main checkout) that has `br` checked out, wherever it is."""
+    path = None
+    for line in (_gitc(store.root, "worktree", "list", "--porcelain", timeout=30).stdout or "").splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):]
+        elif line.strip() == f"branch refs/heads/{br}" and path and os.path.realpath(path) != os.path.realpath(store.root):
+            return Path(path)
+    return None
+
+
+def previous_work(store: Store, tid: str) -> dict | None:
+    """Where an earlier attempt of a task left its work: the kit's worktree, another worktree on dev-kit/T-nnn, or
+    that branch alone. None when there is none."""
+    br = f"dev-kit/{tid}"
+    wt = store.dev / "run" / "worktrees" / tid
+    if wt.exists():
+        return {"worktree": str(wt), "branch": br}
+    other = branch_worktree(store, br)
+    if other:
+        return {"worktree": str(other), "branch": br}
+    if _gitc(store.root, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}", timeout=30).returncode == 0:
+        return {"worktree": None, "branch": br}
+    return None
+
+
+def begin_task(store: Store, tid: str, via: str) -> None:
+    """A command that brings a task's work into play (slot open, slot apply, reconcile --adopt) records its start
+    when nobody did: the state never shows `todo` for a task being worked on. A blocked task must be unblocked
+    first (its block is a decision); a finished one is refused."""
+    t = store.task(tid)
+    if t["status"] == "in_progress":
+        return
+    if t["status"] in FINISHED:
+        fail(f"{tid} is {t['status']}: {via} refused")
+    if t["status"] == "blocked":
+        fail(f"{tid} is blocked ({t.get('blocked_reason') or '-'}): unblock it first (Needs you or `unblock {tid}`), then {via}")
+    start_task(store, tid, True, keep_started=True, via=via)
+
+
+def routed_model(t: dict, r: dict | None) -> str:
+    """The model the task was routed to when it started (state), else the router's answer now."""
+    arm = str((t.get("tier") or {}).get("arm") or "") if isinstance(t.get("tier"), dict) else ""
+    return arm.split("/")[0] if arm else str((r or {}).get("final_model") or "")
+
+
+def is_delegated(model: str) -> bool:
+    """A task routed to speed or quality (haiku or opus) goes to an implementer in its own worktree; balanced ones
+    (sonnet) are done inline (implement step 2)."""
+    return model in ("haiku", "opus")
+
+
+def resume_task(store: Store, tid: str, force: bool) -> None:
+    """`start T-nnn --resume`: take over the work an earlier attempt left (§17). The task goes in_progress keeping its
+    first start. A delegated task keeps the work in its worktree (`slot open --worktree` reuses it); an inline task
+    gets it applied, staged, to the main checkout (or its pipeline worktree) after the fence check, and `done`
+    removes the old worktree and branch. Never apply a worktree by hand (git apply, checkout --, cp)."""
+    t = store.task(tid)
+    if t["status"] in FINISHED:
+        fail(f"{tid} is already {t['status']}")
+    prev = previous_work(store, tid)
+    r = start_task(store, tid, force, keep_started=True, via="start --resume")
+    if not prev:
+        print(f"{tid}: no earlier attempt found (no worktree or branch dev-kit/{tid}): start from the brief")
+        return
+    model = routed_model(t, r if r is not None else safe_route(store, tid))
+    if is_delegated(model):
+        print(f"{tid}: earlier attempt on {prev['branch']}" + (f" in {prev['worktree']}" if prev["worktree"] else "")
+              + f"; delegated ({model}): `slot open N --task {tid} --worktree` reuses it for the implementer")
+        return
+    wt = open_worktree(store, tid, t)
+    base = wt["base_sha"]
+    rec = {"task": tid, "files": list(t.get("files") or []), "allow": [f".dev/qa/{tid}/"]}
+    changed, outside = slot_outside(rec, Path(wt["worktree"]), base)
+    if outside:
+        fail(f"{tid}: the earlier attempt changed {len(outside)} file(s) outside the task: {', '.join(outside)}. Revert them in "
+             f"{wt['worktree']} or replan the task's files, then run `start {tid} --resume` again")
+    patch = worktree_patch(Path(wt["worktree"]), base)
+    target = task_target_dir(store, t)
+    if not patch.strip():
+        print(f"{tid}: the earlier attempt in {wt['worktree']} has no changes: start from the brief")
+        return
+    tmp = store.dev / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    pf = tmp / f"resume-{tid}.patch"
+    pf.write_text(patch, encoding="utf-8")
+    try:
+        if _gitc(target, "apply", "--reverse", "--check", "--cached", str(pf)).returncode == 0:
+            print(f"{tid}: the earlier attempt is already applied (staged) in {target}")
+        else:
+            res = _gitc(target, "apply", "--3way", "--whitespace=nowarn", str(pf))
+            if res.returncode != 0:
+                fail(f"{tid}: the earlier attempt does not apply on {target}: {res.stderr.strip()[:400]}")
+            print(f"{tid}: {len(changed)} file(s) of the earlier attempt applied to {target} (staged) from {wt['worktree']}; "
+                  "review the diff, run the suite and commit")
+    finally:
+        pf.unlink(missing_ok=True)
+    t["resumed_from"] = {"worktree": wt["worktree"], "branch": wt["branch"], "base_sha": base,
+                         "applied": hashlib.sha256(patch.encode()).hexdigest(), "at": now()}
+    store.save()
+    store.log(f"resume {tid}: earlier attempt applied from {wt['worktree']} ({len(changed)} file(s))")
 
 
 def slot_outside(rec: dict, cwd: Path, since: str) -> tuple[list[str], list[str]]:
@@ -2999,6 +3129,8 @@ def cmd_slot(store: Store, a: argparse.Namespace) -> None:
             fail("slot open needs --task (its files) or --allow")
         rec = {"slot": a.n, "task": a.task, "agent": a.agent, "files": files, "allow": allow, "opened_at": now()}
         wt = None
+        if a.task:
+            begin_task(store, a.task, "slot open")
         if a.worktree:
             if not a.task:
                 fail("slot open --worktree needs --task")
@@ -3009,7 +3141,7 @@ def cmd_slot(store: Store, a: argparse.Namespace) -> None:
         print(f"slot {a.n}: fence on {', '.join(files + allow) or '-'}" + (" (+ their tests, changelog.d/, docs/setup.d/)" if files else ""))
         if wt:
             print(f"worktree: {wt['worktree']} on {wt['branch']} from {wt['base_ref']} {wt['base_sha'][:7]}"
-                  + (" (earlier attempt kept)" if wt["reused"] else ""))
+                  + (" (earlier attempt kept)" if wt["reused"] else "") + (" (made outside the kit, reused)" if wt.get("foreign") else ""))
         return
     try:
         rec = json.loads(path.read_text(encoding="utf-8"))
@@ -3045,6 +3177,8 @@ def cmd_slot(store: Store, a: argparse.Namespace) -> None:
     # apply
     if not rec.get("worktree"):
         fail(f"slot {a.n} has no worktree (open it with --worktree)")
+    if rec.get("task"):
+        begin_task(store, rec["task"], "slot apply")
     wt = Path(rec["worktree"])
     patch = worktree_patch(wt, since)
     if not patch.strip():
@@ -3114,7 +3248,7 @@ def reconcile(store: Store, milestone: str | None = None, since: str | None = No
     slots = open_slots(store)
     by_task = {r.get("task"): (n, r) for n, r in slots.items() if r.get("task")}
     why = reason or "the session that worked on it stopped before finishing"
-    out = {"slots_closed": [], "tasks_blocked": [], "worktrees_kept": [], "worktrees_removed": []}
+    out = {"slots_closed": [], "tasks_blocked": [], "tasks_done": [], "worktrees_kept": [], "worktrees_removed": []}
     for n, rec in slots.items():
         if milestone and rec.get("task") and ts.get(rec["task"], {}).get("milestone") != milestone:
             continue
@@ -3146,19 +3280,78 @@ def reconcile(store: Store, milestone: str | None = None, since: str | None = No
         t["blocked_count"] = int(t.get("blocked_count", 0) or 0) + 1
         store.event("task", task=tid, transition="block", type=t.get("type"), milestone=t.get("milestone"))
         out["tasks_blocked"].append(tid)
-    if out["tasks_blocked"] or out["slots_closed"]:
+    if since:
+        unstarted(store, ts, milestone, since, why, out)
+    if out["tasks_blocked"] or out["slots_closed"] or out["tasks_done"]:
         store.save()
         store.log(f"reconcile: blocked {', '.join(out['tasks_blocked']) or '-'}; closed slots {', '.join(map(str, out['slots_closed'])) or '-'}"
-                  f" ({why})")
+                  + (f"; done {', '.join(out['tasks_done'])} (committed without done)" if out["tasks_done"] else "") + f" ({why})")
         store.event("reconcile", blocked=len(out["tasks_blocked"]), slots=len(out["slots_closed"]), kept=len(out["worktrees_kept"]))
     return out
 
 
-def adopt(store: Store, tid: str) -> dict:
+TASK_REF = r"(?:\[{tid}\]|^Refs:.*\b{tid}\b)"
+
+
+def task_commit_since(store: Store, tid: str, since: str) -> str | None:
+    """The newest commit on HEAD since `since` whose subject carries `[T-nnn]` or whose trailer says `Refs: T-nnn`."""
+    raw = _gitc(store.root, "log", f"--since={since}", "--format=%H%x00%B%x01", "HEAD", timeout=60).stdout or ""
+    rx = re.compile(TASK_REF.format(tid=re.escape(tid)), re.M)
+    for chunk in raw.split("\x01"):
+        sha, _, body = chunk.strip("\n").partition("\x00")
+        if sha and rx.search(body):
+            return sha.strip()
+    return None
+
+
+def unstarted(store: Store, ts: dict, milestone: str | None, since: str, why: str, out: dict) -> None:
+    """Work a round did on a task it never started (§17): a `todo` task with a commit of its own since the round
+    began is recorded as done with that commit; a `todo` task whose files (and only its files) were left changed in
+    the main checkout gets them moved to its worktree and is blocked, its attempt in the ledger."""
+    import dev_fence
+    open_ts = {k: v for k, v in ts.items() if v["status"] not in FINISHED}
+    dirty = [ln[3:] for ln in (_gitc(store.root, "status", "--porcelain", "--untracked-files=all", "--", ".", ":(exclude).dev",
+                                     timeout=60).stdout or "").splitlines() if len(ln) > 3]
+    for tid, t in sorted(ts.items(), key=lambda kv: int(kv[0][2:])):
+        if t["status"] != "todo" or (milestone and t["milestone"] != milestone):
+            continue
+        sha = task_commit_since(store, tid, since)
+        if sha:
+            t["status"] = "done"
+            t["done_at"] = now()
+            t["commit"] = sha
+            t["started_at"] = t.get("started_at") or since
+            issue_sync(store, t)
+            store.event("task", task=tid, transition="done", type=t.get("type"), milestone=t.get("milestone"))
+            out["tasks_done"].append(tid)
+            continue
+        fence = {"files": list(t.get("files") or []), "allow": []}
+        mine = [f for f in dirty if dev_fence.allowed(fence, f)]
+        if not mine or any(dev_fence.allowed({"files": list(v.get("files") or []), "allow": []}, f)
+                           for f in mine for k, v in open_ts.items() if k != tid):
+            continue
+        res = adopt(store, tid, start=False)
+        ref = res.get("branch")
+        note = f"{why}; worked on without `start`, its changes moved to {res.get('worktree') or '-'}"
+        with contextlib.suppress(Exception):
+            led.put(store.dev, f"task:{tid}", led.fingerprint(store.root, list(t.get("files") or [])), "failed", ref, note)
+        t["status"] = "blocked"
+        t["blocked_reason"] = f"reconciled: {note}"
+        t["blocked_count"] = int(t.get("blocked_count", 0) or 0) + 1
+        store.event("task", task=tid, transition="block", type=t.get("type"), milestone=t.get("milestone"))
+        out["tasks_blocked"].append(tid)
+        if res.get("worktree"):
+            out["worktrees_kept"].append(res["worktree"])
+
+
+def adopt(store: Store, tid: str, start: bool = True) -> dict:
     """Move a task's uncommitted changes from the main checkout into the task's worktree (created from the work
-    branch when missing). Only files inside the task's fence move; the others stay where they are and are listed."""
+    branch when missing, or the one already on its branch). Only files inside the task's fence move; the others stay
+    where they are and are listed. The task is started when nobody did (`start` False: reconcile, which blocks it)."""
     import dev_fence
     t = store.task(tid)
+    if start:
+        begin_task(store, tid, "reconcile --adopt")
     rec = {"task": tid, "files": list(t.get("files") or []), "allow": [f".dev/qa/{tid}/"]}
     st = _gitc(store.root, "status", "--porcelain", "-z", "--untracked-files=all", "--", ".", ":(exclude).dev", timeout=60).stdout
     entries = [e for e in st.split("\0") if e]
@@ -3215,6 +3408,8 @@ def cmd_reconcile(store: Store, a: argparse.Namespace) -> None:
     if a.json:
         print(json.dumps(res, indent=2))
         return
+    if res["tasks_done"]:
+        print(f"reconcile: {', '.join(res['tasks_done'])} done (committed by a run that never started them)")
     print(f"reconcile: {len(res['tasks_blocked'])} task(s) blocked ({', '.join(res['tasks_blocked']) or '-'}) · "
           f"{len(res['slots_closed'])} slot(s) closed · worktrees kept {len(res['worktrees_kept'])}, removed {len(res['worktrees_removed'])}")
     for w in res["worktrees_kept"]:
@@ -7703,6 +7898,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--batch", help="up to N ready tasks that can run in parallel; auto = the number set on the board's Autopilot card (.dev/run/autopilot.json, default 3)")
 
     s = sub.add_parser("start"); s.set_defaults(fn=cmd_start); s.add_argument("task"); s.add_argument("--force", action="store_true")
+    s.add_argument("--resume", action="store_true", help="take over the work an earlier attempt left (worktree or dev-kit/T-nnn)")
     s = sub.add_parser("done"); s.set_defaults(fn=cmd_done); s.add_argument("task"); s.add_argument("--commit"); s.add_argument("--force", action="store_true")
     s = sub.add_parser("block"); s.set_defaults(fn=cmd_block); s.add_argument("task"); s.add_argument("--reason")
     s.add_argument("--blocked-by", help="I-nnn: paused until the replan of this scope change")

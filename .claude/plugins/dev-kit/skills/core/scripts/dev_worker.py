@@ -761,6 +761,32 @@ def set_autopilot_parallel(root: Path, n: object) -> dict:
     return autopilot_status(root)
 
 
+def round_view(root: Path) -> dict | None:
+    """The headless round running now (`dev_state.py round run`), for the board: skill, milestone, since when, the
+    tasks it has in progress or in an open slot, and its last action (.dev/run/round-activity.json, written by the
+    fence hook). `unregistered` is true when an implement round works with no task started (the state would say todo)."""
+    mk = _read(run_dir(root) / "round.json") or {}
+    if not mk or not (_alive(mk.get("child")) or _alive(mk.get("pid"))):
+        return None
+    st = _read(root / ".dev" / "state.json") or {}
+    tasks = st.get("tasks") if isinstance(st.get("tasks"), dict) else {}
+    scope = mk.get("scope")
+    ids = {k for k, v in tasks.items() if isinstance(v, dict) and v.get("status") == "in_progress" and (not scope or v.get("milestone") == scope)}
+    slots = run_dir(root) / "slots"
+    for f in sorted(slots.glob("*.json")) if slots.is_dir() else []:
+        rec = _read(f) or {}
+        if rec.get("task") and not rec.get("closed_at"):
+            ids.add(str(rec["task"]))
+    rows = [{"id": k, "title": (tasks.get(k) or {}).get("title"), "status": (tasks.get(k) or {}).get("status")}
+            for k in sorted(ids, key=lambda x: int(x[2:]) if x[2:].isdigit() else 0)]
+    act = _read(run_dir(root) / "round-activity.json") or {}
+    if act.get("round") != mk.get("round"):
+        act = {}
+    return {"skill": mk.get("skill"), "scope": scope, "since": mk.get("started"), "round": mk.get("round"), "tasks": rows,
+            "unregistered": mk.get("skill") == "implement" and not rows,
+            "last": {k: act.get(k) for k in ("at", "tool", "what", "agent")} if act else None}
+
+
 def autopilot_status(root: Path) -> dict:
     """The board's autopilot as the switch shows it. state: off · idle (on, about to start a run) · running · stopping
     (off asked, the run finishes its step) · waiting_user (only work that needs the user is left) · release (a release
@@ -780,7 +806,7 @@ def autopilot_status(root: Path) -> dict:
         state = "idle"  # switched on again since it stopped
     keep = ("reason", "pid", "since", "milestone", "runs", "fails", "until", "note", "last_exit", "at")
     return {"on": on, "state": state, "command": AP_COMMAND, "parallel": autopilot_parallel(root), "parallel_range": list(AP_PARALLEL[:2]),
-            **{k: st.get(k) for k in keep if st.get(k) is not None}}
+            "round": round_view(root), **{k: st.get(k) for k in keep if st.get(k) is not None}}
 
 
 def set_autopilot(root: Path, on: object) -> dict:

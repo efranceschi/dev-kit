@@ -930,7 +930,39 @@
       ],
       "produces": ".dev/feedback/feedback-report-<timestamp>.md and export",
       "related": [
-        "costs"
+        "costs",
+        "debug"
+      ]
+    },
+    {
+      "name": "debug",
+      "category": "observe",
+      "one_line": "Diagnosis when something looks stuck or wrong: a debug dump, state checked against git and processes, the cause, and a report for a dev-kit patch.",
+      "when": "A run looks stuck, the board shows something odd, or you want a dump to send to the dev-kit author.",
+      "args": [
+        {
+          "arg": "\"what looks wrong\"",
+          "meaning": "what you see, in your words (default: what is happening now)"
+        },
+        {
+          "arg": "--dump-only",
+          "meaning": "write the dump and list the errors, without the diagnosis"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:debug the autopilot says finishing the step but no task is in progress",
+          "what": "explains what the round does and why the board shows no task"
+        },
+        {
+          "command": "/dev-kit:debug --dump-only",
+          "what": "writes .dev/run/debug/dump-<timestamp>.md to attach to a report"
+        }
+      ],
+      "produces": ".dev/run/debug/dump-<timestamp>.md (machine-local, never committed)",
+      "related": [
+        "status",
+        "feedback"
       ]
     }
   ],

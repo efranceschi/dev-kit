@@ -23,7 +23,7 @@ The diagram reads top to bottom, one lane per stage. **Conception** (interview, 
 
 ## What it does
 
-- **Skills for the whole lifecycle**, invoked as `/dev-kit:<name>`, such as `interview`, `prd`, `architecture`, `ux`, `ui`, `plan`, `implement`, `test`, `qa`, `review`, `usability`, `docs`, `release`, `deploy`, plus `autopilot`, `status`, `board`, `backlog`, `issue`, `costs`, `feedback`, `help` and `start`.
+- **Skills for the whole lifecycle**, invoked as `/dev-kit:<name>`, such as `interview`, `prd`, `architecture`, `ux`, `ui`, `plan`, `implement`, `test`, `qa`, `review`, `usability`, `docs`, `release`, `deploy`, plus `autopilot`, `status`, `board`, `backlog`, `issue`, `costs`, `feedback`, `debug`, `help` and `start`.
 - **Specialised agents** that the skills call: an implementer, an architecture consultant and a team of read-only reviewers (code, security, tests, accessibility, data, performance, copy and more).
 - **Quality gates**: each milestone ends with a scored review (0-100 per dimension) that must clear a cut-off before the next one starts.
 - **Planned releases with one human gate**: the plan groups milestones into releases (R1, R2…: a complete value journey each, 2–5 milestones, a risky delivery ends one). Milestones run on their own; when a release is complete, `/dev-kit:release` audits it, writes a release review and waits for you to approve (production deploy, smoke, release) or reject with what must change (a fixes milestone in the same release).

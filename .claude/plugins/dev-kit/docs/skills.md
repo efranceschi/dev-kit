@@ -63,6 +63,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 |---|---|
 | [`costs`](#costs) | Token usage and estimated US$ (API-equivalent) per stage, agent, model or session; CSV of tokens. |
 | [`feedback`](#feedback) | Evaluation of the session: grade per stage with reasons, what worked and failed, suggestions for the kit. |
+| [`debug`](#debug) | Diagnosis when something looks stuck or wrong: a debug dump, state checked against git and processes, the cause, and a report for a dev-kit patch. |
 
 ### start
 
@@ -640,4 +641,26 @@ Evaluation of the session: grade per stage with reasons, what worked and failed,
 
 **Produces:** .dev/feedback/feedback-report-<timestamp>.md and export
 
-**Related:** [`costs`](#costs)
+**Related:** [`costs`](#costs), [`debug`](#debug)
+
+### debug
+
+Diagnosis when something looks stuck or wrong: a debug dump, state checked against git and processes, the cause, and a report for a dev-kit patch.
+
+**When:** A run looks stuck, the board shows something odd, or you want a dump to send to the dev-kit author.
+
+**Usage:** `/dev-kit:debug ["what looks wrong"] [--dump-only]`
+
+| Argument | Meaning |
+|---|---|
+| `"what looks wrong"` | what you see, in your words (default: what is happening now) |
+| `--dump-only` | write the dump and list the errors, without the diagnosis |
+
+**Examples:**
+
+- `/dev-kit:debug the autopilot says finishing the step but no task is in progress`: explains what the round does and why the board shows no task
+- `/dev-kit:debug --dump-only`: writes .dev/run/debug/dump-<timestamp>.md to attach to a report
+
+**Produces:** .dev/run/debug/dump-<timestamp>.md (machine-local, never committed)
+
+**Related:** [`status`](#status), [`feedback`](#feedback)

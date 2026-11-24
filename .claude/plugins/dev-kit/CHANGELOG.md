@@ -2,6 +2,27 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.6.0 — 2026-11-24
+
+Field report: after a question answered "adopt the work in the worktree", an autopilot implement round applied the earlier attempt of a task (a worktree Claude Code's own isolation had made in `.claude/worktrees/`) to the main checkout and ran the pipeline, while the state still said `todo`. The board showed nothing in progress and the Autopilot card only "finishing the step".
+
+### Fixed
+- **Work on a task is always started.** `slot open --task`, `slot apply` and `reconcile --adopt` record the start of a `todo` task when nobody did (the first start is kept); a blocked task is refused until it is unblocked. `done` on a task that is not in progress now says to run `start` first instead of suggesting `--force`.
+- **Worktrees made outside the kit are reused.** When `dev-kit/T-nnn` is already checked out in another worktree (such as `.claude/worktrees/T-nnn` from before 3.5.0), `slot open --worktree`, `reconcile --adopt` and `start --resume` work in it instead of failing on `git worktree add`; its branch must still hold `.dev/state.json` and the task's files.
+- **A round's reconcile catches work done without a start.** With `--since` (what `round run` passes), a `todo` task with a commit of its own since the round began (`[T-nnn]` or `Refs: T-nnn`) is recorded as done with that commit, so the next run does not pick it again; a `todo` task whose files were left changed in the main checkout gets them moved to its worktree and is blocked, its attempt in the ledger. The summary's `reconciled` gains `tasks_done`.
+- **No manual adoption in a round.** In a headless round the fence hook denies the orchestrator `git apply`/`am`/`cherry-pick`, `git checkout|restore|merge` of a `dev-kit/T-nnn` branch and `cp`/`rsync` out of a `worktrees/` folder, and points to the kit's commands; `git apply` is no longer in the round's allowed tools.
+
+### Added
+- `dev_state.py start T-nnn --resume`: takes over an earlier attempt (the kit's worktree, another worktree on `dev-kit/T-nnn`, or the branch alone) and keeps the first start. An inline task gets the work applied, staged, to the main checkout after the fence check, and `done` then removes the old worktree and branch; for a delegated task `slot open --worktree` reuses the worktree.
+- **The board sees the round.** The Autopilot card shows the round running now (skill, milestone, for how long), its tasks (each opens its card) and its last action, recorded by the fence hook in `.dev/run/round-activity.json`; it warns when an implement round runs with no task started, the switch reads "finishing implement M4" instead of "finishing the step", and the Live list names the round.
+- **`/dev-kit:debug`** (26 skills now) and `dev_debug.py`: `check` compares the state with git and the running processes (round marker left by a dead round, a round with no task started, slots of tasks not started, worktrees made outside the kit, tasks committed but not done, uncommitted files of a task not started, among others; exit 1 on an error); `dump` writes `.dev/run/debug/dump-<stamp>.md` with the versions, the checks, git, the open tasks, the run files, the ends of the log, autopilot and round logs, the ledger's task records and the last telemetry events, never source files or the environment, and the home folder as `~`. The skill explains what is happening, separates a project problem from a kit gap after reading the kit's code, gives the recovery commands without running them, and drafts a report for a dev-kit patch with the dump as its attachment.
+
+### Docs
+- `conventions.md` §17 (work is always started, `start --resume`, reconcile of unstarted work, the round's activity), `implement` (setup step 2 and round child), help, maintainers.
+
+### Tests
+- `test_adopt_start.py`: the field case (a foreign worktree resumed with the first start kept, then removed at `done`), a resume with files outside the task, `slot open` and `adopt` starting the task and refusing a blocked one, a round that commits a task and leaves another's file changed without starting either, the round fence and its activity, the board's round view, and the debug checks and dump.
+
 ## 3.5.0 — 2026-11-24
 
 Field report: on a project that works on `new_version` (with an old `main`), an autopilot implement round got worktrees of `main`, its permission requests waited 10 minutes each and were denied, the tasks stayed in progress with their slots open, and an implementer then edited the main checkout.

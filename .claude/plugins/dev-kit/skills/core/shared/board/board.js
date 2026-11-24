@@ -374,6 +374,8 @@
     const out = [];
     const ap = inbox().autopilot || {};
     if (ap.state === "running" || ap.state === "stopping") out.push({ cmd: ap.command || "/dev-kit:autopilot", since: ap.since, by: tr("started by the Autopilot switch") });
+    const rd = ap.round;
+    if (rd) out.push({ cmd: `/dev-kit:${rd.skill} ${rd.scope || ""}`.trim(), since: rd.since, by: roundWhat(rd) });
     const au = inbox().executor.auto || {};
     if (au.state === "running") out.push({ cmd: "/dev-kit:worker", since: au.since, by: au.request ? tr("started by the board for {id}", { id: au.request }) : tr("started by the board") });
     return out;
@@ -416,6 +418,24 @@
     switched_off: N_("switched off"), force_stopped: N_("force-stopped"), no_change: N_("the last run changed nothing: look at its log"), failed: N_("a run failed"),
     request_running: N_("a Claude Code session runs a board request"), other_session: N_("/dev-kit:autopilot runs in another session"),
     no_claude: N_("the claude command was not found") });
+  /** What a headless round works on: its tasks, or a warning when an implement round has none started. */
+  function roundWhat(rd) {
+    if (rd.tasks && rd.tasks.length) return tr("round on {v}", { v: rd.tasks.map((t) => t.id).join(", ") });
+    return rd.unregistered ? tr("round with no task started in the state") : tr("headless round");
+  }
+  /** The round running now, in the Autopilot card: tasks (each opens its card) and its last action. */
+  function roundBlock(rd) {
+    if (!rd) return null;
+    const last = rd.last;
+    return h("div", { class: "ap-round" },
+      h("p", { class: "ap-line" }, h("strong", { text: tr("Now: ") }), h("code", { text: `/dev-kit:${rd.skill} ${rd.scope || ""}`.trim() }),
+        rd.since ? [tr(" for "), since(rd.since)] : null),
+      rd.tasks && rd.tasks.length ? h("p", { class: "card-sub" }, tr("Tasks: "), rd.tasks.map((t) => h("button", { type: "button", class: "tid-btn",
+        text: t.id, title: t.title || t.id, onclick: () => openTask(t.id) })))
+        : rd.unregistered ? h("p", { class: "card-sub warn-text", text: tr("No task is started in the state while this round works: the board cannot say which one runs. The round's reconcile fixes it when it ends.") }) : null,
+      last ? h("p", { class: "card-sub" }, tr("Last action: "), h("code", { text: `${last.tool || ""}${last.what ? ` · ${last.what}` : ""}` }),
+        last.agent ? ` (${last.agent})` : null, last.at ? [" · ", ago(parseT(last.at))] : null) : null);
+  }
   function renderAutopilot() {
     const wrap = $("ap-wrap");
     wrap.hidden = !actionsOn();
@@ -427,13 +447,16 @@
     const st = $("ap-btn");
     st.className = `ap-state ${AP_CLASS[ap.state] || "off"}`;
     const waitN = ap.state === "waiting_user" ? needsN : 0;
-    fill($("ap-word"), AP_WORD[ap.state] || ap.state, ap.state === "running" && ap.since ? [" · ", since(ap.since)] : null, waitN ? ` · ${waitN}` : null);
+    const rd = ap.round;
+    const word = ap.state === "stopping" && rd ? tr("finishing {v}", { v: `${rd.skill} ${rd.scope || ""}`.trim() }) : AP_WORD[ap.state] || ap.state;
+    fill($("ap-word"), word, ap.state === "running" && ap.since ? [" · ", since(ap.since)] : null, waitN ? ` · ${waitN}` : null);
     st.setAttribute("aria-label", tr("Autopilot: {v}. Show details", { v: AP_WORD[ap.state] || ap.state }));
     const reason = ap.reason ? (AP_REASON[ap.reason] || ap.reason) : null;
     fill($("ap-pop"), h("p", { class: "pop-title", text: tr("Autopilot") }),
-      h("p", { class: "ap-line" }, h("strong", { text: AP_WORD[ap.state] || ap.state }), reason ? ` · ${reason}` : null,
+      h("p", { class: "ap-line" }, h("strong", { text: word }), reason ? ` · ${reason}` : null,
         ap.state === "backoff" && ap.until ? ` · ${tr("next try at {v}", { v: new Date(ap.until * 1000).toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" }) })}` : null),
       ap.note ? h("p", { class: "card-sub", text: ap.note }) : null,
+      roundBlock(rd),
       h("p", { class: "pop-note top" }, tr("Runs "), h("code", { text: ap.command || "/dev-kit:autopilot --milestones 1 --board" }),
         tr(" headless, one milestone per run, until a release waits for your approval. Questions and permissions go to Needs you. Output: "), h("code", { text: ".dev/run/autopilot.log" })),
       ap.runs ? h("p", { class: "card-sub", text: plural(ap.runs, "run") }) : null,

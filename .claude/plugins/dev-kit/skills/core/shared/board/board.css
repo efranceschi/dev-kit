@@ -693,6 +693,9 @@ dialog p { color: var(--text-secondary); }
 .ap-pop { min-width: 300px; max-width: min(460px, 92vw); }
 .ap-pop .pop-note { max-width: none; }
 .ap-line { font-size: 13px; margin: 0 0 6px; }
+.ap-round { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
+.ap-round .tid-btn { margin-right: 6px; }
+.warn-text { color: var(--text-primary); border-left: 3px solid var(--warning); padding-left: 6px; }
 .ap-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .ap-par { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
 .ap-par-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }

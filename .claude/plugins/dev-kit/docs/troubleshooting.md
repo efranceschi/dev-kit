@@ -3,6 +3,7 @@
 | Symptom | Why | What to do |
 |---|---|---|
 | Autopilot stops overnight waiting for a permission | Claude Code asks before Bash commands and edits; the kit's own pauses are not the cause | Run `/fewer-permission-prompts` and start with `--permission-mode acceptEdits`; use the `unattended` autonomy level |
+| The Autopilot runs ("finishing the step") but no task is in progress on the board | Before 3.6.0 a round could take over an earlier attempt's worktree without recording the start | Update the kit; meanwhile `/dev-kit:debug` says what the round does. If the task's commit landed but it is still `todo`: `dev_state.py done T-nnn --commit <sha> --force`; to take over an earlier attempt yourself: `dev_state.py start T-nnn --resume` |
 | The session froze or the machine rebooted | Long runs can be interrupted | `/dev-kit:start` reconciles the state with git; `/dev-kit:autopilot` continues from the current lifecycle step |
 | Processes still running after a run (ports busy, high load) | An agent left a background process | `/dev-kit:start` stops them (only processes inside the project) and frees expired locks; `/dev-kit:status` shows leftovers |
 | A gate keeps failing | Real problems, or the same finding coming back | Read `.dev/qa/<M>/report.md`; from round 2 only previous findings and new medium+ findings count (delta mode). When rounds are exhausted the kit asks (or applies your pause policy) |
