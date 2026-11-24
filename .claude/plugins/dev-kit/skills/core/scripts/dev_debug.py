@@ -12,17 +12,20 @@ that are not done, the run files (.dev/run/*.json: autopilot, round, slots, acti
 autopilot log and of the round logs, the ledger's task records and the last telemetry events. It never copies the
 project's source files or the environment.
 
-Secrets are removed from every dump: values of keys named like token, secret, password, api key, credential, cookie
-(the board's own token included), and anything shaped like a credential in text (private keys, AWS, GitHub, Slack,
-Google, Databricks and `sk-` keys, JWTs, Bearer tokens, `password=…`, credentials in URLs, e-mail addresses).
+Every dump keeps codes only: task, question, milestone, issue and ADR ids, statuses, times, counts and check codes.
+Names and free text never go in: titles of tasks, milestones, releases and issues, the text of questions, commit
+subjects, block reasons, log details, the answers of the claude runs and the round's last action. Secrets are removed
+too: values of keys named like token, secret, password, api key, credential, cookie (the board's own token included),
+and anything shaped like a credential (private keys, AWS, GitHub, Slack, Google, Databricks and `sk-` keys, JWTs,
+Bearer tokens, `password=…`, credentials in URLs, e-mail addresses). The local dump keeps paths and branches.
 
 `--share` writes a dump meant for someone else (the kit's author, a colleague): on top of that, the project folder,
 the home folder and the user name are replaced, every file path of the project becomes a stable pseudonym
-(`p:3fa2c1.js`, the same in every section), branches other than the kit's and main/master become `<branch-n>`, and
-free text is dropped (task titles, commit subjects, block reasons, questions, log details, the claude runs' answers,
-the round's last action), keeping ids (T-, Q-, M-, I-, ADR-), statuses, timestamps, counts, codes and kit tokens.
-Before writing, it checks its own text: when a secret pattern, the project or home folder, the user name or a task
-title is still there, it writes nothing and exits 3 with what it found. Read it anyway before you send it.
+(`p:3fa2c1.js`, the same in every section) and branches other than the kit's and main/master become `<branch-n>`.
+
+Before writing, every dump checks its own text: when a secret pattern or one of the project's names (and, with
+--share, the project or home folder, the user name or a project path) is still there, it writes nothing and exits 3
+with what it found. Read it anyway before you send it.
 """
 from __future__ import annotations
 
@@ -80,10 +83,35 @@ def scrub_json(v: object, share: "Sharer | None" = None, key: str = "") -> objec
     return v
 
 
-class Sharer:
-    """The anonymisation of `--share`: one pseudonym per path and per branch, the same in every section."""
+def names_of(root: Path, st: dict) -> list[str]:
+    """The project's own names, which no dump carries: titles of tasks, milestones, releases and issues, and the
+    text of the questions (only their codes are kept)."""
+    out = set()
+    for key in ("tasks", "milestones", "issues", "releases"):
+        coll = st.get(key)
+        for v in (coll.values() if isinstance(coll, dict) else coll if isinstance(coll, list) else []):
+            if isinstance(v, dict):
+                for f in ("title", "name", "goal"):
+                    if isinstance(v.get(f), str):
+                        out.add(v[f].strip())
+    try:
+        for ln in (root / ".dev" / "open-questions.md").read_text(encoding="utf-8", errors="replace").splitlines():
+            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+            if cells and re.fullmatch(r"Q-\d+", cells[0]):
+                out.update(c for c in cells[3:5] if c)
+    except OSError:
+        pass
+    return sorted((x for x in out if len(x) >= 6), key=len, reverse=True)
 
-    def __init__(self, root: Path, tasks: dict):
+
+class Sharer:
+    """What a dump keeps of the project. Always: codes only (T-, Q-, M-, I-, ADR-), never titles, questions, commit
+    subjects or free text, and no secrets. With `anon` (--share) also one pseudonym per path and per branch, the same
+    in every section, and the folders and user name replaced."""
+
+    def __init__(self, root: Path, st: dict, anon: bool = True):
+        tasks = st.get("tasks") if isinstance(st.get("tasks"), dict) else {}
+        self.anon = anon
         self.root = str(root)
         self.home = str(Path.home())
         try:
@@ -95,13 +123,15 @@ class Sharer:
             self.user = ""  # a generic account name says nothing about a person, and replacing it would break words
         self.paths: dict[str, str] = {}
         self.branches: dict[str, str] = {}
-        self.titles = sorted({str(t.get("title")) for t in tasks.values() if isinstance(t, dict) and len(str(t.get("title") or "")) >= 6})
+        self.titles = names_of(root, st)
         for t in tasks.values():
             for f in (t.get("files") or []) if isinstance(t, dict) else []:
                 self.path(f)
 
     def path(self, p: str) -> str:
         p = p.strip()
+        if not self.anon:
+            return p
         if not p or p.startswith((".dev/", ".dev", ".claude/", "dev-kit/", "<project>", "~")):
             return p
         if p not in self.paths:
@@ -112,6 +142,8 @@ class Sharer:
 
     def branch(self, b: str) -> str:
         b = b.strip()
+        if not self.anon:
+            return b
         if not b or b in KEEP_BRANCHES or b.startswith("dev-kit/") or b.startswith("("):
             return b
         if b not in self.branches:
@@ -119,7 +151,13 @@ class Sharer:
         return self.branches[b]
 
     def text(self, t: str) -> str:
-        """Folders, user, known paths and branches replaced in a text that is kept (structure lines, evidence)."""
+        """Folders, user, known paths and branches replaced in a text that is kept (structure lines, evidence);
+        without `anon` only the home folder. The project's names go in both modes."""
+        for name in self.titles:
+            t = t.replace(name, "(name removed)")
+        if not self.anon:
+            home = self.home if self.home and self.home != "/" else None
+            return redact(t.replace(home, "~") if home else t)
         for src, dst in ((self.root, "<project>"), (self.home, "~")):
             if src and src != "/":
                 t = t.replace(src, dst)
@@ -141,6 +179,8 @@ class Sharer:
         pseudonym; anything else is free text and is dropped."""
         if v.startswith((self.root, self.home)) and self.root:
             return self.text(v)
+        if not self.anon and " " not in v:
+            return self.text(v)
         if v.startswith("/dev-kit:") or re.fullmatch(r"[a-z]+/[a-z+]+", v):
             return self.text(v)
         if "/" in v and " " not in v:
@@ -155,12 +195,14 @@ class Sharer:
         out = [rx.pattern[:30] for rx in SECRETS if rx.search(text)]
         if SECRET_ASSIGN.search(text.replace("[REDACTED]", "")):
             out.append("key=value secret")
+        out += [f"project name {t[:30]!r}" for t in self.titles if t in text]
+        if not self.anon:
+            return out
         for what, s in (("project folder", self.root), ("home folder", self.home)):
             if s and s != "/" and s in text:
                 out.append(what)
         if self.user and len(self.user) >= 3 and re.search(r"\b" + re.escape(self.user) + r"\b", text):
             out.append("user name")
-        out += [f"task title {t[:30]!r}" for t in self.titles if t in text]
         out += [f"path {p}" for p in self.paths if len(p) >= 4 and p in text]
         return out
 TASK_REF = r"(?:\[{tid}\]|^Refs:.*\b{tid}\b)"
@@ -324,9 +366,9 @@ CLAUDE_RUN_KEYS = ("type", "subtype", "is_error", "stop_reason", "terminal_reaso
                    "total_cost_usd", "session_id", "api_error_status")
 
 
-def claude_log(text: str, share: Sharer | None) -> str:
+def claude_log(text: str, share: Sharer) -> str:
     """A log of `claude -p --output-format json` runs: the header lines and, per run, its numbers and the tools it
-    was denied. With --share the run's answer (`result`) is dropped."""
+    was denied; the run's answer (`result`) is free text and is never kept."""
     out = []
     for line in text.splitlines():
         ln = line.strip()
@@ -338,8 +380,6 @@ def claude_log(text: str, share: Sharer | None) -> str:
                 continue
             keep = {k: d.get(k) for k in CLAUDE_RUN_KEYS if k in d}
             keep["permission_denials"] = [x.get("tool_name") for x in d.get("permission_denials") or [] if isinstance(x, dict)]
-            if not share:
-                keep["result"] = redact(str(d.get("result") or ""))[:3000]
             out.append(json.dumps(keep, ensure_ascii=False))
         else:
             out.append(share.text(line) if share else redact(line))
@@ -349,10 +389,8 @@ def claude_log(text: str, share: Sharer | None) -> str:
 LOG_KV = re.compile(r"\b(?:tier|arm|score|commit|killed|files|skipped|kind|mode|result)=[\w./+:-]+")
 
 
-def log_line(line: str, share: Sharer | None) -> str:
-    """One line of .dev/log.md. With --share: its time, its verb, the ids and the kit's key=value tokens only."""
-    if not share:
-        return redact(line)
+def log_line(line: str, share: Sharer) -> str:
+    """One line of .dev/log.md: its time, its verb, the ids and the kit's key=value tokens only."""
     m = re.match(r"^(-\s*\S+\s+)(\S+)", line)
     if not m:
         return share.free(line)
@@ -366,7 +404,7 @@ def dump(root: Path, n: int, share: bool = False) -> tuple[str, list[dict]]:
     st = read_json(dev / "state.json")
     tasks = st.get("tasks") if isinstance(st.get("tasks"), dict) else {}
     found = checks(root)
-    sh = Sharer(root, tasks) if share else None
+    sh = Sharer(root, st, anon=share)
     run = dev / "run"
     status = git(root, "status", "--porcelain")
     if sh:
@@ -381,8 +419,9 @@ def dump(root: Path, n: int, share: bool = False) -> tuple[str, list[dict]]:
     head = ("# dev-kit debug dump (shareable)\n\nWritten {t} by dev_debug.py --share. Paths are pseudonyms (`p:…`, the same in "
             "every section), other branches are `<branch-n>`, free text is removed and secrets are redacted; the text was checked "
             "for leaks before it was written. Read it anyway before you send it.\n" if share else
-            "# dev-kit debug dump\n\nWritten {t} by dev_debug.py. For this machine: it holds task titles, paths and log lines "
-            "of this project (secrets are redacted). To send it to someone, write one with `dev_debug.py dump --share`.\n").format(t=now())
+            "# dev-kit debug dump\n\nWritten {t} by dev_debug.py. For this machine: it keeps the project's paths and branches; "
+            "names are codes only (no titles, questions or commit subjects) and secrets are redacted. To send it to someone, write "
+            "one with `dev_debug.py dump --share`.\n").format(t=now())
     parts = [head, section("Versions", "\n".join([f"dev-kit {kit_version()} (state written by {st.get('kit_version') or '?'})",
                                                   f"python {platform.python_version()} · {platform.system()} {platform.release()}",
                                                   (git(root, "--version") or "git ?").strip(),
@@ -471,16 +510,10 @@ def dump(root: Path, n: int, share: bool = False) -> tuple[str, list[dict]]:
                                  if k in d} | ({"decision": ((d.get("decision") or {}).get("behavior"))} if d.get("decision") else {})))
     parts.append(section("Hook trace (last 20)", "\n".join(trace)))
     text = "".join(parts)
-    if sh:
-        text = sh.text(text)
-        leaks = sh.leaks(text)
-        if leaks:
-            raise LeakError(leaks)
-    else:
-        home = str(Path.home())
-        if home and home != "/":
-            text = text.replace(home, "~")
-        text = redact(text)
+    text = sh.text(text)
+    leaks = sh.leaks(text)
+    if leaks:
+        raise LeakError(leaks)
     return text, found
 
 
@@ -519,7 +552,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         text, found = dump(root, max(10, a.tail), a.share)
     except LeakError as e:
-        print("dump --share refused: the anonymised text still holds " + "; ".join(e.leaks[:10])
+        print("dump refused: the text still holds " + "; ".join(e.leaks[:10])
               + ". Nothing was written; report this as a dev-kit bug (the names above are what leaked).", file=sys.stderr)
         return 3
     stamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')

@@ -663,6 +663,6 @@ Diagnosis when something looks stuck or wrong: a debug dump, state checked again
 - `/dev-kit:debug --dump-only`: writes .dev/run/debug/dump-<timestamp>.md to attach to a report
 - `/dev-kit:debug --dump-only --share`: writes .dev/run/debug/dump-share-<timestamp>.md to send to someone else
 
-**Produces:** .dev/run/debug/dump-<timestamp>.md (this machine) and, with --share, dump-share-<timestamp>.md (to send); never committed
+**Produces:** .dev/run/debug/dump-<timestamp>.md (this machine) and, with --share, dump-share-<timestamp>.md (to send); codes only, no names or secrets; never committed
 
 **Related:** [`status`](#status), [`feedback`](#feedback)

@@ -47,7 +47,7 @@ How the plugin is built, tested and documented. Users do not need this page.
                                  in a headless round it also denies applying a worktree by hand and records the round's
                                  last action (.dev/run/round-activity.json) for the board
     scripts/dev_debug.py         /dev-kit:debug: state-vs-git checks and a debug dump in .dev/run/debug/ (read-only;
-                                 secrets always redacted; --share anonymises it for someone else)
+                                 codes only, no names or secrets; --share also anonymises paths)
     scripts/dev_agent_hook.py    hook handler: board's live agents (.dev/run/agents.jsonl), session title, notifications
     scripts/dev_ui.py            Claude Code interface: spinner tips and status line in .claude/settings.local.json
     scripts/dev_statusline.py    the status line itself (read-only, one line, silent outside a dev-kit project)

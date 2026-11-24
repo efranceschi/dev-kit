@@ -216,7 +216,10 @@ class TestDebug(Started):
         text = Path(json.loads(self.dd("dump", "--json").stdout)["path"]).read_text(encoding="utf-8")
         for secret in ("abc123secretvalue", "ghp_abcdef", "dapi0123", "a@b.com", "board-secret-token-value", "abcdefghijklmnop1234"):
             self.assertNotIn(secret, text, secret)
-        self.assertIn("Databricks credential rows", text)  # the local dump keeps titles
+        self.assertNotIn("Databricks credential rows", text)  # names never go in, only codes
+        self.assertIn("T-001", text)
+        self.assertIn("Q-003", text)
+        self.assertIn("src/a.py", text)  # the local dump keeps paths
 
     def test_share_dump_is_anonymised(self) -> None:
         self.secrets_fixture()
@@ -239,7 +242,17 @@ class TestDebug(Started):
         with mock.patch.object(dev_debug.Sharer, "text", lambda self, t: t):  # a broken anonymiser
             with self.assertRaises(dev_debug.LeakError) as e:
                 dev_debug.dump(self.root, 40, share=True)
-        self.assertTrue(any("project folder" in x or "task title" in x for x in e.exception.leaks))
+        self.assertTrue(any("project folder" in x or "project name" in x for x in e.exception.leaks))
+
+    def test_question_text_and_milestone_name_never_go_in(self) -> None:
+        (self.dev / "open-questions.md").write_text("| id | date | skill | question | answer | note |\n|---|---|---|---|---|---|\n"
+                                                    "| Q-007 | 2026-11-24 | implement | Should the vault keep old keys? | - | - |\n", encoding="utf-8")
+        with (self.dev / "log.md").open("a", encoding="utf-8") as f:
+            f.write("- 2026-11-24T05:38:08+00:00 add-question Q-007 (implement): Should the vault keep old keys?\n")
+        for args in (("dump",), ("dump", "--share")):
+            text = Path(json.loads(self.dd(*args, "--json").stdout)["path"]).read_text(encoding="utf-8")
+            self.assertNotIn("vault", text, args)
+            self.assertIn("Q-007", text, args)
 
     def test_committed_but_not_done(self) -> None:
         (self.root / "src" / "a.py").write_text("a = 3\n", encoding="utf-8")

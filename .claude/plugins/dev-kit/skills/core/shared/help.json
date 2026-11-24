@@ -967,7 +967,7 @@
           "what": "writes .dev/run/debug/dump-share-<timestamp>.md to send to someone else"
         }
       ],
-      "produces": ".dev/run/debug/dump-<timestamp>.md (this machine) and, with --share, dump-share-<timestamp>.md (to send); never committed",
+      "produces": ".dev/run/debug/dump-<timestamp>.md (this machine) and, with --share, dump-share-<timestamp>.md (to send); codes only, no names or secrets; never committed",
       "related": [
         "status",
         "feedback"

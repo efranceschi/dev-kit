@@ -2,6 +2,14 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.6.2 — 2026-11-24
+
+### Changed
+- **Debug dumps keep codes only.** Neither dump carries the project's names any more, the local one included: no titles of tasks, milestones, releases or issues, no question texts, commit subjects, block reasons, log details, answers of the claude runs or the round's last action; tasks, questions, milestones and issues appear by their codes (T-, Q-, M-, I-, ADR-). Both dumps check their own text for these names and for secrets before writing, and write nothing (exit 3) when one is still there. The local dump still keeps paths and branches; `--share` also replaces them.
+
+### Tests
+- `test_adopt_start.py`: a question's text and a task's title in neither dump, their codes in both.
+
 ## 3.6.1 — 2026-11-24
 
 ### Fixed
