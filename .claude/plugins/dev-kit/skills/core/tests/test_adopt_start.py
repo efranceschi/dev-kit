@@ -201,9 +201,10 @@ class TestDebug(Started):
         st = json.loads((self.dev / "state.json").read_text(encoding="utf-8"))
         st["tasks"]["T-001"]["title"] = "Databricks credential rows"
         (self.dev / "state.json").write_text(json.dumps(st), encoding="utf-8")
+        gh, db = "ghp" + "_" + "abcdefghijklmnopqrstuvwxyz0123", "da" + "pi" + "0123456789abcdef" * 2  # built here: no secret-shaped literal in the repo
         with (self.dev / "log.md").open("a", encoding="utf-8") as f:
             f.write("- 2026-11-24T05:38:08+00:00 add-question Q-003 (autopilot): Databricks credential rows in "
-                    f"{wt} token=abc123secretvalue {"ghp" + "_" + "abcdefghijklmnopqrstuvwxyz0123"} {"da" + "pi" + "0123456789abcdef" * 2} by a@b.com\n")
+                    f"{wt} token=abc123secretvalue {gh} {db} by a@b.com\n")
         run = self.dev / "run"
         run.mkdir(parents=True, exist_ok=True)
         (run / "board.json").write_text(json.dumps({"pid": 1, "token": "board-secret-token-value", "url": "http://127.0.0.1:8765/"}), encoding="utf-8")
