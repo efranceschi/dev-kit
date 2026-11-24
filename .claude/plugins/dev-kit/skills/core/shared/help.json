@@ -947,6 +947,10 @@
         {
           "arg": "--dump-only",
           "meaning": "write the dump and list the errors, without the diagnosis"
+        },
+        {
+          "arg": "--share",
+          "meaning": "also write a dump that is safe to send: paths as pseudonyms, free text removed, secrets redacted, checked for leaks before writing"
         }
       ],
       "examples": [
@@ -957,9 +961,13 @@
         {
           "command": "/dev-kit:debug --dump-only",
           "what": "writes .dev/run/debug/dump-<timestamp>.md to attach to a report"
+        },
+        {
+          "command": "/dev-kit:debug --dump-only --share",
+          "what": "writes .dev/run/debug/dump-share-<timestamp>.md to send to someone else"
         }
       ],
-      "produces": ".dev/run/debug/dump-<timestamp>.md (machine-local, never committed)",
+      "produces": ".dev/run/debug/dump-<timestamp>.md (this machine) and, with --share, dump-share-<timestamp>.md (to send); never committed",
       "related": [
         "status",
         "feedback"

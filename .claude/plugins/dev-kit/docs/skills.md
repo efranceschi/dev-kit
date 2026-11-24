@@ -649,18 +649,20 @@ Diagnosis when something looks stuck or wrong: a debug dump, state checked again
 
 **When:** A run looks stuck, the board shows something odd, or you want a dump to send to the dev-kit author.
 
-**Usage:** `/dev-kit:debug ["what looks wrong"] [--dump-only]`
+**Usage:** `/dev-kit:debug ["what looks wrong"] [--dump-only] [--share]`
 
 | Argument | Meaning |
 |---|---|
 | `"what looks wrong"` | what you see, in your words (default: what is happening now) |
 | `--dump-only` | write the dump and list the errors, without the diagnosis |
+| `--share` | also write a dump that is safe to send: paths as pseudonyms, free text removed, secrets redacted, checked for leaks before writing |
 
 **Examples:**
 
 - `/dev-kit:debug the autopilot says finishing the step but no task is in progress`: explains what the round does and why the board shows no task
 - `/dev-kit:debug --dump-only`: writes .dev/run/debug/dump-<timestamp>.md to attach to a report
+- `/dev-kit:debug --dump-only --share`: writes .dev/run/debug/dump-share-<timestamp>.md to send to someone else
 
-**Produces:** .dev/run/debug/dump-<timestamp>.md (machine-local, never committed)
+**Produces:** .dev/run/debug/dump-<timestamp>.md (this machine) and, with --share, dump-share-<timestamp>.md (to send); never committed
 
 **Related:** [`status`](#status), [`feedback`](#feedback)

@@ -2,6 +2,17 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.6.1 — 2026-11-24
+
+### Fixed
+- **No secrets in a debug dump.** Every dump of `dev_debug.py` now drops the values of keys named like token, secret, password, api key, credential or cookie (the board's own token in `.dev/run/board.json` was copied before) and redacts what looks like a credential in any text: private keys, AWS, GitHub, Slack, Google, Databricks and `sk-` keys, JWTs, Bearer tokens, `password=…`, credentials in URLs and e-mail addresses. The answers of the headless runs are kept only in the local dump.
+
+### Added
+- `dev_debug.py dump --share` (and `/dev-kit:debug --share`): a dump meant for someone else, `.dev/run/debug/dump-share-<stamp>.md`. The project folder, the home folder and the user name are replaced; every project path becomes a stable pseudonym (`p:3fa2c1.js`, the same in every section); branches other than the kit's and main/master become `<branch-n>`; free text is dropped (task titles, commit subjects, block reasons, questions, log details, the runs' answers, the round's last action), keeping ids, statuses, times, counts, codes and kit tokens. Before writing, it checks its own text for secrets, the folders, the user name, task titles and project paths; on a leak it writes nothing and exits 3. `/dev-kit:debug` attaches only this dump to a report for someone else.
+
+### Tests
+- `test_adopt_start.py`: secrets redacted in the local dump, the shareable dump anonymised, and a leak refused.
+
 ## 3.6.0 — 2026-11-24
 
 Field report: after a question answered "adopt the work in the worktree", an autopilot implement round applied the earlier attempt of a task (a worktree Claude Code's own isolation had made in `.claude/worktrees/`) to the main checkout and ran the pipeline, while the state still said `todo`. The board showed nothing in progress and the Autopilot card only "finishing the step".

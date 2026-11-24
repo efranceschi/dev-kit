@@ -195,6 +195,51 @@ class TestDebug(Started):
             self.assertIn(title, text)
         self.assertNotIn(str(Path.home()) + "/", text.replace(str(self.root), ""))
 
+    def secrets_fixture(self) -> None:
+        wt = self.foreign()
+        (self.root / "src" / "a.py").write_text("a = 5\n", encoding="utf-8")
+        st = json.loads((self.dev / "state.json").read_text(encoding="utf-8"))
+        st["tasks"]["T-001"]["title"] = "Databricks credential rows"
+        (self.dev / "state.json").write_text(json.dumps(st), encoding="utf-8")
+        with (self.dev / "log.md").open("a", encoding="utf-8") as f:
+            f.write("- 2026-11-24T05:38:08+00:00 add-question Q-003 (autopilot): Databricks credential rows in "
+                    f"{wt} token=abc123secretvalue {"ghp" + "_" + "abcdefghijklmnopqrstuvwxyz0123"} {"da" + "pi" + "0123456789abcdef" * 2} by a@b.com\n")
+        run = self.dev / "run"
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "board.json").write_text(json.dumps({"pid": 1, "token": "board-secret-token-value", "url": "http://127.0.0.1:8765/"}), encoding="utf-8")
+        (run / "round-activity.json").write_text(json.dumps({"round": "r1", "tool": "Bash", "what": "curl -H 'Authorization: Bearer abcdefghijklmnop1234' https://x"}),
+                                                 encoding="utf-8")
+
+    def test_every_dump_redacts_secrets(self) -> None:
+        self.secrets_fixture()
+        text = Path(json.loads(self.dd("dump", "--json").stdout)["path"]).read_text(encoding="utf-8")
+        for secret in ("abc123secretvalue", "ghp_abcdef", "dapi0123", "a@b.com", "board-secret-token-value", "abcdefghijklmnop1234"):
+            self.assertNotIn(secret, text, secret)
+        self.assertIn("Databricks credential rows", text)  # the local dump keeps titles
+
+    def test_share_dump_is_anonymised(self) -> None:
+        self.secrets_fixture()
+        out = json.loads(self.dd("dump", "--share", "--json").stdout)
+        p = Path(out["path"])
+        self.assertTrue(out["share"] and p.name.startswith("dump-share-"))
+        text = p.read_text(encoding="utf-8")
+        for leak in ("abc123secretvalue", "ghp_abcdef", "dapi0123", "a@b.com", "board-secret-token-value", "Databricks", "src/a.py",
+                     str(self.root), "new_version", "work on new_version", "curl"):
+            self.assertNotIn(leak, text, leak)
+        self.assertIn("T-001", text)
+        self.assertIn("Q-003", text)
+        self.assertRegex(text, r"p:[0-9a-f]{6}\.py")
+        self.assertIn("<branch-", text)
+        self.assertIn("foreign_task_worktree", text)
+
+    def test_share_refuses_to_write_a_leak(self) -> None:
+        import dev_debug
+        self.secrets_fixture()
+        with mock.patch.object(dev_debug.Sharer, "text", lambda self, t: t):  # a broken anonymiser
+            with self.assertRaises(dev_debug.LeakError) as e:
+                dev_debug.dump(self.root, 40, share=True)
+        self.assertTrue(any("project folder" in x or "task title" in x for x in e.exception.leaks))
+
     def test_committed_but_not_done(self) -> None:
         (self.root / "src" / "a.py").write_text("a = 3\n", encoding="utf-8")
         self.git("commit", "-qam", "[T-001] feat: a")
