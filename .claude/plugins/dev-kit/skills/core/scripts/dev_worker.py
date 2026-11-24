@@ -81,6 +81,7 @@ WATCH_BEAT_S = 20             # how often the listener refreshes its heartbeat
 WATCH_FRESH_S = 90            # a listener not seen for this long is not listening
 REMIND_S = 600                # a request nobody took is announced again after this long
 THINK_S = 10                  # how often an idle listener scans the queue again even when no file changed
+HOLD_IDLE_S = 60               # an idle executor that does not listen still holds the queue for this long (between two requests)
 APPROVAL_WAIT_S = 600         # a permission request nobody answers on the board is denied after this long
 APPROVAL_TARGET = 300         # characters of the command or path shown on the board
 FINISHED = ("done", "failed", "cancelled", "stale")
@@ -670,8 +671,17 @@ def executor(root: Path) -> dict:
         live = time.time() - seen < ONLINE_S
     hears = listening(root)
     state = (w.get("state") or "idle") if live else ("idle" if hears else "offline")
-    return {"state": state, "online": live or hears, "listening": hears, "paused": m["paused"],
-            "item": w.get("item") if live else None, "last_seen": w.get("last_seen")}
+    return {"state": state, "online": live or hears, "listening": hears, "holds": hears or (live and _holds(w)),
+            "paused": m["paused"], "item": w.get("item") if live else None, "last_seen": w.get("last_seen")}
+
+
+def _holds(w: dict) -> bool:
+    """Whether a live executor still takes the queue: while it works on a request, or for a moment after one (its loop
+    claims the next). An idle session that does not listen never wakes for a new request by itself, so it must not
+    keep the board's own worker away, nor refuse a worker that comes after it."""
+    if w.get("state") in ("running", "sleeping") or w.get("item"):
+        return True
+    return time.time() - _ts(w.get("idle_since") or w.get("last_seen")) < HOLD_IDLE_S
 
 
 # --------------------------------------------------------------------------- the board runs its own executor
@@ -723,6 +733,42 @@ def auto_status(root: Path) -> dict:
     if st.get("state") == "running" and not _alive(st.get("pid")):
         st = {**st, "state": "idle"}
     return st
+
+
+def who_takes(root: Path) -> tuple[str | None, str | None]:
+    """Who will run a waiting request: ("listener" | "executor" | "board", None), ("autopilot", when) while a board
+    Autopilot run is open (the board's worker starts after it), or (None, why nobody will). The Stop and prompt hooks
+    ask the user to run /dev-kit:worker only when nobody will, and never while the Autopilot runs (two Claude Code
+    sessions would change the project at once)."""
+    ex = executor(root)
+    if ex["listening"]:
+        return "listener", None
+    if ex["holds"]:
+        return "executor", None
+    rec = _read(run_dir(root) / "board.json") or {}
+    if not _alive(rec.get("pid")):
+        return None, "the board is not running"
+    ap = _read(run_dir(root) / AP_RUN) or {}
+    if ap.get("state") == "running" and _alive(ap.get("pid")):
+        return "autopilot", ("they run when the Autopilot run ends (one Claude Code changes the project at a time); "
+                             "switching the Autopilot off on the board runs them after its current step")
+    if not rec.get("actions", True):
+        return None, "the board runs with requests off"
+    if not auto_cfg(root).get("auto"):
+        return None, "the board's own worker is off (autonomy.board_executor.auto)"
+    st = auto_status(root)
+    if st.get("state") == "no_claude" or not claude_exe():
+        return None, "the board found no claude command to start its worker"
+    if st.get("state") == "waiting" and time.time() < float(st.get("until") or 0):
+        return None, f"the board's worker failed ({st.get('reason') or 'unknown'}) and retries at {_hhmm(st.get('until'))}; see .dev/run/worker-auto.log"
+    return "board", None
+
+
+def _hhmm(t: object) -> str:
+    try:
+        return datetime.fromtimestamp(float(t)).strftime("%H:%M")  # type: ignore[arg-type]
+    except (TypeError, ValueError, OSError):
+        return "?"
 
 
 def autopilot_on(root: Path) -> bool:
@@ -1026,7 +1072,7 @@ class AutoExecutor:
         if not cfg.get("auto"):
             self._status("off")
             return False
-        if modes(self.root)["paused"] or executor(self.root)["online"]:
+        if modes(self.root)["paused"] or executor(self.root)["holds"]:
             return False
         x = claimable(self.root)
         if x is None or time.time() - _ts(x.get("ts")) < AUTO_GRACE_S or time.time() < self.next_try:
@@ -1159,8 +1205,15 @@ def _other_executor(root: Path, session: str | None) -> dict | None:
     if not w.get("session") or w.get("session") == session or w.get("state") == "offline":
         return None
     if w.get("pid"):
-        return w if _alive(w["pid"]) else None
-    return w if time.time() - _ts(w.get("last_seen")) < ONLINE_S else None
+        live = _alive(w["pid"])
+    else:
+        live = time.time() - _ts(w.get("last_seen")) < ONLINE_S
+    if not live:
+        return None
+    if _holds(w):
+        return w
+    a = armed(root)  # an idle session that listens is woken by the board: it keeps the queue
+    return w if listening(root) and a and f"claude-{a['pid']}" == w.get("session") else None
 
 
 def claim(root: Path, session: str | None = None, pid: int | None = None) -> tuple[dict | None, str]:
@@ -1168,6 +1221,9 @@ def claim(root: Path, session: str | None = None, pid: int | None = None) -> tup
         other = _other_executor(root, session)
         if other:
             return None, f"another session ({other.get('session')}) is the executor of this project"
+        ap = _read(run_dir(root) / AP_RUN) or {}
+        if ap.get("state") == "running" and _alive(ap.get("pid")):
+            return None, "another session (the board's Autopilot run) changes the project; the requests run when it ends"
         all_ = items(root)
         for x in all_:  # a stale request is closed once, so it never runs twice
             if x["status"] == "stale":

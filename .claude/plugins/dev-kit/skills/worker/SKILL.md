@@ -41,7 +41,7 @@ In the session that started the board (`/dev-kit:board`), the plugin's monitor a
    - `task_decision`: a blocked task or an open hotfix. `DS task-decide --request <id>`; for `run` it prints `/dev-kit:implement <T>`: invoke `dev-kit:implement` with that task and follow it fully, in board mode.
 4. Close it: `DW finish <id> --status done` (or `failed`), with `--note` of at most one line made of ids, SHAs, scores and counts, never project text (e.g. `T-014 a1b2c3d; 212 tests green`).
 5. Back to step 2.
-6. `DW heartbeat --session "claude-$PPID" --pid $PPID --state idle`, run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root "${CLAUDE_PROJECT_DIR}" ingest`, log `skill_end`, and report.
+6. `DW heartbeat --session "claude-$PPID" --pid $PPID --state idle`, run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root "${CLAUDE_PROJECT_DIR}" ingest`, log `skill_end`, and report. An idle session that does not listen stops holding the queue a minute later: from then on the board's own headless worker takes new requests, and a later `/dev-kit:worker` here is not refused.
 
 ## Board mode (questions)
 While a request runs, every point that would ask the user (an AskUserQuestion of any skill, a pause point with action `ask`) asks on the board instead:

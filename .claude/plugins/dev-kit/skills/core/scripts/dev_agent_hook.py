@@ -287,8 +287,8 @@ def take_notices(dev: Path) -> dict | None:
 
 
 def board_requests(root: Path, dev: Path, only_new: bool) -> dict | None:
-    """One line about the requests the board queued, or None (nothing waiting, nothing new since the last one, or a
-    session is listening: its monitor announces each request by itself)."""
+    """One line about the requests the board queued, or None (nothing waiting, nothing new since the last one, or
+    someone takes them: a listening session, the executor working on the queue, or the board's own worker)."""
     import dev_worker as dw
     if dw.listening(root):
         return None
@@ -304,8 +304,15 @@ def board_requests(root: Path, dev: Path, only_new: bool) -> dict | None:
         dw._write(seen_path, {"ids": ids})
     if not nxt or dw.modes(root)["paused"] or (only_new and seen == ids):
         return None
+    taker, why = dw.who_takes(root)
+    if taker and taker != "autopilot":
+        return None  # the board's own worker (or a session that holds the queue) takes it: nothing for the user to do
     n = len(waiting) or 1
-    text = f"dev-kit board: {n} request{'s' if n != 1 else ''} waiting ({', '.join(ids[:5]) or nxt['id']}) · run /dev-kit:worker"
+    head = f"dev-kit board: {n} request{'s' if n != 1 else ''} waiting ({', '.join(ids[:5]) or nxt['id']})"
+    if taker == "autopilot":
+        text = f"{head} · {why}"
+        return {"systemMessage": text, "context": f"{text}. Do not run /dev-kit:worker while the Autopilot run is open."}
+    text = f"{head} · {why} · run /dev-kit:worker"
     return {"systemMessage": text, "context": f"{text}. The requests come from the project's web board; /dev-kit:worker runs them."}
 
 

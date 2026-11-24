@@ -2,6 +2,21 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.6.3 — 2026-11-24
+
+Field reports: after `/dev-kit:board restart` the session said requests would run in a worker the board starts by itself, but a request (P-007) then waited and the Stop hook kept saying "run /dev-kit:worker"; later two requests (P-009, P-010) waited during an Autopilot run with the same advice.
+
+### Fixed
+- **An idle session no longer keeps the board's worker away.** A session that had run `/dev-kit:worker` left its heartbeat as `idle` with its own pid, so while it stayed open it counted as the project's executor: the board never started its headless worker, and a headless worker would have been refused as "another session". Now an executor holds the queue only while it works on a request, for a minute after one (its loop claims the next), or while it listens (`dev_worker.py`: `executor()["holds"]`, used by the board's executor and by `claim`).
+- **Requests wait for an open Autopilot run, and say so.** The board runs one Claude Code at a time, so a request queued during an Autopilot run starts when that run ends; the prompt hook used to say "run /dev-kit:worker", which would have had two sessions change the project at once. The hook now says the requests run when the Autopilot run ends (switching it off runs them after its current step), and `claim` refuses while a board Autopilot run is open (exit 4).
+- **The hooks only ask for `/dev-kit:worker` when nobody else will run the request.** When the board's own worker (or a session that holds the queue) takes it, the SessionStart, prompt and Stop hooks stay quiet; otherwise the line says why: the board is not running, requests are off, its worker is off, no `claude` command, or its worker failed and retries at a given time (see `.dev/run/worker-auto.log`). New `dev_worker.who_takes()`.
+
+### Added
+- `/dev-kit:debug` checks the board's queue: `queue_stuck` (a request waits and nobody will take it, with the reason), `queue_not_taken` (the board is up but has not started its worker for over a minute: an old server or a failing executor loop), `queue_waits_for_autopilot` and `request_stale`. The dump gains a `Board queue` section (ids, actions, statuses, times and question codes only) and the end of the board worker's log.
+
+### Tests
+- `test_queue_taken.py`: the field case (an idle session open for minutes, the board starts its worker and the headless claim is not refused), an executor between two requests and one working still hold the queue, the hooks' silence and reasons, requests waiting for an Autopilot run (hook text, refused claim), the new debug checks and the queue in the dump without request text.
+
 ## 3.6.2 — 2026-11-24
 
 ### Changed
