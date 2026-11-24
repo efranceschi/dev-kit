@@ -105,6 +105,7 @@ RUN_COMMANDS = [re.compile(rf"^/dev-kit:{x}$") for x in (
     r"(?:interview|prd|architecture|ux|ui|plan|docs|usability|costs|backlog|status|release)",
     r"interview --gaps",
     rf"deploy(?: {MILESTONE})?",
+    r"diagram(?: update)?",
 )]
 ISSUE_TYPES = ("bug", "improvement", "change")
 PLAN_OPS = {

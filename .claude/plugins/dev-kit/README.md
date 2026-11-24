@@ -2,7 +2,7 @@
 
 A Claude Code plugin where specialised agents build a complete application and keep it evolving, from the requirements interview through milestones and releases until the product is stable. You answer one interview; the kit then specifies, plans, implements, tests, audits and releases almost on its own, and stops only when it needs a decision from you.
 
-- **26 skills**, invoked as `/dev-kit:<name>`.
+- **27 skills**, invoked as `/dev-kit:<name>`.
 - **17 agents** the skills call: one implementer, one architecture consultant and 15 read-only reviewers.
 - **Resumable state** in `.dev/` inside your project.
 - **Lost?** `/dev-kit:help` tells you what to do next; `/dev-kit:help <question>` answers "how do I…?".
@@ -46,10 +46,11 @@ Step by step: [getting started](docs/getting-started.md). What each stage expect
 | change autonomy, release flags, health check | `/dev-kit:settings` |
 | know how much it cost | `/dev-kit:costs` |
 | review the session or send feedback to the author | `/dev-kit:feedback` |
+| draw the architecture diagram of what is being built (also the board's Architecture button) | `/dev-kit:diagram` |
 | find out why a run looks stuck, or make a dump for a dev-kit patch | `/dev-kit:debug` |
 | run it overnight | [recipe](docs/recipes.md#let-it-run-overnight) |
 
-All 26 skills by category, with arguments and examples: [skills](docs/skills.md).
+All 27 skills by category, with arguments and examples: [skills](docs/skills.md).
 
 ## How it works, in short
 

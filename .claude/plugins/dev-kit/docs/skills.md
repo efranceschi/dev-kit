@@ -54,7 +54,8 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 | Skill | What it does |
 |---|---|
 | [`deploy`](#deploy) | Production deploy of an approved milestone or release: preflight, backup, dry-run, install, migrations, smoke checks. |
-| [`docs`](#docs) | Project documentation from the artifacts and code: README, user guide, API reference, CHANGELOG. |
+| [`docs`](#docs) | Project documentation from the artifacts and code: README, architecture diagram (always), user guide, API reference, CHANGELOG. |
+| [`diagram`](#diagram) | The high-level architecture diagram of the system being built, in draw.io's style without draw.io: an SVG for the board and the README, plus a .drawio file. |
 | [`release`](#release) | Ships the next release (the milestones closed since the last release, or the next planned release): audits, the release review and your approve/reject decision for a planned release, then version, CHANGELOG, tag, production deploy and the release record; patch releases for hotfixes. |
 
 ## Observe
@@ -554,7 +555,7 @@ Production deploy of an approved milestone or release: preflight, backup, dry-ru
 
 ### docs
 
-Project documentation from the artifacts and code: README, user guide, API reference, CHANGELOG.
+Project documentation from the artifacts and code: README, architecture diagram (always), user guide, API reference, CHANGELOG.
 
 **When:** Before a release, or when you need docs for the project.
 
@@ -568,9 +569,30 @@ Project documentation from the artifacts and code: README, user guide, API refer
 
 - `/dev-kit:docs all`: all project docs
 
-**Produces:** README.md, docs/, CHANGELOG.md
+**Produces:** README.md, docs/ (with docs/diagrams/architecture.svg), CHANGELOG.md
 
-**Related:** [`review`](#review), [`release`](#release)
+**Related:** [`review`](#review), [`release`](#release), [`diagram`](#diagram)
+
+### diagram
+
+The high-level architecture diagram of the system being built, in draw.io's style without draw.io: an SVG for the board and the README, plus a .drawio file.
+
+**When:** The board's Architecture button has no diagram yet, the architecture changed, or as part of docs (which always runs it).
+
+**Usage:** `/dev-kit:diagram [update]`
+
+| Argument | Meaning |
+|---|---|
+| `update` | redraw the existing diagram from the architecture and the code as built (without it, a missing diagram is created) |
+
+**Examples:**
+
+- `/dev-kit:diagram`: draws docs/diagrams/architecture.svg and .drawio
+- `/dev-kit:diagram update`: redraws it after the architecture changed (the board's Update diagram button)
+
+**Produces:** docs/diagrams/architecture.json (the model), architecture.svg and architecture.drawio
+
+**Related:** [`architecture`](#architecture), [`docs`](#docs), [`board`](#board)
 
 ### release
 

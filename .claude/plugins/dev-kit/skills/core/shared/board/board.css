@@ -1128,6 +1128,21 @@ main[aria-busy="true"] .phase-panel { opacity: .55; }
 
 /* ---------- the Map: the five lanes at once, as the diagram */
 .map-panel { grid-template-rows: minmax(0, 1fr) auto; }
+/* the architecture diagram: a picture drawn by /dev-kit:diagram, always on white (it is the project's own document) */
+.arch-btn { width: auto; padding: 0 12px; }
+.arch-panel { grid-template-rows: auto minmax(0, 1fr); }
+.arch-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.arch-title { flex: 1 1 260px; min-width: 0; }
+.arch-title h2 { margin: 0; font-size: 16px; }
+.arch-title .stale { color: var(--warn-text, var(--text-secondary)); font-weight: 600; }
+.arch-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.arch-view { position: relative; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); padding: 12px; display: grid; place-items: center; }
+.arch-view.has-img { background: #fff; }
+.arch-view img { position: absolute; inset: 12px; width: calc(100% - 24px); height: calc(100% - 24px); object-fit: contain; cursor: zoom-in; }
+.arch-view.zoom { display: block; }
+.arch-view.zoom img { position: static; width: auto; height: auto; cursor: zoom-out; }
+@media not ((min-width: 1024px) and (min-height: 640px)) { .arch-view img { position: static; width: 100%; height: auto; } }
+.arch-view > .empty { max-width: 520px; }
 .map-lanes { display: grid; grid-auto-rows: minmax(0, 1fr); gap: 10px; min-height: 0; }
 .map-lane { display: grid; grid-template-columns: 200px minmax(0, 1fr) 210px; align-items: center; gap: 18px; min-width: 0; min-height: 0; padding: 10px 16px; border-radius: var(--radius);
   background: linear-gradient(90deg, color-mix(in srgb, var(--lane) 9%, var(--surface-1)), var(--surface-1) 40%); border: 1px solid var(--border); border-left: 4px solid var(--lane);

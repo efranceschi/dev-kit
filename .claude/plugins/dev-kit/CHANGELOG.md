@@ -2,6 +2,19 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.8.0 — 2026-11-24
+
+### Added
+- **Architecture diagram on the board.** Next to Map, an Architecture button shows the high-level diagram of the system being built (`docs/diagrams/architecture.svg`), fitted to the screen (click to zoom, or open it full size), with when it was drawn and whether the architecture changed since. Update diagram queues `/dev-kit:diagram update`; when there is no diagram yet, opening the screen queues `/dev-kit:diagram` once and says it is being drawn.
+- **New `/dev-kit:diagram` skill and `dev_diagram.py`.** The skill writes a model of the system (layers of users, clients, services, jobs, data stores, queues and external services, and what flows between them) from `.dev/architecture.md` and the code as built; the script checks it and draws it in draw.io's style (its palette, swimlanes, cylinders, dashed external boxes, right-angle connectors, legend) as an SVG and as an uncompressed `.drawio` file with the same picture. **draw.io is not needed** for anything: the `.drawio` file is only for whoever wants to edit the picture there. `dev_diagram.py check` says whether the diagram is current (exit 0), missing (3) or out of date (4: the model or `.dev/architecture.md` changed since it was drawn); `--info` always exits 0, for the line the skill injects.
+- The board's request queue accepts `/dev-kit:diagram` and `/dev-kit:diagram update`; `/api/state` carries `diagram` and `/api/diagram` serves the SVG (only that file, as an image).
+
+### Changed
+- **The diagram is part of the project's documentation and mandatory in docs.** `/dev-kit:docs` always runs `/dev-kit:diagram update` (step 2a) and links the SVG from the README and `architecture.md`; docs are not finished while `dev_diagram.py check` fails. The docs reviewer and its checklist report a missing or out-of-date diagram as `high` and a component the code has but the diagram lacks (or the reverse) as `medium`.
+
+### Tests
+- `test_dev_diagram.py`: model validation, layout inside the picture with right angles only (neighbours, same lane, skipped layers), well-formed SVG and draw.io output with escaped text, same model same picture, check missing/current/out of date, the queue's commands, the board's endpoint and state, the button next to Map, docs and reviewer requiring the diagram.
+
 ## 3.7.0 — 2026-11-24
 
 The Autopilot's implementers and auditors were never visible in the user's Claude Code session: the board ran the Autopilot as a headless `claude -p`, which sent every round to yet another headless child, so their subagents lived in processes nobody sees. Eduardo chose to run the Autopilot in the session that listens to the board (option A).

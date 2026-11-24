@@ -18,7 +18,7 @@ How the plugin is built, tested and documented. Users do not need this page.
                                  status-pane-model.ts (pure snapshot logic) and status-pane.test.tsx (claude plugin test)
   types/index.d.ts               the pane's $.state contract, named as "types" in plugin.json
   monitors/monitors.json         the board's listener (dev_worker.py watch), started the first time /dev-kit:board runs
-  skills/*/SKILL.md              26 skills, invoked as /dev-kit:<name>
+  skills/*/SKILL.md              27 skills, invoked as /dev-kit:<name>
   skills/core/                   support skill, not invocable
     SKILL.md                     marker (disable-model-invocation: true, user-invocable: false)
     scripts/dev_state.py         state: init, sync-plan, next, start, done, block, unblock, drop, add-task, add-question,
@@ -48,6 +48,8 @@ How the plugin is built, tested and documented. Users do not need this page.
                                  last action (.dev/run/round-activity.json) for the board
     scripts/dev_debug.py         /dev-kit:debug: state-vs-git checks and a debug dump in .dev/run/debug/ (read-only;
                                  codes only, no names or secrets; --share also anonymises paths)
+    scripts/dev_diagram.py       /dev-kit:diagram: checks the model docs/diagrams/architecture.json and draws it as an SVG
+                                 in draw.io's style and a .drawio file (no draw.io needed); check: current or out of date
     scripts/dev_agent_hook.py    hook handler: board's live agents (.dev/run/agents.jsonl), session title, notifications
     scripts/dev_ui.py            Claude Code interface: spinner tips and status line in .claude/settings.local.json
     scripts/dev_statusline.py    the status line itself (read-only, one line, silent outside a dev-kit project)

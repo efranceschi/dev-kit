@@ -140,7 +140,7 @@
   const LANE_NAME = tmap({ conception: N_("Conception"), planning: N_("Planning"), construction: N_("Milestones"), releases: N_("Releases"), stable: N_("Stable") });
   // the lane shown: null follows the project's phase. Not kept across reloads: the board always opens where the project is.
   let phasePick = null;
-  const shownPhase = () => (phasePick && (phasePick === "map" || LANES.includes(phasePick)) ? phasePick : (data && data.phase) || "conception");
+  const shownPhase = () => (phasePick && (phasePick === "map" || phasePick === "arch" || LANES.includes(phasePick)) ? phasePick : (data && data.phase) || "conception");
   let needsBy = {};          // items of "Needs you" per lane, shown as badges on the tabs and on the steps of the flow
   let view = VIEWS.includes(store.get(VIEW_KEY, "")) ? store.get(VIEW_KEY, "") : "tasks";
   let firstRender = true;
@@ -561,6 +561,7 @@
       + (data.reopened ? tr(" · reopened by a change, construction goes on") : "");
     $("phase-back").hidden = shown === here;
     $("ph-map").setAttribute("aria-pressed", String(shown === "map"));
+    $("ph-arch").setAttribute("aria-pressed", String(shown === "arch"));
     fill($("phases"), LANES.map((k) => {
       const sel = k === shown;
       const st = laneState(k);
@@ -591,11 +592,12 @@
     phasePick = data && p === data.phase ? null : p;   // picking the current phase goes back to following it
     if (p !== "planning") replanOpen = false;
     render();
-    const el = $(p === "map" ? "ph-map" : `ph-${shownPhase()}`);
+    const el = $(p === "map" ? "ph-map" : p === "arch" ? "ph-arch" : `ph-${shownPhase()}`);
     if (focus && el) el.focus();
   }
   $("phase-back").addEventListener("click", () => setPhase(data.phase, true));
   $("ph-map").addEventListener("click", () => setPhase(shownPhase() === "map" ? data.phase : "map"));
+  $("ph-arch").addEventListener("click", () => setPhase(shownPhase() === "arch" ? data.phase : "arch"));
   $("phases").addEventListener("keydown", (e) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !data || !data.ok) return;
     const keys = LANES;
@@ -2219,6 +2221,51 @@
   }
 
   // ------------------------------------------------------------------ the map: the five lanes of the flow at once, with where the project is
+  // ------------------------------------------------------------------ architecture: the diagram of the system being built
+  // docs/diagrams/architecture.svg (served by /api/diagram) drawn by /dev-kit:diagram; none yet → the board asks for it once
+  const DIAGRAM_NEW = "/dev-kit:diagram", DIAGRAM_UPDATE = "/dev-kit:diagram update";
+  let archAsked = false;     // a missing diagram is queued once per page, never again by itself after a failure
+  let archZoom = false;
+  const diagramBusy = () => [DIAGRAM_NEW, DIAGRAM_UPDATE].map((c) => runningRun(c) || openRun(c)).find(Boolean) || null;
+  function renderArch() {
+    const d = data.diagram || { exists: false };
+    const busy = diagramBusy();
+    const busyText = busy ? (busy.started_at && !busy.id ? tr("Claude Code is drawing it now") : tr("Queued ({id})", { id: busy.id || "" })) : "";
+    const sub = $("arch-sub");
+    if (d.exists) {
+      fill(sub, d.at ? tr("High-level view of the system being built, drawn on {v}", { v: fmtDT(d.at) }) : tr("High-level view of the system being built"),
+        d.stale || !d.current ? h("span", { class: "stale", text: ` · ${tr("out of date: the architecture changed since")}` }) : null,
+        busy ? ` · ${busyText}` : null);
+    } else fill(sub, tr("High-level view of the system being built"));
+    const upd = h("button", { type: "button", class: `btn btn-sm${d.exists ? "" : " btn-primary"}`, disabled: busy || !actionsOn() ? true : null,
+      title: actionsOn() ? tr("Run {text} in Claude Code", { text: d.exists ? DIAGRAM_UPDATE : DIAGRAM_NEW }) : tr("Requests are off on this board: run {text} in Claude Code", { text: d.exists ? DIAGRAM_UPDATE : DIAGRAM_NEW }),
+      text: d.exists ? tr("Update diagram") : tr("Create diagram") });
+    upd.addEventListener("click", async () => {
+      upd.disabled = true;
+      try { await queue("run", { command: d.exists ? DIAGRAM_UPDATE : DIAGRAM_NEW }); } catch (e) { upd.disabled = false; }
+    });
+    const v = encodeURIComponent(d.at || "");
+    fill($("arch-actions"), upd,
+      d.exists ? h("a", { class: "btn btn-sm", href: `/api/diagram?v=${v}`, target: "_blank", rel: "noopener", text: tr("Open full size") }) : null);
+    const view = $("arch-view");
+    view.classList.toggle("zoom", archZoom && d.exists);
+    view.classList.toggle("has-img", Boolean(d.exists));
+    if (d.exists) {
+      const img = h("img", { src: `/api/diagram?v=${v}`, alt: tr("Architecture diagram of the system being built"), title: tr("Click to zoom") });
+      img.addEventListener("click", () => { archZoom = !archZoom; view.classList.toggle("zoom", archZoom); });
+      fill(view, img);
+      return;
+    }
+    if (!busy && !archAsked && actionsOn()) {
+      archAsked = true;
+      queue("run", { command: DIAGRAM_NEW }).catch(() => {});
+    }
+    fill(view, h("div", { class: "empty" },
+      busy || archAsked && actionsOn() ? tr("No diagram yet: Claude Code is drawing it with /dev-kit:diagram. It shows here when it is done.")
+        : actionsOn() ? tr("No diagram yet. Create it to see the architecture here.")
+          : tr("No diagram yet. Run /dev-kit:diagram in Claude Code to draw it.")));
+  }
+
   function renderMap() {
     const m = data.milestones.find((x) => x.id === data.current_milestone) || currentMilestone();
     const r = relPick();
@@ -2262,7 +2309,8 @@
   // ------------------------------------------------------------------ requests to Claude Code (dev_worker.py on the server, /dev-kit:worker runs them)
   // the commands the server accepts (dev_worker.RUN_COMMANDS); anything else keeps only its copy button
   const RUN_RES = [/^\/dev-kit:implement(?: (?:T-\d{3,5}|--milestone M\d{1,3}(?:\.\d{1,2})?))?$/, /^\/dev-kit:qa M\d{1,3}(?:\.\d{1,2})?$/, /^\/dev-kit:review (?:prd|design|plan|docs)$/,
-    /^\/dev-kit:(?:interview|prd|architecture|ux|ui|plan|docs|usability|costs|backlog|status|release)$/, /^\/dev-kit:interview --gaps$/, /^\/dev-kit:deploy(?: M\d{1,3}(?:\.\d{1,2})?)?$/];
+    /^\/dev-kit:(?:interview|prd|architecture|ux|ui|plan|docs|usability|costs|backlog|status|release)$/, /^\/dev-kit:interview --gaps$/, /^\/dev-kit:deploy(?: M\d{1,3}(?:\.\d{1,2})?)?$/,
+    /^\/dev-kit:diagram(?: update)?$/];
   const EMPTY_INBOX = { open: [], recent: [], executor: { state: "offline", online: false, paused: false }, approvals: [], actions: false };
   const inbox = () => (data && data.inbox) || EMPTY_INBOX;
   const actionsOn = () => Boolean(inbox().actions);
@@ -2892,11 +2940,12 @@
     const panel = planShown() ? "replan" : ph;
     keepFocus(() => {
       // global: the lane tabs, Needs you, requests and activity; below, only the screen of the lane shown
-      ["map", ...LANES, "replan"].forEach((k) => { $(`phase-${k}`).hidden = k !== panel; });
+      ["map", "arch", ...LANES, "replan"].forEach((k) => { $(`phase-${k}`).hidden = k !== panel; });
       document.body.dataset.screen = panel;
       renderImpediments(); renderHeader(); renderRequests(); renderFeed();
       applyView();
       if (panel === "map") renderMap();
+      else if (panel === "arch") renderArch();
       else if (panel === "conception") renderConception();
       else if (panel === "planning") renderPlanning();
       else if (panel === "replan") renderPlan();

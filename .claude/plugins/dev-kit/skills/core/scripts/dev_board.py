@@ -67,6 +67,7 @@ SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))  # -I drops the script dir
 import dev_state as ds  # noqa: E402
 import dev_worker as dw  # noqa: E402
+import dev_diagram as dg  # noqa: E402
 
 ASSETS = SCRIPTS.parent / "shared" / "board"
 STATIC = {"/": "index.html", "/index.html": "index.html", "/assets/board.css": "board.css",
@@ -497,6 +498,7 @@ def _commit_info(root: Path, sha: object) -> dict | None:
             "files": files[:-1][:40], "summary": files[-1] if files else ""}
 
 
+DIAGRAM_MAX = 2_000_000      # bytes of the architecture diagram SVG
 DOC_MAX = 1_000_000          # bytes of one markdown file shown in the side panel
 DOCS_SHOWN = 300             # .md files listed in /api/state
 DOCS_SKIP = ("run", "costs")  # folders of .dev that hold no document
@@ -1031,6 +1033,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
                   for k, f in sorted((s.get("facts") or {}).items(), key=lambda kv: int(kv[0][2:]) if kv[0][2:].isdigit() else 0,
                                      reverse=True) if isinstance(f, dict)],
         "docs": docs_list(root),
+        "diagram": _safe(lambda: dg.status(root)),
         "milestone_costs": {m: {k: v.get(k) for k in ("usd", "usd_complete", "tokens", "partial")}
                             for m, v in ms_costs.items() if isinstance(v, dict)},
         "releases": [{k: r.get(k) for k in ("version", "tag", "milestones", "at", "hotfix", "release")}
@@ -1096,6 +1099,12 @@ def signature(root: Path) -> tuple:
             out.append((name, st.st_mtime_ns, st.st_size))
         except OSError:
             out.append((name, 0, 0))
+    for rel in (dg.SVG, dg.MODEL, *dg.SOURCES):  # the diagram lives in docs/, its source in .dev/architecture.md
+        try:
+            st = (root / rel).stat()
+            out.append((rel, st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((rel, 0, 0))
     return tuple(out)
 
 
@@ -1308,6 +1317,8 @@ class Handler(BaseHTTPRequestHandler):
             raw = next((v[5:] for v in q.split("&") if v.startswith("path=")), "")
             code, d = doc_detail(self.server.root, urllib.parse.unquote(raw))
             return self._json(code, d)
+        if path == "/api/diagram":
+            return self._diagram()
         if path == "/api/events":
             return self._events()
         name = STATIC.get(path)
@@ -1381,6 +1392,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(404, {"ok": False, "error": "unknown request"})
         except ValueError as e:
             return self._json(409, {"ok": False, "error": str(e)})
+
+    def _diagram(self):
+        """The project's architecture diagram (docs/diagrams/architecture.svg), as an image: only that file, never
+        through a link out of the project, at most DIAGRAM_MAX bytes. Shown in an <img>, so scripts in it never run."""
+        root = self.server.root.resolve()
+        try:
+            p = (root / dg.SVG).resolve()
+            ok = p.is_relative_to(root) and p.is_file()
+            size = p.stat().st_size if ok else 0
+        except OSError:
+            ok, size = False, 0
+        if not ok:
+            return self._json(404, {"ok": False, "error": "no diagram", "hint": "run /dev-kit:diagram"})
+        if size > DIAGRAM_MAX:
+            return self._json(413, {"ok": False, "error": f"too large ({size} bytes)"})
+        self._send(200, p.read_bytes(), "image/svg+xml; charset=utf-8",
+                   {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"})
 
     def _body(self) -> dict | None:
         """The JSON object of a POST, or None after answering the error (wrong type, too large, not JSON)."""

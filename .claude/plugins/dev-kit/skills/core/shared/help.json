@@ -801,7 +801,7 @@
     {
       "name": "docs",
       "category": "ship",
-      "one_line": "Project documentation from the artifacts and code: README, user guide, API reference, CHANGELOG.",
+      "one_line": "Project documentation from the artifacts and code: README, architecture diagram (always), user guide, API reference, CHANGELOG.",
       "when": "Before a release, or when you need docs for the project.",
       "args": [
         {
@@ -815,10 +815,39 @@
           "what": "all project docs"
         }
       ],
-      "produces": "README.md, docs/, CHANGELOG.md",
+      "produces": "README.md, docs/ (with docs/diagrams/architecture.svg), CHANGELOG.md",
       "related": [
         "review",
-        "release"
+        "release",
+        "diagram"
+      ]
+    },
+    {
+      "name": "diagram",
+      "category": "ship",
+      "one_line": "The high-level architecture diagram of the system being built, in draw.io's style without draw.io: an SVG for the board and the README, plus a .drawio file.",
+      "when": "The board's Architecture button has no diagram yet, the architecture changed, or as part of docs (which always runs it).",
+      "args": [
+        {
+          "arg": "update",
+          "meaning": "redraw the existing diagram from the architecture and the code as built (without it, a missing diagram is created)"
+        }
+      ],
+      "examples": [
+        {
+          "command": "/dev-kit:diagram",
+          "what": "draws docs/diagrams/architecture.svg and .drawio"
+        },
+        {
+          "command": "/dev-kit:diagram update",
+          "what": "redraws it after the architecture changed (the board's Update diagram button)"
+        }
+      ],
+      "produces": "docs/diagrams/architecture.json (the model), architecture.svg and architecture.drawio",
+      "related": [
+        "architecture",
+        "docs",
+        "board"
       ]
     },
     {

@@ -83,6 +83,7 @@ From there the product keeps living: `/dev-kit:issue "what happens"` sends a bug
 | change autonomy, flags, the board language | `/dev-kit:settings` |
 | see how much it cost | `/dev-kit:costs` |
 | get an evaluation of the session | `/dev-kit:feedback` |
+| draw the architecture diagram of what is being built (also the board's Architecture button) | `/dev-kit:diagram` |
 | find out why a run looks stuck, or make a dump for a dev-kit patch | `/dev-kit:debug` |
 
 ## Good to know

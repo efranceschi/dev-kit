@@ -9,6 +9,10 @@ Verify that the documentation matches the product as built. **Execute what the d
 - Project structure section matches the real tree; links resolve (relative paths exist).
 - Screenshots exist and show the current UI (dates/versions not stale).
 
+## Architecture diagram
+- `docs/diagrams/architecture.svg` exists and `dev_diagram.py check` says it is current (missing or out of date → `high`); it is linked from the README and from `.dev/architecture.md` §2.
+- It shows every deployable unit, data store, queue and outside service the code has, once each, and nothing the code does not have (a difference → `medium`); it stays high level (no classes or endpoints).
+
 ## User guide
 - One section per persona journey in `ux-flows.md`; steps match the actual UI labels (grep the strings; compare with screenshots); features the guide describes exist; features that exist but are missing from the guide (main flows) → `medium`.
 - Language and tone match the brief; glossary consistent with the UI.

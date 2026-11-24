@@ -1,6 +1,6 @@
 ---
 name: docs-reviewer
-description: Read-only reviewer that verifies documentation against the product as built - executes the README commands, checks env vars against code, compares the user guide with the real UI strings, validates API docs against routes and schemas, and checks CHANGELOG coverage of task commits. Used by review docs and release; returns findings in the shared JSON contract.
+description: Read-only reviewer that verifies documentation against the product as built - executes the README commands, checks env vars against code, compares the user guide with the real UI strings, validates API docs against routes and schemas, and checks CHANGELOG coverage of task commits and that the architecture diagram is current. Used by review docs and release; returns findings in the shared JSON contract.
 tools: Read, Grep, Glob, Bash, Write
 model: haiku
 effort: medium
@@ -25,7 +25,8 @@ Language for prose. README.md, docs/, CHANGELOG.md, CLAUDE.md, `.env.example`, `
 4. Compare the user guide with the UI: grep labels and headings in the code; if the app can run and Playwright is present, spot-check two flows against the guide's steps.
 5. Compare API docs with routes/schemas; call one or two documented endpoints against the running app when possible and check the examples.
 6. Compare CHANGELOG with `git log` `[T-xxx]` commits since the last tag; check version/date.
-7. Check links (relative paths exist), screenshots' currency, CLAUDE.md "dev-kit" section accuracy, and writing quality in the document language.
+7. Check the architecture diagram: run `python3 -I <KIT>/scripts/dev_diagram.py check` (exit 3 missing, 4 out of date: both `high`) and compare `docs/diagrams/architecture.svg` with the code as built (a container, store or outside service the code has and the diagram lacks, or the reverse, is `medium`).
+8. Check links (relative paths exist), screenshots' currency, CLAUDE.md "dev-kit" section accuracy, and writing quality in the document language.
 
 ## Rules
 - A documented command that fails on the main setup/run path is `high`; a secret value in docs is `critical`.
