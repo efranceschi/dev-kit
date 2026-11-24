@@ -2,6 +2,26 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.5.0 — 2026-11-24
+
+Field report: on a project that works on `new_version` (with an old `main`), an autopilot implement round got worktrees of `main`, its permission requests waited 10 minutes each and were denied, the tasks stayed in progress with their slots open, and an implementer then edited the main checkout.
+
+### Fixed
+- **Worktrees from the work branch, created by the kit.** `implement` no longer uses Claude Code's own worktree isolation (it picks its base itself). `dev_state.py slot open N --task T-nnn --worktree` creates `.dev/run/worktrees/T-nnn` on `dev-kit/T-nnn` from the work branch (or the task's pipeline branch), reuses the branch of an earlier attempt, refuses a base without `.dev/state.json` or without the task's files that exist on HEAD, and records the worktree, branch and base in the slot; `brief` prints the `Worktree:` line.
+- **The work branch is no longer always `main`.** New `autonomy.git.base_branch` (default null = the branch checked out in the main checkout); `pipeline worktree` and `pipeline integrate` use it, and `pipeline status --json` shows it.
+- **The fence keeps an agent in its worktree.** With a worktree, `dev_fence.py` denies an edit outside it (the main checkout included) and a Bash command run from outside it, except `cd` into it, a read-only look, a kit script or a command that names the worktree. The implementer checks `git rev-parse --show-toplevel` first and stops as blocked without a worktree of its own.
+- **A round that stops leaves a true state.** New `dev_state.py reconcile [--milestone M] [--since ISO] [--reason TEXT] [--json]`: closes the slots left open, blocks the tasks left in progress with the reason (their attempt in the ledger, with the branch when the worktree has changes), removes clean worktrees and keeps the others. `round run` calls it after every round and adds `reconciled` to its summary; `implement` runs it before it starts, and a task's changes left in the main checkout go to its worktree with `reconcile --adopt T-nnn` instead of being continued there.
+- **Headless permissions.** `round run` and the board's autopilot start the child with `--allowedTools` for the kit's scripts, `cd`, the orchestrator's git commands and the project's `architecture.md` §8 commands. The first permission nobody answers on the board stops the round (`verdict: parked`, with the permission in the summary); later requests of that round are denied at once instead of waiting 10 minutes each, and the denial no longer asks the agent to run `block` itself.
+
+### Added
+- `slot apply N` (fence check from the worktree's base, then `git apply --3way` of the worktree's changes into the main checkout or the task's pipeline worktree, staged) and `slot close N --remove` (deletes the worktree and its branch once applied). `slot check` defaults to the worktree and its base.
+
+### Docs
+- `conventions.md` §17 (worktrees, reconcile, headless permissions), `implement`, `autopilot`, `implementer`, `resource-isolation.md`, `settings` (`autonomy.git`) and troubleshooting.
+
+### Tests
+- `test_worktree_isolation.py`: the field report's case (old `main`, work on `new_version`), a refused base, `slot apply` and `--remove`, the worktree fence, a round that dies, an unanswered permission that stops the round, and `reconcile --adopt`.
+
 ## 3.4.0 — 2026-11-24
 
 ### Added

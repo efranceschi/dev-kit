@@ -38,6 +38,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -359,8 +360,27 @@ def permission(root: Path, dev: Path, payload: dict) -> dict | None:
     except ValueError:
         wait_s = float(dw.APPROVAL_WAIT_S)
     rid = run["id"]
+    rnd = os.environ.get("DEV_KIT_ROUND_ID") or ""
+    parked = dev / "run" / "round-parked.json"
+    if rnd:
+        try:
+            prev = json.loads(parked.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            prev = {}
+        if isinstance(prev, dict) and prev.get("round") == rnd:  # one unanswered permission stops the round (§17)
+            return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {
+                "behavior": "deny", "message": "A permission already went unanswered on the dev-kit board in this round, so the "
+                                               "round is stopping. Do not retry anything and do not run dev_state.py block: end "
+                                               "now with one line; the round's reconciliation blocks the tasks with the reason."}}}
     aid = dw.request_approval(root, tool, target, rid, label, wait_s)
     got = dw.wait_decision(root, aid, wait_s, rid)
+    if got == "timeout" and rnd:
+        try:
+            tmp = parked.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"round": rnd, "tool": tool[:80], "target": target[:200], "at": time.time()}) + "\n", encoding="utf-8")
+            os.replace(tmp, parked)
+        except OSError:
+            pass
     if got in ("allow", "allow_session"):
         decision: dict = {"behavior": "allow"}
         if got == "allow_session" and keep:
@@ -372,7 +392,11 @@ def permission(root: Path, dev: Path, payload: dict) -> dict | None:
                "timeout": f"Nobody answered this permission on the dev-kit board within {max(1, round(wait_s / 60))} minutes, so it "
                           f"is denied ({rid}). Do not retry it now: finish what does not need it, or finish the request as "
                           "failed with a note naming the permission that was missing."}[got]
-        if rid == "autopilot":  # the board's autopilot run: no request to finish, the run parks what needs it
+        if rnd and got == "timeout":  # a round child: the round stops and its reconciliation blocks the tasks (§17)
+            why = (f"Nobody answered this permission on the dev-kit board within {max(1, round(wait_s / 60))} minutes, so it "
+                   "is denied and this round stops. Do not retry it and do not run dev_state.py block: end now with one "
+                   "line naming the permission; the round's reconciliation blocks the tasks with the reason.")
+        elif rid == "autopilot":  # the board's autopilot run: no request to finish, the run parks what needs it
             why = {"deny": "Denied by the user on the dev-kit board. Do not retry this action: go on with work that does not need it, "
                            "and block the task that does with the reason.",
                    "timeout": f"Nobody answered this permission on the dev-kit board within {max(1, round(wait_s / 60))} minutes, so it "

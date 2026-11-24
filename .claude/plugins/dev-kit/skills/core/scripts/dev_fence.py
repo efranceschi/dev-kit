@@ -13,6 +13,10 @@ agent without a slot, a project without .dev/state.json) passes untouched.
 - Bash (every kit agent, slot or not): `git commit --no-verify` / `-n`, `git push --force` / `-f`, `git rebase` and
   `git reset --hard` are denied. The orchestrator uses the kit's scripts, never these.
 
+- With a worktree (`slot open --worktree`, the slot records it): an edit outside the worktree is denied, the main
+  checkout included, and so is a Bash command run from outside it, except `cd` into it, a read-only look, a kit script
+  or a command that names the worktree (`git -C <wt>`).
+
 Bash in general (`sed -i`, a script) is not covered: `dev_state.py slot check <n> --since <sha>` compares the agent's
 diff with the same list at integration and fails it on a file outside.
 
@@ -71,6 +75,32 @@ def allowed(slot: dict, rel: str) -> bool:
     return False
 
 
+def inside(path: str, folder: str) -> bool:
+    """Whether a path is the folder or under it (lexically and after resolving links)."""
+    for f in (os.path.normpath, os.path.realpath):
+        try:
+            a, b = f(path), f(folder)
+        except (OSError, ValueError):
+            continue
+        if a == b or a.startswith(b.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
+READ_ONLY = re.compile(r"^\s*(?:git\s+(?:-C\s+\S+\s+)?(?:status|diff|log|show|rev-parse)\b|ls\b|pwd\s*$)")
+
+
+def bash_ok_outside(cmd: str, wt: str) -> bool:
+    """A command an agent with a worktree may run from outside it: `cd` into it, a read-only look, a kit script (they
+    take --root), or a command that names the worktree itself (`git -C <wt>`, `npm --prefix <wt>`)."""
+    c = cmd.strip()
+    if re.fullmatch(r"cd\s+[\"']?" + re.escape(wt.rstrip("/")) + r"/?[\"']?", c):
+        return True
+    if wt.rstrip("/") in c or READ_ONLY.match(c):
+        return True
+    return bool(re.match(r"^\s*python3\s+-I\s+\S*core/scripts/dev_\w+\.py\b", c.replace('"', "")))
+
+
 def kit_agents() -> set[str]:
     global KIT_AGENTS
     if KIT_AGENTS is None:
@@ -127,6 +157,7 @@ def decide(payload: dict, root: Path) -> dict | None:
         slot = {}
     tool = str(payload.get("tool_name") or "")
     ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    wt = str(slot.get("worktree") or "")
     if tool == "Bash":
         if not slot and agent not in kit_agents():
             return None
@@ -135,13 +166,24 @@ def decide(payload: dict, root: Path) -> dict | None:
             if rx.search(cmd):
                 return deny(dev, f"dev-kit fence: `{code.replace('_', ' ')}` is not allowed for kit agents (conventions.md §17); "
                                  "commit normally and let the orchestrator integrate.", code, agent, slot.get("task"), tool)
+        if wt and not inside(payload.get("cwd") or str(root), wt) and not bash_ok_outside(cmd, wt):
+            return deny(dev, f"dev-kit fence: you work in the worktree {wt}, not in {payload.get('cwd') or root}. Run `cd {wt}` "
+                             "first (one command), then your command (conventions.md §17).", "outside_worktree", agent,
+                        slot.get("task"), tool)
         return None
     if tool not in EDIT_TOOLS or not slot:
         return None
     target = str(ti.get("file_path") or ti.get("notebook_path") or "")
     if not target:
         return None
-    rel = rel_path(target, payload, root)
+    if wt:
+        ab = target if Path(target).is_absolute() else str(Path(payload.get("cwd") or wt) / target)
+        if not inside(ab, wt):
+            return deny(dev, f"dev-kit fence: {target} is outside your worktree {wt}. Never edit the main checkout: edit the same "
+                             f"path under {wt} (conventions.md §17).", "outside_worktree", agent, slot.get("task"), tool)
+        rel = norm(Path(os.path.normpath(ab)).relative_to(Path(os.path.normpath(wt))).as_posix())
+    else:
+        rel = rel_path(target, payload, root)
     if allowed(slot, rel):
         return None
     task = slot.get("task") or "this task"

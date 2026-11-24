@@ -25,6 +25,7 @@ A command that takes minutes (integration suite, build, scan, data load): start 
 - Type-check with the command that covers every project reference (e.g. `tsc -b`, not `tsc --noEmit` on a solution with references), as written in `.dev/architecture.md` §8.
 
 ## Worktrees
+- Your worktree is the folder on the `Worktree:` line of your prompt, created by the kit from the work branch. Run `cd <Worktree>` first and work only there: the fence denies edits outside it (the main checkout included) and Bash commands run from outside it.
 - A git worktree has the code but not the installed dependencies. When `node_modules` (or `.venv`) exists in the Project root and is missing in your worktree, and your task does not change a manifest or lockfile, link it (`ln -s <Project root>/node_modules node_modules`) and check `git check-ignore -q node_modules` (an entry `node_modules/` with a trailing slash does not ignore a symlink). Never install packages in a worktree: through the link it rewrites the main checkout's dependencies. Tasks that change manifests run alone in the main checkout.
 
 ## Credentials for QA
@@ -33,7 +34,7 @@ Screens behind a login are reached with the **QA access** in `.dev/architecture.
 ## Commands
 Permission guards often allow simple read-only commands and stop compound ones. Prefer:
 - the Read, Grep and Glob tools over `cat`, `grep -r`, `find` and `ls` chains;
-- one command per Bash call, run from the project root (or `git -C <dir>`, `--root <dir>`, `npm --prefix <dir>`) instead of `cd <dir> && …`;
+- one command per Bash call, run from the project root (your worktree when you have one; or `git -C <dir>`, `--root <dir>`, `npm --prefix <dir>`) instead of `cd <dir> && …`;
 - no heredocs or inline multi-line scripts: put a script in your scratch folder with the Write tool (when you have it) and run it, or pass arguments to an existing command;
 - no `| head`, `2>&1 | tail` decorations when the tool output is already short; use the command's own limit flags.
 

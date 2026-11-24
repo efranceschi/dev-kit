@@ -886,6 +886,13 @@ class AutoExecutor:
                 self._ap("stopped", reason="no_claude")
             return False
         cmd = [exe, "-p", prompt, "--plugin-dir", str(self.kit), "--output-format", "json", "--permission-mode", mode]
+        try:  # the kit's own commands, git and the project's §8 commands never wait for a person (conventions.md §17)
+            import dev_state
+            st = dev_state.Store(self.root)
+            st.load()
+            cmd += ["--allowedTools", *dev_state.headless_allowed_tools(st, self.kit)]
+        except (Exception, SystemExit):  # noqa: BLE001 - without the list the child still runs, it only asks more
+            pass
         env = {**os.environ, "CLAUDE_PROJECT_DIR": str(self.root), "DEV_KIT_BOARD_CHILD": "1"}
         if kind == "autopilot":
             env["DEV_KIT_AUTOPILOT"] = "board"

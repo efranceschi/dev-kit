@@ -273,7 +273,8 @@
       "score": "num",
       "fix_tasks": "num",
       "tasks_done": "num",
-      "exit_code": "num"
+      "exit_code": "num",
+      "reconciled": "num"
     },
     "pipeline": {
       "transition": "tok",
@@ -289,6 +290,12 @@
     "lesson": {
       "agent": "tok",
       "transition": "tok"
+    },
+    "reconcile": {
+      "blocked": "num",
+      "slots": "num",
+      "kept": "num",
+      "adopted": "num"
     }
   }
 }

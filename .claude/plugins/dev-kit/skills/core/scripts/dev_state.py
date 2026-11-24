@@ -34,8 +34,13 @@ Subcommands
                 method per role in .dev/lessons/ (at most 8 each), conventions §13
   challenger M F   who challenges a critical/high finding: another role, or another model family (--json)
   challenge record M --from FILE  a challenger's verdict (agree | dispute | refine, with evidence), conventions §7
-  slot ACTION N open --task T-nnn [--allow PATH] | close | show | check --since SHA: the file fence of an agent
-                slot (dev_fence.py enforces it as a hook; check fails an integration that touched a file outside)
+  slot ACTION N open --task T-nnn [--allow PATH] [--worktree] | close [--remove] | show | check [--since SHA] |
+                apply: the file fence of an agent slot (dev_fence.py enforces it as a hook; check fails an integration
+                that touched a file outside); --worktree creates the task's worktree from the work branch, apply brings
+                its changes into the main checkout, conventions §17
+  reconcile [--milestone M] [--since ISO] [--adopt T-nnn] [--json]   after a round or a session that stopped: close
+                the slots left open, block the tasks left in_progress (Previous attempt in the ledger), remove clean
+                worktrees; --adopt moves a task's changes from the main checkout into its worktree, conventions §17
   affected      pending tasks whose acceptance cites changed ACs (--acs AC-4,AC-7 [--json]), conventions §15
   unblock T     blocked -> todo
   drop T        drop a task removed by a replan (--reason); it no longer counts for milestones or release
@@ -178,6 +183,9 @@ DEFAULT_AUTONOMY = {
     # work does not stop while a person decides (§19): one release ahead of the one waiting for approval, and the
     # independent tasks of the next milestone while the current one is in QA, each on its own branch
     "pipeline": {"releases_ahead": 1, "milestone_overlap": True},
+    # the branch the project builds on (conventions.md §17): implementers' worktrees start from it and the pipeline
+    # integrates into it; null = the branch checked out in the main checkout (not necessarily main)
+    "git": {"base_branch": None},
     # the board's server starts a headless worker session itself (`claude -p "/dev-kit:worker"`) when a request waits
     # and no session takes requests (§17); permission_mode is passed to it, timeout_min ends a run that hangs
     "board_executor": {"auto": True, "permission_mode": "acceptEdits", "timeout_min": 180, "autopilot_timeout_min": 360},
@@ -493,6 +501,11 @@ def check_autonomy_field(field: str, val: object) -> object:
                 or not isinstance(val.get("releases_ahead", 1), int) or isinstance(val.get("releases_ahead", 1), bool)
                 or not 0 <= val.get("releases_ahead", 1) <= 3 or not isinstance(val.get("milestone_overlap", True), bool)):
             fail('autonomy.pipeline must be {"releases_ahead": 0-3, "milestone_overlap": true | false}')
+    elif field == "git":
+        br = val.get("base_branch") if isinstance(val, dict) else None
+        if (not isinstance(val, dict) or set(val) - {"base_branch"} or not isinstance(br, (str, type(None)))
+                or (br is not None and not re.fullmatch(r"[A-Za-z0-9._/-]{1,100}", br))):
+            fail('autonomy.git must be {"base_branch": "<branch>" | null} (null = the branch of the main checkout)')
     elif field == "release_flags":
         if (not isinstance(val, dict) or set(val) - {"enabled", "provider"} or not isinstance(val.get("enabled", False), bool)
                 or not isinstance(val.get("provider"), (str, type(None)))):
@@ -2337,6 +2350,19 @@ def main_branch(store: Store) -> str:
     return _git(store, "rev-parse", "--abbrev-ref", "HEAD") or "main"
 
 
+def work_branch(store: Store) -> str:
+    """The branch the project builds on (§17): autonomy.git.base_branch, else the branch checked out in the main
+    checkout, else main/master. Worktrees start from it and the pipeline integrates into it, so a project that works
+    on another branch than main never gets a worktree of main."""
+    br = (((store.state.get("autonomy") or {}).get("git") or {}).get("base_branch") or "").strip()
+    if br:
+        return br
+    cur = _git(store, "rev-parse", "--abbrev-ref", "HEAD")
+    if cur and cur != "HEAD" and not re.fullmatch(r"dev-kit/.+", cur):
+        return cur
+    return main_branch(store)
+
+
 def cmd_pipeline(store: Store, a: argparse.Namespace) -> None:
     """status [--json] | worktree BRANCH (create or show the worktree of a branch ahead) | integrate BRANCH (rebase it on
     the main branch once what it waited for is released or gated, then fast-forward the main branch to it)."""
@@ -2351,7 +2377,7 @@ def cmd_pipeline(store: Store, a: argparse.Namespace) -> None:
                 rows.append({"milestone": m, **ah, "tasks": sorted(k for k, v in store.tasks().items() if v["milestone"] == m
                                                                     and v["status"] == "todo" and ahead_ok(store, k, ah))})
         branches = sorted({v["branch"] for v in ahead_tasks(store).values()})
-        out = {"config": pipeline_cfg(store), "ahead": rows, "branches": branches,
+        out = {"config": pipeline_cfg(store), "work_branch": work_branch(store), "ahead": rows, "branches": branches,
                "paused": sorted(k for k, v in store.tasks().items() if v.get("pipeline_paused")),
                "redo": sorted(k for k, v in store.tasks().items() if v.get("redo_after") and v["status"] == "todo")}
         if a.json:
@@ -2369,7 +2395,7 @@ def cmd_pipeline(store: Store, a: argparse.Namespace) -> None:
         fail("the branch is dev-kit/R<n> or dev-kit/M<n>")
     target = br.split("/", 1)[1]
     wt = store.dev / "run" / "worktrees" / br.replace("/", "-")
-    main = main_branch(store)
+    main = work_branch(store)
     if a.action == "worktree":
         if wt.exists():
             print(str(wt))
@@ -2490,11 +2516,37 @@ def round_summary(store: Store, skill: str, scope: str, before: dict, rc: int, d
             "log": str(log.relative_to(store.root)), "next": next_command(store)}
 
 
+def headless_allowed_tools(store: Store, kit: Path | None = None) -> list[str]:
+    """What a headless session of the kit may run without asking (§17): the kit's own scripts, the git commands of
+    the orchestrator, `cd`, and the project's commands of architecture.md §8 (tests, lint, type-check). Everything
+    else still goes to Needs you."""
+    kit = kit or Path(__file__).resolve().parents[3]
+    out = [f"Bash(python3 -I *{kit}/skills/*core/scripts/dev_*.py*)", "Bash(cd *)"]
+    for verb in ("status", "diff", "log", "show", "rev-parse", "add", "commit", "apply", "check-ignore", "ls-files"):
+        out += [f"Bash(git {verb}*)", f"Bash(git -C * {verb}*)"]
+    try:
+        arch = (store.dev / "architecture.md").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        arch = ""
+    for _, cmd in _section_rows(arch, r"^## 8\b.*$"):
+        c = cmd.strip().strip("`").strip()
+        if c and c not in ("-", "n/a") and not re.search(r"[;&|<>`$()]", c) and len(c) <= 200:
+            out.append(f"Bash({c}*)")
+    return list(dict.fromkeys(out))
+
+
+def round_parked_path(store: Store) -> Path:
+    return store.dev / "run" / "round-parked.json"
+
+
 def cmd_round(store: Store, a: argparse.Namespace) -> None:
     """run SKILL SCOPE: one QA round or one milestone's implementation in a headless child session of Claude Code
     (`claude -p "/dev-kit:<skill> <scope> --round-child" --plugin-dir <kit>`), with a clean context, the same project
-    directory and permission mode; it waits and prints a JSON summary for the parent, which never reads the child's
-    reports (conventions.md §17). The child logs into the parent's telemetry session (`parent_session`)."""
+    directory and permission mode, and the kit's own commands allowed (headless_allowed_tools); it waits and prints a
+    JSON summary for the parent, which never reads the child's reports (conventions.md §17). The child logs into the
+    parent's telemetry session (`parent_session`). When a permission goes unanswered on the board, the round is
+    stopped there; whatever way it ends, `reconcile` then makes the state true (slots closed, tasks left in progress
+    blocked with their attempt in the ledger)."""
     store.load()
     if a.skill not in ROUND_SKILLS:
         fail(f"round run takes {' or '.join(ROUND_SKILLS)}")
@@ -2505,32 +2557,70 @@ def cmd_round(store: Store, a: argparse.Namespace) -> None:
     exe = os.environ.get("DEV_KIT_CLAUDE") or shutil.which("claude")
     if not exe:
         fail("`claude` is not on PATH: run the round in this session instead (plan B, conventions.md §17)", 3)
+    mk = _read_json(round_marker(store))
+    if mk and _pid_alive(mk.get("pid")):
+        fail(f"a round is already running ({mk.get('skill')} {mk.get('scope')}, pid {mk.get('pid')})")
     kit = Path(__file__).resolve().parents[3]
     run = store.dev / "run" / "rounds"
     run.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    log = run / f"{a.skill}-{a.scope}-{stamp}.log"
+    rid = f"{a.skill}-{a.scope}-{stamp}"
+    log = run / f"{rid}.log"
     prompt = f"/dev-kit:{a.skill} {a.scope} --round-child"
     cmd = [exe, "-p", prompt, "--plugin-dir", str(kit), "--output-format", "json"]
     mode = a.permission_mode or os.environ.get("DEV_KIT_PERMISSION_MODE")
     if mode:
         cmd += ["--permission-mode", mode]
+    cmd += ["--allowedTools", *headless_allowed_tools(store, kit)]
     env = {**os.environ, "DEV_KIT_PARENT_SESSION": tel.session_id(store.dev), "DEV_KIT_ROUND_CHILD": "1",
-           "CLAUDE_PROJECT_DIR": str(store.root)}
+           "DEV_KIT_ROUND_ID": rid, "CLAUDE_PROJECT_DIR": str(store.root)}
     before = round_snapshot(store, a.scope)
+    started = now()
+    round_parked_path(store).unlink(missing_ok=True)
     t0 = time.monotonic()
+    parked: dict = {}
     try:
         with log.open("w", encoding="utf-8") as fh:
-            rc = subprocess.run(cmd, cwd=store.root, env=env, stdout=fh, stderr=subprocess.STDOUT,
-                                timeout=a.timeout * 60 if a.timeout else None).returncode
-    except subprocess.TimeoutExpired:
-        rc = 124
+            proc = subprocess.Popen(cmd, cwd=store.root, env=env, stdout=fh, stderr=subprocess.STDOUT, start_new_session=True)
+            atomic_write(round_marker(store), json.dumps({"pid": os.getpid(), "child": proc.pid, "skill": a.skill,
+                                                          "scope": a.scope, "round": rid, "started": started}) + "\n")
+            deadline = t0 + a.timeout * 60 if a.timeout else None
+            rc = None
+            while rc is None:
+                try:
+                    rc = proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pk = _read_json(round_parked_path(store))
+                    if pk.get("round") == rid:
+                        parked = pk  # a permission went unanswered: the round stops here (§17)
+                    if parked or (deadline and time.monotonic() > deadline):
+                        with contextlib.suppress(OSError):
+                            os.killpg(proc.pid, signal.SIGTERM)
+                        try:
+                            proc.wait(timeout=30)
+                        except subprocess.TimeoutExpired:
+                            with contextlib.suppress(OSError):
+                                os.killpg(proc.pid, signal.SIGKILL)
+                            proc.wait()
+                        rc = 125 if parked else 124
     except OSError as e:
+        round_marker(store).unlink(missing_ok=True)
         fail(f"cannot start the child session: {e}", 3)
+    round_marker(store).unlink(missing_ok=True)
+    why = (f"round {rid} stopped: nobody answered the permission for {parked.get('tool') or 'a tool'} "
+           f"({str(parked.get('target') or '')[:80]})" if parked else
+           f"round {rid} ended with exit code {rc}" if rc else f"round {rid} ended with the task unfinished")
+    with store.transaction():
+        rec = reconcile(store, a.scope, started, why)
     out = round_summary(store, a.skill, a.scope, before, rc, time.monotonic() - t0, log)
+    out["reconciled"] = rec
+    if parked:
+        out["parked"] = {"tool": parked.get("tool"), "target": parked.get("target")}
+        out["verdict"] = "parked"
     tel.safe_emit(store.dev, "round_run", {"skill": a.skill, "scope": a.scope, "outcome": "ok" if rc == 0 else "failed",
                                            "verdict": out["verdict"], "score": out["score"], "fix_tasks": len(out["fix_tasks"]),
-                                           "tasks_done": len(out["tasks_done"]), "exit_code": rc, "duration_s": out["duration_s"]})
+                                           "tasks_done": len(out["tasks_done"]), "exit_code": rc, "duration_s": out["duration_s"],
+                                           "reconciled": len(rec["tasks_blocked"])})
     print(json.dumps(out, indent=2))
     if rc != 0:
         raise SystemExit(1)
@@ -2791,16 +2881,114 @@ def slot_path(store: Store, n: int) -> Path:
     return store.dev / "run" / "slots" / f"{n}.json"
 
 
-def cmd_slot(store: Store, a: argparse.Namespace) -> None:
-    """The fence of one agent slot. open N --task T-nnn [--allow PATH…] [--agent NAME]: the files the agent of slot
-    N may edit (the task's `files:`, their tests, changelog.d/, docs/setup.d/ and the .dev/ paths given); dev_fence.py
-    enforces it as a PreToolUse hook. close N. show N. check N --since SHA [--cwd DIR]: the files changed since SHA
-    (committed or not) that fall outside the fence; exit 1 when there is one (the integration check)."""
+def _gitc(cwd: Path, *args: str, timeout: int = 120) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as e:
+        return subprocess.CompletedProcess(args, 1, "", str(e))
+
+
+def task_target_dir(store: Store, t: dict) -> Path:
+    """Where a task is integrated: the main checkout, or the worktree of its pipeline branch (§19)."""
+    br = t.get("branch")
+    if br:
+        wt = store.dev / "run" / "worktrees" / br.replace("/", "-")
+        return wt if wt.exists() else store.root
+    return store.root
+
+
+def check_base(store: Store, base: str, t: dict) -> str | None:
+    """Why a worktree base is wrong for this project, or None. The base must hold what the main checkout holds:
+    the kit's tracked state and the task's files that already exist (a base without them is another branch)."""
+    if _gitc(store.root, "ls-files", "--error-unmatch", ".dev/state.json", timeout=30).returncode == 0 \
+            and _gitc(store.root, "cat-file", "-e", f"{base}:.dev/state.json", timeout=30).returncode != 0:
+        return f"{base} has no .dev/state.json, which the main checkout tracks"
+    head_files = [f for f in t.get("files") or [] if f and not f.endswith("/")
+                  and _gitc(store.root, "cat-file", "-e", f"HEAD:{f}", timeout=30).returncode == 0]
+    missing = [f for f in head_files if _gitc(store.root, "cat-file", "-e", f"{base}:{f}", timeout=30).returncode != 0]
+    if missing:
+        return f"{base} lacks the task's files that exist on HEAD: {', '.join(missing[:5])}"
+    return None
+
+
+def open_worktree(store: Store, tid: str, t: dict) -> dict:
+    """The task's own worktree (.dev/run/worktrees/T-nnn on dev-kit/T-nnn), created by the kit from the work branch
+    (or the task's pipeline branch), never left to the agent tool. A branch left by an earlier attempt is reused."""
+    wt = store.dev / "run" / "worktrees" / tid
+    br = f"dev-kit/{tid}"
+    base_ref = t.get("branch") or work_branch(store)
+    if t.get("branch") and _gitc(store.root, "rev-parse", "--verify", "--quiet", f"refs/heads/{base_ref}", timeout=30).returncode != 0:
+        fail(f"{tid} belongs on {base_ref}, which does not exist yet: run `pipeline worktree {base_ref}` first")
+    base_sha = (_gitc(store.root, "rev-parse", "--verify", "--quiet", f"{base_ref}^{{commit}}", timeout=30).stdout or "").strip()
+    if not base_sha:
+        fail(f"cannot resolve the work branch {base_ref} (set autonomy.git.base_branch)")
+    exists = _gitc(store.root, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}", timeout=30).returncode == 0
+    reused = False
+    if wt.exists():
+        reused = True
+    else:
+        why = check_base(store, base_sha, t)
+        if why:
+            fail(f"refusing the worktree of {tid}: {why}")
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        r = _gitc(store.root, "worktree", "add", str(wt), br) if exists else _gitc(store.root, "worktree", "add", "-b", br, str(wt), base_sha)
+        if r.returncode != 0:
+            fail(f"git worktree add failed for {tid}: {r.stderr.strip()[:300]}")
+        reused = exists
+    if reused:
+        mb = (_gitc(store.root, "merge-base", base_sha, br, timeout=30).stdout or "").strip()
+        base_sha = mb or base_sha
+    top = (_gitc(wt, "rev-parse", "--show-toplevel", timeout=30).stdout or "").strip()
+    if not top or os.path.realpath(top) != os.path.realpath(wt):
+        fail(f"{wt} is not a worktree of its own (git says {top or 'nothing'})")
+    return {"worktree": str(wt), "branch": br, "base_ref": base_ref, "base_sha": base_sha, "reused": reused}
+
+
+def slot_outside(rec: dict, cwd: Path, since: str) -> tuple[list[str], list[str]]:
     import dev_fence
+    diff = _gitc(cwd, "diff", "--name-only", since, timeout=60)
+    new = _gitc(cwd, "ls-files", "--others", "--exclude-standard", timeout=60)
+    if diff.returncode != 0:
+        fail(f"git diff {since} failed: {diff.stderr.strip()}")
+    changed = sorted({x for x in (diff.stdout + "\n" + new.stdout).splitlines() if x.strip()})
+    return changed, [f for f in changed if not f.startswith(".dev/") and not dev_fence.allowed(rec, f)]
+
+
+def worktree_patch(wt: Path, base: str) -> str:
+    """The worktree's changes since its base (committed or not, new files included, .dev/ left out)."""
+    _gitc(wt, "add", "-A", "--", ".", ":(exclude).dev")
+    return _gitc(wt, "diff", "--cached", "--binary", base, "--", ".", ":(exclude).dev").stdout
+
+
+def remove_worktree(store: Store, wt: Path, br: str | None, applied: str | None = None, base: str | None = None) -> str | None:
+    """Remove a task worktree and its branch. Refused (returns why) when it holds changes that were not applied
+    (`slot apply` records the hash of what it applied)."""
+    if wt.exists():
+        dirty = _gitc(wt, "status", "--porcelain", "--", ".", ":(exclude).dev", timeout=60).stdout.strip()
+        if dirty and not (applied and base and hashlib.sha256(worktree_patch(wt, base).encode()).hexdigest() == applied):
+            return f"{wt} has changes that were not applied (slot apply)"
+        r = _gitc(store.root, "worktree", "remove", "--force", str(wt))
+        if r.returncode != 0:
+            return r.stderr.strip()[:200] or "git worktree remove failed"
+    _gitc(store.root, "worktree", "prune", timeout=30)
+    if br:
+        _gitc(store.root, "branch", "-D", br, timeout=30)
+    return None
+
+
+def cmd_slot(store: Store, a: argparse.Namespace) -> None:
+    """The fence of one agent slot. open N --task T-nnn [--allow PATH…] [--agent NAME] [--worktree]: the files the
+    agent of slot N may edit (the task's `files:`, their tests, changelog.d/, docs/setup.d/ and the .dev/ paths given);
+    dev_fence.py enforces it as a PreToolUse hook. With --worktree the kit creates the task's worktree from the work
+    branch (§17) and the fence also denies edits outside it. close N [--remove] (--remove deletes the worktree and its
+    branch once integrated). show N. check N [--since SHA] [--cwd DIR]: the files changed since SHA (committed or not;
+    default the worktree's base) that fall outside the fence; exit 1 when there is one. apply N: check, then apply the
+    worktree's changes to the main checkout (or the task's pipeline worktree) with git apply --3way."""
     store.load()
     path = slot_path(store, a.n)
     if a.action == "open":
         files: list[str] = []
+        t = None
         if a.task:
             t = store.task(a.task)
             files = list(t.get("files") or [])
@@ -2810,41 +2998,227 @@ def cmd_slot(store: Store, a: argparse.Namespace) -> None:
         if not files and not allow:
             fail("slot open needs --task (its files) or --allow")
         rec = {"slot": a.n, "task": a.task, "agent": a.agent, "files": files, "allow": allow, "opened_at": now()}
+        wt = None
+        if a.worktree:
+            if not a.task:
+                fail("slot open --worktree needs --task")
+            wt = open_worktree(store, a.task, t)
+            rec.update({k: wt[k] for k in ("worktree", "branch", "base_ref", "base_sha")})
         store.stage(path, json.dumps(rec, indent=2) + "\n")
-        store.log(f"slot {a.n} open" + (f" for {a.task}" if a.task else ""))
+        store.log(f"slot {a.n} open" + (f" for {a.task}" if a.task else "") + (f" in {wt['worktree']}" if wt else ""))
         print(f"slot {a.n}: fence on {', '.join(files + allow) or '-'}" + (" (+ their tests, changelog.d/, docs/setup.d/)" if files else ""))
+        if wt:
+            print(f"worktree: {wt['worktree']} on {wt['branch']} from {wt['base_ref']} {wt['base_sha'][:7]}"
+                  + (" (earlier attempt kept)" if wt["reused"] else ""))
         return
     try:
         rec = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         fail(f"slot {a.n} is not open")
     if a.action == "close":
-        rec["closed_at"] = now()
+        rec.setdefault("closed_at", now())
+        if a.remove and rec.get("worktree"):
+            why = remove_worktree(store, Path(rec["worktree"]), rec.get("branch"), rec.get("applied"), rec.get("base_sha"))
+            if why:
+                fail(f"slot {a.n}: worktree not removed ({why}); integrate or keep it, then close again")
+            rec["removed_at"] = now()
         store.stage(path, json.dumps(rec, indent=2) + "\n")
-        print(f"slot {a.n} closed")
+        print(f"slot {a.n} closed" + (" · worktree and branch removed" if rec.get("removed_at") else ""))
         return
     if a.action == "show":
         print(json.dumps(rec, indent=2))
         return
-    if not a.since:
+    since = a.since or rec.get("base_sha")
+    if not since:
         fail("slot check needs --since <sha>")
-    cwd = Path(a.cwd) if a.cwd else store.root
-    try:
-        diff = subprocess.run(["git", "-C", str(cwd), "diff", "--name-only", a.since], capture_output=True, text=True, timeout=30)
-        new = subprocess.run(["git", "-C", str(cwd), "ls-files", "--others", "--exclude-standard"], capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.SubprocessError) as e:
-        fail(f"git failed: {e}")
-    if diff.returncode != 0:
-        fail(f"git diff {a.since} failed: {diff.stderr.strip()}")
-    changed = sorted({x for x in (diff.stdout + "\n" + new.stdout).splitlines() if x.strip()})
-    outside = [f for f in changed if not f.startswith(".dev/") and not dev_fence.allowed(rec, f)]
+    cwd = Path(a.cwd) if a.cwd else Path(rec["worktree"]) if rec.get("worktree") else store.root
+    changed, outside = slot_outside(rec, cwd, since)
     if outside:
         tel.safe_emit(store.dev, "fence_deny", {"agent": tel.scope_token(rec.get("agent") or "implementer"), "scope": rec.get("task"),
                                                 "tool": "diff", "reason": "outside_files"})  # logged even though the command fails
         print(f"slot {a.n} ({rec.get('task') or '-'}): {len(outside)} file(s) outside the fence: {', '.join(outside)}")
         print("integration refused: revert them, or record the dependency and replan the task's files")
         raise SystemExit(1)
-    print(f"slot {a.n} ({rec.get('task') or '-'}): {len(changed)} changed file(s), all inside the fence")
+    if a.action == "check":
+        print(f"slot {a.n} ({rec.get('task') or '-'}): {len(changed)} changed file(s), all inside the fence")
+        return
+    # apply
+    if not rec.get("worktree"):
+        fail(f"slot {a.n} has no worktree (open it with --worktree)")
+    wt = Path(rec["worktree"])
+    patch = worktree_patch(wt, since)
+    if not patch.strip():
+        print(f"slot {a.n} ({rec.get('task') or '-'}): nothing to apply")
+        return
+    if rec.get("applied") == hashlib.sha256(patch.encode()).hexdigest():
+        print(f"slot {a.n} ({rec.get('task') or '-'}): already applied")
+        return
+    target = task_target_dir(store, store.task(rec["task"])) if rec.get("task") else store.root
+    tmp = store.dev / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    pf = tmp / f"slot-{a.n}.patch"
+    pf.write_text(patch, encoding="utf-8")
+    r = _gitc(target, "apply", "--3way", "--whitespace=nowarn", str(pf))
+    if r.returncode != 0:
+        store.event("error", code="merge_conflict", component="slot")
+        print(f"slot {a.n} ({rec.get('task') or '-'}): the changes do not apply on {target}: {r.stderr.strip()[:400]}")
+        print("integration refused: run this task again alone after the others (its worktree and branch are kept)")
+        raise SystemExit(1)
+    pf.unlink(missing_ok=True)
+    rec["applied"] = hashlib.sha256(patch.encode()).hexdigest()
+    rec["applied_at"] = now()
+    store.stage(path, json.dumps(rec, indent=2) + "\n")
+    print(f"slot {a.n} ({rec.get('task') or '-'}): {len(changed)} file(s) applied to {target} (staged); run the suite and commit")
+
+
+# ---------------------------------------------------------------- reconciliation (conventions.md §17)
+def _read_json(p: Path) -> dict:
+    try:
+        v = json.loads(p.read_text(encoding="utf-8"))
+        return v if isinstance(v, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def round_marker(store: Store) -> Path:
+    return store.dev / "run" / "round.json"
+
+
+def _pid_alive(pid: object) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def open_slots(store: Store) -> dict[int, dict]:
+    d = store.dev / "run" / "slots"
+    out = {}
+    for f in sorted(d.glob("*.json")) if d.exists() else []:
+        try:
+            rec = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if f.stem.isdigit() and not rec.get("closed_at"):
+            out[int(f.stem)] = rec
+    return out
+
+
+def reconcile(store: Store, milestone: str | None = None, since: str | None = None, reason: str | None = None) -> dict:
+    """Make the state true again after a round or a session that stopped (no model involved): every slot left open
+    is closed; every task left in_progress that had a slot, or that started after `since`, is blocked with the
+    reason and its attempt recorded in the ledger (Previous attempt: its branch); a clean worktree is removed,
+    one with changes is kept. Called by `round run` after every round, and by `implement` before it starts."""
+    ts = store.tasks()
+    slots = open_slots(store)
+    by_task = {r.get("task"): (n, r) for n, r in slots.items() if r.get("task")}
+    why = reason or "the session that worked on it stopped before finishing"
+    out = {"slots_closed": [], "tasks_blocked": [], "worktrees_kept": [], "worktrees_removed": []}
+    for n, rec in slots.items():
+        if milestone and rec.get("task") and ts.get(rec["task"], {}).get("milestone") != milestone:
+            continue
+        rec["closed_at"] = now()
+        rec["closed_by"] = "reconcile"
+        store.stage(slot_path(store, n), json.dumps(rec, indent=2) + "\n")
+        out["slots_closed"].append(n)
+        wt = rec.get("worktree")
+        if wt and Path(wt).exists():
+            ahead = _gitc(Path(wt), "rev-list", "--count", f"{rec.get('base_sha')}..HEAD", timeout=30).stdout.strip() if rec.get("base_sha") else "0"
+            dirty = _gitc(Path(wt), "status", "--porcelain", "--", ".", ":(exclude).dev", timeout=60).stdout.strip()
+            if dirty or (ahead and ahead != "0"):
+                out["worktrees_kept"].append(wt)
+            elif not remove_worktree(store, Path(wt), rec.get("branch")):
+                out["worktrees_removed"].append(wt)
+    for tid, t in sorted(ts.items(), key=lambda kv: int(kv[0][2:])):
+        if t["status"] != "in_progress" or (milestone and t["milestone"] != milestone):
+            continue
+        slot = by_task.get(tid)
+        if not slot and not (since and (t.get("started_at") or "") >= since):
+            continue
+        rec = slot[1] if slot else {}
+        ref = rec.get("branch") if rec.get("worktree") and rec["worktree"] in out["worktrees_kept"] else None
+        note = why + (f"; partial work kept on {ref} ({rec['worktree']})" if ref else "")
+        with contextlib.suppress(Exception):
+            led.put(store.dev, f"task:{tid}", led.fingerprint(store.root, list(t.get("files") or [])), "failed", ref, note)
+        t["status"] = "blocked"
+        t["blocked_reason"] = f"reconciled: {why}"
+        t["blocked_count"] = int(t.get("blocked_count", 0) or 0) + 1
+        store.event("task", task=tid, transition="block", type=t.get("type"), milestone=t.get("milestone"))
+        out["tasks_blocked"].append(tid)
+    if out["tasks_blocked"] or out["slots_closed"]:
+        store.save()
+        store.log(f"reconcile: blocked {', '.join(out['tasks_blocked']) or '-'}; closed slots {', '.join(map(str, out['slots_closed'])) or '-'}"
+                  f" ({why})")
+        store.event("reconcile", blocked=len(out["tasks_blocked"]), slots=len(out["slots_closed"]), kept=len(out["worktrees_kept"]))
+    return out
+
+
+def adopt(store: Store, tid: str) -> dict:
+    """Move a task's uncommitted changes from the main checkout into the task's worktree (created from the work
+    branch when missing). Only files inside the task's fence move; the others stay where they are and are listed."""
+    import dev_fence
+    t = store.task(tid)
+    rec = {"task": tid, "files": list(t.get("files") or []), "allow": [f".dev/qa/{tid}/"]}
+    st = _gitc(store.root, "status", "--porcelain", "-z", "--untracked-files=all", "--", ".", ":(exclude).dev", timeout=60).stdout
+    entries = [e for e in st.split("\0") if e]
+    changed: list[tuple[str, str]] = []
+    skip_next = False
+    for e in entries:
+        if skip_next:
+            skip_next = False
+            continue
+        code, f = e[:2], e[3:]
+        if code[0] in "RC":
+            skip_next = True  # the rename's source follows
+        changed.append((code, f))
+    mine = [(c, f) for c, f in changed if dev_fence.allowed(rec, f)]
+    others = [f for c, f in changed if not dev_fence.allowed(rec, f)]
+    if not mine:
+        return {"task": tid, "moved": [], "left": others, "worktree": None}
+    wt = open_worktree(store, tid, t)
+    dst = Path(wt["worktree"])
+    moved = []
+    for code, f in mine:
+        src = store.root / f
+        if src.exists() or src.is_symlink():
+            (dst / f).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst / f, follow_symlinks=False)
+        else:
+            (dst / f).unlink(missing_ok=True)
+        moved.append(f)
+    tracked = [f for c, f in mine if c != "??"]
+    if tracked:
+        _gitc(store.root, "restore", "--staged", "--worktree", "--source=HEAD", "--", *tracked)
+    for c, f in mine:
+        if c == "??":
+            (store.root / f).unlink(missing_ok=True)
+    store.log(f"reconcile --adopt {tid}: {len(moved)} file(s) moved to {wt['worktree']}")
+    store.event("reconcile", adopted=len(moved))
+    return {"task": tid, "moved": moved, "left": others, "worktree": wt["worktree"], "branch": wt["branch"]}
+
+
+def cmd_reconcile(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    mk = _read_json(round_marker(store))
+    if mk and _pid_alive(mk.get("pid")) and not a.force and mk.get("round") != os.environ.get("DEV_KIT_ROUND_ID"):
+        fail(f"a round is running ({mk.get('skill')} {mk.get('scope')}, pid {mk.get('pid')}): it reconciles when it ends (--force to do it now)", 2)
+    if a.adopt:
+        res = adopt(store, a.adopt)
+        if a.json:
+            print(json.dumps(res, indent=2))
+        else:
+            print(f"{a.adopt}: {len(res['moved'])} file(s) moved to {res['worktree'] or '-'}"
+                  + (f" · left in the main checkout (not this task's): {', '.join(res['left'])}" if res["left"] else ""))
+        return
+    res = reconcile(store, a.milestone, a.since, a.reason)
+    if a.json:
+        print(json.dumps(res, indent=2))
+        return
+    print(f"reconcile: {len(res['tasks_blocked'])} task(s) blocked ({', '.join(res['tasks_blocked']) or '-'}) · "
+          f"{len(res['slots_closed'])} slot(s) closed · worktrees kept {len(res['worktrees_kept'])}, removed {len(res['worktrees_removed'])}")
+    for w in res["worktrees_kept"]:
+        print(f"  kept with changes: {w}")
 
 
 def cmd_unblock(store: Store, a: argparse.Namespace) -> None:
@@ -4332,7 +4706,13 @@ def cmd_brief(store: Store, a: argparse.Namespace) -> None:
     out = [f"Task: {a.task} — {t['title']} (milestone {t['milestone']}, type {t['type']})",
            f"Scope: {a.task}", f"Kit root: {kit}", f"Project root: {store.root}",
            f"Language for prose (report): {store.state.get('language') or 'en'} · application language (UI copy): {app_lang}",
-           f"Base commit: {_git(store, 'rev-parse', '--short', 'HEAD') or '-'}", "", "Acceptance:"]
+           f"Base commit: {_git(store, 'rev-parse', '--short', 'HEAD') or '-'}"]
+    wts = [r for r in open_slots(store).values() if r.get("task") == a.task and r.get("worktree")]
+    if wts:
+        out[-1] = f"Base commit: {wts[0]['base_sha'][:7]} ({wts[0]['base_ref']})"
+        out += [f"Worktree: {wts[0]['worktree']} (branch {wts[0]['branch']}). Work only there: first `cd {wts[0]['worktree']}`; "
+                "never edit the main checkout (the fence denies it)."]
+    out += ["", "Acceptance:"]
     out += [f"  - {x}" for x in t.get("acceptance") or ["(none listed: ask the orchestrator)"]]
     out += [f"Test notes: {t.get('test_notes') or '-'}", f"Files: {', '.join(t.get('files') or []) or '-'}"]
     if deps:
@@ -5612,7 +5992,7 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
             node[parts[-1]] = parsed
             store_autonomy_object(auto, top, merged)
         elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy", "ui", "queue", "milestone_size", "ci", "pipeline",
-                     "board_executor", "release_flags"):
+                     "board_executor", "release_flags", "git"):
             if top == "board_executor" and not isinstance(parsed, dict):
                 if val not in ("on", "off", "true", "false", "yes", "no"):
                     fail('autonomy.board_executor must be on | off or {"auto": true, "permission_mode": "acceptEdits", "timeout_min": 180}')
@@ -5666,7 +6046,7 @@ def store_autonomy_object(auto: dict, top: str, obj: dict) -> None:
         obj = {**DEFAULT_AUTONOMY["local_deploy"], **obj}
     elif top in ("cooldown", "quality"):
         check_autonomy_field(top, obj)
-    elif top in ("queue", "milestone_size", "ci", "pipeline", "board_executor", "release_flags"):
+    elif top in ("queue", "milestone_size", "ci", "pipeline", "board_executor", "release_flags", "git"):
         obj = {**DEFAULT_AUTONOMY[top], **obj}
         check_autonomy_field(top, obj)
     elif top == "ui":
@@ -7355,9 +7735,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true")
     s = sub.add_parser("challenge"); s.set_defaults(fn=cmd_challenge); s.add_argument("action", choices=["record"])
     s.add_argument("milestone"); s.add_argument("--from", dest="from_file", required=True)
-    s = sub.add_parser("slot"); s.set_defaults(fn=cmd_slot); s.add_argument("action", choices=["open", "close", "show", "check"])
+    s = sub.add_parser("slot"); s.set_defaults(fn=cmd_slot); s.add_argument("action", choices=["open", "close", "show", "check", "apply"])
     s.add_argument("n", type=int); s.add_argument("--task"); s.add_argument("--agent"); s.add_argument("--allow", action="append")
-    s.add_argument("--since"); s.add_argument("--cwd")
+    s.add_argument("--since"); s.add_argument("--cwd"); s.add_argument("--worktree", action="store_true")
+    s.add_argument("--remove", action="store_true")
+    s = sub.add_parser("reconcile"); s.set_defaults(fn=cmd_reconcile); s.add_argument("--milestone"); s.add_argument("--since")
+    s.add_argument("--reason"); s.add_argument("--adopt"); s.add_argument("--force", action="store_true")
+    s.add_argument("--json", action="store_true")
     s = sub.add_parser("affected"); s.set_defaults(fn=cmd_affected); s.add_argument("--acs", required=True); s.add_argument("--json", action="store_true")
     s = sub.add_parser("hard-floor"); s.set_defaults(fn=cmd_hard_floor); s.add_argument("milestone")
     s.add_argument("--from", dest="from_file", required=True, help="JSON file of the checks (- for stdin)")
@@ -7494,7 +7878,7 @@ MUTATING = frozenset({
     cmd_new_milestone, cmd_reorder, cmd_gate, cmd_review, cmd_artifact, cmd_release_submit, cmd_release_decide,
     cmd_release_record, cmd_set, cmd_deploy, cmd_preview, cmd_add_issue, cmd_issue, cmd_pull_issues, cmd_cooldown,
     cmd_freeze, cmd_hard_floor, cmd_ci, cmd_debt, cmd_checkpoint, cmd_slot, cmd_challenge, cmd_fact, cmd_lesson, cmd_pipeline,
-    cmd_qa_decide, cmd_task_decide, cmd_flag,
+    cmd_qa_decide, cmd_task_decide, cmd_flag, cmd_reconcile,
 })
 
 
