@@ -2,6 +2,17 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.9.0 — 2026-11-24
+
+Eduardo picked, from live prototypes, the waiting animations that make the board show its work with some personality, with a menu setting to tone them down.
+
+### Added
+- **Mascots on the task cards.** An in-progress card with an agent on it shows the agent as a small figure in its color, walking along the card and pushing its commit. A blocked card (it waits for you) shows the implementer napping beside it, waking up now and then to wave.
+- **Characters in the milestone flow.** While QA runs, its node shows an auditor with a magnifier and a raised eyebrow. The Gate node has a keeper with a clipboard who writes while QA checks, smiles and raises the barrier when the gate passes, and keeps it down when it fails.
+- **Autopilot coffee and the milestone plant.** Beside the milestone progress, a coffee cup drains as the milestone advances while the Autopilot is on (steaming while it runs); with the Autopilot off, a plant grows a leaf for each part of the progress and flowers when the milestone closes.
+- **The release train.** Under the Releases flow, a locomotive pulls the release's milestones as wagons (green once closed), moves while its work runs, stops at a red signal while the release waits for your approval and reaches the end of the line once released.
+- **Menu > Animations: Full, Still or Off**, kept per browser. Still shows the drawings without motion; Off hides them. The system's reduce-motion setting stops every animation, as before. Looping animations keep their phase when the board redraws.
+
 ## 3.8.1 — 2026-11-24
 
 Field report: after `/dev-kit:board restart` the session was armed as the board's listener but its monitor never started, and P-009, P-010 and P-011 waited with no worker. Eduardo's rule: a request from the board never waits in the queue because no worker takes it; the board's worker is there whenever the board is.

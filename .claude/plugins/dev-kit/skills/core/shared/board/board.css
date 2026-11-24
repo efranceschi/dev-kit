@@ -1251,3 +1251,132 @@ dialog.modal[open] { animation: pop-in .18s ease-out; }
 .flow.compact .branch-row { grid-template-columns: minmax(0, 1fr) auto; }
 .flow.compact .fnode-label { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.2; }
 .answer-free .btn, .answer .btn { white-space: nowrap; flex: none; }
+
+/* ---------- animations (3.9): drawings that show the work. Menu > Animations: full (moves), still (no motion), off (hidden).
+   Looping animations last a divisor of 24 s and start at --clk (set by board.js), so a redraw keeps their phase.
+   The reduce-motion rule above stops all of them; "still" does the same by choice. */
+:root { --clk: 0s; --coffee: #8a5a3b; }
+:root[data-motion="still"] :is(.mascot, .mascot *, .walk, .sleeper *, .fnode-fun, .fnode-fun *, .ms-fun *, .rail *) { animation: none !important; transition: none !important; }
+.mascot { fill: currentColor; overflow: visible; }
+.mascot.ag-red { color: var(--ag-red); } .mascot.ag-blue { color: var(--ag-blue); } .mascot.ag-green { color: var(--ag-green); } .mascot.ag-yellow { color: var(--ag-yellow); }
+.mascot.ag-purple { color: var(--ag-purple); } .mascot.ag-orange { color: var(--ag-orange); } .mascot.ag-pink { color: var(--ag-pink); } .mascot.ag-cyan { color: var(--ag-cyan); }
+.mascot .m-eye { fill: #fff; } .mascot .m-pupil, .keeper .m-pupil { fill: #111; }
+.mascot .m-limb { fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
+.mascot .m-limb.thick { stroke-width: 4; }
+.mascot .m-line, .keeper .m-line { fill: none; stroke: #111; stroke-width: 1.5; stroke-linecap: round; }
+
+/* the implementer pushing its commit along an in-progress card */
+.walk-track { position: relative; flex: 1 1 64px; min-width: 64px; height: 20px; overflow: hidden; }
+.walk { position: absolute; left: 0; bottom: 0; display: flex; align-items: flex-end; }
+.walk .walker { width: 15px; height: 20px; flex: none; }
+.walk-box { width: 8px; height: 8px; margin-bottom: 1px; border-radius: 2px; background: color-mix(in srgb, var(--warning) 70%, var(--surface-1)); border: 1px solid var(--warning); }
+.walker .leg-a, .walker .leg-b { transform-box: fill-box; transform-origin: top center; }
+.walk { animation: walk-across 6s linear infinite var(--clk); }
+.walk.second { animation-delay: calc(var(--clk) - 3s); }
+.walker .leg-a { animation: m-leg .5s ease-in-out infinite alternate var(--clk); }
+.walker .leg-b { animation: m-leg .5s ease-in-out infinite alternate-reverse var(--clk); }
+.walker .m-body { animation: m-bob .25s ease-in-out infinite alternate var(--clk); }
+@keyframes walk-across { 0% { left: 0; opacity: 0; } 6% { opacity: 1; } 80% { left: calc(100% - 24px); opacity: 1; } 88%, 100% { left: calc(100% - 24px); opacity: 0; } }
+@keyframes m-leg { from { transform: rotate(-24deg); } to { transform: rotate(24deg); } }
+@keyframes m-bob { from { transform: translateY(0); } to { transform: translateY(-1.5px); } }
+
+/* a task that waits for you: its mascot naps next to the card and wakes up to wave now and then */
+.tcard.napping { position: relative; padding-right: 54px; }
+.sleeper { position: absolute; right: 6px; bottom: 4px; width: 44px; height: 40px; pointer-events: none; }
+.sleeper svg { width: 100%; height: 100%; }
+.sleeper .open, .sleeper .wave { opacity: 0; }
+.sleeper .m-head { transform-box: fill-box; transform-origin: bottom center; transform: rotate(14deg); }
+.sleeper .zz path { fill: none; stroke: var(--accent-text); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .8; }
+.sleeper .m-head { animation: nap-head 8s ease-in-out infinite var(--clk); }
+.sleeper .open, .sleeper .wave { animation: nap-awake 8s step-end infinite var(--clk); }
+.sleeper .closed, .sleeper .rest, .sleeper .zz { animation: nap-asleep 8s step-end infinite var(--clk); }
+.sleeper .wave { transform-box: fill-box; transform-origin: bottom left; }
+.sleeper svg { animation: nap-jump 8s ease-in-out infinite var(--clk); }
+.sleeper .zz path { animation: nap-z 2.4s ease-in infinite var(--clk); }
+.sleeper .zz path:nth-child(2) { animation-delay: calc(var(--clk) - .8s); } .sleeper .zz path:nth-child(3) { animation-delay: calc(var(--clk) - 1.6s); }
+@keyframes nap-head { 0%, 74% { transform: rotate(14deg); } 37% { transform: rotate(20deg) translateY(1px); } 78%, 94% { transform: none; } 100% { transform: rotate(14deg); } }
+@keyframes nap-awake { 0% { opacity: 0; } 77% { opacity: 1; } 95% { opacity: 0; } }
+@keyframes nap-asleep { 0% { opacity: 1; } 77% { opacity: 0; } 95% { opacity: 1; } }
+@keyframes nap-jump { 0%, 78%, 86%, 94%, 100% { transform: none; } 82%, 90% { transform: translateY(-6px); } }
+@keyframes nap-z { 0% { opacity: 0; transform: translate(0, 4px); } 30% { opacity: .9; } 100% { opacity: 0; transform: translate(4px, -8px); } }
+
+/* in the flow: the QA inspector while QA runs, the gate keeper on the gate */
+.fnode-btn:has(.fnode-fun) { padding-right: 52px; }
+.fnode-btn:has(.keeper) { padding-right: 76px; }
+.fnode-fun { position: absolute; right: 8px; bottom: 6px; height: 40px; width: auto; pointer-events: none; }
+.inspector .lens { animation: m-scan 4s ease-in-out infinite var(--clk); }
+.inspector .brow { transform-box: fill-box; transform-origin: center; animation: m-brow 4s ease-in-out infinite var(--clk); }
+.inspector .m-handle { stroke: var(--text-secondary); stroke-width: 3; stroke-linecap: round; fill: none; }
+.inspector .m-glass { fill: color-mix(in srgb, var(--accent-b) 25%, transparent); stroke: var(--text-secondary); stroke-width: 2.4; }
+@keyframes m-scan { 0%, 100% { transform: translate(0, 0); } 30% { transform: translate(6px, -3px); } 60% { transform: translate(10px, 3px); } }
+@keyframes m-brow { 0%, 40%, 100% { transform: rotate(-12deg); } 50%, 70% { transform: rotate(-22deg) translateY(-1.5px); } }
+.keeper .k-cap, .keeper .k-post { fill: var(--text-secondary); }
+.keeper .k-skin { fill: var(--ag-yellow); }
+.keeper .k-legs, .keeper .k-pen { fill: none; stroke: var(--ag-yellow); stroke-width: 4; stroke-linecap: round; }
+.keeper .k-board { fill: var(--surface-1); stroke: var(--text-secondary); stroke-width: 1.6; }
+.keeper .k-lines { stroke: var(--text-muted); stroke-width: 1.2; }
+.keeper .k-bar { fill: var(--critical); } .keeper .k-stripe { fill: #fff; } .keeper .k-pin { fill: var(--surface-1); }
+.keeper .happy { display: none; } .keeper.g-passed .happy { display: inline; } .keeper.g-passed .serious { display: none; }
+.keeper .k-arm { transform-box: view-box; transform-origin: 70px 40px; }
+.keeper.g-passed .k-arm { transform: rotate(-78deg); }
+.keeper.g-passed .k-bar { fill: var(--good); }
+.keeper .k-pen { transform-box: fill-box; transform-origin: bottom left; }
+.keeper.g-checking .k-pen { animation: k-write .5s ease-in-out infinite alternate var(--clk); }
+@keyframes k-write { from { transform: rotate(-8deg); } to { transform: rotate(6deg) translate(2px, 1px); } }
+@media (max-width: 1180px) { .fnode-fun { display: none; } .fnode-btn:has(.fnode-fun) { padding-right: 11px; } }
+
+/* next to the milestone progress: the Autopilot coffee (Autopilot on) or the milestone plant (off) */
+.ms-progress:has(.ms-fun:not([hidden])) { grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; }
+.ms-progress:has(.ms-fun:not([hidden])) > :not(.ms-fun) { grid-column: 2; }
+.ms-fun { grid-column: 1; grid-row: 1 / span 3; align-self: center; display: block; width: 40px; height: 46px; }
+.ms-fun svg { width: 100%; height: 100%; overflow: visible; }
+.cup .c-liquid { fill: var(--coffee); transform: translateY(var(--drop, 0px)); }
+.cup .c-cup { fill: none; stroke: var(--text-secondary); stroke-width: 2.6; }
+.cup .c-dish { stroke: var(--text-muted); stroke-width: 2.6; stroke-linecap: round; }
+.cup .c-steam { fill: none; stroke: var(--text-muted); stroke-width: 2.2; stroke-linecap: round; opacity: 0; }
+.cup.hot .c-steam { opacity: .6; animation: c-steam 2.4s ease-in-out infinite var(--clk); }
+.cup.hot .c-steam.s2 { animation-delay: calc(var(--clk) - .8s); } .cup.hot .c-steam.s3 { animation-delay: calc(var(--clk) - 1.6s); }
+@keyframes c-steam { 0% { opacity: 0; transform: translateY(4px); } 40% { opacity: .7; } 100% { opacity: 0; transform: translateY(-8px); } }
+.plant .p-stem { fill: none; stroke: var(--ag-green); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 1; }
+.plant .p-leaf { fill: var(--ag-green); transform-box: fill-box; transform: scale(0); }
+.plant .p-leaf.l { transform-origin: right center; } .plant .p-leaf.r { transform-origin: left center; }
+.plant .p-leaf.on { transform: scale(1); }
+.plant .p-leaf.new { animation: p-pop .7s cubic-bezier(.3, 1.6, .4, 1); }
+.plant .p-flower { transform-box: fill-box; transform-origin: center; transform: scale(0); }
+.plant .p-flower.on { transform: scale(1); }
+.plant .p-petal { fill: var(--ag-pink); } .plant .p-core { fill: var(--ag-yellow); }
+.plant .p-pot { fill: var(--lane-construction); } .plant .p-rim { fill: color-mix(in srgb, var(--lane-construction) 78%, #000); }
+.plant .p-top { transform-box: view-box; transform-origin: 45px 104px; animation: p-sway 6s ease-in-out infinite var(--clk); }
+@keyframes p-pop { from { transform: scale(0); } to { transform: scale(1); } }
+@keyframes p-sway { 0%, 100% { transform: rotate(-2deg); } 50% { transform: rotate(2deg); } }
+
+/* Releases: the release train under the flow, stopped at the signal while it waits for your approval */
+.rail { position: relative; height: 40px; margin: 0 2px; }
+.rail-track { position: absolute; left: 0; right: 0; bottom: 5px; height: 6px;
+  background: linear-gradient(var(--text-muted), var(--text-muted)) bottom / 100% 2px no-repeat, repeating-linear-gradient(90deg, var(--axis) 0 3px, transparent 3px 11px); opacity: .7; }
+.train { position: absolute; bottom: 6px; display: flex; align-items: flex-end; gap: 3px; }
+.wagon { position: relative; height: 20px; padding: 0 6px; margin-bottom: 5px; display: grid; place-items: center; border-radius: 4px; font: 700 11px var(--mono); color: var(--text-primary);
+  background: color-mix(in srgb, var(--lane-construction) 18%, var(--surface-1)); border: 1.5px solid var(--lane-construction); }
+.wagon.full { background: color-mix(in srgb, var(--good) 20%, var(--surface-1)); border-color: var(--good); }
+.wagon.more { background: var(--surface-2); border-color: var(--border-strong); color: var(--text-muted); }
+.wagon::before, .wagon::after { content: ""; position: absolute; bottom: -6px; width: 7px; height: 7px; border-radius: 50%; background: var(--text-secondary); }
+.wagon::before { left: 4px; } .wagon::after { right: 4px; }
+.loco { width: 46px; height: 36px; overflow: visible; flex: none; }
+.loco .t-body { fill: var(--lane-construction); } .loco .t-dark { fill: var(--text-secondary); }
+.loco .t-window { fill: color-mix(in srgb, var(--accent-b) 45%, var(--surface-1)); }
+.loco .t-wheel circle { fill: var(--text-secondary); stroke: var(--surface-1); stroke-width: 2; }
+.loco .t-wheel path { stroke: var(--surface-1); stroke-width: 1.6; }
+.loco .t-wheel { transform-box: fill-box; transform-origin: center; }
+.loco .t-puff { fill: var(--text-muted); opacity: 0; transform-box: fill-box; transform-origin: center; }
+.train.moving .t-wheel { animation: t-spin 1s linear infinite var(--clk); }
+.train.moving .t-puff { animation: t-puff 1.5s ease-out infinite var(--clk); }
+.train.moving .t-puff.p2 { animation-delay: calc(var(--clk) - .75s); }
+.train.moving .loco { animation: m-bob .25s ease-in-out infinite alternate var(--clk); }
+@keyframes t-spin { to { transform: rotate(360deg); } }
+@keyframes t-puff { 0% { opacity: .7; transform: translate(0, 0) scale(.6); } 100% { opacity: 0; transform: translate(-12px, -14px) scale(1.5); } }
+.signal { position: absolute; bottom: 7px; display: grid; justify-items: center; transform: translateX(-50%); }
+.signal .lamp { width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); border: 1.5px solid var(--surface-3); }
+.signal .pole { width: 2px; height: 16px; background: var(--text-muted); }
+.signal.stop .lamp { background: var(--critical); box-shadow: 0 0 8px var(--critical); }
+.signal.go .lamp { background: var(--good); box-shadow: 0 0 8px var(--good); }
+:root[data-motion="off"] .rail { display: none; }

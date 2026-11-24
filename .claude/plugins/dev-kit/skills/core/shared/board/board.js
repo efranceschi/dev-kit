@@ -319,6 +319,156 @@
   applyStatic(true);
   applyTheme();
 
+  // ------------------------------------------------------------------ animations: drawings that show the work (agent mascots, the gate keeper,
+  // the Autopilot coffee or the milestone plant, the release train). "full" moves, "still" keeps the drawings without motion, "off" hides them;
+  // the system's reduce-motion setting stops every animation (board.css), so it works as "still". Every drawing is aria-hidden or labelled.
+  const MOTIONS = ["full", "still", "off"];
+  const MOTION_KEY = "board-motion";
+  let motion = MOTIONS.includes(store.get(MOTION_KEY, "")) ? store.get(MOTION_KEY, "") : "full";
+  function applyMotion() {
+    document.documentElement.dataset.motion = motion;
+    document.querySelectorAll("[data-motion-opt]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.motionOpt === motion)));
+  }
+  function setMotion(v) {
+    motion = MOTIONS.includes(v) ? v : "full"; store.set(MOTION_KEY, motion); applyMotion();
+    if (data && data.ok) render();
+  }
+  $("motion-switch").addEventListener("click", (e) => { const b = e.target.closest("[data-motion-opt]"); if (b) setMotion(b.dataset.motionOpt); });
+  applyMotion();
+  const funOn = () => motion !== "off";
+  /** Every looping animation lasts a divisor of 24 s and starts at --clk (now, modulo 24 s), so a redraw keeps its phase instead of restarting it. */
+  const syncClock = () => document.documentElement.style.setProperty("--clk", `-${Date.now() % 24000}ms`);
+  const agColor = (name) => { const c = roleOf(name).color; return AGENT_COLORS.includes(c) ? c : "blue"; };
+  /** An implementer walking and pushing a box (its commit) along the card. */
+  function walker(name) {
+    return s("svg", { class: `mascot walker ag-${agColor(name)}`, viewBox: "0 0 30 40", "aria-hidden": "true" },
+      s("g", { class: "m-body" },
+        s("circle", { cx: "13", cy: "9", r: "7" }),
+        s("circle", { cx: "16", cy: "8", r: "1.6", class: "m-eye" }), s("circle", { cx: "11", cy: "8", r: "1.6", class: "m-eye" }),
+        s("circle", { cx: "16.4", cy: "8.2", r: ".8", class: "m-pupil" }), s("circle", { cx: "11.4", cy: "8.2", r: ".8", class: "m-pupil" }),
+        s("rect", { x: "8", y: "16", width: "10", height: "12", rx: "4" }),
+        s("path", { d: "M16 20 L27 18", class: "m-limb" })),
+      s("path", { d: "M11 27 L11 38", class: "m-limb leg-a" }), s("path", { d: "M15 27 L15 38", class: "m-limb leg-b" }));
+  }
+  function walkTrack(names) {
+    return h("span", { class: "walk-track", "aria-hidden": "true" }, names.slice(0, 2).map((n, i) =>
+      h("span", { class: `walk${i ? " second" : ""}` }, walker(n), h("span", { class: "walk-box" }))));
+  }
+  /** The mascot of a task that waits for the user: it naps next to the card and wakes up now and then to wave. */
+  function sleeper(name) {
+    return h("span", { class: "sleeper", "aria-hidden": "true" },
+      s("svg", { class: `mascot ag-${agColor(name)}`, viewBox: "0 0 78 70" },
+        s("rect", { x: "22", y: "40", width: "22", height: "20", rx: "8" }),
+        s("path", { d: "M24 58 L14 64 M40 58 L50 64 M24 48 L18 56", class: "m-limb thick" }),
+        s("path", { d: "M42 46 L54 34", class: "m-limb thick wave" }),
+        s("path", { d: "M42 48 L46 56", class: "m-limb thick rest" }),
+        s("g", { class: "m-head" },
+          s("circle", { cx: "33", cy: "28", r: "12" }),
+          s("path", { d: "M26 28 q3 3 6 0 M35 28 q3 3 6 0", class: "m-line closed" }),
+          s("g", { class: "open" }, s("circle", { cx: "29", cy: "27", r: "2.6", class: "m-eye" }), s("circle", { cx: "38", cy: "27", r: "2.6", class: "m-eye" }),
+            s("circle", { cx: "29.5", cy: "27.4", r: "1.3", class: "m-pupil" }), s("circle", { cx: "38.5", cy: "27.4", r: "1.3", class: "m-pupil" }),
+            s("path", { d: "M29 34 q4 3 8 0", class: "m-line" }))),
+        s("g", { class: "zz" }, s("path", { d: "M50 15 h5 l-5 6 h5" }), s("path", { d: "M58 5 h6 l-6 7 h6" }), s("path", { d: "M66 -6 h7 l-7 9 h7" }))));
+  }
+  /** The QA auditor with a magnifier, raising an eyebrow, while QA runs. */
+  function inspector(name) {
+    return s("svg", { class: `mascot fnode-fun inspector ag-${agColor(name)}`, viewBox: "0 0 56 52", "aria-hidden": "true" },
+      s("circle", { cx: "18", cy: "16", r: "10" }),
+      s("ellipse", { cx: "14", cy: "15", rx: "2", ry: "2", class: "m-eye" }), s("circle", { cx: "14.5", cy: "15.3", r: "1", class: "m-pupil" }),
+      s("ellipse", { cx: "22", cy: "16", rx: "2.2", ry: ".9", class: "m-eye" }),
+      s("path", { d: "M19 10.5 L25 9", class: "m-line brow" }), s("path", { d: "M11 11 L16 11.5", class: "m-line" }),
+      s("path", { d: "M15 21.5 Q18 20.5 21 21.5", class: "m-line" }),
+      s("rect", { x: "11", y: "27", width: "14", height: "16", rx: "5" }),
+      s("path", { d: "M14 43 L14 50 M22 43 L22 50", class: "m-limb" }),
+      s("g", { class: "lens" }, s("path", { d: "M24 32 L34 26", class: "m-limb" }), s("path", { d: "M35 25 L39 22", class: "m-handle" }),
+        s("circle", { cx: "44", cy: "17", r: "7", class: "m-glass" })));
+  }
+  /** The gate keeper: checks the rules with a clipboard; the barrier goes up when the gate passes. */
+  function gateKeeper(state) {
+    return s("svg", { class: `fnode-fun keeper g-${state}`, viewBox: "0 0 120 70", "aria-hidden": "true" },
+      s("rect", { x: "18", y: "4", width: "26", height: "6", rx: "2", class: "k-cap" }), s("rect", { x: "22", y: "0", width: "18", height: "6", rx: "2", class: "k-cap" }),
+      s("circle", { cx: "31", cy: "20", r: "10", class: "k-skin" }),
+      s("g", { class: "serious" }, s("circle", { cx: "27", cy: "19", r: "1.6", class: "m-pupil" }), s("circle", { cx: "35", cy: "19", r: "1.6", class: "m-pupil" }), s("path", { d: "M27 25 H35", class: "m-line" })),
+      s("g", { class: "happy" }, s("path", { d: "M25 19 q2 -2 4 0 M33 19 q2 -2 4 0 M26 24 q5 4 10 0", class: "m-line" })),
+      s("rect", { x: "20", y: "31", width: "22", height: "22", rx: "7", class: "k-skin" }),
+      s("path", { d: "M26 53 V66 M36 53 V66", class: "m-limb k-legs" }),
+      s("rect", { x: "40", y: "34", width: "14", height: "18", rx: "2", class: "k-board" }), s("path", { d: "M43 39 H51 M43 43 H51 M43 47 H48", class: "k-lines" }),
+      s("path", { d: "M38 46 L46 40", class: "m-limb k-pen" }),
+      s("rect", { x: "64", y: "36", width: "10", height: "32", rx: "2", class: "k-post" }),
+      s("g", { class: "k-arm" }, s("rect", { x: "68", y: "36", width: "50", height: "8", rx: "3", class: "k-bar" }),
+        s("rect", { x: "80", y: "36", width: "8", height: "8", class: "k-stripe" }), s("rect", { x: "96", y: "36", width: "8", height: "8", class: "k-stripe" })),
+      s("circle", { cx: "70", cy: "40", r: "3.5", class: "k-pin" }));
+  }
+  const plantSeen = {};
+  /** The Autopilot coffee (on) or the milestone plant (off): the same place, the progress of the milestone shown. */
+  function msFun(m, prog, closed) {
+    const box = $("ms-fun");
+    if (!box) return;
+    const ap = inbox().autopilot || {};
+    box.hidden = !funOn() || !m;
+    if (box.hidden) { fill(box); return; }
+    const p = Math.max(0, Math.min(1, closed ? 1 : prog.total));
+    const pct = Math.round(p * 100);
+    if (actionsOn() && ap.on) {
+      const label = tr("Autopilot coffee: {v}% of {id} still to do", { v: 100 - pct, id: m.id });
+      box.setAttribute("aria-label", label); box.title = label;
+      const liquid = s("rect", { x: "12", y: "28", width: "38", height: "30", class: "c-liquid" });
+      liquid.style.setProperty("--drop", `${(p * 26).toFixed(1)}px`);
+      fill(box, s("svg", { class: `cup${ap.state === "running" && p < 1 ? " hot" : ""}`, viewBox: "0 0 64 64" },
+        s("path", { d: "M24 20 q-3 -4 0 -8 q3 -4 0 -8", class: "c-steam s1" }), s("path", { d: "M31 20 q-3 -4 0 -8 q3 -4 0 -8", class: "c-steam s2" }),
+        s("path", { d: "M38 20 q-3 -4 0 -8 q3 -4 0 -8", class: "c-steam s3" }),
+        s("defs", {}, s("clipPath", { id: "cup-clip" }, s("path", { d: "M14 26 H46 V44 Q46 54 36 54 H24 Q14 54 14 44 Z" }))),
+        s("g", { "clip-path": "url(#cup-clip)" }, liquid),
+        s("path", { d: "M14 26 H46 V44 Q46 54 36 54 H24 Q14 54 14 44 Z M46 30 Q55 30 55 37 Q55 44 46 44", class: "c-cup" }),
+        s("path", { d: "M10 57 H50", class: "c-dish" })));
+      return;
+    }
+    const label = closed ? tr("{id} flowered: milestone closed", { id: m.id }) : tr("{id} grows with its work: {v}%", { id: m.id, v: pct });
+    box.setAttribute("aria-label", label); box.title = label;
+    const stem = s("path", { d: "M45 104 C45 90 41 78 45 66 C49 54 43 42 45 26", pathLength: "1", class: "p-stem" });
+    stem.style.strokeDashoffset = String(1 - Math.max(0.12, p));
+    const leaves = [["l", "M44 94 q-14 -2 -18 -12 q12 -1 18 12 z"], ["r", "M44 84 q14 -2 18 -12 q-12 -1 -18 12 z"], ["l", "M44 72 q-14 -2 -18 -12 q12 -1 18 12 z"],
+      ["r", "M46 60 q14 -2 18 -12 q-12 -1 -18 12 z"], ["l", "M44 48 q-12 -2 -15 -10 q10 -1 15 10 z"]];
+    const on = Math.round(p * leaves.length);
+    const before = plantSeen[m.id] != null ? plantSeen[m.id] : on;  // leaves that opened since the last redraw pop in once
+    plantSeen[m.id] = on;
+    fill(box, s("svg", { class: "plant", viewBox: "0 0 90 120" },
+      s("g", { class: "p-top" }, stem, leaves.map(([side, d], i) => s("path", { d, class: `p-leaf ${side}${i < on ? " on" : ""}${i < on && i >= before ? " new" : ""}` })),
+        s("g", { class: `p-flower${closed ? " on" : ""}` }, [[45, 18], [53, 23], [37, 23], [40, 31], [50, 31]].map(([cx, cy]) => s("circle", { cx: String(cx), cy: String(cy), r: "6", class: "p-petal" })),
+          s("circle", { cx: "45", cy: "25", r: "4.5", class: "p-core" }))),
+      s("path", { d: "M28 104 H62 L58 118 H32 Z", class: "p-pot" }), s("rect", { x: "26", y: "100", width: "38", height: "6", rx: "2", class: "p-rim" })));
+  }
+  /** The release train under the release's flow: a locomotive pulling its milestones, stopped at a red signal until you approve. */
+  function relTrain(r, nodes) {
+    if (!funOn()) return null;
+    const at = Math.max(0, nodes.findIndex((n) => n.here));
+    const slot = (i) => ((i + 0.5) / nodes.length) * 100;
+    const approval = nodes.findIndex((n) => n.key === "approval");
+    const pos = r.status === "released" ? 100 : r.status === "in_progress" ? 0 : r.status === "awaiting_approval" ? slot(Math.max(0, approval - 1)) : slot(at);
+    const moving = r.status !== "released" && r.status !== "awaiting_approval"
+      && (runsAt("releases").length > 0 || r.milestones.some((id) => tasksOf(data.milestones.find((x) => x.id === id)).some((t) => t.status === "in_progress")));
+    const wagons = r.milestones.slice(-4);
+    const train = h("span", { class: `train${moving ? " moving" : ""}` },
+      r.milestones.length > wagons.length ? h("span", { class: "wagon more", text: `+${r.milestones.length - wagons.length}` }) : null,
+      wagons.map((id) => h("span", { class: `wagon${(r.closed || []).includes(id) ? " full" : ""}`, text: id })),
+      s("svg", { class: "loco", viewBox: "0 0 58 46" },
+        s("circle", { cx: "44", cy: "6", r: "5", class: "t-puff p1" }), s("circle", { cx: "44", cy: "6", r: "5", class: "t-puff p2" }),
+        s("rect", { x: "40", y: "10", width: "8", height: "10", rx: "2", class: "t-dark" }),
+        s("rect", { x: "2", y: "8", width: "22", height: "24", rx: "4", class: "t-body" }),
+        s("rect", { x: "6", y: "12", width: "14", height: "9", rx: "2", class: "t-window" }),
+        s("rect", { x: "22", y: "18", width: "32", height: "14", rx: "6", class: "t-body" }),
+        s("path", { d: "M54 32 L58 38 H48 Z", class: "t-dark" }),
+        [[12, 38, 6], [30, 39, 5], [44, 39, 5]].map(([cx, cy, rr]) => s("g", { class: "t-wheel" }, s("circle", { cx: String(cx), cy: String(cy), r: String(rr) }),
+          s("path", { d: `M${cx - rr + 1} ${cy} H${cx + rr - 1}` })))));
+    train.style.left = `${pos}%`;
+    train.style.transform = `translateX(-${pos}%)`;
+    const sig = approval >= 0 ? h("span", { class: `signal${["deploying_prod", "released"].includes(r.status) ? " go" : r.status === "awaiting_approval" ? " stop" : ""}` },
+      h("span", { class: "lamp" }), h("span", { class: "pole" })) : null;
+    if (sig) sig.style.left = `${slot(approval) - 100 / nodes.length / 2}%`;
+    const label = r.status === "awaiting_approval" ? tr("{id} stopped at the signal: waiting for your approval", { id: r.id }) : tr("{id} train: {v}", { id: r.id, v: REL_WORD[r.status] || r.status });
+    return h("div", { class: "rail", role: "img", "aria-label": label, title: label }, h("span", { class: "rail-track" }), sig, train);
+  }
+
   // ------------------------------------------------------------------ header
   // ------------------------------------------------------------------ what Claude Code runs now: skills (outermost first) and agents
   const skillRuns = () => ((data && data.agents && data.agents.runs) || []).filter((r) => r.skill !== "board");  // the board is not work
@@ -623,7 +773,8 @@
         NODE_MARK[st] ? h("span", { class: "fnode-mark", text: NODE_MARK[st] }) : null,
         h("span", { class: "fnode-label", text: n.label })),
       !compact && n.sub ? h("span", { class: "fnode-sub", "aria-hidden": "true", text: n.sub }) : null,
-      n.agents && n.agents.length ? h("span", { class: "fnode-agents", "aria-hidden": "true" }, n.agents.slice(0, 6).map((a) => h("span", { class: agentDot(a.agent), title: a.agent }))) : null));
+      n.agents && n.agents.length ? h("span", { class: "fnode-agents", "aria-hidden": "true" }, n.agents.slice(0, 6).map((a) => h("span", { class: agentDot(a.agent), title: a.agent }))) : null,
+      !compact && n.fun && funOn() ? n.fun() : null));
   }
   const flowList = (nodes, compact, label) => h("ol", { class: `flow${compact ? " compact" : ""}`, "aria-label": label || null }, nodes.map((n) => flowNode(n, compact)));
   /** The details of one step of the flow, in a modal. */
@@ -779,7 +930,7 @@
     const nodes = relNodes(r);
     const here = nodes.find((n) => n.here);
     const fc = fcFor("releases", "release", r.id);
-    fill(strip, stripHead("releases", sub, selector), flowList(nodes, false, tr("Stages of {id}", { id: r.id })),
+    fill(strip, stripHead("releases", sub, selector), flowList(nodes, false, tr("Stages of {id}", { id: r.id })), relTrain(r, nodes),
       h("div", { class: `rel-reject${rej.length ? " hit" : ""}` }, h("span", { class: "rel-reject-ico", "aria-hidden": "true", text: "↺" }),
         rej.length ? tr("Rejected {v}: fixes in {m}, then back to the loop", { v: plural(rej.length, "time"), m: rej.map((x) => x.milestone).filter(Boolean).join(", ") || "M?" })
           : tr("If you reject it: a fixes milestone in the same release, back to the loop")),
@@ -912,6 +1063,7 @@
     const prog = m ? weightedProgress(m) : null;
     const took = closedNow ? msTook(m) : null;
     $("ms-pct").textContent = !m ? "" : closedNow ? (took ? tr(" · closed in {v}", { v: took.text }) : tr(" · closed")) : prog.runs ? tr(" · QA round {runs}", { runs: prog.runs }) : "";
+    msFun(m, prog, Boolean(closedNow));
     $("ms-pct").title = took ? took.title : m ? tr("{v}% of the milestone: tasks {pct}% (70% of the bar), QA {v2}% (30%)", { v: Math.round(prog.total * 100), pct, v2: Math.round(prog.qa * 100) }) : "";
     const order = ["done", "in_progress", "blocked", "todo"];
     const label = (k) => STATUS.find((x) => x.key === k).label;
@@ -971,14 +1123,17 @@
     const isNext = data.next && data.next.task === t.id;
     const wait = t.status === "done" ? [] : waitingOn(t);
     const here = agentsOn(t.id);
-    return h("article", { class: `tcard s-${t.status}${isNext ? " next" : ""}`, "aria-label": tr("{id} {title}, {v}{v2}. Open details", { id: t.id, title: t.title, v: stLabel(t.status), v2: wait.length ? tr(", waiting on {v}", { v: wait.join(", ") }) : "" }),
+    const nap = funOn() && t.status === "blocked";
+    return h("article", { class: `tcard s-${t.status}${isNext ? " next" : ""}${nap ? " napping" : ""}`, "aria-label": tr("{id} {title}, {v}{v2}. Open details", { id: t.id, title: t.title, v: stLabel(t.status), v2: wait.length ? tr(", waiting on {v}", { v: wait.join(", ") }) : "" }),
       tabindex: "0", role: "button", "aria-haspopup": "dialog", "data-tid": t.id,
       onclick: () => openTask(t.id), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTask(t.id); } } },
       h("div", { class: "tcard-top" }, h("span", { class: "tid", text: t.id }), h("span", { class: "chip", text: t.type }),
         t.lane ? h("span", { class: `chip lane-${t.lane}`, text: t.lane }) : null,
         isNext ? h("span", { class: "chip next-chip", text: tr("next up") }) : null),
       h("div", { class: "tcard-title", text: t.title }),
-      here.length ? h("div", { class: "tcard-agents" }, here.map((x) => h("span", { class: "agent-chip" }, agentBits(x)))) : null,
+      here.length ? h("div", { class: "tcard-agents" }, here.map((x) => h("span", { class: "agent-chip" }, agentBits(x))),
+        funOn() && t.status === "in_progress" ? walkTrack(here.map((x) => x.agent)) : null) : null,
+      nap ? sleeper("implementer") : null,
       t.status === "blocked" && t.blocked_reason ? h("div", { class: "reason", text: t.blocked_reason }) : null,
       h("div", { class: "tcard-meta" },
         wait.length ? h("span", { class: "chip wait", text: tr("Waiting on {v}", { v: wait.join(", ") }) }) : null,
@@ -1637,9 +1792,11 @@
         agents: building.flatMap((t) => agentsOn(t.id)), need: blocked, needText: tr("{n} blocked", { n: blocked }), about: tr("Tests first, the full suite, one commit per task"), stage: by.build }),
       qaNode ? { key: "qa", label: tr("QA"), kind: "work", stage: qaNode, about: tr("Auditors in parallel score the milestone from 0 to 100 per dimension"),
         state: gateFailed ? "done" : qaNode.state === "upcoming" ? "todo" : qaNode.state, here: Boolean(qaNode.here) && !gateFailed, running: x.running, agents: x.agents,
+        fun: x.running ? () => inspector(((x.agents || [])[0] || {}).agent || "qa") : null,
         sub: x.passed ? tr("passed{v}", { v: m.score != null ? ` · ${m.score}` : "" }) : x.running ? tr("auditing · round {n}", { n: x.round }) : x.fixActive.length ? tr("fixes {v}/{n}", { v: x.fixes.length - x.fixOpen.length, n: x.fixes.length }) : x.qa.runs ? plural(x.qa.runs, "round") : tr("auditors") } : null,
       qaNode ? { key: "gate", label: tr("Gate"), kind: "gate", stage: qaNode, about: tr("Hard floor, exit check and cut-offs: a failed gate creates fix tasks and a new round"),
-        state: x.passed ? "done" : gateFailed ? "failed" : "todo", here: gateFailed, need: gateFailed ? 1 : 0, needText: tr("decide"),
+        state: x.passed ? "done" : gateFailed ? "failed" : "todo", here: gateFailed,
+        fun: () => gateKeeper(x.passed ? "passed" : gateFailed ? "failed" : x.running ? "checking" : "waiting"), need: gateFailed ? 1 : 0, needText: tr("decide"),
         sub: x.passed ? (m.gate === "skipped" ? tr("skipped") : tr("passed")) : gateFailed ? tr("rounds used up") : tr("floor · exit · cut-off") } : null,
     ];
     if (by.deploy) nodes.push(node(by.deploy, { key: "deploy", label: qaNode && qaNode.sub ? tr("Smoke, deploy") : tr("Deploy"), kind: "ship", sub: by.deploy.note, running: Boolean(by.deploy.running), stage: by.deploy,
@@ -2938,6 +3095,7 @@
     const m = currentMilestone();
     const ph = shownPhase();
     const panel = planShown() ? "replan" : ph;
+    syncClock();
     keepFocus(() => {
       // global: the lane tabs, Needs you, requests and activity; below, only the screen of the lane shown
       ["map", "arch", ...LANES, "replan"].forEach((k) => { $(`phase-${k}`).hidden = k !== panel; });

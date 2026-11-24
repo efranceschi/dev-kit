@@ -70,6 +70,13 @@
           </div>
           <p class="pop-title" id="lang-label" data-i18n="Language">Language</p>
           <div class="seg-switch" role="group" aria-labelledby="lang-label" id="lang-switch"></div>
+          <p class="pop-title" id="motion-label" data-i18n="Animations">Animations</p>
+          <p class="pop-note top" data-i18n="Mascots and drawings that show the work. Your system's reduce-motion setting keeps them still.">Mascots and drawings that show the work. Your system's reduce-motion setting keeps them still.</p>
+          <div class="seg-switch" role="group" aria-labelledby="motion-label" id="motion-switch">
+            <button type="button" class="seg-btn" data-motion-opt="full" data-i18n="Full">Full</button>
+            <button type="button" class="seg-btn" data-motion-opt="still" data-i18n="Still">Still</button>
+            <button type="button" class="seg-btn" data-motion-opt="off" data-i18n="Off">Off</button>
+          </div>
           <hr>
           <p class="pop-title" data-i18n="About the server">About the server</p>
           <p class="pop-note top" id="server-about"></p>
@@ -161,6 +168,7 @@
           <button type="button" class="goal" id="ms-goal" title="Show the whole goal" data-i18n-title="Show the whole goal">—</button>
         </div>
         <div class="ms-progress">
+          <span class="ms-fun" id="ms-fun" role="img" hidden></span>
           <div class="segbar" id="segbar" role="img" aria-label="Task status split" data-i18n-aria-label="Task status split"></div>
           <p class="ms-count" id="ms-count"><strong id="ms-done">0</strong><span id="ms-total" data-i18n-once="/0 tasks">/0 tasks</span><span class="ms-pct" id="ms-pct"></span></p>
           <span class="ms-facts" id="ms-facts"></span>
