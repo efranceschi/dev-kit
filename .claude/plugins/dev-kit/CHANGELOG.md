@@ -2,6 +2,12 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.1.1 — 2026-11-24
+
+### Docs
+- **README**: the top picture is now the flow diagram (`docs/dev-kit-flow.svg`) instead of the four lifecycle chevrons, and the text under it follows its lanes (conception, planning, milestones, releases, stable); the Live board bullet describes the 3.1 board (a tab per lane, Map, Needs you button, panels and Metrics modal). The old `.github/assets/dev-kit-lifecycle.svg` is removed.
+- **concepts.md**: the board section describes the 3.1 board instead of the 2.x chevron tabs; `e2e-checklist.md` points to the "Replan the milestones" screen instead of the Plan tab.
+
 ## 3.1.0 — 2026-11-23
 
 The board, redrawn after the flow diagram (`docs/dev-kit-flow.svg`): one screen per lane, in the diagram's order and colours, each fitting the window.
