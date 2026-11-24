@@ -340,7 +340,7 @@ Drives the build on its own: conception and planning, then milestone after miles
 
 **When:** After the interview, when you want the app built with minimal interaction (also overnight).
 
-**Usage:** `/dev-kit:autopilot [--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N] [--parallel N] [--board]`
+**Usage:** `/dev-kit:autopilot [--until prd|architecture|design|plan|qa|usability|docs|release] [--milestone M1] [--milestones N] [--parallel N] [--board] [--rounds session|child]`
 
 | Argument | Meaning |
 |---|---|
@@ -348,7 +348,8 @@ Drives the build on its own: conception and planning, then milestone after miles
 | `--milestone M1` | build only one milestone |
 | `--milestones N` | stop after N approved gates, to resume in a fresh session (cheaper long runs) |
 | `--parallel N` | implementers at once for this run (1-6); without it, the number set on the board's Autopilot card (default 3). With the board's Autopilot running, it changes that run's number instead |
-| `--board` | how the board's Autopilot switch runs it: headless, questions go to Needs you, ends saying why (you do not type it) |
+| `--board` | how the board's Autopilot switch runs it: in the session that listens to the board, or headless; questions go to Needs you, ends saying why (you do not type it) |
+| `--rounds session|child` | where the implement and QA rounds run: session (here, so the implementers show in this session's task list; the default when you are at the console) or child (a fresh headless session per round, a smaller context; the default in a headless run) |
 
 **Examples:**
 

@@ -457,7 +457,11 @@
         },
         {
           "arg": "--board",
-          "meaning": "how the board's Autopilot switch runs it: headless, questions go to Needs you, ends saying why (you do not type it)"
+          "meaning": "how the board's Autopilot switch runs it: in the session that listens to the board, or headless; questions go to Needs you, ends saying why (you do not type it)"
+        },
+        {
+          "arg": "--rounds session|child",
+          "meaning": "where the implement and QA rounds run: session (here, so the implementers show in this session's task list; the default when you are at the console) or child (a fresh headless session per round, a smaller context; the default in a headless run)"
         }
       ],
       "examples": [

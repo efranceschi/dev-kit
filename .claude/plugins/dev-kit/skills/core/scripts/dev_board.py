@@ -13,6 +13,9 @@ Subcommands
           repeatable, remembered for the project in .dev/run/board-config.json; "none" forgets them)
   stop    stop the board of this project (token-authenticated shutdown, then SIGTERM, then SIGKILL)
   status  print whether the board is running, its URL and PID (--json)
+  pane    what runs now, for the terminal status pane (hooks/status-pane.tsx): the board, the Autopilot (where it
+          runs, its round, its tasks and last action), the agents at work and what they work on, the requests and
+          the permission prompts waiting on the board (--json; read-only, no server needed)
   serve   internal: the server process itself (spawned by start)
 
 One board per project: .dev/run/board.json holds {pid, port, token, url, root, started_at}; a lock file
@@ -1672,6 +1675,59 @@ def cmd_status(root: Path, a: argparse.Namespace) -> int:
     return 0
 
 
+def pane_data(root: Path) -> dict:
+    """What runs now, in one small read for the terminal status pane: never the server's token, never request text."""
+    rec = read_record(root)
+    board = {"running": bool(rec and dw._alive(rec.get("pid")))}
+    if board["running"]:
+        board["url"] = rec.get("url")
+    ap = dw.autopilot_status(root)
+    rd = ap.get("round") or {}
+    autopilot = {k: ap.get(k) for k in ("on", "state", "where", "handoff", "since", "reason", "note", "parallel", "until") if ap.get(k) is not None}
+    if rd:
+        autopilot["round"] = {"skill": rd.get("skill"), "scope": rd.get("scope"), "since": rd.get("since"),
+                              "tasks": [t["id"] for t in rd.get("tasks") or []], "unregistered": bool(rd.get("unregistered")),
+                              **({"last": {k: (rd.get("last") or {}).get(k) for k in ("at", "tool", "agent")}} if rd.get("last") else {})}
+    tasks: dict = {}
+    try:
+        store = ds.Store(root)
+        store.load()
+        for tid, t in store.tasks().items():
+            if isinstance(t, dict):
+                tasks[tid] = {"status": t.get("status"), "started_at": t.get("started_at"), "milestone": t.get("milestone")}
+    except (Exception, SystemExit):  # noqa: BLE001 - the pane shows what it can
+        pass
+    try:
+        live = live_agents(root, None, tasks)
+    except Exception:  # noqa: BLE001
+        live = {"hooks": False, "active": [], "runs": []}
+    agents = [{"agent": a.get("agent"), "node": a.get("node"), "started_at": a.get("started_at")} for a in live.get("active") or []]
+    runs = [{"skill": r.get("skill"), "scope": r.get("scope"), "started_at": r.get("started_at")} for r in live.get("runs") or []
+            if r.get("skill") not in ("board",)]
+    snap = dw.snapshot(root, recent=1)
+    requests = [{"id": x["id"], "action": x["action"], "status": x["status"], **({"question": x["question"]} if x.get("question") else {})}
+                for x in snap["open"]]
+    approvals = [{"id": a.get("id"), "tool": a.get("tool"), "target": (a.get("target") or "")[:80], "seconds_left": a.get("seconds_left")}
+                 for a in snap["approvals"]]
+    ex = snap["executor"]
+    return {"board": board, "autopilot": autopilot, "agents": agents, "runs": runs, "requests": requests, "approvals": approvals,
+            "executor": {"state": ex.get("state"), "listening": ex.get("listening"), "auto": (ex.get("auto") or {}).get("state")}}
+
+
+def cmd_pane(root: Path, a: argparse.Namespace) -> int:
+    if not (root / ".dev" / "state.json").exists():
+        return 2
+    out = pane_data(root)
+    if a.json:
+        print(json.dumps(out, ensure_ascii=False))
+    else:
+        ap = out["autopilot"]
+        print(f"board {'up' if out['board']['running'] else 'down'} · autopilot {ap.get('state')}"
+              + (f" ({ap['where']})" if ap.get("where") else "") + f" · {len(out['agents'])} agent(s) · "
+              f"{len(out['requests'])} request(s) · {len(out['approvals'])} permission(s) waiting")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="dev_board.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", help="project root (default: walk up from cwd to find .dev/state.json, else cwd)")
@@ -1694,13 +1750,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("stop")
     s = sub.add_parser("status")
     s.add_argument("--json", action="store_true")
+    s = sub.add_parser("pane")
+    s.add_argument("--json", action="store_true")
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
     root = ds.find_root(a.root)
-    return {"start": cmd_start, "serve": cmd_serve, "stop": cmd_stop, "status": cmd_status}[a.cmd](root, a)
+    return {"start": cmd_start, "serve": cmd_serve, "stop": cmd_stop, "status": cmd_status, "pane": cmd_pane}[a.cmd](root, a)
 
 
 if __name__ == "__main__":

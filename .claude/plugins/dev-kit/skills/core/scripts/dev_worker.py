@@ -26,7 +26,11 @@ Subcommands (executor side)
                 idle session starts working. Prints nothing in any other session. (--once: one pass, for tests)
   autopilot     the board's autopilot: on | off | status | parallel [N] (--json). On, the board's server runs
                 /dev-kit:autopilot headless, one milestone per run, until a release waits for approval (AutoExecutor);
-                parallel N (1-6, default 3) = implementers at once, read by `dev_state.py next --batch auto`
+                parallel N (1-6, default 3) = implementers at once, read by `dev_state.py next --batch auto`.
+                With a session listening (autonomy.board_executor.autopilot_in_session, default on) the run is handed
+                to that session instead: its monitor announces it, and the session runs /dev-kit:autopilot itself.
+                take --pid N: the autopilot skill takes the run handed to its session (refused for any other).
+                where [--rounds session|child]: where this run's implement and QA rounds go (session = here)
   autopilot-exit  written by /dev-kit:autopilot --board as its last step: --reason milestone_done|waiting_for_user|
                 release_approval|stable|stopped|until_reached [--note TEXT]; the board reads it to decide the next run
 
@@ -699,10 +703,13 @@ def _holds(w: dict) -> bool:
 AUTO_FILE = "worker-auto.json"
 AUTO_GRACE_S = 4                # a listening session gets this long to take a new request first
 AUTO_BACKOFF_S = (30, 120, 600) # after a run that failed (or left its request pending), wait before the next one
-AUTO_DEFAULTS = {"auto": True, "permission_mode": "acceptEdits", "timeout_min": 180, "autopilot_timeout_min": 360}
+AUTO_DEFAULTS = {"auto": True, "permission_mode": "acceptEdits", "timeout_min": 180, "autopilot_timeout_min": 360,
+                 "autopilot_in_session": True}
 AUTO_MODES = ("default", "acceptEdits", "plan", "auto", "bypassPermissions", "dontAsk")
 AP_FILE, AP_RUN, AP_STOP, AP_EXIT = "autopilot.json", "autopilot-run.json", "autopilot.stop", "autopilot-exit.json"
 AP_COMMAND = "/dev-kit:autopilot --milestones 1 --board"
+AP_SESSION_COMMAND = "/dev-kit:autopilot --milestones 1 --board --rounds session"  # handed to the listening session
+HANDOFF_WAIT_S = 600            # a run handed to the listening session falls back to headless if not taken by then
 AP_EXIT_REASONS = ("milestone_done", "waiting_for_user", "release_approval", "stable", "stopped", "until_reached")
 AP_WAITS = {"waiting_for_user": "waiting_user", "release_approval": "release", "stable": "stable"}  # exit reason -> state
 AP_MAX_FAILS = 3                # failed runs in a row before the autopilot stops and says why
@@ -719,6 +726,8 @@ def auto_cfg(root: Path) -> dict:
     cfg = {**AUTO_DEFAULTS, **own}
     if cfg.get("permission_mode") not in AUTO_MODES:
         cfg["permission_mode"] = AUTO_DEFAULTS["permission_mode"]
+    if not isinstance(cfg.get("autopilot_in_session"), bool):
+        cfg["autopilot_in_session"] = True
     return cfg
 
 
@@ -850,8 +859,8 @@ def autopilot_status(root: Path) -> dict:
         state = "off"
     elif state == "stopped" and float(st.get("at_s") or 0) < _ap_since(root):
         state = "idle"  # switched on again since it stopped
-    keep = ("reason", "pid", "since", "milestone", "runs", "fails", "until", "note", "last_exit", "at")
-    return {"on": on, "state": state, "command": AP_COMMAND, "parallel": autopilot_parallel(root), "parallel_range": list(AP_PARALLEL[:2]),
+    keep = ("reason", "pid", "since", "milestone", "runs", "fails", "until", "note", "last_exit", "at", "where", "handoff")
+    return {"on": on, "state": state, "command": AP_SESSION_COMMAND if st.get("where") == "session" else AP_COMMAND, "parallel": autopilot_parallel(root), "parallel_range": list(AP_PARALLEL[:2]),
             "round": round_view(root), **{k: st.get(k) for k in keep if st.get(k) is not None}}
 
 
@@ -885,6 +894,43 @@ def autopilot_exit(root: Path, reason: str, note: str | None = None) -> dict:
 
 def autopilot_stop_asked(root: Path) -> bool:
     return (run_dir(root) / AP_STOP).exists() or not autopilot_on(root)
+
+
+def session_run(root: Path) -> dict | None:
+    """The board's Autopilot run while it is handed to (or taken by) the listening Claude Code session, or None."""
+    st = _read(run_dir(root) / AP_RUN) or {}
+    return st if st.get("state") == "running" and st.get("where") == "session" and _alive(st.get("pid")) else None
+
+
+def autopilot_take(root: Path, pid: object) -> dict:
+    """The autopilot skill's first step in board mode: the session `pid` takes the run the board handed to it. A
+    headless board run has nothing to take (it is the run); any other call is refused, so a session never starts a
+    second driver."""
+    if os.environ.get("DEV_KIT_BOARD_CHILD") == "1":
+        return {"taken": False, "where": "headless"}
+    with _Lock(root):
+        st = session_run(root)
+        try:
+            mine = st is not None and int(pid) == int(st.get("pid"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            mine = False
+        if not mine:
+            raise Invalid(["no Autopilot run was handed to this session: start it with the board's switch, or type /dev-kit:autopilot"])
+        if st.get("handoff") != "taken":
+            st = {**st, "handoff": "taken", "taken_at": now(), "taken_s": time.time()}
+            _write(run_dir(root) / AP_RUN, st)
+    return {"taken": True, "where": "session", "since": st.get("since")}
+
+
+def rounds_mode(asked: str | None = None) -> dict:
+    """Where the autopilot runs its implement and QA rounds: `session` (here: the implementers and auditors are
+    subagents of this session and show in its task list) or `child` (a headless `claude -p` per round, a clean
+    context each, conventions.md §17). A headless run (the board's own) defaults to child, any other to session."""
+    if asked in ("session", "child"):
+        return {"rounds": asked, "why": "--rounds"}
+    if os.environ.get("DEV_KIT_BOARD_CHILD") == "1" or os.environ.get("DEV_KIT_ROUND_CHILD") == "1":
+        return {"rounds": "child", "why": "headless run"}
+    return {"rounds": "session", "why": "interactive session"}
 
 
 def _ap_sig(root: Path) -> list:
@@ -934,6 +980,7 @@ class AutoExecutor:
         self.ap_fails = 0
         self.ap_next = 0.0
         self.ap_before: object = None   # state.json updated_at when the autopilot run started
+        self.handoff_skip_until = 0.0   # a run the session did not take: run headless until then
 
     # ---------------------------------------------------------------- status files
     def _status(self, state: str, **extra) -> None:
@@ -1030,12 +1077,29 @@ class AutoExecutor:
         return True
 
     def _reap_adopted(self) -> bool:
-        """An autopilot run left by an earlier board process (the board restarted while it ran): watch its pid."""
+        """An autopilot run this process did not spawn: one left by an earlier board process (the board restarted
+        while it ran), or one handed to the listening session. Watch its pid, and for the session its exit record."""
         st = _read(run_dir(self.root) / AP_RUN) or {}
-        if st.get("state") == "running" and not _alive(st.get("pid")):
-            self.started = float(st.get("started_s") or 0)
-            self.ap_before = st.get("state_before")
+        if st.get("state") != "running":
+            return False
+        self.started = float(st.get("started_s") or 0)
+        self.ap_before = st.get("state_before")
+        if not _alive(st.get("pid")):
             self._ap_ended(None)
+            return True
+        if st.get("where") != "session":
+            return False
+        ex = _read(run_dir(self.root) / AP_EXIT) or {}
+        if float(ex.get("at_s") or 0) >= self.started - 5:
+            self._ap_ended(0)  # the session's run said why it ended
+            return True
+        if st.get("handoff") == "pending" and (time.time() - float(st.get("at_s") or 0) > HANDOFF_WAIT_S or not listening(self.root)):
+            self.handoff_skip_until = time.time() + HANDOFF_WAIT_S  # it never took it: the next run is headless
+            self._ap("idle", reason="session_did_not_take", note="the listening session did not take the run")
+            return True
+        limit = float(auto_cfg(self.root)["autopilot_timeout_min"]) * 60
+        if time.time() - self.started > limit:
+            self._ap_failed("timeout")  # the session is the user's: never ended from here
             return True
         return False
 
@@ -1107,7 +1171,17 @@ class AutoExecutor:
         if self.other_autopilot():
             return self._ap("waiting_session", reason="other_session")
         self.ap_before = _state_at(root)
-        if not self._spawn("autopilot", AP_COMMAND, auto_cfg(root)["permission_mode"], "autopilot"):
+        cfg = auto_cfg(root)
+        if cfg["autopilot_in_session"] and time.time() >= self.handoff_skip_until and listening(root):
+            a = armed(root)
+            if a:  # the session that listens runs it: its implementers show as its own subagents
+                self.started = time.time()
+                _write(run_dir(root) / AP_RUN, {"state": "running", "where": "session", "handoff": "pending", "pid": a["pid"],
+                                                 "at": now(), "at_s": self.started, "since": now(), "started_s": self.started,
+                                                 "state_before": self.ap_before, "runs": int(raw.get("runs") or 0) + 1,
+                                                 "fails": self.ap_fails})
+                return
+        if not self._spawn("autopilot", AP_COMMAND, cfg["permission_mode"], "autopilot"):
             return
         runs = int(raw.get("runs") or 0) + 1
         _write(run_dir(root) / AP_RUN, {"state": "running", "at": now(), "at_s": time.time(), "pid": self.proc.pid,  # type: ignore[union-attr]
@@ -1143,7 +1217,7 @@ def autopilot_force_stop(root: Path) -> dict:
     set_autopilot(root, False)
     st = _read(run_dir(root) / AP_RUN) or {}
     pid = st.get("pid")
-    if st.get("state") == "running" and _alive(pid):
+    if st.get("state") == "running" and _alive(pid) and st.get("where") != "session":  # never end the user's own session
         try:
             os.killpg(int(pid), signal.SIGTERM)
         except OSError:
@@ -1222,7 +1296,7 @@ def claim(root: Path, session: str | None = None, pid: int | None = None) -> tup
         if other:
             return None, f"another session ({other.get('session')}) is the executor of this project"
         ap = _read(run_dir(root) / AP_RUN) or {}
-        if ap.get("state") == "running" and _alive(ap.get("pid")):
+        if ap.get("state") == "running" and _alive(ap.get("pid")) and not (ap.get("where") == "session" and pid and int(pid) == int(ap["pid"])):
             return None, "another session (the board's Autopilot run) changes the project; the requests run when it ends"
         all_ = items(root)
         for x in all_:  # a stale request is closed once, so it never runs twice
@@ -1290,7 +1364,7 @@ def wait(root: Path, timeout: float, poll: float = 1.0) -> dict | None:
 
 def _watch_sig(root: Path) -> tuple:
     out = []
-    for p in (inbox_dir(root), run_dir(root) / "worker-mode.json", run_dir(root) / "worker.json",
+    for p in (inbox_dir(root), run_dir(root) / "worker-mode.json", run_dir(root) / "worker.json", run_dir(root) / AP_RUN,
               run_dir(root) / "questions", root / ".dev" / "open-questions.md", root / ".dev" / "state.json"):
         try:
             st = p.stat()
@@ -1335,6 +1409,14 @@ def watch(root: Path, poll: float = 2.0, once: bool = False, emit=None, grace: f
                 if cur != sig or t - scanned >= THINK_S:
                     sig, scanned = cur, t
                     nxt = None if m["paused"] else claimable(root)
+                ho = _read(run_dir(root) / AP_RUN) or {}
+                if ho.get("where") == "session" and ho.get("handoff") == "pending" and ho.get("pid") == a["pid"] and ho.get("state") == "running":
+                    key = f"autopilot:{ho.get('started_s')}"
+                    last = told.get(key)
+                    if last is None or t - last >= REMIND_S:
+                        told[key] = t
+                        emit(f"dev-kit board: the Autopilot run is handed to this session; invoke the skill dev-kit:autopilot "
+                             f"with {AP_SESSION_COMMAND.split(' ', 1)[1]}")
                 if nxt and not m["paused"]:
                     rid = nxt["id"]
                     seen, last = first.setdefault(rid, t), told.get(rid)
@@ -1389,8 +1471,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("arm"); s.add_argument("--pid", type=int, required=True); s.add_argument("--wait", type=float, default=0)
     sub.add_parser("disarm")
     s = sub.add_parser("watch"); s.add_argument("--once", action="store_true"); s.add_argument("--poll", type=float, default=2.0)
-    s = sub.add_parser("autopilot"); s.add_argument("what", choices=("on", "off", "status", "parallel")); s.add_argument("n", nargs="?")
-    s.add_argument("--json", action="store_true")
+    s = sub.add_parser("autopilot"); s.add_argument("what", choices=("on", "off", "status", "parallel", "take", "where")); s.add_argument("n", nargs="?")
+    s.add_argument("--pid", type=int); s.add_argument("--rounds", choices=("session", "child")); s.add_argument("--json", action="store_true")
     s = sub.add_parser("autopilot-exit"); s.add_argument("--reason", required=True); s.add_argument("--note")
     a = p.parse_args(argv)
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -1415,6 +1497,14 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "disarm":
             disarm(root)
             print("disarmed")
+            return 0
+        if a.cmd == "autopilot" and a.what == "take":
+            r = autopilot_take(root, a.pid)
+            _print(r, a.json, "autopilot run taken by this session" if r["taken"] else "headless board run: nothing to take")
+            return 0
+        if a.cmd == "autopilot" and a.what == "where":
+            r = rounds_mode(a.rounds)
+            _print(r, a.json, f"rounds: {r['rounds']} ({r['why']})")
             return 0
         if a.cmd == "autopilot":
             if a.what == "parallel":

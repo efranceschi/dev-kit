@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { needsYou, toSnapshot } from './status-pane-model'
+import { autopilotLine, needsYou, toLive, toSnapshot } from './status-pane-model'
 
 // What `dev_state.py status --json` prints, cut to the fields the pane reads.
 const STATUS = {
@@ -31,6 +31,18 @@ const STATUS = {
   lifecycle: { releases: [{ id: 'R1', status: 'awaiting_approval' }] },
 }
 
+// What `dev_board.py pane --json` prints while the board's Autopilot runs in this session.
+const LIVE = {
+  board: { running: true, url: 'http://127.0.0.1:8765/' },
+  autopilot: { on: true, state: 'running', where: 'session', handoff: 'taken', since: '2026-11-21T11:10:00Z',
+    round: { skill: 'implement', scope: 'M1', tasks: ['T-002'], unregistered: false, last: { at: '2026-11-21T11:29:00Z', tool: 'Bash', agent: 'implementer' } } },
+  agents: [{ agent: 'implementer', node: 'T-002', started_at: '2026-11-21T11:26:00Z' }, { agent: 'copy-reviewer', started_at: '2026-11-21T11:28:00Z' }],
+  runs: [{ skill: 'autopilot', started_at: '2026-11-21T11:10:00Z' }],
+  requests: [{ id: 'P-009', action: 'answer_question', status: 'pending' }, { id: 'P-010', action: 'run', status: 'running' }],
+  approvals: [{ id: 'A-001', tool: 'Bash', target: 'npm test', seconds_left: 470 }],
+  executor: { state: 'idle', listening: true, auto: 'idle' },
+}
+
 const PANE = {
   plugin: 'dev-kit',
   component: 'Pane',
@@ -59,6 +71,22 @@ test('the snapshot keeps live tasks in plan order and picks the current mileston
   expect(needsYou(snap)).toEqual(['Release R1 waits for your approval', '2 open questions', '1 blocked task'])
 })
 
+test('what runs now: the Autopilot in this session, its agents, the board requests and permissions', () => {
+  const live = toLive(LIVE, NOW)
+  expect(autopilotLine(live, NOW)).toBe('Autopilot running · in this session · implement M1 T-002 · 20m')
+  expect(live.agents).toEqual([
+    { agent: 'implementer', node: 'T-002', startedAt: '2026-11-21T11:26:00Z' },
+    { agent: 'copy-reviewer', startedAt: '2026-11-21T11:28:00Z' },
+  ])
+  const snap = { ...toSnapshot(STATUS, NOW), live }
+  expect(needsYou(snap)[0]).toBe('Permission: Bash npm test (8m left)')
+  expect(needsYou(snap).at(-1)).toBe('1 board request waiting (P-009)')
+  expect(autopilotLine(toLive({ autopilot: { on: true, state: 'running', where: 'session', handoff: 'pending' } }, NOW), NOW))
+    .toBe('Autopilot running · handed to this session, not started yet')
+  expect(autopilotLine(toLive({ autopilot: { on: false, state: 'off' } }, NOW), NOW)).toBe('Autopilot off')
+  expect(toLive('nonsense', NOW).agents).toEqual([])
+})
+
 test('the snapshot survives a state it does not know', () => {
   const snap = toSnapshot({ tasks: { 'T-001': null }, milestones: 'x' }, NOW)
   expect(snap.isProject).toBe(true)
@@ -74,12 +102,13 @@ for (const surface of ['terminal', 'desktop'] as const) {
     on('session.start', (_, e) => ({ cwd: e.cwd }))
     on('session.cwd', () => ({ value: '/work/demo' }))
     on('clock.now', () => ({ value: NOW }))
+    on('clock.every', () => ({ value: undefined }))
     on('fs.stat', (_, e) => {
       if (!String(e.path).startsWith('/work/demo/.dev/')) throw new Error('ENOENT')
       return { value: { kind: 'file', size: 10, mtimeMs: 1, isLink: false } }
     })
-    on('process.run', () => ({
-      value: { exitCode: 0, stdout: JSON.stringify(STATUS), stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+    on('process.run', (_, e) => ({
+      value: { exitCode: 0, stdout: JSON.stringify(e.argv.includes('pane') ? LIVE : STATUS), stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
     }))
 
     await $.session.start({ cwd: '/work/demo', surface, isInteractive: true })
@@ -88,13 +117,19 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((await ui.find({ type: 'Text', text: /Demo/ }))?.text).toContain('construction › implement')
     expect((await ui.find({ type: 'Text', text: /M1 Accounts/ }))?.text).toContain('1/4')
     expect((await ui.find({ type: 'Text', text: /Release R1/ }))?.text).toContain('approval')
-    expect((await ui.find({ type: 'Text', text: /T-002/ }))?.text).toContain('30m')
+    expect((await ui.find({ type: 'Text', text: /^ +T-002/ }))?.text).toContain('30m')
     expect((await ui.find({ type: 'Text', text: /T-003/ }))?.text).toContain('Waiting for API key')
     expect((await ui.find({ type: 'Text', text: /T-004/ }))?.text).toContain('next')
     expect((await ui.find({ type: 'Text', text: /T-001/ }))?.text).toContain('abc1234')
     expect(await ui.find({ type: 'Text', text: /T-006/ })).toBe(undefined)
     expect(await ui.find({ type: 'Text', text: /T-005/ })).toBe(undefined)
+    expect((await ui.find({ type: 'Text', text: /^Autopilot/ }))?.text).toContain('in this session')
+    expect((await ui.find({ type: 'Text', text: /copy-reviewer/ }))?.text).toContain('2m')
+    expect((await ui.find({ type: 'Text', text: /^ +T-002/ }))?.text).toContain('implementer')
+    expect((await ui.find({ type: 'Text', text: /Permission: Bash/ }))?.text).toContain('npm test')
 
+    await ui.press({ key: 'agents' })
+    expect(await ui.find({ type: 'Text', text: /copy-reviewer/ })).toBe(undefined)
     await ui.press({ key: 'scope' })
     expect((await ui.find({ type: 'Text', text: /T-006/ }))?.text).toContain('M2')
     await ui.press({ key: 'done' })

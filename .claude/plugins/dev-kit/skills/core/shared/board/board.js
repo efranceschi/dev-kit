@@ -373,7 +373,8 @@
   function liveRuns() {
     const out = [];
     const ap = inbox().autopilot || {};
-    if (ap.state === "running" || ap.state === "stopping") out.push({ cmd: ap.command || "/dev-kit:autopilot", since: ap.since, by: tr("started by the Autopilot switch") });
+    if (ap.state === "running" || ap.state === "stopping") out.push({ cmd: ap.command || "/dev-kit:autopilot", since: ap.since,
+      by: ap.where !== "session" ? tr("started by the Autopilot switch") : ap.handoff === "pending" ? tr("handed to your Claude Code session, waiting for it to start") : tr("running in your Claude Code session") });
     const rd = ap.round;
     if (rd) out.push({ cmd: `/dev-kit:${rd.skill} ${rd.scope || ""}`.trim(), since: rd.since, by: roundWhat(rd) });
     const au = inbox().executor.auto || {};
@@ -457,8 +458,11 @@
         ap.state === "backoff" && ap.until ? ` · ${tr("next try at {v}", { v: new Date(ap.until * 1000).toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" }) })}` : null),
       ap.note ? h("p", { class: "card-sub", text: ap.note }) : null,
       roundBlock(rd),
-      h("p", { class: "pop-note top" }, tr("Runs "), h("code", { text: ap.command || "/dev-kit:autopilot --milestones 1 --board" }),
-        tr(" headless, one milestone per run, until a release waits for your approval. Questions and permissions go to Needs you. Output: "), h("code", { text: ".dev/run/autopilot.log" })),
+      ap.where === "session"
+        ? h("p", { class: "pop-note top" }, tr("Runs "), h("code", { text: ap.command || "/dev-kit:autopilot --milestones 1 --board --rounds session" }),
+          tr(" in the Claude Code session that listens to the board, one milestone per run, until a release waits for your approval: its implementers and auditors show in that session's task list. Questions and permissions go to Needs you."))
+        : h("p", { class: "pop-note top" }, tr("Runs "), h("code", { text: ap.command || "/dev-kit:autopilot --milestones 1 --board" }),
+          tr(" headless, one milestone per run, until a release waits for your approval. Questions and permissions go to Needs you. Output: "), h("code", { text: ".dev/run/autopilot.log" })),
       ap.runs ? h("p", { class: "card-sub", text: plural(ap.runs, "run") }) : null,
       parallelRow(ap),
       h("div", { class: "ap-actions" },

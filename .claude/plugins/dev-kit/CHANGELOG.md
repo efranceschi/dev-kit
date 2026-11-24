@@ -2,6 +2,22 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.7.0 — 2026-11-24
+
+The Autopilot's implementers and auditors were never visible in the user's Claude Code session: the board ran the Autopilot as a headless `claude -p`, which sent every round to yet another headless child, so their subagents lived in processes nobody sees. Eduardo chose to run the Autopilot in the session that listens to the board (option A).
+
+### Changed
+- **The board's Autopilot runs in the session that listens to it.** When a session listens (it ran `/dev-kit:board`), the switch hands each run to it instead of starting `claude -p`: the board's monitor announces `the Autopilot run is handed to this session`, the session invokes `/dev-kit:autopilot --milestones 1 --board --rounds session`, and its implementers and auditors are that session's own subagents, in its task list. With no session listening it runs headless as before; a handoff not taken in 10 minutes, or lost with the listener, also goes headless. `autonomy.board_executor.autopilot_in_session` (default true) turns it off. Force stop never ends the user's session; switching off makes the run finish its step, as before. The board's Live and Autopilot cards say where the run is.
+- **Rounds run in the session by default where someone sees it.** `/dev-kit:autopilot --rounds session|child`: `session` invokes `implement` and `qa` in the session itself (the default at the console), `child` sends each round to a fresh headless session with a clean context (the default in a headless run). In the session the context grows with every round: the board hands one milestone per run, and the run suggests `/clear` before the next.
+- **`/dev-kit:autopilot` may be invoked by the model, only for a board handoff.** It no longer sets `disable-model-invocation` (the monitor's notification is not typed by the user); the skill starts only when the user typed it or the board handed a run to this session, and with `--board` it first takes the run (`dev_worker.py autopilot take --pid $PPID`, refused when nothing was handed there), so a session never becomes a second driver.
+- **Terminal status pane: what runs now.** The pane shows the Autopilot (state, here or headless, round, tasks, last action), an "Agents at work" section with the task or milestone of each agent, the agent beside each running task, permission prompts waiting on the board first in Needs you, and board requests waiting. The one-line widget adds the Autopilot mark (`AP here` / `AP bg`) and the number of agents. New key `a` hides or shows the agents. Its data comes from the new read-only `dev_board.py pane --json` (ids and actions only), read when a run file changes or every 30 s.
+
+### Added
+- `dev_worker.py autopilot take --pid N` and `autopilot where [--rounds session|child]`.
+
+### Tests
+- `test_autopilot_in_session.py`: the handoff, its take (and the refusal for another session), the exit, the fallback to headless, the setting off, Force stop sparing the session, claims while it runs, the monitor's line, the rounds mode, the skill's guard and `dev_board.py pane`. `hooks/status-pane.test.tsx`: the live view, the Autopilot line, the agents, permissions and requests in Needs you, the `a` key.
+
 ## 3.6.3 — 2026-11-24
 
 Field reports: after `/dev-kit:board restart` the session said requests would run in a worker the board starts by itself, but a request (P-007) then waited and the Stop hook kept saying "run /dev-kit:worker"; later two requests (P-009, P-010) waited during an Autopilot run with the same advice.

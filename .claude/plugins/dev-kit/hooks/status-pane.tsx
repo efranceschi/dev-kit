@@ -5,16 +5,23 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { PaneView, Snapshot, TaskCard } from '../types'
-import { bar, emptySnapshot, needsYou, since, toSnapshot } from './status-pane-model'
+import { agentsByNode, autopilotLine, bar, emptySnapshot, needsYou, since, toLive, toSnapshot } from './status-pane-model'
 
 const PANE = 'dev-kit-status'
 const TITLE = 'dev-kit'
 const COMMAND = 'dev-kit-pane'
 const POLL_MS = 5000
+// What runs now can change with no file changing (a process ends): read it again at least this often.
+const LIVE_MAX_AGE_MS = 30000
+// The run files `dev_board.py pane` reads: a change in any of them reads it again.
+const LIVE_FILES = [
+  'run/agents.jsonl', 'run/autopilot.json', 'run/autopilot-run.json', 'run/round.json', 'run/round-activity.json',
+  'run/worker.json', 'run/worker-auto.json', 'run/board.json', 'run/inbox', 'run/approvals',
+]
 
 // Change a shape tag when its fields change: an earlier version's value is declined.
 const snapshot = atom({ plugin: 'dev-kit', key: 'snapshot' } as const, emptySnapshot(false), {
-  shape: 'snapshot-1',
+  shape: 'snapshot-2',
 })
 const view = atom({ plugin: 'dev-kit', key: 'view' } as const, { scope: 'current', showDone: true } as PaneView, {
   shape: 'view-1',
@@ -38,9 +45,9 @@ async function findRoot($: EngineInterface): Promise<string | undefined> {
 }
 
 /** Signature of the files the snapshot depends on, to skip a read when nothing moved. */
-async function signature($: EngineInterface, root: string): Promise<string> {
+async function signature($: EngineInterface, root: string, files = ['state.json', 'open-questions.md']): Promise<string> {
   const parts: string[] = []
-  for (const f of ['state.json', 'open-questions.md']) {
+  for (const f of files) {
     try {
       const st = await $.fs.stat(`${root}/.dev/${f}`)
       parts.push(`${st.mtimeMs}:${st.size}`)
@@ -52,6 +59,8 @@ async function signature($: EngineInterface, root: string): Promise<string> {
 }
 
 let lastSig = ''
+let lastLiveSig = ''
+let lastLiveAt = 0
 let isReading = false
 // Opened once in this module's life: after that only the person opens it again.
 let wasOpened = false
@@ -68,7 +77,18 @@ async function refresh($: EngineInterface, force = false): Promise<Snapshot> {
       return none
     }
     const sig = await signature($, root)
-    if (!force && sig === lastSig) return read($, snapshot)
+    const liveSig = await signature($, root, LIVE_FILES)
+    const now = await $.clock.now()
+    const liveDue = force || liveSig !== lastLiveSig || now - lastLiveAt >= LIVE_MAX_AGE_MS
+    if (!force && sig === lastSig) {
+      if (!liveDue) return read($, snapshot)
+      const live = await readLive($, root, now)
+      lastLiveSig = liveSig
+      const cur = await read($, snapshot)
+      const snap = { ...cur, ...(live ? { live } : {}) }
+      await update($, snapshot, () => snap)
+      return snap
+    }
     const script = `${$.plugin.root}/skills/core/scripts/dev_state.py`
     const ran = await $.process.run(['python3', '-I', script, '--root', root, 'status', '--json', '--quiet-if-missing'], {
       cwd: root,
@@ -80,8 +100,13 @@ async function refresh($: EngineInterface, force = false): Promise<Snapshot> {
     } else if (!ran.stdout.trim()) {
       snap = emptySnapshot(false)
     } else {
-      snap = toSnapshot(JSON.parse(ran.stdout), await $.clock.now())
+      snap = toSnapshot(JSON.parse(ran.stdout), now)
       lastSig = sig
+    }
+    if (snap.isProject) {
+      const live = liveDue ? await readLive($, root, now) : (await read($, snapshot)).live
+      if (liveDue) lastLiveSig = liveSig
+      if (live) snap = { ...snap, live }
     }
     await update($, snapshot, () => snap)
     return snap
@@ -91,6 +116,21 @@ async function refresh($: EngineInterface, force = false): Promise<Snapshot> {
     return snap
   } finally {
     isReading = false
+  }
+}
+
+/** What runs now: the Autopilot, its round, the agents, the board's requests and permission prompts. */
+async function readLive($: EngineInterface, root: string, now: number) {
+  lastLiveAt = now
+  try {
+    const ran = await $.process.run(['python3', '-I', `${$.plugin.root}/skills/core/scripts/dev_board.py`, '--root', root, 'pane', '--json'], {
+      cwd: root,
+      timeoutMs: 20000,
+    })
+    if (ran.exitCode !== 0 || !ran.stdout.trim()) return undefined
+    return toLive(JSON.parse(ran.stdout), now)
+  } catch {
+    return undefined // an older kit without `pane`, or a busy disk: the task board still shows
   }
 }
 
@@ -165,9 +205,13 @@ export const register: Register = on => {
 
     if (e.props.placement === 'widget') {
       const running = snap.tasks.filter(t => t.status === 'in_progress').map(t => t.id)
+      const ap = snap.live?.autopilot
+      const apMark = ap && (ap.state === 'running' || ap.state === 'stopping') ? `AP ${ap.where === 'session' ? 'here' : 'bg'}` : ap?.on ? `AP ${ap.state}` : ''
+      const nAgents = snap.live?.agents.length ?? 0
       return (
         <Text wrap="truncate-end">
-          {[phase, cur ? `${cur.id} ${cur.done}/${cur.total}` : '', running.length ? `▶ ${running.join(' ')}` : '', needs.length ? `! ${needs.length}` : '']
+          {[phase, cur ? `${cur.id} ${cur.done}/${cur.total}` : '', apMark, running.length ? `▶ ${running.join(' ')}` : '',
+            nAgents ? `⚙ ${nAgents}` : '', needs.length ? `! ${needs.length}` : '']
             .filter(Boolean)
             .join(' · ')}
         </Text>
@@ -183,15 +227,19 @@ export const register: Register = on => {
     const done = group('done').sort((a, b) => (b.doneAt ?? '').localeCompare(a.doneAt ?? ''))
 
     // Rows: the pane's room less the fixed lines (header, milestone bar, next, keys).
-    let room = Math.max(4, (e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 24) - 5)
+    const apText = autopilotLine(snap.live, now)
+    let room = Math.max(4, (e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 24) - 5 - (apText ? 1 : 0))
     const take = <T,>(list: T[], keepHeader = true): T[] => {
       if (!list.length) return []
       const n = Math.max(0, Math.min(list.length, room - (keepHeader ? 1 : 0)))
       room -= n + (keepHeader ? 1 : 0)
       return list.slice(0, n)
     }
-    // Priority order: Needs you > Running > Blocked > To do > Done > issues > milestones.
+    // Priority order: Needs you > Agents > Running > Blocked > To do > Done > issues > milestones.
+    const byNode = agentsByNode(snap.live)
+    const agents = v.showAgents === false ? [] : (snap.live?.agents ?? [])
     const needsShown = take(needs)
+    const agentsShown = take(agents)
     const runningShown = take(running)
     const blockedShown = take(blocked)
     const todoShown = take(todo)
@@ -234,6 +282,17 @@ export const register: Register = on => {
         ) : (
           <Text dimColor>No milestone in progress.</Text>
         )}
+        {apText ? (
+          <Text
+            wrap="truncate-end"
+            bold={snap.live?.autopilot.state === 'running'}
+            color={snap.live?.autopilot.state === 'running' ? 'success' : ['waiting_user', 'release', 'backoff', 'stopped'].includes(snap.live?.autopilot.state ?? '') ? 'warning' : undefined}
+            dimColor={!snap.live?.autopilot.on}
+          >
+            {apText}
+            {snap.live?.autopilot.round?.lastTool ? <Text dimColor> · last {snap.live.autopilot.round.lastAgent ?? snap.live.autopilot.round.lastTool}</Text> : ''}
+          </Text>
+        ) : null}
         {snap.error ? <Text color="warning" wrap="truncate-end">{snap.error}</Text> : null}
 
         {needsShown.length > 0 && heading('Needs you', needs.length, 'warning')}
@@ -244,8 +303,21 @@ export const register: Register = on => {
           </Text>
         ))}
 
+        {agentsShown.length > 0 && heading('Agents at work', agents.length, 'success')}
+        {agentsShown.map(a => (
+          <Text wrap="truncate-end" color="success">
+            {'  '}
+            <Text bold>{a.agent}</Text>
+            {a.node ? ` → ${a.node}` : ''}
+            <Text dimColor> {since(a.startedAt, now)}</Text>
+          </Text>
+        ))}
+        {more(agentsShown.length, agents.length)}
+
         {runningShown.length > 0 && heading('Running', running.length, 'success')}
-        {runningShown.map(t => card(t, since(t.startedAt, now), 'success'))}
+        {runningShown.map(t =>
+          card(t, [since(t.startedAt, now), (byNode[t.id] ?? []).map(a => a.agent).join(', ')].filter(Boolean).join(' · '), 'success'),
+        )}
         {more(runningShown.length, running.length)}
 
         {blockedShown.length > 0 && heading('Blocked', blocked.length, 'error')}
@@ -306,6 +378,14 @@ export const register: Register = on => {
             dimColor
             label={v.showDone ? 'd hide done' : 'd show done'}
             onPress={() => update($, view, x => ({ ...x, showDone: !x.showDone }))}
+          />
+          <Button
+            key="agents"
+            hotkey="a"
+            plain
+            dimColor
+            label={v.showAgents === false ? 'a show agents' : 'a hide agents'}
+            onPress={() => update($, view, (x): PaneView => ({ ...x, showAgents: x.showAgents === false }))}
           />
           <Button key="refresh" hotkey="r" plain dimColor label="r refresh" onPress={() => refresh($, true)} />
         </Box>

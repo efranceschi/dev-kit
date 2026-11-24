@@ -517,11 +517,12 @@ def check_autonomy_field(field: str, val: object) -> object:
     elif field == "board_executor":
         modes = ("default", "acceptEdits", "plan", "auto", "bypassPermissions", "dontAsk")
         mins = lambda k, d: isinstance(val.get(k, d), int) and not isinstance(val.get(k, d), bool) and 5 <= val.get(k, d) <= 1440  # noqa: E731
-        if (not isinstance(val, dict) or set(val) - {"auto", "permission_mode", "timeout_min", "autopilot_timeout_min"}
+        if (not isinstance(val, dict) or set(val) - {"auto", "permission_mode", "timeout_min", "autopilot_timeout_min", "autopilot_in_session"}
                 or not isinstance(val.get("auto", True), bool) or val.get("permission_mode", "acceptEdits") not in modes
-                or not mins("timeout_min", 180) or not mins("autopilot_timeout_min", 360)):
+                or not mins("timeout_min", 180) or not mins("autopilot_timeout_min", 360)
+                or not isinstance(val.get("autopilot_in_session", True), bool)):
             fail(f'autonomy.board_executor must be {{"auto": true | false, "permission_mode": {" | ".join(modes)}, "timeout_min": 5-1440, '
-                 f'"autopilot_timeout_min": 5-1440}}')
+                 f'"autopilot_timeout_min": 5-1440, "autopilot_in_session": true | false}}')
     elif field == "ci":
         if (not isinstance(val, dict) or set(val) - {"provider", "required", "timeout_min"}
                 or val.get("provider", "auto") not in CI_PROVIDERS or not isinstance(val.get("required", True), bool)
