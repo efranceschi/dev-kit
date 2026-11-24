@@ -1,6 +1,6 @@
 {
   "name": "dev-kit",
   "description": "Kit for building complete applications and keeping them evolving (conception, planning, construction by milestones and releases, until stable): 26 skills (plus the core support skill) and the reviewer and implementer agents they call.",
-  "version": "3.12.0",
+  "version": "3.12.1",
   "types": "./types/index.d.ts"
 }

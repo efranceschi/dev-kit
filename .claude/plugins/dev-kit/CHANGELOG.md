@@ -2,6 +2,13 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.12.1 — 2026-11-24
+
+Field report: on a running step of a flow, the pulsing ring was drawn over the "now" tag (Eduardo's screenshot).
+
+### Fixed
+- The "now" and "you" tags and the Needs-you badge on a flow step now sit above the step's pulsing ring, so the pulse no longer crosses them.
+
 ## 3.12.0 — 2026-11-24
 
 The board is read-only. Managing the project from the board and from the console at the same time kept the two out of step, so Eduardo decided the board only shows the project: every decision and every run happens in Claude Code.

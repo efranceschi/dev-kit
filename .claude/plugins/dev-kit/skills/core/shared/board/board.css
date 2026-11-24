@@ -820,10 +820,10 @@ main[aria-busy="true"] .phase-panel { opacity: .55; }
 .fnode.running .fnode-btn::after { content: ""; position: absolute; inset: -4px; border-radius: inherit; border: 2px solid var(--good); opacity: .0; animation: run-ring 1.8s ease-in-out infinite; pointer-events: none; }
 @keyframes run-ring { 50% { opacity: .75; } }
 .fnode-now { position: absolute; top: -10px; left: 10px; font-size: 9.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; line-height: 1; padding: 3px 7px;
-  border-radius: 999px; color: #fff; background: var(--lane, var(--accent-a)); }
+  border-radius: 999px; color: #fff; background: var(--lane, var(--accent-a)); z-index: 2; }
 .fnode.s-waiting .fnode-now { background: var(--k-human-bd); color: #221a00; }
 .fnode-need { position: absolute; top: -10px; right: -8px; font-size: 10.5px; font-weight: 800; line-height: 1; padding: 4px 7px; border-radius: 999px; color: #fff;
-  background: var(--critical); border: 2px solid var(--surface-1); white-space: nowrap; z-index: 1; }
+  background: var(--critical); border: 2px solid var(--surface-1); white-space: nowrap; z-index: 2; }
 .fnode-agents { display: flex; gap: 3px; margin-top: 2px; }
 .fnode-agents .agent-dot { width: 7px; height: 7px; }
 /* the branch at the end of Stable: three classes of service, each with its queue */
