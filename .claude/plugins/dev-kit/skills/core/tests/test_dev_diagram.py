@@ -14,6 +14,8 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+os.environ.setdefault("DEV_KIT_HOME", tempfile.mkdtemp(prefix="dk-home-"))  # boards started here register in a throwaway list
+
 os.environ["DEV_KIT_CLAUDE"] = __import__("shutil").which("true") or "/bin/true"
 
 CORE = Path(__file__).resolve().parent.parent

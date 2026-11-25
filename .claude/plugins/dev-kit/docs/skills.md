@@ -61,6 +61,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 
 | Skill | What it does |
 |---|---|
+| [`spog`](#spog) | One local page for every dev-kit project on this machine (single pane of glass), opened from any Claude Code session: a card per project with whether it waits for you, runs or sits idle and since when, and what needs you there (the board's Needs you items, plus a session of the project waiting on a permission or a question, when the kit's hooks run). The projects that need you come first, the tab's title counts the items, and a card rings once when something new arrives. A project joins the list (~/.dev-kit/projects.json) when /dev-kit:board or /dev-kit:spog runs in it; one whose folder was moved or deleted stays greyed with the command that forgets it. Read-only like the board: decisions and runs stay in each project's own session; it listens on 127.0.0.1 only. |
 | [`costs`](#costs) | Token usage and estimated US$ (API-equivalent) per stage, agent, model or session; CSV of tokens. |
 | [`feedback`](#feedback) | Evaluation of the session: grade per stage with reasons, what worked and failed, suggestions for the kit. |
 | [`debug`](#debug) | Diagnosis when something looks stuck or wrong: a debug dump, state checked against git and processes, the cause, and a report for a dev-kit patch. |
@@ -182,7 +183,35 @@ Live board in the browser, laid out like the flow diagram (docs/dev-kit-flow.svg
 
 **Produces:** nothing in the project: the board only shows it (every decision and run happens in Claude Code); its own files in .dev/run/
 
-**Related:** [`status`](#status), [`backlog`](#backlog), [`costs`](#costs)
+**Related:** [`status`](#status), [`backlog`](#backlog), [`costs`](#costs), [`spog`](#spog)
+
+### spog
+
+One local page for every dev-kit project on this machine (single pane of glass), opened from any Claude Code session: a card per project with whether it waits for you, runs or sits idle and since when, and what needs you there (the board's Needs you items, plus a session of the project waiting on a permission or a question, when the kit's hooks run). The projects that need you come first, the tab's title counts the items, and a card rings once when something new arrives. A project joins the list (~/.dev-kit/projects.json) when /dev-kit:board or /dev-kit:spog runs in it; one whose folder was moved or deleted stays greyed with the command that forgets it. Read-only like the board: decisions and runs stay in each project's own session; it listens on 127.0.0.1 only.
+
+**When:** When you keep several Claude Code sessions open on different projects and want one place that says which of them needs you.
+
+**Usage:** `/dev-kit:spog [stop | status | list | forget PATH... | forget --missing | --open | --no-open | --port N | --idle-min N]`
+
+| Argument | Meaning |
+|---|---|
+| `(empty)` | start the page (or reuse the running one), add this project to the list when it is a dev-kit project, and open the default browser |
+| `stop` | stop the server (the page also has a Stop server button) |
+| `status` | whether it is running, its URL and how many projects it shows |
+| `list` | the projects and how each one stands, in the terminal |
+| `forget PATH... | forget --missing` | take projects off the list: the paths given, or every one whose folder or .dev/state.json is gone |
+| `--open | --no-open | --port N` | force a new tab, do not open a tab, preferred port (default 8790) |
+| `--idle-min N` | stop after N minutes with no open tab (default 240; 0 = never) |
+
+**Examples:**
+
+- `/dev-kit:spog`: open the page of every project
+- `/dev-kit:spog list`: the same, in the terminal
+- `/dev-kit:spog forget --missing`: drop the projects whose folders are gone
+
+**Produces:** nothing in any project: only ~/.dev-kit/projects.json (the list) and its own run files in ~/.dev-kit/run/
+
+**Related:** [`board`](#board), [`status`](#status)
 
 ### prd
 

@@ -17,6 +17,12 @@ Reads the hook payload from stdin.
   measurement script in .dev/tmp/) is allowed at once. Any other permission is left to Claude Code (in a headless
   child nobody answers, so it is denied) and is kept in .dev/run/permission-misses.json with the rule that would
   allow it (`dev_perms.py show`, read-only in the board's Needs you). Anywhere else it returns nothing.
+- Sessions, for /dev-kit:spog (dev_spog.py): one small file per Claude Code session, .dev/run/sessions/<session>.json
+  {"session", "state": "working|waiting|idle", "why": "permission|question", "since", "at", "tool"}: UserPromptSubmit,
+  PostToolUse and the subagent events mean working; a permission_prompt or elicitation_dialog Notification, a
+  PermissionRequest and PreToolUse of AskUserQuestion mean waiting (on a permission, or a question); Stop and a new
+  session mean idle; SessionEnd removes the file. Only the ids, the state and the tool's name are kept. Not written in a
+  headless round child (DEV_KIT_ROUND_ID set), where nobody answers.
 - PreToolUse (Agent tool), SubagentStart, SubagentStop: the session log's agent_spawn / agent_end events
   (conventions.md §13), written here so no skill has to: agent, model and effort (from the kit agent's frontmatter,
   or the model the Agent call asked for), the skill running it (innermost open skill in .dev/run/skills.json),
@@ -323,6 +329,58 @@ def with_miss(root: Path, tool: str, target: str, agent: str, how: str, label: s
         pass
 
 
+SESSION_STATE = {"UserPromptSubmit": ("working", None), "PostToolUse": ("working", None), "SubagentStart": ("working", None),
+                 "SubagentStop": ("working", None), "Stop": ("idle", None), "SessionStart": ("idle", None)}
+WAIT_NOTICE = {"permission_prompt": "permission", "elicitation_dialog": "question"}
+
+
+def session_signal(payload: dict) -> tuple[str, str | None] | None:
+    """The state a hook event says the session is in, or None when it says nothing about it."""
+    name = payload.get("hook_event_name")
+    if name == "Notification":
+        kind = str(payload.get("notification_type") or "")
+        if not kind:  # older Claude Code: only the message ("Claude needs your permission to use Bash")
+            kind = "permission_prompt" if "permission" in str(payload.get("message") or "").lower() else ""
+        return ("waiting", WAIT_NOTICE[kind]) if kind in WAIT_NOTICE else None
+    if name == "PermissionRequest":
+        return "waiting", "permission"
+    if name == "PreToolUse" and payload.get("tool_name") == "AskUserQuestion":
+        return "waiting", "question"
+    return SESSION_STATE.get(name)
+
+
+def record_session(dev: Path, payload: dict) -> None:
+    """.dev/run/sessions/<session>.json: what the session is doing now (see the module docstring)."""
+    sid = tok(payload.get("session_id"))
+    if not sid or os.environ.get("DEV_KIT_ROUND_ID"):
+        return
+    d = dev / "run" / "sessions"
+    p = d / f"{sid}.json"
+    if payload.get("hook_event_name") == "SessionEnd":
+        p.unlink(missing_ok=True)
+        return
+    sig = session_signal(payload)
+    if not sig:
+        return
+    try:
+        cur = json.loads(p.read_text(encoding="utf-8"))
+        cur = cur if isinstance(cur, dict) else {}
+    except (OSError, ValueError):
+        cur = {}
+    state, why = sig
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if state == "working" and cur.get("state") == "working" and payload.get("hook_event_name") != "UserPromptSubmit":
+        return  # the common case (a tool ran while working) writes nothing
+    same = cur.get("state") == state and cur.get("why") == why
+    rec = {"session": sid, "state": state, "why": why, "since": cur.get("since") if same and cur.get("since") else stamp, "at": stamp}
+    if state == "waiting":
+        rec["tool"] = tok(payload.get("tool_name")) or None
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rec), encoding="utf-8")
+    tmp.replace(p)
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -332,6 +390,10 @@ def main() -> int:
         if not (dev / "state.json").is_file():
             return 0
         out = None
+        try:
+            record_session(dev, payload)
+        except Exception:  # noqa: BLE001 - the session file must never break a hook
+            pass
         if name in EVENTS:
             record_agent(dev, EVENTS[name], payload)
             if name in ("SubagentStart", "SubagentStop"):

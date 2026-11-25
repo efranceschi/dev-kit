@@ -16,6 +16,8 @@ import time
 import unittest
 from pathlib import Path
 
+os.environ.setdefault("DEV_KIT_HOME", tempfile.mkdtemp(prefix="dk-home-"))  # boards started here register in a throwaway list
+
 # the board never starts Claude Code; a fake binary keeps any child round in a test from reaching the real one
 os.environ["DEV_KIT_CLAUDE"] = __import__("shutil").which("true") or "/bin/true"
 

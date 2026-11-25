@@ -2,6 +2,18 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.15.0 — 2026-11-25
+
+Eduardo often has several Claude Code sessions open on different projects and wanted to follow them all in one place, a single pane of glass, opened from any session.
+
+### Added
+- `/dev-kit:spog`: one local page (127.0.0.1) with a card per dev-kit project on this machine. Each card says whether the project waits for you, runs or is idle, and since when; what needs you there (the board's Needs you items: production health, release approvals, QA rounds used up, confirmations, hotfixes, blocked tasks, questions, the issue queue, debt, lessons, denied permissions), the phase and current milestone, what runs, the next command and a link to its board when one is running. The projects that need you come first; the tab's title counts the items and the icon turns red; a card rings once when something new arrives. Filters: all, need you, running, idle. Read-only like the board, in English or Portuguese, light or dark; it can be run from any session, inside a project or not, and stops by itself after 4 hours with no open tab.
+- The list of projects, `~/.dev-kit/projects.json`: a project joins it when `/dev-kit:board` starts its board or `/dev-kit:spog` runs in it. A project whose folder was moved or deleted, or that lost `.dev/state.json`, stays on the page greyed, with `/dev-kit:spog forget <path>`; `forget --missing` drops them all. `/dev-kit:spog list` prints the same overview in the terminal.
+- Sessions waiting on you: the optional hooks now record what each Claude Code session of a project is doing (`.dev/run/sessions/<session>.json`: working, waiting on a permission or a question, idle; ids, the state and a tool name only), from UserPromptSubmit, PostToolUse, Notification (`permission_prompt`, `elicitation_dialog`), PermissionRequest, PreToolUse of AskUserQuestion, Stop and SessionEnd. The spog page shows a session waiting on a permission or a question first. Without the hooks the rest of the page still works. A headless round child records none.
+
+### Changed
+- `dev_board.py start` registers the project in the machine-wide list (it never fails the start because of it). The tests that start a board use a throwaway list (`DEV_KIT_HOME`).
+
 ## 3.14.0 — 2026-11-25
 
 Field report: a project with 20 milestones in one release made the Roadmap unreadable (Eduardo's screenshot). A stress run of the board with far bigger projects (one release of 20 milestones; 20 releases, 60 milestones and about 1,200 tasks; very long names, unbroken words, emoji and CJK) found 23 places where the board degrades as items grow. This release fixes them together, with one shared idea: a timeline, newest first, with the past folded.

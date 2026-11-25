@@ -2,7 +2,7 @@
 
 A Claude Code plugin where specialised agents build a complete application and keep it evolving, from the requirements interview through milestones and releases until the product is stable. You answer one interview; the kit then specifies, plans, implements, tests, audits and releases almost on its own, and stops only when it needs a decision from you.
 
-- **26 skills**, invoked as `/dev-kit:<name>`.
+- **27 skills**, invoked as `/dev-kit:<name>`.
 - **17 agents** the skills call: one implementer, one architecture consultant and 15 read-only reviewers.
 - **Resumable state** in `.dev/` inside your project.
 - **Lost?** `/dev-kit:help` tells you what to do next; `/dev-kit:help <question>` answers "how do I…?".
@@ -37,6 +37,7 @@ Step by step: [getting started](docs/getting-started.md). What each stage expect
 | build it step by step | `/dev-kit:prd` → `review prd` → `architecture` → `ux` → `ui` → `review design` → `plan` → `review plan` → `implement` → `qa` |
 | see where things stand | `/dev-kit:status` |
 | watch it live in the browser (read-only) | `/dev-kit:board` (`/dev-kit:board stop` to stop) |
+| follow every project on this machine in one page (from any session) | `/dev-kit:spog` (`/dev-kit:spog stop` to stop) |
 | report a bug or ask for an improvement | `/dev-kit:issue "what happens"` |
 | see everything pending | `/dev-kit:backlog` |
 | put it in production | `/dev-kit:deploy` |
@@ -48,7 +49,7 @@ Step by step: [getting started](docs/getting-started.md). What each stage expect
 | find out why a run looks stuck, or make a dump for a dev-kit patch | `/dev-kit:debug` |
 | run it overnight | [recipe](docs/recipes.md#let-it-run-overnight) |
 
-All 26 skills by category, with arguments and examples: [skills](docs/skills.md).
+All 27 skills by category, with arguments and examples: [skills](docs/skills.md).
 
 ## How it works, in short
 

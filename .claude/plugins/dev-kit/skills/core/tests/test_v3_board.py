@@ -15,6 +15,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+os.environ.setdefault("DEV_KIT_HOME", tempfile.mkdtemp(prefix="dk-home-"))  # boards started here register in a throwaway list
+
 CORE = Path(__file__).resolve().parent.parent
 SCRIPTS = CORE / "scripts"
 STATE = SCRIPTS / "dev_state.py"

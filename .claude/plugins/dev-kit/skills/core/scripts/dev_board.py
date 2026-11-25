@@ -34,6 +34,9 @@ Whoever can open a shared board sees the project and can stop the board. Behind 
 (which brings its own TLS and login), name the proxy's host with --trusted-host: that name alone is accepted in
 Host and Origin, so the DNS-rebinding protection stays for every other name.
 
+Starting a board also adds the project to the machine-wide list that /dev-kit:spog shows (~/.dev-kit/projects.json,
+dev_spog.py).
+
 Exit codes: 0 ok · 1 error · 2 no dev-kit state in the project
 """
 from __future__ import annotations
@@ -1444,6 +1447,8 @@ def cmd_start(root: Path, a: argparse.Namespace) -> int:
         print(f"no dev-kit state at {root / '.dev' / 'state.json'}; run /dev-kit:start first", file=sys.stderr)
         return 2
     trusted = trusted_hosts(root, a.trusted_host)
+    import dev_spog  # the machine-wide list of projects that /dev-kit:spog shows (~/.dev-kit/projects.json)
+    dev_spog.register_quietly(root)
     with Lock(root):
         rec = live_record(root)
         restarted = False
