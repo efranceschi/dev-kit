@@ -141,9 +141,18 @@ code { font-family: var(--mono); font-size: 0.92em; background: var(--surface-3)
   background: color-mix(in srgb, var(--good) 22%, var(--surface-2)); color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .live-pop { min-width: 300px; max-width: min(520px, 92vw); }
 .live-pop .pop-note { max-width: none; }
-.live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--todo); }
-.live.on .dot { background: var(--good); animation: pulse 2s infinite; }
-.live.off .dot { background: var(--critical); }
+/* the Live antenna (3.16): sends small waves while the board is connected; bends and turns grey when the connection drops */
+.live .ant { width: 15px; height: 15px; flex: none; overflow: visible; fill: none; stroke: var(--todo); stroke-width: 2.2; stroke-linecap: round; }
+.live .ant circle { fill: var(--todo); stroke: none; }
+.live .ant-w { opacity: 0; }
+.live .ant-top { transform-box: view-box; transform-origin: 13px 15px; transition: transform .3s; }
+.live.on .ant { stroke: var(--good); } .live.on .ant circle { fill: var(--good); }
+.live.on .ant-w { stroke: var(--good); animation: ant-wave 2s ease-out infinite var(--clk); }
+.live.on .ant-w2 { animation-delay: calc(var(--clk) - 1s); }
+.live.off .ant { stroke: var(--text-muted); } .live.off .ant circle { fill: var(--critical); }
+.live.off .ant-top { transform: rotate(-38deg); }
+@keyframes ant-wave { 0% { opacity: 0; } 30% { opacity: .9; } 100% { opacity: 0; } }
+:root:is([data-motion="still"], [data-motion="off"]) .live.on .ant-w { animation: none; opacity: .8; }
 .updated { font-size: 12px; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(12,163,12,.55); } 70% { box-shadow: 0 0 0 8px rgba(12,163,12,0); } 100% { box-shadow: 0 0 0 0 rgba(12,163,12,0); } }
 
@@ -293,6 +302,17 @@ button.run-chip:hover { background: var(--surface-3); }
 /* ---------- needs you: shown only when something waits on the user */
 
 .needs-icon { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--critical); color: #fff; font-size: 14px; font-weight: 800; }
+/* the bell of Needs you (3.16): swings while something waits, rings harder once when a new item arrives */
+.needs-icon .bell { width: 16px; height: 16px; overflow: visible; }
+.needs-icon .bell-swing { fill: #fff; transform-box: view-box; transform-origin: 15px 3px; }
+.needs-icon .bell-wave { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; opacity: 0; }
+.needs-drawer.waiting .bell-swing { animation: bell-swing 4s ease-in-out infinite var(--clk); }
+.needs-drawer.waiting .bell-wave { animation: bell-wave 4s ease-out infinite var(--clk); }
+.needs-drawer.ring .bell-swing { animation: bell-ring .25s ease-in-out 6 alternate; }
+@keyframes bell-swing { 0%, 70%, 100% { transform: rotate(0); } 75% { transform: rotate(16deg); } 80% { transform: rotate(-14deg); } 85% { transform: rotate(10deg); } 90% { transform: rotate(-6deg); } 95% { transform: rotate(2deg); } }
+@keyframes bell-wave { 0%, 72% { opacity: 0; } 78%, 90% { opacity: .9; } 100% { opacity: 0; } }
+@keyframes bell-ring { from { transform: rotate(-22deg); } to { transform: rotate(22deg); } }
+:root:is([data-motion="still"], [data-motion="off"]) .needs-icon .bell * { animation: none !important; }
 .needs-count { font-size: 12px; font-weight: 700; color: #fff; background: var(--critical); border-radius: 999px; padding: 2px 10px; }
 .needs-lists { display: flex; flex-wrap: wrap; gap: 14px; }
 .needs-lists > * { flex: 1 1 320px; min-width: 0; }
@@ -1185,10 +1205,10 @@ dialog.modal[open] { animation: pop-in .18s ease-out; }
 .mascot { fill: currentColor; overflow: visible; }
 .mascot.ag-red { color: var(--ag-red); } .mascot.ag-blue { color: var(--ag-blue); } .mascot.ag-green { color: var(--ag-green); } .mascot.ag-yellow { color: var(--ag-yellow); }
 .mascot.ag-purple { color: var(--ag-purple); } .mascot.ag-orange { color: var(--ag-orange); } .mascot.ag-pink { color: var(--ag-pink); } .mascot.ag-cyan { color: var(--ag-cyan); }
-.mascot .m-eye { fill: #fff; } .mascot .m-pupil, .keeper .m-pupil { fill: #111; }
+.mascot .m-eye { fill: #fff; } .mascot .m-pupil { fill: #111; }
 .mascot .m-limb { fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
 .mascot .m-limb.thick { stroke-width: 4; }
-.mascot .m-line, .keeper .m-line { fill: none; stroke: #111; stroke-width: 1.5; stroke-linecap: round; }
+.mascot .m-line { fill: none; stroke: #111; stroke-width: 1.5; stroke-linecap: round; }
 
 /* the implementer pushing its commit along an in-progress card */
 .walk-track { position: relative; flex: 1 1 64px; min-width: 64px; height: 20px; overflow: hidden; }
@@ -1225,9 +1245,9 @@ dialog.modal[open] { animation: pop-in .18s ease-out; }
 @keyframes nap-jump { 0%, 78%, 86%, 94%, 100% { transform: none; } 82%, 90% { transform: translateY(-6px); } }
 @keyframes nap-z { 0% { opacity: 0; transform: translate(0, 4px); } 30% { opacity: .9; } 100% { opacity: 0; transform: translate(4px, -8px); } }
 
-/* in the flow: the QA inspector while QA runs, the gate keeper on the gate */
+/* in the flow: the QA inspector while QA runs, the traffic light on the gate */
 .fnode-btn:has(.fnode-fun) { padding-right: 52px; }
-.fnode-btn:has(.keeper) { padding-right: 76px; }
+.fnode-btn:has(.tlight) { padding-right: 48px; }
 .fnode-fun { position: absolute; right: 8px; bottom: 6px; height: 40px; width: auto; pointer-events: none; }
 .inspector .lens { animation: m-scan 4s ease-in-out infinite var(--clk); }
 .inspector .brow { transform-box: fill-box; transform-origin: center; animation: m-brow 4s ease-in-out infinite var(--clk); }
@@ -1235,19 +1255,21 @@ dialog.modal[open] { animation: pop-in .18s ease-out; }
 .inspector .m-glass { fill: color-mix(in srgb, var(--accent-b) 25%, transparent); stroke: var(--text-secondary); stroke-width: 2.4; }
 @keyframes m-scan { 0%, 100% { transform: translate(0, 0); } 30% { transform: translate(6px, -3px); } 60% { transform: translate(10px, 3px); } }
 @keyframes m-brow { 0%, 40%, 100% { transform: rotate(-12deg); } 50%, 70% { transform: rotate(-22deg) translateY(-1.5px); } }
-.keeper .k-cap, .keeper .k-post { fill: var(--text-secondary); }
-.keeper .k-skin { fill: var(--ag-yellow); }
-.keeper .k-legs, .keeper .k-pen { fill: none; stroke: var(--ag-yellow); stroke-width: 4; stroke-linecap: round; }
-.keeper .k-board { fill: var(--surface-1); stroke: var(--text-secondary); stroke-width: 1.6; }
-.keeper .k-lines { stroke: var(--text-muted); stroke-width: 1.2; }
-.keeper .k-bar { fill: var(--critical); } .keeper .k-stripe { fill: #fff; } .keeper .k-pin { fill: var(--surface-1); }
-.keeper .happy { display: none; } .keeper.g-passed .happy { display: inline; } .keeper.g-passed .serious { display: none; }
-.keeper .k-arm { transform-box: view-box; transform-origin: 70px 40px; }
-.keeper.g-passed .k-arm { transform: rotate(-78deg); }
-.keeper.g-passed .k-bar { fill: var(--good); }
-.keeper .k-pen { transform-box: fill-box; transform-origin: bottom left; }
-.keeper.g-checking .k-pen { animation: k-write .5s ease-in-out infinite alternate var(--clk); }
-@keyframes k-write { from { transform: rotate(-8deg); } to { transform: rotate(6deg) translate(2px, 1px); } }
+/* the gate as a traffic light (3.16): a lamp per rule; green one by one while QA runs, all green and "go" when it passes */
+.tlight .tl-box { fill: var(--text-secondary); } .tlight .tl-pole { fill: var(--text-muted); }
+.tlight .tl-lamp { fill: color-mix(in srgb, var(--surface-1) 30%, #000); }
+.tlight.g-waiting .tl-lamp.l2 { fill: var(--warning); }
+.tlight.g-checking .tl-lamp { animation: tl-check 3s steps(1) infinite var(--clk); }
+.tlight.g-checking .tl-lamp.l2 { animation-name: tl-check2; } .tlight.g-checking .tl-lamp.l3 { animation-name: tl-check3; }
+.tlight.g-passed .tl-lamp, .tlight.g-failed .tl-lamp { fill: var(--good); }
+.tlight.g-failed .tl-lamp.bad { fill: var(--critical); animation: tl-blink 2s ease-in-out infinite var(--clk); }
+.tlight .tl-go { fill: var(--good); opacity: 0; transform-box: fill-box; transform-origin: left center; }
+.tlight.g-passed .tl-go { opacity: 1; animation: tl-go 2s ease-in-out infinite var(--clk); }
+@keyframes tl-check { 0% { fill: var(--warning); } 25%, 100% { fill: var(--good); } }
+@keyframes tl-check2 { 0%, 25% { fill: color-mix(in srgb, var(--surface-1) 30%, #000); } 33% { fill: var(--warning); } 50%, 100% { fill: var(--good); } }
+@keyframes tl-check3 { 0%, 50% { fill: color-mix(in srgb, var(--surface-1) 30%, #000); } 58% { fill: var(--warning); } 75%, 100% { fill: var(--good); } }
+@keyframes tl-blink { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes tl-go { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(3px); } }
 @media (max-width: 1180px) { .fnode-fun { display: none; } .fnode-btn:has(.fnode-fun) { padding-right: 11px; } }
 
 /* next to the milestone progress: the Autopilot coffee (Autopilot on) or the milestone plant (off) */
@@ -1431,3 +1453,28 @@ dialog.modal[open] { animation: pop-in .18s ease-out; }
 .empty-fun .ef-dust circle { fill: var(--text-muted); animation: ef-dust .8s ease-out infinite var(--clk); }
 @keyframes ef-sweep { from { transform: rotate(-18deg); } to { transform: rotate(14deg); } }
 @keyframes ef-dust { from { opacity: .7; transform: none; } to { opacity: 0; transform: translate(10px, -6px); } }
+
+/* QA panel (3.16): each open blocking finding is a bug crawling across its block; fixed ones lie on their back next to
+   a mascot with a swatter */
+.qa-bugs { position: relative; height: 22px; margin: 2px 0 6px; pointer-events: none; }
+.qa-bug { position: absolute; top: 3px; left: 0; width: 18px; height: 15px; overflow: visible; }
+.qa-bug .qb-legs { fill: none; stroke: #3a2a2a; stroke-width: 1.4; stroke-linecap: round; }
+.qa-bug .qb-body { fill: var(--critical); } .qa-bug .qb-head { fill: #3a2a2a; }
+.qa-bug.b1 { left: 8%; } .qa-bug.b2 { left: 42%; } .qa-bug.b3 { left: 74%; }
+.qa-bug.qb-run { animation: bug-crawl 12s linear infinite var(--clk); }
+.qa-bug.qb-run.b2 { animation-duration: 8s; animation-direction: reverse; top: 6px; }
+.qa-bug.qb-run.b3 { animation-duration: 6s; animation-delay: calc(var(--clk) - 3s); top: 1px; }
+.qa-bug.qb-run .qb-legs { animation: bug-legs .3s steps(2) infinite; }
+@keyframes bug-crawl { 0% { left: 0; transform: rotate(90deg); } 48% { left: calc(100% - 18px); transform: rotate(90deg); } 50% { left: calc(100% - 18px); transform: rotate(-90deg); }
+  98% { left: 0; transform: rotate(-90deg); } 100% { left: 0; transform: rotate(90deg); } }
+@keyframes bug-legs { to { transform: rotate(10deg); } }
+.qa-bug .qb-legs { transform-box: fill-box; transform-origin: center; }
+.qa-bugs.swatted { display: flex; align-items: flex-end; gap: 6px; height: 30px; }
+.qa-bug.qb-dead { position: static; transform: rotate(180deg); opacity: .55; }
+.qa-bug.qb-dead .qb-body { fill: var(--text-muted); }
+.qa-swatter { width: 34px; height: 30px; margin-left: auto; }
+.qa-swatter .sw-stick { fill: none; stroke: var(--text-secondary); stroke-width: 2; stroke-linecap: round; }
+.qa-swatter .sw-net { fill: none; stroke: var(--good); stroke-width: 2; }
+.qa-swatter .sw-arm { transform-box: view-box; transform-origin: 17px 32px; animation: sw-swing 4s ease-in-out infinite var(--clk); }
+@keyframes sw-swing { 0%, 80%, 100% { transform: rotate(0); } 86% { transform: rotate(-24deg); } 90% { transform: rotate(18deg); } }
+:root[data-motion="still"] .qa-bugs * { animation: none !important; }

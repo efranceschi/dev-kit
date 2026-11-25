@@ -2,6 +2,18 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.16.0 — 2026-11-25
+
+Eduardo asked to replace the gate keeper animation and to find the parts of the board still without one; he picked the traffic light from four prototypes and took the recommended additions.
+
+### Changed
+- The QA gate in the milestone flow is a traffic light instead of the gate keeper: one lamp per rule (hard floor, exit check, cut-offs). Waiting, the middle lamp is amber; while QA runs the lamps turn green one by one; a passed gate shows three greens and a "go" arrow; a failed gate turns the lamp of the rule that failed red (the hard floor when a deterministic check failed, the exit check when a gate check names it, otherwise the cut-offs).
+- Live, on the board and on the spog page, is a small antenna instead of a dot: it sends waves while connected and bends, grey, when the connection drops.
+
+### Added
+- Needs you: the drawer's icon is a bell that swings every few seconds while something waits and rings harder once when a new item arrives.
+- QA panel: each open blocking finding is a bug crawling across its block (up to three); fixed findings lie on their back in the Fixes block next to a mascot with a swatter. Menu > Animations: still keeps them still, off hides them.
+
 ## 3.15.0 — 2026-11-25
 
 Eduardo often has several Claude Code sessions open on different projects and wanted to follow them all in one place, a single pane of glass, opened from any session.

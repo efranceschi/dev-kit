@@ -279,7 +279,7 @@
   applyStatic(true);
   applyTheme();
 
-  // ------------------------------------------------------------------ animations: drawings that show the work (agent mascots, the gate keeper,
+  // ------------------------------------------------------------------ animations: drawings that show the work (agent mascots, the gate traffic light,
   // the Autopilot coffee or the milestone plant, the release train). "full" moves, "still" keeps the drawings without motion, "off" hides them;
   // the system's reduce-motion setting stops every animation (board.css), so it works as "still". Every drawing is aria-hidden or labelled.
   const MOTIONS = ["full", "still", "off"];
@@ -343,21 +343,41 @@
       s("g", { class: "lens" }, s("path", { d: "M24 32 L34 26", class: "m-limb" }), s("path", { d: "M35 25 L39 22", class: "m-handle" }),
         s("circle", { cx: "44", cy: "17", r: "7", class: "m-glass" })));
   }
-  /** The gate keeper: checks the rules with a clipboard; the barrier goes up when the gate passes. */
-  function gateKeeper(state) {
-    return s("svg", { class: `fnode-fun keeper g-${state}`, viewBox: "0 0 120 70", "aria-hidden": "true" },
-      s("rect", { x: "18", y: "4", width: "26", height: "6", rx: "2", class: "k-cap" }), s("rect", { x: "22", y: "0", width: "18", height: "6", rx: "2", class: "k-cap" }),
-      s("circle", { cx: "31", cy: "20", r: "10", class: "k-skin" }),
-      s("g", { class: "serious" }, s("circle", { cx: "27", cy: "19", r: "1.6", class: "m-pupil" }), s("circle", { cx: "35", cy: "19", r: "1.6", class: "m-pupil" }), s("path", { d: "M27 25 H35", class: "m-line" })),
-      s("g", { class: "happy" }, s("path", { d: "M25 19 q2 -2 4 0 M33 19 q2 -2 4 0 M26 24 q5 4 10 0", class: "m-line" })),
-      s("rect", { x: "20", y: "31", width: "22", height: "22", rx: "7", class: "k-skin" }),
-      s("path", { d: "M26 53 V66 M36 53 V66", class: "m-limb k-legs" }),
-      s("rect", { x: "40", y: "34", width: "14", height: "18", rx: "2", class: "k-board" }), s("path", { d: "M43 39 H51 M43 43 H51 M43 47 H48", class: "k-lines" }),
-      s("path", { d: "M38 46 L46 40", class: "m-limb k-pen" }),
-      s("rect", { x: "64", y: "36", width: "10", height: "32", rx: "2", class: "k-post" }),
-      s("g", { class: "k-arm" }, s("rect", { x: "68", y: "36", width: "50", height: "8", rx: "3", class: "k-bar" }),
-        s("rect", { x: "80", y: "36", width: "8", height: "8", class: "k-stripe" }), s("rect", { x: "96", y: "36", width: "8", height: "8", class: "k-stripe" })),
-      s("circle", { cx: "70", cy: "40", r: "3.5", class: "k-pin" }));
+  /** The gate as a traffic light: one lamp per rule (hard floor, exit check, cut-offs). While QA runs the lamps turn green
+   * one by one; a passed gate shows three greens and a "go" arrow; a failed gate turns the lamp of the rule that failed red. */
+  function trafficLight(state, failed) {
+    const lamp = (i, cy) => s("circle", { cx: "17", cy, r: "6.5", class: `tl-lamp l${i}${failed === i ? " bad" : ""}` });
+    return s("svg", { class: `fnode-fun tlight g-${state}`, viewBox: "0 0 66 70", "aria-hidden": "true" },
+      s("rect", { x: "15", y: "56", width: "4", height: "14", rx: "1", class: "tl-pole" }),
+      s("rect", { x: "6", y: "2", width: "22", height: "56", rx: "6", class: "tl-box" }),
+      lamp(1, "14"), lamp(2, "30"), lamp(3, "46"),
+      s("path", { d: "M36 26 H48 V18 L64 30 L48 42 V34 H36 Z", class: "tl-go" }));
+  }
+  /** Which rule of the gate failed: 1 the hard floor, 2 the exit check, 3 the cut-offs (the default). */
+  function gateFailedRule(m) {
+    const hf = m.hard_floor && m.hard_floor.checks ? Object.values(m.hard_floor.checks) : [];
+    if (hf.some((c) => c && c.status === "fail")) return 1;
+    if ((m.gate_checks || []).some((g) => /exit/i.test(String(g.text || "")))) return 2;
+    return 3;
+  }
+  /** One bug of the QA panel: a blocking finding still open walks; a fixed one lies on its back. */
+  function bug(cls) {
+    return s("svg", { class: `qa-bug ${cls}`, viewBox: "0 0 22 18", "aria-hidden": "true" },
+      s("path", { d: "M6 4 L2 1 M6 9 L1 9 M6 14 L2 17 M16 4 L20 1 M16 9 L21 9 M16 14 L20 17", class: "qb-legs" }),
+      s("ellipse", { cx: "11", cy: "9", rx: "6", ry: "7", class: "qb-body" }), s("circle", { cx: "11", cy: "2.5", r: "2.5", class: "qb-head" }));
+  }
+  /** Open blocking findings crawl across their block (at most three bugs). */
+  function bugTrail(n) {
+    return h("div", { class: "qa-bugs", "aria-hidden": "true" }, Array.from({ length: Math.min(3, n) }, (_, i) => bug(`qb-run b${i + 1}`)));
+  }
+  /** Fixed findings: the bugs on their back and a mascot with the swatter. */
+  function swatter(done) {
+    return h("div", { class: "qa-bugs swatted", "aria-hidden": "true" },
+      Array.from({ length: Math.min(3, done) }, () => bug("qb-dead")),
+      s("svg", { class: "mascot ag-yellow qa-swatter", viewBox: "0 0 56 50" },
+        s("circle", { cx: "12", cy: "20", r: "7" }), s("circle", { cx: "14", cy: "19", r: "1.5", class: "m-eye" }), s("circle", { cx: "14.3", cy: "19.3", r: ".7", class: "m-pupil" }),
+        s("rect", { x: "6", y: "28", width: "12", height: "14", rx: "4" }), s("path", { d: "M9 42 V49 M15 42 V49", class: "m-limb" }),
+        s("g", { class: "sw-arm" }, s("path", { d: "M17 32 L40 12", class: "sw-stick" }), s("rect", { x: "36", y: "2", width: "16", height: "14", rx: "2", class: "sw-net", transform: "rotate(40 44 9)" }))));
   }
   const plantSeen = {};
   /** The Autopilot coffee (on) or the milestone plant (off): the same place, the progress of the milestone shown. */
@@ -1589,8 +1609,11 @@
     nb.classList.toggle("alert", n > 0);
     $("needs-sr").textContent = n ? `: ${plural(n, "item")}` : tr(": nothing now");
     $("needs-count").textContent = n ? plural(n, "item") : "";
-    // a new item makes the button ring once (the favicon and the title of the tab change too)
-    if (n > before && !firstRender) { nb.classList.remove("ping"); void nb.offsetWidth; nb.classList.add("ping"); }
+    // a new item makes the button ring once (the favicon and the title of the tab change too); the bell of the drawer
+    // swings while something waits and rings harder once when a new item arrives
+    const nd = $("needs-dialog");
+    nd.classList.toggle("waiting", n > 0);
+    if (n > before && !firstRender) { nb.classList.remove("ping"); nd.classList.remove("ring"); void nb.offsetWidth; nb.classList.add("ping"); nd.classList.add("ring"); }
     if (!n) { fill($("impediments"), h("div", { class: "empty good needs-empty" }, h("strong", { text: tr("Nothing needs you now.") }), h("span", { text: tr("Questions, confirmations, approvals and blocked work show up here.") }))); return; }
     // management by exception, in the order that costs most to leave waiting: production, approvals, decisions,
     // then the work that waits on an answer; the first two groups open, the rest fold to a line each
@@ -1852,7 +1875,7 @@
         sub: x.passed ? tr("passed{v}", { v: m.score != null ? ` · ${m.score}` : "" }) : x.running ? tr("auditing · round {n}", { n: x.round }) : x.fixActive.length ? tr("fixes {v}/{n}", { v: x.fixes.length - x.fixOpen.length, n: x.fixes.length }) : x.qa.runs ? plural(x.qa.runs, "round") : tr("auditors") } : null,
       qaNode ? { key: "gate", label: tr("Gate"), kind: "gate", stage: qaNode, about: tr("Hard floor, exit check and cut-offs: a failed gate creates fix tasks and a new round"),
         state: x.passed ? "done" : gateFailed ? "failed" : "todo", here: gateFailed,
-        fun: () => gateKeeper(x.passed ? "passed" : gateFailed ? "failed" : x.running ? "checking" : "waiting"), need: gateFailed ? 1 : 0, needText: tr("decide"),
+        fun: () => trafficLight(x.passed ? "passed" : gateFailed ? "failed" : x.running ? "checking" : "waiting", gateFailed ? gateFailedRule(m) : 0), need: gateFailed ? 1 : 0, needText: tr("decide"),
         sub: x.passed ? (m.gate === "skipped" ? tr("skipped") : tr("passed")) : gateFailed ? tr("rounds used up") : tr("floor · exit · cut-off") } : null,
     ];
     if (by.deploy) nodes.push(node(by.deploy, { key: "deploy", label: qaNode && qaNode.sub ? tr("Smoke, deploy") : tr("Deploy"), kind: "ship", sub: by.deploy.note, running: Boolean(by.deploy.running), stage: by.deploy,
@@ -2091,6 +2114,8 @@
       h("span", { text: f.title || "" }), h("span", { class: `chip sev-${f.severity}`, text: f.severity || "" }),
       f.file ? h("span", { class: "sub mono-wrap", text: `${f.file}${f.line ? `:${f.line}` : ""}` }) : null)))
       : h("div", { class: "empty good", text: x.passed ? tr("None: the gate passed") : tr("No blocking finding open") });
+    const openBugs = !x.passed && last && last.blocking ? last.blocking.length : 0;
+    const fixedN = x.fixes.filter((t) => t.status === "done").length;
     const cols = ["todo", "in_progress", "blocked", "done"].map((k) => [k, x.fixes.filter((t) => t.status === k)]).filter(([, v]) => v.length);
     const fixes = cols.length ? h("div", { class: "qa-fixes" }, cols.map(([k, v]) => h("div", { class: `qa-fix-col s-${k}` },
       h("div", { class: "list-title", text: `${stLabel(k)} ${v.length}` }), v.map((t) => h("button", { type: "button", class: "run-chip", "data-tid": t.id, title: `${t.id} ${t.title || ""}`, onclick: () => openTask(t.id) },
@@ -2103,8 +2128,8 @@
       (m.exit_check.acs || []).length ? tr("acs: {v}", { v: (m.exit_check.acs || []).join(", ") }) : null].filter(Boolean).join(" · "))
       : h("div", { class: "empty", text: tr("No exit_check in the plan for this milestone") });
     const problems = (m.gate_checks || []).length ? h("ul", { class: "list" }, m.gate_checks.map((g) => h("li", {}, h("span", { class: "id", text: g.hard ? "⛔" : "!" }), h("span", { text: gateText(g.text) })))) : null;
-    fill(box, sect(tr("Auditors{v}", { v: r ? tr(" · round {n}", { n: r.n }) : "" }), auditors), sect(tr("Blocking findings open"), blocking, report ? h("p", { class: "sub" }, docLink(report, tr("Open the QA report"))) : null),
-      sect(tr("Fixes"), fixes), sect(tr("Hard floor"), hf), sect(tr("Exit check"), ex), problems ? sect(tr("What still stops the gate"), problems) : null);
+    fill(box, sect(tr("Auditors{v}", { v: r ? tr(" · round {n}", { n: r.n }) : "" }), auditors), sect(tr("Blocking findings open"), openBugs && funOn() ? bugTrail(openBugs) : null, blocking, report ? h("p", { class: "sub" }, docLink(report, tr("Open the QA report"))) : null),
+      sect(tr("Fixes"), fixedN && funOn() ? swatter(fixedN) : null, fixes), sect(tr("Hard floor"), hf), sect(tr("Exit check"), ex), problems ? sect(tr("What still stops the gate"), problems) : null);
   }
 
   // ------------------------------------------------------------------ tiles: blocks of the same size; what does not fit opens in a modal
