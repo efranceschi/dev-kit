@@ -2,6 +2,29 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.14.0 — 2026-11-25
+
+Field report: a project with 20 milestones in one release made the Roadmap unreadable (Eduardo's screenshot). A stress run of the board with far bigger projects (one release of 20 milestones; 20 releases, 60 milestones and about 1,200 tasks; very long names, unbroken words, emoji and CJK) found 23 places where the board degrades as items grow. This release fixes them together, with one shared idea: a timeline, newest first, with the past folded.
+
+### Added
+- One timeline for releases and milestones, newest first, in the milestone picker, the release picker and the Roadmap: the releases not started fold into one "Next" chip, the released ones past the latest two fold into one range, a released release folds to one chip with its version, and a release's closed milestones past the latest four fold into one chip. Each fold opens in place and closes with "‹"; the milestone picked or in progress is never hidden in a fold. The roadmap's road runs the same way, with the car facing the newer milestones.
+- Grouped lists: Needs you folds by kind, in the order that costs most to leave waiting (production health, release approvals, QA rounds used up, confirmations, hotfixes, blocked tasks, questions, the issue queue, debt, lessons, denied permissions, warnings), the first two open, six rows each before "Show N more"; blocked tasks are grouped by what they wait on, in Needs you and in the Blocked column (and its "See all"); denied permissions are grouped by agent and tool and say how many more are recorded.
+- Activity puts a heading per day and turns a burst of the same event (40 issues filed at once) into its newest line and "N more like this".
+- The gates in Metrics fold by release when there are many, released ones closed, each group naming how many gates took fix rounds or still fail.
+- Production lists the deploys, newest first, with the failed ones in red.
+- `docs/demo/stress/`: `build_stress.py` builds the stress projects (`onerel`, `huge`, `text`) through `dev_state.py`, and `stress.js` screenshots every screen at four sizes and reports sideways scroll, spills, page errors, the size of the state and the main-thread time of live updates (`docs/maintainers.md`).
+
+### Changed
+- Live updates are lighter: `/api/state` is compact JSON, gzipped when the browser accepts it, without the duplicated backlog task list or empty task fields and the page skips the redraw when nothing changed. Fitting the tiles and columns reads every box before it hides anything (two layouts per redraw instead of two per box and one per card), and a column draws at most 24 cards (the rest only count in "+N more"). On the biggest stress project an update went from 678 KB to 35 KB and from 106–180 ms to 55–75 ms of main-thread time.
+- The agent line of a milestone shows the three oldest chips and "+N more" (named by role), which opens all of them; the same for what runs outside the milestone. The task board keeps at least 260 px, so many agents no longer push it off a 1024×640 window.
+- Within a class of service the issue queue lists the most severe first. The velocity and hours charts show the last 12 milestones, with "Show all"; their labels thin out instead of overlapping.
+- Card titles in a column keep to three lines and a blocked reason to two (the details and "See all" show all of it); long questions and options keep to two lines and open on click; the milestone facts wrap instead of being cut.
+- Codes the server sends are shown in the reader's language: issue type, class, severity and status, task types, review verdicts ("pass") and the gate's problems (hard floor, exit check, CI).
+
+### Fixed
+- On a phone the release strip no longer scrolls the page sideways.
+- The Activity drawer's lines have their own layout again (time, then text).
+
 ## 3.13.0 — 2026-11-25
 
 Field report: `/dev-kit:autopilot --parallel 6` started a batch of one `balanced+` task (T-098) and implemented it in the main session, outside any subagent, because `implement` step 2 said `balanced` and `balanced+` tasks are done inline. The task ran on the session's model instead of its route, did not show in `/tasks` and had no worktree or fence. The brief's `Tier:` and `Route:` lines also disagreed (sonnet / high and sonnet / medium), and the session had to pick one.

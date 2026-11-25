@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import gzip
 import hashlib
 import http.client
 import http.cookies
@@ -948,6 +949,12 @@ def denied_permissions(root: Path) -> list[dict]:
         return []
 
 
+def denied_count(root: Path) -> int:
+    """How many denied permissions are recorded, so the board can say how many it does not list."""
+    import dev_perms
+    return len(dev_perms.misses(root))
+
+
 def build_state(root: Path, board: dict | None = None) -> dict:
     store = ds.Store(root)
     if not store.exists():
@@ -963,9 +970,10 @@ def build_state(root: Path, board: dict | None = None) -> dict:
     for tid, t in sorted(store.tasks().items(), key=lambda kv: int(kv[0][2:])):
         if t.get("status") == "dropped":
             continue  # removed by a replan: history only, not on the board
+        # empty fields are left out: a large project sends ~1,000 tasks on every change
         tasks[tid] = {k: t.get(k) for k in ("title", "milestone", "type", "status", "lane", "deps", "commit",
                                             "blocked_reason", "started_at", "done_at", "source", "seq", "dep_reasons",
-                                            "question", "blocked_count")}
+                                            "question", "blocked_count") if t.get(k) not in (None, [], "")}
         tasks[tid]["acceptance"] = len(t.get("acceptance") or [])
     events = _task_events(root)
     order = store.milestone_order()
@@ -993,6 +1001,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
     nxt, why = ds.pick_next(store, None)
     try:
         backlog = ds.backlog_data(store)
+        backlog.pop("tasks", None)  # the board reads the tasks above; this copy doubled the payload
     except Exception as e:  # noqa: BLE001 - the board must keep rendering
         backlog = {"error": str(e)}
     costs = None
@@ -1026,7 +1035,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
         "backlog": backlog,
         "questions": [{**q, "task": ((s.get("question_meta") or {}).get(q["id"]) or {}).get("task")}
                       for q in question_options(root, open_questions(_read(store.dev / "open-questions.md")))],
-        "denied": denied_permissions(root),
+        "denied": denied_permissions(root), "denied_total": _safe(lambda: denied_count(root)) or 0,
         "log": sorted(log_tail(_read(store.dev / "log.md")) + live_feed(events), key=lambda r: _ts(r.get("at")), reverse=True)[:LOG_TAIL],
         "feed": user_feed(log_tail(_read(store.dev / "log.md"), 400), events, tasks),
         "costs": costs,
@@ -1250,7 +1259,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _json(self, code: int, obj: object):
-        self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+        body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        # the state of a large project is hundreds of KB on every change; compressed it is a tenth of that
+        if len(body) > 4096 and "gzip" in self.headers.get("Accept-Encoding", "") and self.command != "HEAD":
+            return self._send(code, gzip.compress(body, compresslevel=5), extra={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+        self._send(code, body)
 
     def do_GET(self):
         self.server.touch()

@@ -189,6 +189,9 @@ dialog .btn-danger:hover { background: color-mix(in srgb, var(--critical) 85%, #
   padding: 3px 10px; min-height: 28px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface-2);
 }
 button.run-chip { cursor: pointer; }
+.run-chip.more-chip { font-weight: 700; color: var(--text-secondary); border-style: dashed; }
+.chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-list .run-chip .run-title { max-width: 40ch; }
 button.run-chip:hover { background: var(--surface-3); }
 .run-chip .tid { white-space: nowrap; }
 .run-chip .run-title { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22ch; min-width: 0; flex: 0 1 auto; }
@@ -296,6 +299,28 @@ button.run-chip:hover { background: var(--surface-3); }
 .needs-lists > .needs-hint { flex-basis: 100%; }  /* a hint is a line under the lists, never a column of its own */
 .needs-lists .list li, .needs-lists .list .row-btn { background: var(--surface-1); }
 .needs-hint { grid-column: 1 / -1; font-size: 12px; color: var(--text-secondary); }
+/* grouped lists (3.14): a list folds to its title line; past the cap one button shows the rest */
+.fold-list > summary { cursor: pointer; list-style: none; border-radius: 6px; padding: 2px 0; }
+.fold-list > summary::-webkit-details-marker { display: none; }
+.fold-list > summary:hover { color: var(--text-primary); }
+.fold-caret::before { content: "▸"; display: inline-block; width: 10px; font-size: 10px; transition: transform .15s; }
+.fold-list[open] > summary .fold-caret::before { transform: rotate(90deg); }
+.fold-list > .more-btn { margin-top: 6px; font-size: 12.5px; }
+.list li.group-head { display: flex; align-items: center; gap: 8px; background: none; border: 0; padding: 6px 2px 0; font-size: 12px; color: var(--critical-text); font-weight: 650; }
+.group-name { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.chip.sev-high { box-shadow: inset 0 0 0 1px var(--critical); }
+.list li.dod-li { display: block; padding: 0; border: 0; background: none; }
+.list li.dod-li.odd .dod-row { border-color: var(--warning); }
+.list li.odd { border-color: var(--critical); }
+.fold-list + .fold-list { margin-top: 10px; }
+/* a card in a column keeps to a few lines; the drawer and "See all" show everything */
+.col-cards .tcard-title { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.col-cards .tcard .reason { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.chart-window { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; font-size: 12px; }
+.modal-group + .modal-group { margin-top: 14px; }
+.clamp2, .list .sub.clamp2 { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.clamp2.open, .list .sub.clamp2.open { display: block; overflow: visible; }
+span.clamp2[title] { cursor: pointer; }
 
 /* ---------- chevrons: project phases and milestone stages point the way forward */
 
@@ -522,6 +547,12 @@ code.cmd { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-w
 
 .road-rel { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 2px 4px; font-size: 13px; }
 .road-rel:first-child { margin-top: 0; }
+.road-rel-btn { font: inherit; color: inherit; display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; padding: 2px 4px; border-radius: 7px; background: none; border: 0; cursor: pointer; text-align: left; }
+.road-rel-btn:hover { background: var(--surface-3); }
+.road-caret { color: var(--text-muted); font-size: 11px; width: 10px; }
+.road-rel-btn .road-count { margin-left: auto; }
+.road-fold { background: none !important; border: 0 !important; padding: 0 !important; }
+.tl-fold.road-fold-btn { width: 100%; padding: 6px 10px; justify-content: flex-start; border: 1px dashed var(--border-strong); }
 .road-rel.s-released { color: var(--text-muted); }
 .rel-decide { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
 .rel-decide textarea { min-width: 220px; flex: 1 1 260px; font: inherit; }
@@ -774,7 +805,7 @@ main[aria-busy="true"] .phase-panel { opacity: .55; }
 .phase-back { align-self: center; flex: none; white-space: nowrap; }
 
 /* ---------- the strip of a lane: its number and name, a line, its flow and what happens at the current step */
-.lane-strip { position: relative; display: grid; gap: 12px; min-width: 0; padding: 12px 16px 14px; border-radius: var(--radius); border: 1px solid var(--border);
+.lane-strip { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; padding: 12px 16px 14px; border-radius: var(--radius); border: 1px solid var(--border);
   border-top: 3px solid var(--lane); box-shadow: var(--tile-shadow);
   background: linear-gradient(180deg, color-mix(in srgb, var(--lane) 8%, var(--surface-1)), var(--surface-1) 70%); }
 .strip-head { display: flex; align-items: center; gap: 12px; min-width: 0; flex-wrap: wrap; }
@@ -859,7 +890,8 @@ main[aria-busy="true"] .phase-panel { opacity: .55; }
 .fd-note { color: var(--text-secondary); min-width: 0; }
 .fd-note .cmd { margin-left: 4px; }
 .stage-sub { font-size: 12px; color: var(--text-secondary); }
-.stage-run { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.stage-run { display: inline-flex; flex-wrap: wrap; gap: 6px; min-width: 0; max-width: 100%; }
+.stage-run .run-chip { max-width: 100%; min-width: 0; }
 .stage-blocked { font: inherit; font-size: 12px; font-weight: 700; color: #fff; background: var(--critical); border: 0; border-radius: 999px; padding: 3px 11px; cursor: pointer; }
 .stage-blocked:hover { background: color-mix(in srgb, var(--critical) 85%, #000); }
 .also-running { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; font-size: 12px; }
@@ -889,6 +921,15 @@ main[aria-busy="true"] .phase-panel { opacity: .55; }
 .sel-btn.now::after { content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--lane, var(--lane-construction)); }
 .sel-btn.active .sel-meta { color: var(--text-primary); }
 .sel-btn.wait { color: var(--critical-text); }
+/* timeline folds (3.14): a range that is not started, or already released, as one dashed chip that opens in place */
+.sel-group.fold { background: none; border-style: dashed; }
+.tl-fold { font: inherit; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; min-height: 28px; border-radius: 8px; white-space: nowrap; cursor: pointer;
+  color: var(--text-secondary); background: none; border: 0; }
+.tl-fold:hover { color: var(--text-primary); background: var(--surface-3); }
+.tl-fold strong { font-weight: 700; }
+.tl-fold.past .sel-meta { color: var(--good-text); font-weight: 700; }
+.tl-close { font: inherit; font-size: 14px; font-weight: 800; line-height: 1; padding: 2px 7px; min-height: 26px; border-radius: 8px; cursor: pointer; color: var(--text-muted); background: none; border: 0; }
+.tl-close:hover { color: var(--text-primary); background: var(--surface-3); }
 .sel-btn.sel { color: var(--text-primary); background: var(--surface-1); border-color: var(--lane, var(--lane-construction)); box-shadow: 0 2px 8px -4px var(--lane, var(--lane-construction)); }
 .tab-stage { font-size: 11px; color: var(--lane-construction); }
 
@@ -971,7 +1012,8 @@ main[aria-busy="true"] .phase-panel { opacity: .55; }
 .ms-count { display: flex; align-items: baseline; gap: 4px; font-size: 12.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ms-count strong { font-size: 15px; color: var(--text-primary); }
 .ms-pct { color: var(--text-muted); }
-.ms-facts { display: flex; gap: 10px; font-size: 11.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ms-facts { display: flex; flex-wrap: wrap; gap: 0 10px; font-size: 11.5px; color: var(--text-muted); min-width: 0; }
+.ms-facts > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .ms-facts:empty { display: none; }
 .ms-tools { display: flex; align-items: center; gap: 8px; flex: none; }
 .work-tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); flex: none; }
@@ -984,7 +1026,7 @@ main[aria-busy="true"] .phase-panel { opacity: .55; }
 .work-area { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .view-tasks { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .view-qa { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 2px; }
-.kanban { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+.kanban { flex: 1 1 auto; min-height: 260px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
 .col { min-height: 0; padding: 10px; gap: 8px; border-radius: 14px; background: var(--surface-2); }
 .col-head { flex: none; }
 .col[data-st="in_progress"] .col-head .count { background: color-mix(in srgb, var(--warning) 35%, var(--surface-3)); }
@@ -1053,11 +1095,17 @@ dialog { overscroll-behavior: contain; }
 dialog.modal { width: min(900px, calc(100vw - 32px)); max-width: none; max-height: calc(100vh - 64px); max-height: calc(100dvh - 64px); padding: 0 22px 20px; overflow: auto; }
 dialog.modal[open] { animation: pop-in .18s ease-out; }
 .metrics-modal { width: min(1040px, calc(100vw - 32px)); }
-.metrics-modal .td-head h2 { margin-right: 0; }
+.metrics-modal .td-head h2 { margin-right: 0; white-space: nowrap; }
+.metrics-modal .td-head .card-sub, .metrics-modal .td-head .sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metrics-modal .work-tabs { margin: 0 auto 0 12px; }
 .modal-body { padding-top: 12px; display: grid; gap: 12px; }
 @keyframes pop-in { from { transform: translateY(8px) scale(.985); opacity: 0; } to { transform: none; opacity: 1; } }
-.feed { min-height: 0; overflow: visible; display: grid; }
+.feed { min-height: 0; overflow: visible; display: grid; list-style: none; margin: 0; padding: 0; }
+.feed li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 6px 4px; border-bottom: 1px solid var(--border); font-size: 13px; overflow-wrap: anywhere; }
+.feed time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.feed li.feed-day { display: block; border-bottom: 0; padding: 12px 4px 2px; font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+.feed li.feed-day:first-child { padding-top: 0; }
+.feed li.feed-burst { display: block; padding-left: 78px; font-size: 12.5px; }
 
 /* ---------- smaller windows: the page scrolls, blocks keep a fixed height and still cut what does not fit */
 @media (max-width: 1279px) {
@@ -1112,6 +1160,12 @@ dialog.modal[open] { animation: pop-in .18s ease-out; }
   .drawer { border-radius: 0; border-width: 0; }
   .needs-btn .needs-label { display: none; }
   .needs-btn { padding-right: 6px; }
+  .selector { width: 100%; margin-left: 0; }
+  .strip-sub { white-space: normal; flex-basis: 100%; }
+  .road-row { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+  .road-row .road-meter, .road-row .tab-current { display: none; }
+  .feed li { grid-template-columns: 52px minmax(0, 1fr); }
+  .feed li.feed-burst { padding-left: 62px; }
 }
 @media (forced-colors: active) {
   .fnode-btn, .ptab, .tile, .lane-strip { border: 1px solid CanvasText; }
@@ -1280,6 +1334,10 @@ dialog.modal[open] { animation: pop-in .18s ease-out; }
 .road-sign.cur b { border-color: var(--lane-construction); color: var(--text-primary); }
 .road-car { position: absolute; bottom: 3px; width: 40px; height: 21px; left: calc(var(--to) - 20px); z-index: 2; }
 .road-car.drive { animation: r-drive 2.4s ease-out 1; }
+.road-car.rev { transform: scaleX(-1); }
+.road-car.rev.drive { animation-name: r-drive-rev; }
+@keyframes r-drive-rev { from { left: calc(100% + 6px); } to { left: calc(var(--to) - 20px); } }
+.road-sign.fold b { border-style: dashed; font-weight: 600; }
 @keyframes r-drive { from { left: -46px; } to { left: calc(var(--to) - 20px); } }
 .road-car.drive .car-wheel { transform-box: fill-box; transform-origin: center; animation: t-spin .5s linear 5; }
 .road-car .car-body { fill: var(--ag-blue); } .car-glass { fill: color-mix(in srgb, var(--accent-b) 45%, var(--surface-1)); }

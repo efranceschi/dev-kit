@@ -67,6 +67,7 @@
   let stopped = false;
   let loading = false;
   let pending = false;
+  let lastText = "";         // the last state received (without its timestamp): an identical one is not drawn again
 
   // ------------------------------------------------------------------ helpers
   const $ = (id) => document.getElementById(id);
@@ -450,25 +451,26 @@
       s("rect", { x: "15", y: "21", width: "14", height: "14", rx: "4" }),
       s("rect", { x: "8", y: "24", width: "28", height: "12", rx: "2", class: "m-paper" }), s("path", { d: "M22 24 V36", class: "m-fold" }));
   }
-  /** The roadmap as a road: a sign per milestone (green once closed), the car parked at the current one, which drives in when it changes. */
+  /** The roadmap as a road, newest on the left: a sign per milestone being worked on (green once closed), one sign per
+   *  folded range, the car parked at the current milestone facing the newer ones, driving in when it changes. */
   let roadSeen = null;
-  function roadStrip(ms) {
-    if (!funOn() || !ms.length) return null;
-    const cur = Math.max(0, ms.findIndex((m) => m.id === data.current_milestone));
-    const at = (i) => ((i + 0.5) / ms.length) * 100;
+  function roadStrip(signs) {
+    if (!funOn() || !signs.length) return null;
+    const cur = Math.max(0, signs.findIndex((g) => g.cur));
+    const at = (i) => ((i + 0.5) / signs.length) * 100;
     const drive = roadSeen !== null && roadSeen !== data.current_milestone;
     roadSeen = data.current_milestone;
-    const car = s("svg", { class: `road-car${drive ? " drive" : ""}`, viewBox: "0 0 46 24" },
+    const car = s("svg", { class: `road-car rev${drive ? " drive" : ""}`, viewBox: "0 0 46 24" },
       s("path", { d: "M4 14 L10 6 H30 L38 14 H43 Q45 14 45 16 V19 H2 V16 Q2 14 4 14 Z", class: "car-body" }),
       s("path", { d: "M12 8 H20 V14 H8 Z M22 8 H29 L35 14 H22 Z", class: "car-glass" }),
       [11, 35].map((x) => s("g", { class: "car-wheel" }, s("circle", { cx: String(x), cy: "19", r: "4.5" }), s("path", { d: `M${x - 3} 19 H${x + 3}` }))));
     car.style.setProperty("--to", `${at(cur)}%`);
     const cone = s("svg", { class: "road-cone", viewBox: "0 0 12 16" }, s("path", { d: "M6 0 L11 14 H1 Z", class: "cone-body" }), s("path", { d: "M3.5 8 H8.5", class: "cone-band" }),
       s("rect", { x: "0", y: "14", width: "12", height: "2", class: "cone-base" }));
-    cone.style.left = `calc(${at(cur)}% + 26px)`;
+    cone.style.left = `calc(${at(cur)}% - 37px)`;
     return h("div", { class: "road-strip", "aria-hidden": "true" },
-      ms.map((m, i) => { const sg = h("span", { class: `road-sign${isClosed(m) ? " done" : ""}${i === cur ? " cur" : ""}` }, h("b", { text: m.id }), h("i")); sg.style.left = `${at(i)}%`; return sg; }),
-      isClosed(ms[cur]) ? null : cone, car);
+      signs.map((g, i) => { const sg = h("span", { class: `road-sign${g.done ? " done" : ""}${g.cur ? " cur" : ""}${g.fold ? " fold" : ""}` }, h("b", { text: g.label }), h("i")); sg.style.left = `${at(i)}%`; return sg; }),
+      signs[cur] && signs[cur].cur && !signs[cur].done ? cone : null, signs.some((g) => g.cur) ? car : null);
   }
   /** The backlog's mail carrier: when a new issue reaches the queue, an envelope flies in and the new row shakes. */
   let issuesSeen = null;
@@ -716,7 +718,7 @@
       need ? h("span", { class: "ptab-needs", title: tr("{v} in Needs you", { v: plural(need, "item") }), text: String(need) }) : null,
       h("span", { class: "visually-hidden", text: `: ${PHASE_WORD[st === "active" ? "current" : st] || ""}${now ? tr(", the project is here") : ""}${need ? tr(", {v} need you", { v: plural(need, "item") }) : ""}.` }));
     }));
-    tabInSight();
+    requestAnimationFrame(tabInSight);  // after the redraw: reading the layout mid-render costs a layout per change
   }
   // on a narrow screen the tabs scroll sideways: keep the one shown in sight
   const tabInSight = () => { const el = $(`ph-${shownPhase()}`); const bar = document.querySelector(".phasebar");
@@ -804,6 +806,68 @@
   }
   const relMs = (r) => r.milestones.map((id) => data.milestones.find((m) => m.id === id)).filter(Boolean);
   const isClosed = (m) => m.gate === "passed" || m.gate === "skipped";
+
+  // ------------------------------------------------------------------ timeline (3.14): releases and milestones, newest first, the past folded
+  // One order for every selector and list, so a project with 60 milestones reads like one with 6: the future that has
+  // not started folds into one chip, then the releases being worked on (newest first), then the released ones, newest
+  // first; past the most recent TL_PAST, released ones fold into one range. A fold opens on click and stays open until
+  // the page reloads; whatever the user picked (or the project is on) is never hidden inside a fold.
+  const TL_PAST = 2;           // released releases shown before the older ones fold into a range
+  const TL_MS = 4;             // closed milestones shown when the plan has no releases
+  const tlOpen = new Set();
+  const tlToggle = (key) => { if (tlOpen.has(key)) tlOpen.delete(key); else tlOpen.add(key); render(); };
+  /** Entries in timeline order: { rel } a release; { fold, key, rels, future } a folded range; { loose } milestones in no release. */
+  function tlEntries(keepRel) {
+    const rp = relPlan();
+    const keep = (rels) => rels.some((r) => keepRel.includes(r.id));
+    const unrel = rp.filter((r) => r.status !== "released");
+    const started = (r) => r === unrel[0] || r.status !== "in_progress" || (r.closed || []).length > 0 || r.milestones.includes(data.current_milestone);
+    const live = unrel.filter(started), next = unrel.filter((r) => !started(r));
+    const past = rp.filter((r) => r.status === "released").reverse();
+    const out = [];
+    if (next.length) {
+      if (tlOpen.has("next") || keep(next)) next.slice().reverse().forEach((r, i) => out.push({ rel: r, closeKey: !i && tlOpen.has("next") ? "next" : null }));
+      else out.push({ fold: true, key: "next", rels: next, future: true });
+    }
+    live.slice().reverse().forEach((r) => out.push({ rel: r, live: true }));
+    const inRel = new Set(rp.flatMap((r) => r.milestones));
+    const loose = data.milestones.filter((m) => !inRel.has(m.id));
+    if (loose.length) out.push({ loose: loose.slice().reverse() });
+    past.slice(0, TL_PAST).forEach((r) => out.push({ rel: r, past: true }));
+    const older = past.slice(TL_PAST);
+    if (older.length) {
+      if (tlOpen.has("older") || keep(older)) older.forEach((r, i) => out.push({ rel: r, past: true, closeKey: !i && tlOpen.has("older") ? "older" : null }));
+      else out.push({ fold: true, key: "older", rels: older });
+    }
+    return out;
+  }
+  /** The release that holds a milestone, if any. */
+  const relOf = (id) => relPlan().find((r) => r.milestones.includes(id)) || null;
+  /** "R1–R4" for a range of releases (any order), "R3" for one. */
+  const tlRange = (rels) => { const ids = rels.map((r) => r.id).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))); return ids.length > 1 ? `${ids[0]}–${ids.at(-1)}` : ids[0] || ""; };
+  /** A folded range as a chip: it opens in place. */
+  function tlFoldBtn(e, cls) {
+    const n = e.rels.reduce((k, r) => k + r.milestones.length, 0);
+    const label = e.future ? tr("Next: {v}", { v: tlRange(e.rels) }) : tlRange(e.rels);
+    const meta = e.future ? plural(n, "milestone") : tr("✓ {v}", { v: plural(n, "milestone") });
+    return h("button", { type: "button", class: `tl-fold ${cls || ""}${e.future ? " future" : " past"}`, "aria-expanded": "false",
+      title: e.future ? tr("{v} not started yet: show them", { v: e.rels.map((r) => r.id).join(", ") }) : tr("{v} released: show them", { v: e.rels.map((r) => r.id).join(", ") }),
+      onclick: () => tlToggle(e.key) }, h("strong", { text: label }), h("span", { class: "sel-meta", text: meta }));
+  }
+  /** Milestones newest first: the closed ones past the latest TL_MS fold, unless opened, kept in sight or shown in full. */
+  function tlMs(list, key, keep, full) {
+    const hide = list.filter(isClosed).slice(TL_MS);
+    if (full || !hide.length || tlOpen.has(key) || hide.some((m) => keep.includes(m.id))) return { shown: list, hidden: [], open: tlOpen.has(key) && hide.length > 0 };
+    const hs = new Set(hide.map((m) => m.id));
+    return { shown: list.filter((m) => !hs.has(m.id)), hidden: hide, open: false };
+  }
+  /** "M1–M14" for milestones listed newest first. */
+  const msRange = (list) => (list.length > 1 ? `${list.at(-1).id}–${list[0].id}` : list[0].id);
+  /** The folded older closed milestones as a chip. */
+  const msFoldBtn = (hidden, key, cls) => h("button", { type: "button", class: `tl-fold past ${cls || ""}`, "aria-expanded": "false", title: tr("Show the older closed milestones"), onclick: () => tlToggle(key) },
+    h("strong", { text: msRange(hidden) }), h("span", { class: "sel-meta", text: tr("✓ {v}", { v: plural(hidden.length, "milestone") }) }));
+  /** The chip that folds a range the user opened back. */
+  const tlCloseBtn = (key) => h("button", { type: "button", class: "tl-close", "aria-expanded": "true", title: tr("Fold these back"), "aria-label": tr("Fold these back"), text: "‹", onclick: () => tlToggle(key) });
   /** What a release adds up to, from the milestones it holds: progress, cost, time and pace. */
   function relTotals(r) {
     const ms = relMs(r);
@@ -880,14 +944,18 @@
       return;
     }
     const t = relTotals(r);
+    const relBtn = (x) => {
+      const done = x.status === "released", sel = x.id === r.id;
+      const ver = (data.releases || []).filter((v) => v.release === x.id).map((v) => v.tag || v.version).pop();
+      return h("button", { type: "button", role: "tab", id: `rel-${x.id}`, "aria-selected": String(sel), tabindex: sel ? "0" : "-1", class: `sel-btn${done ? " ok" : ""}${sel ? " sel" : ""}${x.status === "awaiting_approval" ? " wait" : ""}`,
+        title: `${x.id} · ${x.title}: ${REL_WORD[x.status]}${relTook(x) ? ` · ${tr("took {v}", { v: relTook(x).text })}` : ""}`, onclick: () => { relView = x.id; render(); $(`rel-${x.id}`) && $(`rel-${x.id}`).focus(); } },
+      h("strong", { text: x.id }), done ? h("span", { class: "sel-meta", text: `✓ ${ver || ""}`.trim() }) : h("span", { class: "sel-meta", text: `${x.closed.length}/${x.milestones.length}` }));
+    };
+    // the timeline, newest first: the next releases fold before, the older released ones fold after
+    const relEntries = tlEntries([r.id]);
     const selector = h("div", { class: "selector" }, h("span", { class: "sel-label", text: tr("Release") }),
-      h("div", { class: "sel-groups", role: "tablist", id: "rel-tabs", "aria-label": tr("Releases") }, h("div", { class: "sel-group" }, rp.map((x) => {
-        const done = x.status === "released", sel = x.id === r.id;
-        const ver = (data.releases || []).filter((v) => v.release === x.id).map((v) => v.tag || v.version).pop();
-        return h("button", { type: "button", role: "tab", id: `rel-${x.id}`, "aria-selected": String(sel), tabindex: sel ? "0" : "-1", class: `sel-btn${done ? " ok" : ""}${sel ? " sel" : ""}${x.status === "awaiting_approval" ? " wait" : ""}`,
-          title: `${x.id} · ${x.title}: ${REL_WORD[x.status]}${relTook(x) ? ` · ${tr("took {v}", { v: relTook(x).text })}` : ""}`, onclick: () => { relView = x.id; render(); $(`rel-${x.id}`) && $(`rel-${x.id}`).focus(); } },
-        h("strong", { text: x.id }), done ? h("span", { class: "sel-meta", text: `✓ ${ver || ""}`.trim() }) : h("span", { class: "sel-meta", text: `${x.closed.length}/${x.milestones.length}` }));
-      }))));
+      h("div", { class: "sel-groups", role: "tablist", id: "rel-tabs", "aria-label": tr("Releases") }, h("div", { class: "sel-group" }, relEntries.flatMap((e) =>
+        e.fold ? [tlFoldBtn(e)] : e.loose ? [] : [e.closeKey ? tlCloseBtn(e.closeKey) : null, relBtn(e.rel)]))));
     const rej = (r.history || []).filter((x) => x.event === "rejected");
     const waiting = r.status === "in_progress" ? r.milestones.filter((id) => { const m = data.milestones.find((x) => x.id === id); return m && !isClosed(m); }) : [];
     const rt = relTook(r);
@@ -917,7 +985,7 @@
         fact(tr("Cost"), t.spend ? t.spend.text : "—", t.spend && t.spend.title),
         fact(tr("Time"), fmtH(t.work), rt ? rt.title : t.elapsed != null ? tr("{v} from the first task to {v2}", { v: fmtH(t.elapsed), v2: r.status === "released" || r.status === "ready_for_review" ? tr("the last gate") : "now" }) : tr("No task started")),
         fact(tr("Pace"), t.pace != null ? tr("{v} tasks/h", { v: t.pace.toFixed(1) }) : "—", tr("Tasks done per working hour, parallel work counted once")))];
-    const msRows = () => t.ms.map((m) => {
+    const msRows = () => t.ms.slice().reverse().map((m) => {
       const x = milestoneInfo(m), tm = msTiming(m), sp = msSpend(m.id), q = qaState(m);
       return h("li", { class: "has-btn" }, h("button", { type: "button", class: "row-btn", title: tr("Show {id} in construction", { id: m.id }), onclick: () => { closeList(); openMilestone(m.id); } },
         h("span", { class: "id", text: m.id }), h("span", { text: m.title || "" }),
@@ -996,20 +1064,41 @@
       inQa ? h("span", { class: "tab-stage", title: tr("In QA & fixes"), "aria-label": tr("in QA & fixes"), text: "◐" }) : null,
       now ? h("span", { class: "visually-hidden", text: tr(", current") }) : null);
     };
-    let groups;
-    if (rp.length) {
-      const inRel = new Set(rp.flatMap((r) => r.milestones));
-      const loose = ms.filter((m) => !inRel.has(m.id));
-      groups = rp.map((r) => [r.id, ms.filter((m) => r.milestones.includes(m.id))]).filter(([, l]) => l.length);
-      if (loose.length) groups.push(["", loose]);
-    } else groups = [["", ms]];
-    fill($("tabs"), ms.length ? groups.map(([rid, list]) => h("div", { class: "sel-group", role: "presentation" },
+    // the timeline, newest first: releases not started fold before, released ones fold after (one chip each, older ones in a range)
+    const keepMs = [cur, data.current_milestone].filter(Boolean);
+    const keepRel = keepMs.map((id) => (relOf(id) || {}).id).filter(Boolean);
+    const group = (rid, list, closeKey) => h("div", { class: "sel-group", role: "presentation" },
+      closeKey ? tlCloseBtn(closeKey) : null,
       rid ? h("button", { type: "button", class: "sel-rel", title: tr("Open {id} in Releases", { id: rid }), tabindex: "-1", text: rid, onclick: () => openRelease(rid) }) : null,
-      list.map(btn))) : h("span", { class: "card-sub" }, tr("No milestones yet. They appear after "), cmd("/dev-kit:plan"), "."));
+      list.map(btn));
+    const groups = [];
+    const foldGroup = (...kids) => h("div", { class: "sel-group fold", role: "presentation" }, kids);
+    const msGroup = (rid, list, key, closeKey) => {
+      const f = tlMs(list, key, keepMs);
+      groups.push(group(rid, f.shown, closeKey || (f.open ? key : null)));
+      if (f.hidden.length) groups.push(foldGroup(msFoldBtn(f.hidden, key)));
+    };
+    if (rp.length) {
+      tlEntries(keepRel).forEach((e) => {
+        if (e.fold) { groups.push(foldGroup(tlFoldBtn(e))); return; }
+        if (e.loose) { msGroup("", e.loose, "old:loose"); return; }
+        const r = e.rel, list = relMs(r).slice().reverse();
+        const key = `ms:${r.id}`;
+        if (e.past && !tlOpen.has(key) && !list.some((m) => keepMs.includes(m.id))) {
+          const ver = (data.releases || []).filter((v) => v.release === r.id).map((v) => v.tag || v.version).pop();
+          groups.push(foldGroup(e.closeKey ? tlCloseBtn(e.closeKey) : null,
+            h("button", { type: "button", class: "tl-fold past", "aria-expanded": "false", title: tr("{id} released: show its milestones", { id: r.id }), onclick: () => tlToggle(key) },
+              h("strong", { text: r.id }), h("span", { class: "sel-meta", text: tr("✓ {v}", { v: ver || plural(list.length, "milestone") }) }))));
+          return;
+        }
+        if (e.past) groups.push(group(r.id, list, e.closeKey || (tlOpen.has(key) ? key : null)));
+        else msGroup(r.id, list, `old:${r.id}`, e.closeKey);
+      });
+    } else msGroup("", ms.slice().reverse(), "old:all");
+    fill($("tabs"), ms.length ? groups : h("span", { class: "card-sub" }, tr("No milestones yet. They appear after "), cmd("/dev-kit:plan"), "."));
     $("tabs-back").hidden = !data.current_milestone || cur === data.current_milestone;
     // keep the selected milestone in sight when the selector scrolls sideways
-    const selBtn = $(`tab-${cur}`);
-    if (selBtn && selBtn.scrollIntoView) selBtn.scrollIntoView({ block: "nearest", inline: "nearest" });
+    requestAnimationFrame(() => { const selBtn = $(`tab-${currentId()}`); if (selBtn && selBtn.scrollIntoView) selBtn.scrollIntoView({ block: "nearest", inline: "nearest" }); });
   }
   $("tabs-back").addEventListener("click", () => { selected = null; selectMilestone(null, true); });
 
@@ -1086,6 +1175,19 @@
   function waitingOn(t) {
     return (t.deps || []).filter((d) => d && data.tasks[d] && data.tasks[d].status !== "done");
   }
+  // the gate's problems come from dev_state.py as English sentences; the known shapes are said in the reader's language
+  // (an unknown one is shown as sent, so a new server message is never lost)
+  const GATE_TEXT = [
+    [/^hard floor: (\S+) fails(?: \(([^)]+)\))?(?: -> (\S+))?$/, (x) => tr("Hard floor: {check} fails{v}{v2}", { check: x[1], v: x[2] ? ` (${iw(x[2])})` : "", v2: x[3] ? ` → ${x[3]}` : "" })],
+    [/^hard floor: no deterministic checks recorded for (\S+) \(run `([^`]+)`\)$/, (x) => tr("Hard floor: no deterministic checks recorded for {id} (run {v})", { id: x[1], v: x[2] })],
+    [/^exit_check: no result in scores\.json \(spec-tracer runs (\S+)'s exit_check\)$/, (x) => tr("Exit check: no result yet (the spec-tracer runs the exit check of {id})", { id: x[1] })],
+    [/^exit_check failed(?:: (.+))?$/, (x) => (x[1] ? tr("Exit check failed: {v}", { v: x[1] }) : tr("Exit check failed"))],
+    [/^ci: no (\S+) result recorded for the round's commit \(run `([^`]+)`\)$/, (x) => tr("CI: no {v} result for the round's commit (run {v2})", { v: x[1], v2: x[2] })],
+    [/^ci: (\S+) is (\S+) at (\S+) \(the CI verdict wins over local runs\)$/, (x) => tr("CI: {v} is {v2} at {sha} (the CI verdict wins over local runs)", { v: x[1], v2: x[2], sha: x[3] })],
+  ];
+  const gateText = (t) => { for (const [re, f] of GATE_TEXT) { const x = re.exec(t || ""); if (x) return f(x); } return t; };
+  const TASK_WORD = tmap({ feature: N_("feature"), fix: N_("fix"), chore: N_("chore"), test: N_("test"), docs: N_("docs"), hotfix: N_("hotfix") });
+  const tw = (v) => (v ? TASK_WORD[v] || v : v);
   function taskCard(t) {
     const isNext = data.next && data.next.task === t.id;
     const wait = t.status === "done" ? [] : waitingOn(t);
@@ -1094,10 +1196,10 @@
     return h("article", { class: `tcard s-${t.status}${isNext ? " next" : ""}${nap ? " napping" : ""}`, "aria-label": tr("{id} {title}, {v}{v2}. Open details", { id: t.id, title: t.title, v: stLabel(t.status), v2: wait.length ? tr(", waiting on {v}", { v: wait.join(", ") }) : "" }),
       tabindex: "0", role: "button", "aria-haspopup": "dialog", "data-tid": t.id,
       onclick: () => openTask(t.id), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTask(t.id); } } },
-      h("div", { class: "tcard-top" }, h("span", { class: "tid", text: t.id }), h("span", { class: "chip", text: t.type }),
-        t.lane ? h("span", { class: `chip lane-${t.lane}`, text: t.lane }) : null,
+      h("div", { class: "tcard-top" }, h("span", { class: "tid", text: t.id }), h("span", { class: "chip", text: tw(t.type) }),
+        t.lane ? h("span", { class: `chip lane-${t.lane}`, text: tw(t.lane) }) : null,
         isNext ? h("span", { class: "chip next-chip", text: tr("next up") }) : null),
-      h("div", { class: "tcard-title", text: t.title }),
+      h("div", { class: "tcard-title", title: String(t.title || "").length > 90 ? t.title : null, text: t.title }),
       here.length ? h("div", { class: "tcard-agents" }, here.map((x) => h("span", { class: "agent-chip" }, agentBits(x))),
         funOn() && t.status === "in_progress" ? walkTrack(here.map((x) => x.agent)) : null) : null,
       nap ? sleeper("implementer") : null,
@@ -1112,6 +1214,7 @@
         t.commit ? h("span", { class: "tid", title: tr("Commit"), text: t.commit.slice(0, 7) }) : null));
   }
 
+  const COL_DOM = 24;
   function renderKanban(m) {
     if (view !== "tasks") return;
     const ts = tasksOf(m);
@@ -1120,7 +1223,7 @@
     if (typeFilter && !types.includes(typeFilter)) typeFilter = "";
     if (sel.dataset.types !== types.join(",")) {
       sel.dataset.types = types.join(",");
-      fill(sel, h("option", { value: "", text: tr("All types") }), types.map((t) => h("option", { value: t, text: t })));
+      fill(sel, h("option", { value: "", text: tr("All types") }), types.map((t) => h("option", { value: t, text: tw(t) })));
     }
     sel.value = typeFilter;
     sel.disabled = types.length < 2;
@@ -1144,19 +1247,28 @@
     const nextId = data.next && data.next.task;
     const todoRank = (t) => (t.id === nextId ? 0 : waitingOn(t).length ? 2 : 1);
     by.todo.sort((a, b) => todoRank(a) - todoRank(b) || Number(a.id.slice(2)) - Number(b.id.slice(2)));
+    // Blocked: grouped by what they wait on, the biggest group first, so one answer clears the most cards
+    const whyN = {};
+    by.blocked.forEach((t) => { const k = t.blocked_reason || ""; whyN[k] = (whyN[k] || 0) + 1; });
+    by.blocked.sort((a, b) => whyN[b.blocked_reason || ""] - whyN[a.blocked_reason || ""] || String(a.blocked_reason || "").localeCompare(String(b.blocked_reason || "")) || Number(a.id.slice(2)) - Number(b.id.slice(2)));
     const col = mobileCol || ["in_progress", "blocked", "todo", "done"].find((k) => by[k].length) || "todo";
     box.dataset.col = col;
     fill($("col-tabs"), STATUS.map((st) => h("button", { type: "button", class: "seg-btn", "aria-pressed": String(col === st.key),
       text: `${st.label} ${by[st.key].length}`, onclick: () => { mobileCol = st.key; renderKanban(currentMilestone()); } })));
-    // every column has the same height; the cards that do not fit become "+N more", which opens the whole column
+    // every column has the same height; the cards that do not fit become "+N more", which opens the whole column.
+    // A column never shows more than COL_DOM cards, so only those are drawn: the rest only add to "+N more".
     fill(box, STATUS.map((st) => {
       const list = by[st.key];
-      const all = () => openList(`${m.id} · ${st.label} (${list.length})`, h("div", { class: "modal-cards" }, list.map(taskCard)));
+      const all = () => openList(`${m.id} · ${st.label} (${list.length})`, st.key === "blocked" && list.length > 1
+        ? groupBy(list, (t) => t.blocked_reason || "").map(([why, ts]) => h("div", { class: "modal-group" },
+          h("div", { class: "list-title" }, h("span", { class: "group-name", text: why || tr("No reason recorded") }), h("span", { class: "chip", text: String(ts.length) })),
+          h("div", { class: "modal-cards" }, ts.map(taskCard))))
+        : h("div", { class: "modal-cards" }, list.map(taskCard)));
       return h("section", { class: "col", "data-st": st.key, "aria-label": `${st.label}, ${plural(list.length, "task")}` },
         h("div", { class: "col-head" }, h("span", { class: `swatch st-${st.key}`, "aria-hidden": "true" }), st.label,
           h("span", { class: "count", text: String(list.length) })),
-        h("div", { class: `col-cards${filtering ? " scroll" : ""}`, "data-clamp": filtering ? null : "cards" },
-          list.length ? list.map(taskCard) : h("div", { class: "col-empty" }, filtering ? null : emptyFun(st.key === "blocked" ? "rest" : "sweep"),
+        h("div", { class: `col-cards${filtering ? " scroll" : ""}`, "data-clamp": filtering ? null : "cards", "data-extra": !filtering && list.length > COL_DOM ? String(list.length - COL_DOM) : null },
+          list.length ? (filtering ? list : list.slice(0, COL_DOM)).map(taskCard) : h("div", { class: "col-empty" }, filtering ? null : emptyFun(st.key === "blocked" ? "rest" : "sweep"),
             h("span", { text: filtering ? tr("No match") : st.key === "blocked" ? tr("Nothing blocked") : tr("Empty") }))),
         h("button", { type: "button", class: "col-more", id: `more-${st.key}`, hidden: true, onclick: all }));
     }));
@@ -1298,12 +1410,16 @@
     if (Number(c.tokens) > 0) return { text: tr("{v} tok", { v: compact(Number(c.tokens)) }), title: c.partial ? tr("Tokens reported by the skills (no transcripts): partial") : tr("Tokens used (no price for the model)") };
     return null;
   }
+  // the charts show the last VEL_WINDOW milestones (a sprint-like window that keeps the bars readable); the table has all
+  const VEL_WINDOW = 12;
+  let velAll = false;
   function renderVelocity(cur) {
     const box = $("velocity");
-    const rows = data.milestones.map((m) => {
+    const every = data.milestones.map((m) => {
       const ts = tasksOf(m);
       return { id: m.id, title: m.title, done: ts.filter((t) => t.status === "done").length, total: ts.length, time: msTiming(m), spend: msSpend(m.id) };
     }).filter((r) => r.total);
+    const rows = velAll || every.length <= VEL_WINDOW ? every : every.slice(-VEL_WINDOW);
     if (!rows.length) {
       fill(box, h("div", { class: "chart-empty", text: tr("Velocity appears once milestones have tasks.") }));
       fill($("velocity-hours"));
@@ -1336,13 +1452,14 @@
       hit.addEventListener("pointerleave", hideTip); hit.addEventListener("blur", hideTip);
       svg.append(hit, s("path", { class: `bar${r.id === cur ? " current" : ""}`, d }));
       svg.append(s("text", { class: "label-strong", x: cx, y: top - 6, "text-anchor": "middle", text: String(r.done) }));
-      svg.append(s("text", { x: cx, y: H - 8, "text-anchor": "middle", text: r.id }));
+      if (band >= 34 || i % Math.ceil(34 / band) === 0 || r.id === cur) svg.append(s("text", { x: cx, y: H - 8, "text-anchor": "middle", text: r.id }));
     });
-    fill(box, svg);
+    fill(box, every.length > VEL_WINDOW ? h("div", { class: "chart-window" }, h("span", { class: "sub", text: velAll ? tr("All {n} milestones", { n: every.length }) : tr("Last {n} of {v} milestones", { n: VEL_WINDOW, v: every.length }) }),
+      h("button", { type: "button", class: "link-btn", "aria-pressed": String(velAll), text: velAll ? tr("Last {n}", { n: VEL_WINDOW }) : tr("Show all"), onclick: () => { velAll = !velAll; renderVelocity(cur); } })) : null, svg);
     renderHours(rows, W);
     // the table is a list: newest first (the charts keep time order)
     fill($("velocity-table"), h("table", {}, h("thead", {}, h("tr", {}, [tr("Milestone"), tr("Done"), tr("Total"), tr("Elapsed"), tr("Working"), tr("Cost or tokens")].map((x) => h("th", { text: x })))),
-      h("tbody", {}, rows.slice().reverse().map((r) => h("tr", {}, h("td", { text: `${r.id} ${r.title || ""}` }), h("td", { text: String(r.done) }), h("td", { text: String(r.total) }),
+      h("tbody", {}, every.slice().reverse().map((r) => h("tr", {}, h("td", { text: `${r.id} ${r.title || ""}` }), h("td", { text: String(r.done) }), h("td", { text: String(r.total) }),
         h("td", { text: r.time ? fmtH(r.time.elapsed) + (r.time.open ? tr(" so far") : "") : "—" }), h("td", { text: r.time ? fmtH(r.time.work) : "—" }),
         h("td", { text: r.spend ? r.spend.text : tr("not measured") }))))));
   }
@@ -1384,8 +1501,9 @@
     svg.append(s("text", { class: "label-strong", x: cx(lastI) + 9, y: ye + 4 + gap[0], text: tr("elapsed") }),
       s("text", { class: "label-strong", x: cx(lastI) + 9, y: yw + 4 + gap[1], text: tr("working") }));
     rows.forEach((r, i) => {
-      svg.append(s("text", { x: cx(i), y: H - 24, "text-anchor": "middle", text: r.id }));
-      if (r.spend) svg.append(s("text", { class: "spend", x: cx(i), y: H - 8, "text-anchor": "middle", text: r.spend.text }));
+      const thin = band < 56 && i % Math.ceil(56 / band) !== 0 && i !== rows.length - 1;  // labels never overlap
+      if (!thin) svg.append(s("text", { x: cx(i), y: H - 24, "text-anchor": "middle", text: r.id }));
+      if (r.spend && !thin) svg.append(s("text", { class: "spend", x: cx(i), y: H - 8, "text-anchor": "middle", text: r.spend.text }));
       const hit = s("rect", { class: "hit", x: cx(i) - band / 2 + 2, y: T, width: band - 4, height: H - T - B, tabindex: "0",
         "aria-label": `${r.id}: ${r.time ? tr("elapsed {v}, working {v2}", { v: fmtH(r.time.elapsed), v2: fmtH(r.time.work) }) : tr("not started")}${r.spend ? `, ${r.spend.text}` : ""}` });
       const tipFn = (evt) => showTip(evt, `${r.id} · ${r.title || ""}`, velTip(r));
@@ -1403,6 +1521,34 @@
     return h("div", {}, h("div", { class: "list-title" }, title, items.length ? h("span", { class: "chip", text: String(items.length) }) : null, phase ? phaseTag(phase) : null),
       items.length ? h("ul", { class: "list" }, items) : h("div", { class: `empty${good ? " good" : ""}` }, good && emptyText ? emptyFun("rest") : null, h("span", { text: emptyText })));
   }
+
+  // grouped lists (3.14): a list that folds, its open state kept until the page reloads; past the cap, the rest waits
+  // behind one button, so 60 questions or 30 blocked cards take the room of a few
+  const groupOpen = new Map();
+  const GROUP_CAP = 6;
+  /** A folding list: the summary carries the title, the count and the phase; rows past `cap` show on request. */
+  function foldList(key, title, items, opt = {}) {
+    const det = h("details", { class: "fold-list" });
+    det.open = groupOpen.has(key) ? groupOpen.get(key) : Boolean(opt.open);
+    det.addEventListener("toggle", () => groupOpen.set(key, det.open));
+    const cap = opt.cap || GROUP_CAP;
+    const shown = groupOpen.get(`${key}:all`) || items.length <= cap + 1 ? items : items.slice(0, cap);
+    const more = items.length - shown.length;
+    det.append(h("summary", { class: "list-title" }, h("span", { class: "fold-caret", "aria-hidden": "true" }), title,
+      h("span", { class: "chip", text: String(opt.count != null ? opt.count : items.length) }), opt.phase ? phaseTag(opt.phase) : null),
+      h("ul", { class: "list" }, shown),
+      more > 0 ? h("button", { type: "button", class: "link-btn more-btn", text: tr("Show {v} more", { v: more }), onclick: () => { groupOpen.set(`${key}:all`, true); render(); } }) : "",
+      opt.foot || "");
+    return det;
+  }
+  /** Items grouped by a key, the biggest group first (ties keep their order). */
+  function groupBy(items, keyOf) {
+    const m = new Map();
+    items.forEach((x) => { const k = keyOf(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); });
+    return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
+  }
+  /** A heading row inside a grouped list. */
+  const groupHead = (text, n) => h("li", { class: "group-head" }, h("span", { class: "group-name", text }), h("span", { class: "chip", text: String(n) }));
 
   /** The phase an open question belongs to, from the skill that raised it. */
   function questionPhase(q) {
@@ -1446,25 +1592,37 @@
     // a new item makes the button ring once (the favicon and the title of the tab change too)
     if (n > before && !firstRender) { nb.classList.remove("ping"); void nb.offsetWidth; nb.classList.add("ping"); }
     if (!n) { fill($("impediments"), h("div", { class: "empty good needs-empty" }, h("strong", { text: tr("Nothing needs you now.") }), h("span", { text: tr("Questions, confirmations, approvals and blocked work show up here.") }))); return; }
-    fill($("impediments"),
-      denied.length ? listBlock(tr("Denied because nobody answered"), denied.map(deniedRow), "") : null,
-      hneeds.length ? listBlock(tr("Production is failing its health check"), hneeds.map(healthRow), "", false, "stable") : null,
-      waitingRel.length ? listBlock(tr("Releases waiting for your approval"), waitingRel.map((r) => h("li", {}, h("span", { class: "id", text: r.id }),
+    // management by exception, in the order that costs most to leave waiting: production, approvals, decisions,
+    // then the work that waits on an answer; the first two groups open, the rest fold to a line each
+    const reasons = groupBy(blocked, ([, t]) => t.blocked_reason || "");
+    const blockedItems = blocked.length > 1 ? reasons.flatMap(([why, list]) => [groupHead(why || tr("No reason recorded"), list.length), ...list.map(([id, t]) => blockedRow(id, t, true))])
+      : blocked.map(([id, t]) => blockedRow(id, t));
+    const qRow = (q) => h("li", {}, hasDoc("open-questions.md") ? docLink("open-questions.md", q.id, q.id, "id") : h("span", { class: "id", text: q.id }),
+      h("span", { class: "clamp2", title: tr("Click to read it all"), onclick: (e) => e.currentTarget.classList.toggle("open") }, linkify(q.question)),
+      h("span", { class: "q-tags" }, h("span", { class: "chip", text: q.by || "?" }), phaseTag(questionPhase(q))), q.assumption ? h("span", { class: "sub", text: tr("Assumed meanwhile: {assumption}", { assumption: q.assumption }) }) : null,
+      q.options && q.options.length ? h("span", { class: "sub clamp2", text: tr("Options: {v}", { v: q.options.map((o) => (o === q.recommended ? `${o} (${tr("recommended")})` : o)).join(" · ") }) }) : null);
+    const deniedGroups = groupBy(denied, (m) => `${m.agent || ""}|${m.tool || ""}`);
+    const hidden = Math.max(0, (data.denied_total || 0) - denied.length);
+    const groups = [
+      ["health", tr("Production is failing its health check"), hneeds.map(healthRow), "stable"],
+      ["approve", tr("Releases waiting for your approval"), waitingRel.map((r) => h("li", {}, h("span", { class: "id", text: r.id }),
         h("span", { text: tr("{title} · {v} closed", { title: r.title, v: plural(r.closed.length, "milestone") }) }),
         h("button", { type: "button", class: "link-btn", text: tr("Open"), onclick: () => openRelease(r.id) }),
         r.review_doc ? h("span", { class: "sub" }, docLink(r.review_doc, tr("Open the release review"))) : null,
-        releaseDecision(r))), "", false, "releases") : null,
-      stuck.length ? listBlock(tr("QA rounds used up"), stuck.map(qaDecisionRow), "", false, "construction") : null,
-      cneeds.length ? listBlock(tr("Confirm before building"), cneeds.map(checkpointRow), "", false, cpPrd ? "conception" : "planning") : null,
-      dneeds.length ? listBlock(tr("Deferred debt above the cap"), dneeds.map(debtRow), "", false, "construction") : null,
-      lneeds.length ? listBlock(tr("Proposed lessons"), lneeds.map(lessonRow), "", false, "construction") : null,
-      qneeds.length ? listBlock(tr("Issue queue"), qneeds.map(queueNeedRow), "", false, "planning") : null,
-      hot.length ? listBlock(tr("Open hotfixes"), hot.map((id) => hotfixRow(id, b)), "", false, "construction") : null,
-      blocked.length ? listBlock(tr("Blocked tasks"), blocked.map(([id, t]) => blockedRow(id, t)), "", false, "construction") : null,
-      data.questions.length ? listBlock(tr("Open questions"), data.questions.map((q) => h("li", {}, hasDoc("open-questions.md") ? docLink("open-questions.md", q.id, q.id, "id") : h("span", { class: "id", text: q.id }), h("span", {}, linkify(q.question)),
-        h("span", { class: "q-tags" }, h("span", { class: "chip", text: q.by || "?" }), phaseTag(questionPhase(q))), q.assumption ? h("span", { class: "sub", text: tr("Assumed meanwhile: {assumption}", { assumption: q.assumption }) }) : null,
-        q.options && q.options.length ? h("span", { class: "sub", text: tr("Options: {v}", { v: q.options.map((o) => (o === q.recommended ? `${o} (${tr("recommended")})` : o)).join(" · ") }) }) : null)), "") : null,
-      warns.length ? listBlock(tr("Warnings"), warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { text: w }))), "") : null,
+        releaseDecision(r))), "releases"],
+      ["qa", tr("QA rounds used up"), stuck.map(qaDecisionRow), "construction"],
+      ["confirm", tr("Confirm before building"), cneeds.map(checkpointRow), cpPrd ? "conception" : "planning"],
+      ["hotfix", tr("Open hotfixes"), hot.map((id) => hotfixRow(id, b)), "construction"],
+      ["blocked", tr("Blocked tasks"), blockedItems, "construction", { count: blocked.length }],
+      ["questions", tr("Open questions"), data.questions.map(qRow), null],
+      ["queue", tr("Issue queue"), qneeds.map(queueNeedRow), "planning"],
+      ["debt", tr("Deferred debt above the cap"), dneeds.map(debtRow), "construction"],
+      ["lessons", tr("Proposed lessons"), lneeds.map(lessonRow), "construction"],
+      ["denied", tr("Denied because nobody answered"), deniedGroups.map(([, list]) => deniedRow(list[0], list.length)), null,
+        { count: denied.length + hidden, foot: hidden ? h("p", { class: "needs-hint", text: tr("{v} more not listed here: see them in Claude Code with /dev-kit:settings.", { v: hidden }) }) : null }],
+      ["warnings", tr("Warnings"), warns.map((w) => h("li", {}, h("span", { class: "id", text: "!" }), h("span", { class: "clamp2", text: w }))), null],
+    ].filter((g) => g[2].length);
+    fill($("impediments"), groups.map(([key, title, items, phase, opt], i) => foldList(`needs:${key}`, title, items, { phase, open: i < 2, ...(opt || {}) })),
       data.questions.length || blocked.length ? h("p", { class: "needs-hint" }, tr("Answer in Claude Code with "), cmd("/dev-kit:interview --gaps")) : null);
   }
   /** Needs you › QA rounds used up (conventions §7): keep fixing (+1 round), accept with an ADR (a justification), or replan. */
@@ -1475,11 +1633,11 @@
     return h("li", {}, ...head, h("span", { class: "sub" }, tr("Decide in Claude Code with "), cmd(`/dev-kit:qa ${m.id}`)));
   }
   /** Needs you › a blocked task, and the question it waits on (decided in Claude Code). */
-  function blockedRow(id, t) {
+  function blockedRow(id, t, grouped) {
     const q = data.questions.find((x) => x.task === id);
     const head = h("button", { type: "button", class: "row-btn", "data-tid": id, "aria-haspopup": "dialog", onclick: () => openTask(id) },
       h("span", { class: "id", text: id }), h("span", { text: t.title }), h("span", { class: "chip", text: t.milestone }),
-      h("span", { class: "sub bad", text: t.blocked_reason || tr("No reason recorded") }));
+      grouped ? null : h("span", { class: "sub bad clamp2", text: t.blocked_reason || tr("No reason recorded") }));
     return h("li", { class: "has-btn" }, head, q ? h("span", { class: "sub" }, tr("Waiting on {id}: ", { id: q.id }), linkify(q.question)) : null);
   }
   /** Needs you › an open hotfix and where it is. */
@@ -1661,6 +1819,17 @@
     return h("button", { type: "button", class: "run-chip", "data-tid": t.id, title: tr("{id} {title}. Open details", { id: t.id, title: t.title }), onclick: () => openTask(t.id) },
       h("span", { class: "tid", text: t.id }), h("span", { class: "run-title", text: t.title }), agentsOn(t.id).slice(0, 2).flatMap((a) => agentBits(a)));
   }
+  /** One line of who is at work: the first `n` chips, then one "+N" chip (named by role) that opens them all, so 23
+   *  agents do not push the kanban off the screen. `make` builds fresh chips each time (the list keeps its handlers). */
+  const CHIP_CAP = 3;
+  function capChips(make, title, roles) {
+    const all = make();
+    if (all.length <= CHIP_CAP + 1) return all;
+    const rest = all.length - CHIP_CAP;
+    const who = groupBy(roles.slice(CHIP_CAP), (r) => r).map(([r, l]) => `${r} ×${l.length}`).join(", ");
+    return [...all.slice(0, CHIP_CAP), h("button", { type: "button", class: "run-chip more-chip", title: tr("{v} more at work: {v2}. Show them all", { v: rest, v2: who }),
+      text: tr("+{n} more", { n: rest }), onclick: () => openList(title, h("div", { class: "chip-list" }, make())) })];
+  }
   /** The milestone as lane "3 · Milestones" of the diagram: pull issues → implement → QA → gate → smoke/deploy (or closed). */
   function msNodes(m) {
     const st = stagesOf(m);
@@ -1719,10 +1888,12 @@
     // the detail line: what happens at the current stage, its command, the QA rounds, who works on it now
     let detail = null;
     if (here) {
-      const running = here.tasks.filter((t) => t.status === "in_progress");
+      const running = here.tasks.filter((t) => t.status === "in_progress").sort((a, b) => (parseT(a.started_at) || 0) - (parseT(b.started_at) || 0));
       const blocked = here.tasks.filter((t) => t.status === "blocked");
       running.forEach((t) => shown.add(t.id));
-      const chips = [...running.map(runChip), ...(here.agents || []).map((a) => h("span", { class: "run-chip auditor", title: roleOf(a.agent).about || a.agent }, agentBits(a, true)))];
+      const roleName = (a) => (a ? a.agent || "?" : tr("no agent"));
+      const chips = capChips(() => [...running.map(runChip), ...(here.agents || []).map((a) => h("span", { class: "run-chip auditor", title: roleOf(a.agent).about || a.agent }, agentBits(a, true)))],
+        tr("At work in {id}", { id: m.id }), [...running.map((t) => roleName(agentsOn(t.id)[0])), ...(here.agents || []).map(roleName)]);
       let nextBtn = null;
       if (!chips.length) {
         const nt = data.next && data.next.task && data.tasks[data.next.task];
@@ -1744,11 +1915,13 @@
       detail = [h("span", { class: "fd-word st-done", text: tr("Closed") }), h("span", { class: "sub", text: st.at(-1).note || "" })];
     }
     // anything running outside this milestone's stages stays visible
-    const elsewhere = Object.entries(data.tasks).filter(([id, t]) => t.status === "in_progress" && !shown.has(id) && t.milestone !== m.id).map(([id, t]) => runChip({ id, ...t }));
+    const outTasks = Object.entries(data.tasks).filter(([id, t]) => t.status === "in_progress" && !shown.has(id) && t.milestone !== m.id);
     const taskIds = new Set(Object.keys(data.tasks));
-    activeAgents().filter((a) => !(a.node && (taskIds.has(a.node) || a.node === `GATE:${m.id}`))).forEach((a) =>
-      elsewhere.push(h("span", { class: "run-chip", title: `${roleOf(a.agent).about || a.agent}${a.node ? "" : tr(". Not linked to a task or a QA gate")}` },
-        a.node ? h("span", { class: "tid", text: a.node.replace("GATE:", "QA ") }) : h("span", { class: "unlinked", text: tr("not linked") }), agentBits(a, true))));
+    const outAgents = activeAgents().filter((a) => !(a.node && (taskIds.has(a.node) || a.node === `GATE:${m.id}`)));
+    const elsewhere = outTasks.length + outAgents.length ? capChips(() => [...outTasks.map(([id, t]) => runChip({ id, ...t })),
+      ...outAgents.map((a) => h("span", { class: "run-chip", title: `${roleOf(a.agent).about || a.agent}${a.node ? "" : tr(". Not linked to a task or a QA gate")}` },
+        a.node ? h("span", { class: "tid", text: a.node.replace("GATE:", "QA ") }) : h("span", { class: "unlinked", text: tr("not linked") }), agentBits(a, true)))],
+    tr("Running outside this milestone"), [...outTasks.map(([id]) => ((agentsOn(id)[0]) || {}).agent || tr("no agent")), ...outAgents.map((a) => a.agent || "?")]) : [];
     fill(box, flowList(msNodes(m), false, tr("Stages of {id}", { id: m.id })),
       flowDetail(detail, elsewhere.length ? h("span", { class: "also-running", id: "also-running" }, h("span", { class: "also-label", text: tr("Running outside this milestone") }), elsewhere) : null));
   }
@@ -1771,22 +1944,42 @@
     return (FEED_TEXT[r.kind] || r.kind).replace(/\{(\w+)\}/g, (_, k) => (v[k] != null ? String(v[k]) : "")).replace(/\s+$/, "");
   }
   let fullLog = false;
+  const feedOpen = new Set();  // bursts the user opened, until the page reloads
   function renderFeed() {
     fill($("log-link"), h("button", { type: "button", class: "link-btn", "aria-pressed": String(fullLog), text: fullLog ? tr("Activity") : tr("Full log"),
       title: fullLog ? tr("Back to what happened") : tr("Every line of .dev/log.md and the session log"), onclick: () => { fullLog = !fullLog; renderFeed(); } }),
       fullLog && hasDoc("log.md") ? [" · ", docLink("log.md", "log.md")] : null);
     const rows = fullLog ? data.log : (data.feed || []);
-    fill($("feed"), rows.length ? rows.map((r) => {
+    const line = (r) => {
       const t = parseT(r.at);
       return h("li", { class: r.kind === "live" ? "feed-live" : r.kind ? `feed-${r.kind}` : null }, h("time", { datetime: r.at, title: Number.isFinite(t) ? fmtDT(t) : r.at, text: Number.isFinite(t) ? agoShort(t) : r.at }),
         h("span", { class: "txt" }, linkify(fullLog ? r.text : feedText(r))));
-    }) : h("li", {}, h("span", { class: "txt", text: tr("No activity logged yet.") })));
+    };
+    // a heading per day, and a burst of the same event (40 issues filed at once) as its newest line plus "N more like it"
+    const out = [];
+    let day = null;
+    for (let i = 0; i < rows.length;) {
+      const r = rows[i], t = parseT(r.at);
+      const d = Number.isFinite(t) ? new Date(t).toLocaleDateString(LANG, { weekday: "short", month: "short", day: "numeric" }) : "";
+      if (d && d !== day) { day = d; out.push(h("li", { class: "feed-day", "aria-hidden": "true", text: d })); }
+      let j = i + 1;
+      while (!fullLog && r.kind && r.kind !== "live" && j < rows.length && rows[j].kind === r.kind) j += 1;
+      const key = `${r.kind}@${r.at}`;
+      out.push(line(r));
+      if (j - i >= 3 && !feedOpen.has(key)) {
+        out.push(h("li", { class: "feed-burst" }, h("button", { type: "button", class: "link-btn", text: tr("{v} more like this", { v: j - i - 1 }),
+          onclick: () => { feedOpen.add(key); renderFeed(); } })));
+      } else rows.slice(i + 1, j).forEach((x) => out.push(line(x)));
+      i = j;
+    }
+    fill($("feed"), rows.length ? out : h("li", {}, h("span", { class: "txt", text: tr("No activity logged yet.") })));
     fill($("foot"), tr("Read-only view of {project}/.dev · autonomy {v}", { project: data.project, v: data.autonomy || "?" }));
     const b = data.board;
     fill($("server-about"), b ? tr("Server pid {pid} on port {port}", { pid: b.pid, port: b.port }) : tr("Server details unknown"), tr(". Stop it here or with "), cmd("/dev-kit:board stop"), ".");
   }
 
   // ------------------------------------------------------------------ insights: quality (definition of done) and backlog
+  const VERDICT_WORD = tmap({ pass: N_("pass"), passed: N_("passed"), skipped: N_("skipped"), "n/a": N_("not needed"), fail: N_("fail"), pending: N_("pending") });
   function dodRow(name, score, cut, verdict, links) {
     const mm = h("div", { class: "meter" });
     const sp = h("span"); sp.style.width = `${score != null ? Math.min(100, score) : 0}%`;
@@ -1795,7 +1988,7 @@
     const ok = verdict === "pass" || verdict === "passed" || verdict === "skipped" || verdict === "n/a";
     const bad = verdict === "fail" || (score != null && score < cut && !ok);
     return h("div", { class: "dod-row" }, h("span", { class: "name" }, name, " ",
-      h("span", { class: `badge ${ok ? "good" : bad ? "bad" : "neutral"}`, text: ok ? `✓ ${verdict}` : bad ? tr("✕ below cut-off") : verdict || "pending" }),
+      h("span", { class: `badge ${ok ? "good" : bad ? "bad" : "neutral"}`, text: ok ? `✓ ${VERDICT_WORD[verdict] || verdict}` : bad ? tr("✕ below cut-off") : VERDICT_WORD[verdict || "pending"] || verdict }),
       links && links.length ? h("span", { class: "dod-links" }, links) : null),
       h("span", { class: "score", text: score != null ? `${score} / ${cut}` : `— / ${cut}` }), jumpLane(score, cut, ok, bad), mm);
   }
@@ -1831,19 +2024,42 @@
     const q = data.quality;
     $("dod-sub").textContent = tr("Cut-off {min_overall} overall · {min_dimension} per dimension. Rows show the score against its cut-off mark.", { min_overall: q.min_overall, min_dimension: q.min_dimension });
     const gStarted = (m) => m.score != null || m.gate !== "pending";
-    const rows = data.milestones.filter(gStarted).map((m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? "fail" : m.gate,
-      [`qa/${m.id}/report.md`, `qa/${m.id}/risk-report.md`].filter(hasDoc).map((p) => docLink(p, p.endsWith("risk-report.md") ? tr("risk report") : tr("report"))))).reverse();
+    const gRow = (m) => dodRow(`${m.id} ${m.title || ""}`, m.score ?? null, q.min_overall, m.gate === "pending" ? "fail" : m.gate,
+      [`qa/${m.id}/report.md`, `qa/${m.id}/risk-report.md`].filter(hasDoc).map((p) => docLink(p, p.endsWith("risk-report.md") ? tr("risk report") : tr("report"))));
+    const ran = data.milestones.filter(gStarted).reverse();
     const pending = data.milestones.filter((m) => !gStarted(m)).map((m) => m.id);
     const debt = (data.backlog || {}).debt;
-    fill($("dod"), rows.length ? h("div", { class: "list" }, rows) : !pending.length ? h("div", { class: "empty", text: tr("No milestones yet.") }) : null,
-      pending.length ? h("p", { class: "pending-line", text: tr("Not run yet: {v}", { v: pending.join(", ") }) }) : null,
+    // many gates: one folding group per release, newest first; released ones fold, and each group says its exceptions
+    // (a gate that took fix rounds or is still failing) so the past is read by exception, not row by row
+    const rp = relPlan();
+    let body;
+    if (rp.length && ran.length > 8) {
+      const odd = (m) => (m.qa && m.qa.runs > 1) || !isClosed(m);
+      const inRel = new Set(rp.flatMap((r) => r.milestones));
+      const sets = rp.slice().reverse().map((r) => ({ key: r.id, title: `${r.id} · ${r.title || ""}`, open: r.status !== "released", ms: ran.filter((m) => r.milestones.includes(m.id)) }))
+        .concat([{ key: "none", title: tr("In no release"), open: true, ms: ran.filter((m) => !inRel.has(m.id)) }]).filter((g) => g.ms.length);
+      body = sets.map((g) => {
+        const n = g.ms.filter(odd).length;
+        return foldList(`gates:${g.key}`, [g.title, n ? h("span", { class: "chip bad", text: tr("{v} with fix rounds or failing", { v: n }) }) : null],
+          g.ms.map((m) => h("li", { class: `dod-li${odd(m) ? " odd" : ""}` }, gRow(m))), { open: g.open || n > 0 && !isClosed(g.ms[0]), cap: 8 });
+      });
+    } else body = ran.length ? h("div", { class: "list" }, ran.map(gRow)) : null;
+    fill($("dod"), body || (!pending.length ? h("div", { class: "empty", text: tr("No milestones yet.") }) : null),
+      pending.length ? h("p", { class: "pending-line clamp2", title: pending.join(", "), text: tr("Not run yet: {v}", { v: pending.length > 12 ? `${pending.slice(0, 12).join(", ")} … (${pending.length})` : pending.join(", ") }) }) : null,
       debt && debt.total ? h("p", { class: `pending-line${debt.over ? " bad" : ""}`, text: debtLine(debt) }) : null);
   }
 
   const issueId = (id) => (hasDoc("issues.md") ? docLink("issues.md", String(id), String(id), "id") : h("span", { class: "id", text: String(id) }));
-  const issueLi = (i) => h("li", {}, issueId(i.id), h("span", { text: i.title || "" }),
-    h("span", { class: `chip${i.c === "expedite" ? " lane-hotfix" : ""}`, text: i.c || i.status }),
-    h("span", { class: "sub", text: [i.type, i.severity, i.origin === "baseline" ? "pre-existing" : null, i.scheduled_in ? `→ ${i.scheduled_in}` : null, i.c && i.status && i.c !== i.status ? i.status : null].filter(Boolean).join(" · ") }));
+  // the server sends issue fields as codes; the board says them in the reader's language
+  const ISSUE_WORD = tmap({ bug: N_("bug"), improvement: N_("improvement"), change: N_("change"), feature: N_("feature"),
+    expedite: N_("expedite"), current: N_("current"), standard: N_("standard"), intangible: N_("intangible"),
+    open: N_("open"), scheduled: N_("scheduled"), in_progress: N_("in progress"), done: N_("done"), wontfix: N_("won't fix"), duplicate: N_("duplicate"), parked: N_("parked"),
+    critical: N_("critical"), high: N_("high"), medium: N_("medium"), low: N_("low") });
+  const iw = (v) => (v ? ISSUE_WORD[v] || v : v);
+  const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+  const issueLi = (i) => h("li", {}, issueId(i.id), h("span", { class: "clamp2", text: i.title || "" }),
+    h("span", { class: `chip${i.c === "expedite" ? " lane-hotfix" : ""}${i.severity === "critical" || i.severity === "high" ? " sev-high" : ""}`, text: iw(i.c || i.status) }),
+    h("span", { class: "sub", text: [iw(i.type), iw(i.severity), i.origin === "baseline" ? tr("pre-existing") : null, i.scheduled_in ? `→ ${i.scheduled_in}` : null, i.c && i.status && i.c !== i.status ? iw(i.status) : null].filter(Boolean).join(" · ") }));
   /** Shows a milestone in Construction, from anywhere on the board. */
   function openMilestone(id) {
     selected = id; mobileCol = null;
@@ -1886,7 +2102,7 @@
     const ex = m.exit_check ? h("div", { class: "sub" }, [m.exit_check.cmd ? `cmd: ${m.exit_check.cmd}` : null, m.exit_check.e2e ? `e2e: ${m.exit_check.e2e}` : null,
       (m.exit_check.acs || []).length ? tr("acs: {v}", { v: (m.exit_check.acs || []).join(", ") }) : null].filter(Boolean).join(" · "))
       : h("div", { class: "empty", text: tr("No exit_check in the plan for this milestone") });
-    const problems = (m.gate_checks || []).length ? h("ul", { class: "list" }, m.gate_checks.map((g) => h("li", {}, h("span", { class: "id", text: g.hard ? "⛔" : "!" }), h("span", { text: g.text })))) : null;
+    const problems = (m.gate_checks || []).length ? h("ul", { class: "list" }, m.gate_checks.map((g) => h("li", {}, h("span", { class: "id", text: g.hard ? "⛔" : "!" }), h("span", { text: gateText(g.text) })))) : null;
     fill(box, sect(tr("Auditors{v}", { v: r ? tr(" · round {n}", { n: r.n }) : "" }), auditors), sect(tr("Blocking findings open"), blocking, report ? h("p", { class: "sub" }, docLink(report, tr("Open the QA report"))) : null),
       sect(tr("Fixes"), fixes), sect(tr("Hard floor"), hf), sect(tr("Exit check"), ex), problems ? sect(tr("What still stops the gate"), problems) : null);
   }
@@ -1907,47 +2123,56 @@
   const CLAMP_ROWS = ":scope > *, :scope .list > li, :scope .list > .dod-row, :scope .list-title, :scope .empty, :scope .pending-line, :scope .kpi, :scope .fact, :scope .hc > *, :scope .facts-grid";  // i18n-ok: selectors
   const COUNTED = "li, .dod-row, .kpi, .fact";  // i18n-ok: selectors
   /** Hides what does not fit in one box; returns how many rows went and whether anything did. */
-  function clampBox(box) {
-    box.querySelectorAll(".clamped").forEach((el) => el.classList.remove("clamped"));
+  // Clamping reads every box first and writes after, so a redraw costs two layouts, not two per box and one per card
+  // (3.14: a 120-card column and a dozen tiles took 110-180 ms per live update on the stress project).
+  /** Read only: what does not fit in one box, and how many rows that is. */
+  function clampMeasure(box) {
     const limit = box.getBoundingClientRect().bottom + 1;
-    let cut = 0, any = false;
     if (box.dataset.clamp === "cards") {
       // a column keeps its first cards: once one does not fit, the ones below it go too
-      let over = false;
-      [...box.children].forEach((el) => { if (over || el.getBoundingClientRect().bottom > limit) { over = true; el.classList.add("clamped"); cut += 1; } });
-      return { cut, any: cut > 0 };
+      const kids = [...box.children];
+      const first = kids.findIndex((el) => el.getBoundingClientRect().bottom > limit);
+      const hide = first >= 0 ? kids.slice(first) : [];
+      const extra = Number(box.dataset.extra) || 0;  // cards not drawn at all
+      return { hide, cut: hide.length + extra, any: hide.length + extra > 0 };
     }
-    // last rows first, so a list keeps its first rows and a block goes as a whole only when none of it fits
+    // last rows first, so a list keeps its first rows and a block goes as a whole only when none of it fits; hiding a
+    // row never moves the rows above it, so every bottom is read from the same layout
     const rows = [...box.querySelectorAll(CLAMP_ROWS)].reverse();
-    const live = (el) => [...el.querySelectorAll(COUNTED)].filter((c) => !c.closest(".clamped")).length;
-    rows.forEach((el) => {
-      if (el.closest(".clamped") || el.getBoundingClientRect().bottom <= limit) return;
-      cut += el.matches(COUNTED) ? 1 : live(el);
-      el.classList.add("clamped"); any = true;
+    const bottoms = rows.map((el) => el.getBoundingClientRect().bottom);
+    const hide = [];
+    const hidden = (el) => hide.some((x) => x.contains(el));
+    let cut = 0;
+    rows.forEach((el, i) => {
+      if (bottoms[i] <= limit || hidden(el)) return;
+      cut += el.matches(COUNTED) ? 1 : [...el.querySelectorAll(COUNTED)].filter((c) => !hidden(c)).length;
+      hide.push(el);
     });
-    // a block left with nothing visible goes too (its title alone says nothing)
-    rows.forEach((el) => { if (!el.classList.contains("clamped") && el.children.length && [...el.children].every((c) => c.classList.contains("clamped") || c.classList.contains("list-title"))) el.classList.add("clamped"); });
-    return { cut, any };
+    return { hide, cut, any: hide.length > 0, rows };
+  }
+  /** Write only: hides what clampMeasure found; a block left with nothing visible goes too (its title alone says nothing). */
+  function clampApply(m) {
+    m.hide.forEach((el) => el.classList.add("clamped"));
+    (m.rows || []).forEach((el) => { if (!el.classList.contains("clamped") && el.children.length && [...el.children].every((c) => c.classList.contains("clamped") || c.classList.contains("list-title"))) el.classList.add("clamped"); });
   }
   /** Every tile and kanban column keeps the size of the grid: what does not fit goes behind "See all" / "+N more". */
   function clampAll() {
     clampRaf = 0;
-    document.querySelectorAll("[data-clamp]").forEach((box) => {
-      if (!box.offsetParent) return;
+    const boxes = [...document.querySelectorAll("[data-clamp]")].filter((box) => box.offsetParent).map((box) => {
       const cards = box.dataset.clamp === "cards";
-      const more = box.parentElement.querySelector(cards ? ".col-more" : ".tile-more");
-      if (more) more.hidden = true;
-      const label = (n) => (cards ? tr("+{n} more", { n }) : n ? tr("See all ({n} more)", { n }) : tr("See all"));
-      let r = clampBox(box);
-      if (r.any && more) {
-        // the button takes room (with its text): measure again with it shown
-        more.hidden = false; more.textContent = label(r.cut);
-        r = clampBox(box);
-      }
-      if (!more) return;
-      more.hidden = !r.any;
-      more.textContent = label(r.cut);
+      return { box, cards, more: box.parentElement.querySelector(cards ? ".col-more" : ".tile-more") };
     });
+    const label = (x, n) => (x.cards ? tr("+{n} more", { n }) : n ? tr("See all ({n} more)", { n }) : tr("See all"));
+    const reset = (x) => { x.box.querySelectorAll(".clamped").forEach((el) => el.classList.remove("clamped")); };
+    boxes.forEach((x) => { reset(x); if (x.more) x.more.hidden = true; });
+    boxes.forEach((x) => { x.m = clampMeasure(x.box); });
+    boxes.forEach((x) => { clampApply(x.m); if (x.more && x.m.any) { x.more.hidden = false; x.more.textContent = label(x, x.m.cut); } });
+    // the button takes room (with its text): measure the boxes that show it again, with it shown
+    const again = boxes.filter((x) => x.more && x.m.any);
+    again.forEach(reset);
+    again.forEach((x) => { x.m = clampMeasure(x.box); });
+    again.forEach((x) => clampApply(x.m));
+    boxes.forEach((x) => { if (!x.more) return; x.more.hidden = !x.m.any; x.more.textContent = label(x, x.m.cut); });
   }
   let clampRaf = 0;
   const clampSoon = () => { if (!clampRaf) clampRaf = requestAnimationFrame(clampAll); };
@@ -2114,7 +2339,7 @@
     fill($("pl-strip"), stripHead("planning", tr("The plan and every replan; no milestone starts before the plan is confirmed"),
       h("span", { class: `chip lane-chip st-${laneState("planning")}`, text: PHASE_WORD[p.state === "active" ? "current" : p.state] || "" })),
       flowList(nodes, false, tr("Steps of planning")), stepDetail(nodes));
-    // roadmap: releases and their milestones, in plan order
+    // roadmap: releases and their milestones, newest first
     const ms = data.milestones;
     const closed = ms.filter(isClosed).length;
     const row = (m) => {
@@ -2129,15 +2354,55 @@
         roadMeter(x)));
     };
     const rp = relPlan();
-    const roadRows = () => (rp.length ? ms.filter((m) => !rp.some((r) => r.milestones.includes(m.id))).map(row)
-      .concat(rp.flatMap((r) => [h("li", { class: `road-rel s-${r.status}` }, h("strong", { text: r.id }), h("span", { class: "road-rel-title", text: r.title }),
-        h("span", { class: `chip rel-st-${r.status}`, text: REL_WORD[r.status] })), ...ms.filter((m) => r.milestones.includes(m.id)).map(row)]))
-      : ms.map(row));
+    // the roadmap is the timeline, newest first: the next releases fold, the past folds, each release's older closed milestones fold
+    const keep = [data.current_milestone].filter(Boolean);
+    const foldLi = (btn) => h("li", { class: "road-fold" }, btn);
+    const relHead = (r, extra) => h("li", { class: `road-rel s-${r.status}` }, extra, h("strong", { text: r.id }), h("span", { class: "road-rel-title", text: r.title }),
+      h("span", { class: `chip rel-st-${r.status}`, text: REL_WORD[r.status] }));
+    const msPart = (list, key, full) => {
+      const f = tlMs(list, key, keep, full);
+      return [f.open ? foldLi(tlCloseBtn(key)) : null, ...f.shown.map(row), f.hidden.length ? foldLi(msFoldBtn(f.hidden, key, "road-fold-btn")) : null];
+    };
+    const roadRows = (full) => {
+      if (!rp.length) return msPart(ms.slice().reverse(), "old:all", full);
+      if (full) return [...msPart(ms.filter((m) => !relOf(m.id)).reverse(), "", true), ...rp.slice().reverse().flatMap((r) => [relHead(r), ...relMs(r).reverse().map(row)])];
+      return tlEntries(keep.map((id) => (relOf(id) || {}).id).filter(Boolean)).flatMap((e) => {
+        if (e.fold) return [foldLi(tlFoldBtn(e, "road-fold-btn"))];
+        if (e.loose) return msPart(e.loose, "old:loose");
+        const r = e.rel, key = `road:${r.id}`, close = e.closeKey ? tlCloseBtn(e.closeKey) : null;
+        if (e.past) {
+          const opened = tlOpen.has(key);
+          const ver = (data.releases || []).filter((v) => v.release === r.id).map((v) => v.tag || v.version).pop();
+          return [h("li", { class: `road-rel s-${r.status} has-btn` }, close, h("button", { type: "button", class: "road-rel-btn", "aria-expanded": String(opened),
+            title: opened ? tr("Fold these back") : tr("{id} released: show its milestones", { id: r.id }), onclick: () => tlToggle(key) },
+            h("span", { class: "road-caret", "aria-hidden": "true", text: opened ? "▾" : "▸" }), h("strong", { text: r.id }), h("span", { class: "road-rel-title", text: r.title }),
+            h("span", { class: `chip rel-st-${r.status}`, text: ver ? `✓ ${ver}` : REL_WORD[r.status] }), h("span", { class: "road-count", text: plural(r.milestones.length, "milestone") }))),
+            ...(opened ? relMs(r).reverse().map(row) : [])];
+        }
+        return [relHead(r, close), ...msPart(relMs(r).reverse(), `old:${r.id}`)];
+      });
+    };
+    // the road strip follows the same timeline: one sign per fold, per past release, per milestone in sight
+    const roadSigns = () => {
+      const sg = [];
+      const msSigns = (list, key) => { const f = tlMs(list, key, keep); f.shown.forEach((m) => sg.push({ label: m.id, done: isClosed(m), cur: m.id === data.current_milestone }));
+        if (f.hidden.length) sg.push({ label: msRange(f.hidden), done: true, fold: true }); };
+      if (!rp.length) { msSigns(ms.slice().reverse(), "old:all"); return sg; }
+      tlEntries([]).forEach((e) => {
+        if (e.fold) sg.push({ label: tlRange(e.rels), done: !e.future, fold: true });
+        else if (e.loose) msSigns(e.loose, "old:loose");
+        else if (e.past) sg.push({ label: e.rel.id, done: true, fold: true });
+        else msSigns(relMs(e.rel).reverse(), `old:${e.rel.id}`);
+      });
+      return sg;
+    };
     // backlog: the issue queue by class of service, the issues already scheduled, and what later milestones hold
     const b = data.backlog || {};
     const issues = b.issues || {};
     const order = ["expedite", "current", "standard", "intangible", "change"];
-    const queued = order.flatMap((c) => ((b.queue || {})[c] || []).map((id) => ({ id, c, ...issues[id] })));
+    // within a class of service, the most severe first (cost of delay), then the oldest
+    const queued = order.flatMap((c) => ((b.queue || {})[c] || []).map((id, k) => ({ id, c, k, ...issues[id] }))
+      .sort((x, y) => (SEV_RANK[x.severity] ?? 2) - (SEV_RANK[y.severity] ?? 2) || x.k - y.k));
     const scheduled = Object.entries(issues).filter(([, v]) => ["scheduled", "in_progress"].includes(v.status));
     const curIdx = ms.findIndex((m) => m.id === data.current_milestone);
     const later = ms.slice(curIdx + 1).map((m) => ({ m, left: tasksOf(m).filter((t) => t.status !== "done").length })).filter((x) => x.left);
@@ -2159,7 +2424,7 @@
     const kpi = (label, value) => h("div", { class: "kpi" }, h("span", { class: "fact-label", text: label }), h("strong", { text: String(value) }));
     fill($("pl-tiles"),
       tile({ title: tr("Roadmap"), count: ms.length || null, sub: ms.length ? tr("{closed} of {v} closed", { closed, v: plural(ms.length, "milestone") }) : "",
-        body: ms.length ? [roadStrip(ms), h("ol", { class: "list road" }, roadRows())] : h("div", { class: "empty" }, tr("No milestones yet. They appear after "), cmd("/dev-kit:plan"), "."), all: () => h("ol", { class: "list road" }, roadRows()) }),
+        body: ms.length ? [roadStrip(roadSigns()), h("ol", { class: "list road" }, roadRows())] : h("div", { class: "empty" }, tr("No milestones yet. They appear after "), cmd("/dev-kit:plan"), "."), all: () => h("ol", { class: "list road" }, roadRows(true)) }),
       tile({ title: tr("Backlog"), count: queued.length + laterTasks || null, sub: tr("{v} · {v2} in later milestones", { v: plural(queued.length, "queued issue"), v2: plural(laterTasks, "task") }),
         body: [runBanner(runsAt("backlog")), ...backBody()], all: backBody }),
       tile({ title: tr("Plan review"), sub: tr("Cut-off {review_min_overall}", { review_min_overall: data.quality.review_min_overall }),
@@ -2226,6 +2491,14 @@
           h("span", { class: "badge bad", text: stLabel(last.status) }), h("span", { class: "sub", text: last.at && Number.isFinite(parseT(last.at)) ? fmtDT(parseT(last.at)) : "" })) : null),
       pr.drift ? h("p", { class: "pending-line", text: pr.drift }) : null];
     }
+    // the deploy history, newest first, one line per milestone; failures carry a red badge so they read at a glance
+    const deps = ms.filter((m) => m.deploy && m.deploy.at).sort((a, b) => (parseT(b.deploy.at) || 0) - (parseT(a.deploy.at) || 0));
+    const depRows = (list) => list.map((m) => h("li", { class: m.deploy.status === "ok" ? null : "odd" }, h("span", { class: "id", text: m.id }),
+      h("span", { class: "mono-wrap", text: (m.deploy.sha || "").slice(0, 7) }),
+      h("span", { class: `badge ${m.deploy.status === "ok" ? "good" : "bad"}`, text: m.deploy.status === "ok" ? tr("✓ ok") : stLabel(m.deploy.status) }),
+      h("span", { class: "sub", text: Number.isFinite(parseT(m.deploy.at)) ? fmtDT(parseT(m.deploy.at)) : "" })));
+    const depFails = deps.filter((m) => m.deploy.status !== "ok").length;
+    const depBlock = (all) => (deps.length > 1 ? listBlock(depFails ? tr("Deploys · {v} failed", { v: depFails }) : tr("Deploys"), depRows(all ? deps : deps.slice(0, 5)), "") : null);
     const others = Object.keys(data.reviews).filter((k) => !OWN_REVIEWS.includes(k));
     const relRows = () => rel.slice().reverse().map((r) => h("li", {},
       hasDoc(`release-notes-${r.version}.md`) ? docLink(`release-notes-${r.version}.md`, r.tag || r.version, null, "id") : h("span", { class: "id", text: r.tag || r.version || "release" }),
@@ -2234,7 +2507,7 @@
     const fl = data.flags || [];
     fill($("st-tiles"),
       tile({ title: tr("Project"), sub: data.phase === "stable" ? tr("stable") : PHASE_NAME[data.phase], body: summary }),
-      tile({ title: tr("Production"), sub: h("span", { id: "st-prod-sub", text: tr("Deploys {v}", { v: when[lc.deploy_when] || lc.deploy_when || "?" }) }), bodyId: "st-prod", body: [runBanner(runsAt("prod")), ...prod], all: () => prod.map((n) => n && n.cloneNode(true)) }),
+      tile({ title: tr("Production"), sub: h("span", { id: "st-prod-sub", text: tr("Deploys {v}", { v: when[lc.deploy_when] || lc.deploy_when || "?" }) }), bodyId: "st-prod", body: [runBanner(runsAt("prod")), ...prod, depBlock(false)], all: () => [...prod.map((n) => n && n.cloneNode(true)), depBlock(true)] }),
       tile({ title: tr("Health check"), sub: data.prod_health ? tr("every {n} min · {target}", { n: data.prod_health.interval_min, target: data.prod_health.target }) : "", bodyId: "st-health",
         body: healthBlock() || h("div", { class: "empty", text: tr("No health check: set autonomy.production.health to watch production.") }) }),
       tile({ title: tr("Release flags"), count: fl.length || null, bodyId: "st-flags", body: flagsBlock() || h("div", { class: "empty", text: tr("No release flags.") }), all: () => flagsBlock() }),
@@ -2264,7 +2537,10 @@
     const fl = data.flags || [];
     if (!fl.length) return null;
     const word = tmap({ on: N_("on"), off: N_("off"), removed: N_("removed") });
-    return h("ul", { class: "list" }, fl.map((f) => h("li", {}, flagPole(f.state), h("span", { class: "id", text: f.release }), h("span", {}, h("code", { text: f.name })),
+    // newest release first (the flag you are about to switch), removed ones last
+    const num = (f) => Number(String(f.release || "").replace(/\D/g, "")) || 0;
+    const sorted = fl.slice().sort((a, b) => (a.state === "removed") - (b.state === "removed") || num(b) - num(a));
+    return h("ul", { class: "list" }, sorted.map((f) => h("li", {}, flagPole(f.state), h("span", { class: "id", text: f.release }), h("span", {}, h("code", { text: f.name })),
       h("span", { class: `badge ${f.state === "on" ? "good" : ""}`, text: word[f.state] || f.state }),
       f.cleanup_task && f.cleanup_task !== "pending" ? h("span", { class: "sub", text: tr("removal: {id}", { id: f.cleanup_task }) }) : null)));
   }
@@ -2338,9 +2614,9 @@
 
   const issueOf = (id) => ((data.backlog || {}).issues || {})[id];
   /** A permission a round child was denied because nobody answered (information only: the board does not act). */
-  function deniedRow(m) {
-    return h("li", {}, h("span", { class: "id", text: m.tool || "tool" }), h("span", { class: "mono-wrap", text: m.target || "" }),
-      m.agent ? h("span", { class: "chip", text: m.agent }) : null,
+  function deniedRow(m, n) {
+    return h("li", {}, h("span", { class: "id", text: m.tool || "tool" }), h("span", { class: "mono-wrap clamp2", text: m.target || "" }),
+      h("span", { class: "q-tags" }, m.agent ? h("span", { class: "chip", text: m.agent }) : null, n > 1 ? h("span", { class: "chip", title: tr("Denied {v} with the same agent and tool", { v: plural(n, "time") }), text: `×${n}` }) : null),
       h("span", { class: "sub", text: m.how === "auditor_skipped"
         ? tr("The auditor went on without it; the round did not stop.") : tr("Denied after the wait; what needed it stopped.") }),
       m.rule ? h("span", { class: "sub" }, tr("Rule to allow it: "), h("code", { text: m.rule })) : null,
@@ -2484,7 +2760,12 @@
     loading = true;
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
-      const next = await r.json();
+      const text = await r.text();
+      // a change on disk that does not change what the board shows (a telemetry line, a heartbeat) costs no redraw
+      const same = text.replace(/"generated_at":"[^"]*"/, "");
+      if (data && data.ok && same === lastText) { lastUpdate = Date.now(); tickUpdated(); return; }
+      lastText = same;
+      const next = JSON.parse(text);
       if (next.ok && !data && !langPicked && pickLang(next.language) && pickLang(next.language) !== LANG) { data = next; setLang(next.language, false); }
       if (next.ok || !data) data = next;
       else if (!next.ok && next.error === "corrupt_state") { /* mid-write: keep the previous frame */ }
