@@ -2,6 +2,13 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.16.1 — 2026-11-25
+
+Eduardo saw the QA tab still selected in Construction after M6 passed its gate and M7 started building.
+
+### Fixed
+- Construction: the task board / QA tab follows the stage of the milestone shown. It already opened QA by itself when QA & fixes started, but never came back, so the next milestone's build was shown on the QA tab. Now QA & fixes opens the QA tab and Plan or Build opens the task board, each time the milestone or its stage changes; a tab picked by hand is kept until the next change.
+
 ## 3.16.0 — 2026-11-25
 
 Eduardo asked to replace the gate keeper animation and to find the parts of the board still without one; he picked the traffic light from four prototypes and took the recommended additions.

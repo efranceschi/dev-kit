@@ -2090,10 +2090,17 @@
   }
 
   // ------------------------------------------------------------------ QA panel: what the QA & fixes stage is doing now
-  let qaAutoFor = null;  // the milestone the panel opened by itself for (once; the user's choice of tab is kept after that)
+  // The tab follows the stage the milestone is in: QA & fixes opens the QA tab, Plan and Build the task board.
+  // It moves only when the milestone or its stage changes, so a tab the user picks is kept until then
+  // (without the way back, the QA tab of the last milestone stayed open on the next one's build).
+  let viewFor = null;    // "<milestone>:<stage>" the tab was last moved for
   function autoQaView(m) {
     const here = m && stagesOf(m).find((x) => x.here);
-    if (here && here.key === "qa" && qaAutoFor !== m.id) { qaAutoFor = m.id; if (view === "tasks") { view = "qa"; applyView(); } }
+    const key = here ? `${m.id}:${here.key}` : null;
+    if (!key || key === viewFor) return;
+    viewFor = key;
+    const want = here.key === "qa" ? "qa" : here.key === "plan" || here.key === "build" ? "tasks" : null;
+    if (want && view !== want) { view = want; applyView(); }
   }
   function renderQaPanel(m) {
     const box = $("qa-panel");
