@@ -302,8 +302,8 @@ def checks(root: Path) -> list[dict]:
         if rec.get("worktree") and not Path(rec["worktree"]).exists():
             add("slot_worktree_missing", "warn", f"slot {n} points to a worktree that does not exist", rec["worktree"])
     if in_prog and not round_alive and not slots:
-        add("in_progress_idle", "info", "tasks in progress with no round and no open slot: an inline session may hold them, or "
-            "a session stopped (reconcile blocks them)", ", ".join(sorted(in_prog)))
+        add("in_progress_idle", "info", "tasks in progress with no round and no open slot: a session stopped (reconcile blocks "
+            "them), or a task was worked on outside an implementer", ", ".join(sorted(in_prog)))
     wts = worktrees(root)
     kit_wt = str((dev / "run" / "worktrees").resolve())
     for w in wts[1:]:

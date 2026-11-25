@@ -2,6 +2,16 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.13.0 — 2026-11-25
+
+Field report: `/dev-kit:autopilot --parallel 6` started a batch of one `balanced+` task (T-098) and implemented it in the main session, outside any subagent, because `implement` step 2 said `balanced` and `balanced+` tasks are done inline. The task ran on the session's model instead of its route, did not show in `/tasks` and had no worktree or fence. The brief's `Tier:` and `Route:` lines also disagreed (sonnet / high and sonnet / medium), and the session had to pick one.
+
+### Changed
+- Every task, whatever its tier, is implemented by one `implementer` subagent in its own worktree, in the background, on its route's model and effort: also a batch of one task and `balanced+` or `quality` tasks. The orchestrating session only coordinates, integrates, runs the full suite, reviews and commits (`implement` steps 2 and 3, `autopilot`, `conventions.md` §9).
+- `DS brief` ends with an `Implementer:` line: the one model and effort to spawn with (the route), naming the reason when the router moved it away from the tier's arm.
+- `start --resume` no longer applies an earlier attempt to the main checkout: it records the start and leaves the work in its worktree, which `slot open --worktree` reuses and `slot apply` brings in after the fence check.
+- An implementer of a task that changes manifests installs into its own worktree instead of running in the main checkout.
+
 ## 3.12.2 — 2026-11-24
 
 Field report: in a milestone's QA block, the fix chips of the To do column ran over the Done column, and the Done chips ran out of the card (Eduardo's screenshot).

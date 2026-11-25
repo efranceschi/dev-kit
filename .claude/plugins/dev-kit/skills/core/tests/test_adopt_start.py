@@ -55,7 +55,8 @@ class TestCommandsStartTheTask(Started):
 
 
 class TestResume(Started):
-    def test_field_case_inline_task_resumes_a_foreign_worktree(self) -> None:
+    def test_field_case_resume_keeps_the_work_for_the_implementer(self) -> None:
+        """3.13: every task is delegated, so --resume never applies the earlier attempt to the main checkout."""
         wt = self.foreign()
         t0 = "2026-11-24T03:18:22+00:00"
         self.ds("start", "T-001")
@@ -66,23 +67,32 @@ class TestResume(Started):
         (self.dev / "state.json").write_text(json.dumps(st), encoding="utf-8")
         with mock.patch.dict(os.environ, {}):
             out = self.ds("start", "T-001", "--resume").stdout
-        self.assertIn("applied", out)
+        self.assertIn("reuses it for the implementer", out)
         t = self.state()["tasks"]["T-001"]
         self.assertEqual((t["status"], t["started_at"]), ("in_progress", t0))  # the first start is kept
-        self.assertEqual(t["resumed_from"]["worktree"], str(wt))
+        self.assertNotIn("resumed_from", t)
+        self.assertNotEqual((self.root / "src" / "a.py").read_text(encoding="utf-8"), "a = 5\n")  # main checkout untouched
+        out = self.ds("slot", "open", "1", "--task", "T-001", "--worktree").stdout
+        self.assertIn("made outside the kit, reused", out)
+        self.assertEqual(self.slot(1)["worktree"], str(wt))
+        self.ds("slot", "close", "1")
+        self.ds("slot", "apply", "1")
         self.assertEqual((self.root / "src" / "a.py").read_text(encoding="utf-8"), "a = 5\n")
-        self.assertIn("M  src/a.py", self.git("status", "--porcelain"))
-        self.assertIn("already applied", self.ds("start", "T-001", "--resume").stdout)
-        self.git("commit", "-qm", "[T-001] feat: a")
-        self.ds("done", "T-001", "--commit", self.git("rev-parse", "HEAD"))
-        self.assertFalse(wt.exists())
-        self.assertNotIn("dev-kit/T-001", self.git("branch"))
+
+    def test_brief_names_the_one_model_to_spawn_with(self) -> None:
+        brief = self.ds("brief", "T-001").stdout
+        line = next(x for x in brief.splitlines() if x.startswith("Implementer: spawn with model "))
+        tier = json.loads(self.ds("tier", "T-001", "--json").stdout)
+        self.assertIn(f"model {tier['final_model']}, effort {tier['final_effort']}", line)
 
     def test_resume_refuses_files_outside_the_task(self) -> None:
         wt = self.foreign()
         (wt / "src" / "zz.py").write_text("x\n", encoding="utf-8")
-        p = self.ds("start", "T-001", "--resume", expect=1)
-        self.assertIn("outside the task", p.stderr)
+        self.ds("start", "T-001", "--resume")
+        self.ds("slot", "open", "1", "--task", "T-001", "--worktree")
+        self.ds("slot", "close", "1")
+        p = self.ds("slot", "apply", "1", expect=1)
+        self.assertIn("src/zz.py", p.stdout + p.stderr)
 
     def test_slot_open_reuses_a_foreign_worktree(self) -> None:
         wt = self.foreign()

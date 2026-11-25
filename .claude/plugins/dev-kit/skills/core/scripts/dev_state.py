@@ -3118,67 +3118,21 @@ def begin_task(store: Store, tid: str, via: str) -> None:
     start_task(store, tid, True, keep_started=True, via=via)
 
 
-def routed_model(t: dict, r: dict | None) -> str:
-    """The model the task was routed to when it started (state), else the router's answer now."""
-    arm = str((t.get("tier") or {}).get("arm") or "") if isinstance(t.get("tier"), dict) else ""
-    return arm.split("/")[0] if arm else str((r or {}).get("final_model") or "")
-
-
-def is_delegated(model: str) -> bool:
-    """A task routed to speed or quality (haiku or opus) goes to an implementer in its own worktree; balanced ones
-    (sonnet) are done inline (implement step 2)."""
-    return model in ("haiku", "opus")
-
-
 def resume_task(store: Store, tid: str, force: bool) -> None:
     """`start T-nnn --resume`: take over the work an earlier attempt left (§17). The task goes in_progress keeping its
-    first start. A delegated task keeps the work in its worktree (`slot open --worktree` reuses it); an inline task
-    gets it applied, staged, to the main checkout (or its pipeline worktree) after the fence check, and `done`
-    removes the old worktree and branch. Never apply a worktree by hand (git apply, checkout --, cp)."""
+    first start, and the work stays in its worktree: every task is delegated to an implementer (implement step 2), and
+    `slot open N --task T-nnn --worktree` reuses that worktree for it. Never apply a worktree by hand (git apply,
+    checkout --, cp)."""
     t = store.task(tid)
     if t["status"] in FINISHED:
         fail(f"{tid} is already {t['status']}")
     prev = previous_work(store, tid)
-    r = start_task(store, tid, force, keep_started=True, via="start --resume")
+    start_task(store, tid, force, keep_started=True, via="start --resume")
     if not prev:
         print(f"{tid}: no earlier attempt found (no worktree or branch dev-kit/{tid}): start from the brief")
         return
-    model = routed_model(t, r if r is not None else safe_route(store, tid))
-    if is_delegated(model):
-        print(f"{tid}: earlier attempt on {prev['branch']}" + (f" in {prev['worktree']}" if prev["worktree"] else "")
-              + f"; delegated ({model}): `slot open N --task {tid} --worktree` reuses it for the implementer")
-        return
-    wt = open_worktree(store, tid, t)
-    base = wt["base_sha"]
-    rec = {"task": tid, "files": list(t.get("files") or []), "allow": [f".dev/qa/{tid}/"]}
-    changed, outside = slot_outside(rec, Path(wt["worktree"]), base)
-    if outside:
-        fail(f"{tid}: the earlier attempt changed {len(outside)} file(s) outside the task: {', '.join(outside)}. Revert them in "
-             f"{wt['worktree']} or replan the task's files, then run `start {tid} --resume` again")
-    patch = worktree_patch(Path(wt["worktree"]), base)
-    target = task_target_dir(store, t)
-    if not patch.strip():
-        print(f"{tid}: the earlier attempt in {wt['worktree']} has no changes: start from the brief")
-        return
-    tmp = store.dev / "tmp"
-    tmp.mkdir(parents=True, exist_ok=True)
-    pf = tmp / f"resume-{tid}.patch"
-    pf.write_text(patch, encoding="utf-8")
-    try:
-        if _gitc(target, "apply", "--reverse", "--check", "--cached", str(pf)).returncode == 0:
-            print(f"{tid}: the earlier attempt is already applied (staged) in {target}")
-        else:
-            res = _gitc(target, "apply", "--3way", "--whitespace=nowarn", str(pf))
-            if res.returncode != 0:
-                fail(f"{tid}: the earlier attempt does not apply on {target}: {res.stderr.strip()[:400]}")
-            print(f"{tid}: {len(changed)} file(s) of the earlier attempt applied to {target} (staged) from {wt['worktree']}; "
-                  "review the diff, run the suite and commit")
-    finally:
-        pf.unlink(missing_ok=True)
-    t["resumed_from"] = {"worktree": wt["worktree"], "branch": wt["branch"], "base_sha": base,
-                         "applied": hashlib.sha256(patch.encode()).hexdigest(), "at": now()}
-    store.save()
-    store.log(f"resume {tid}: earlier attempt applied from {wt['worktree']} ({len(changed)} file(s))")
+    print(f"{tid}: earlier attempt on {prev['branch']}" + (f" in {prev['worktree']}" if prev["worktree"] else "")
+          + f"; `slot open N --task {tid} --worktree` reuses it for the implementer, and `slot apply N` brings it in")
 
 
 def slot_outside(rec: dict, cwd: Path, since: str) -> tuple[list[str], list[str]]:
@@ -5025,8 +4979,18 @@ def cmd_brief(store: Store, a: argparse.Namespace) -> None:
         out += ["", "Lessons for this role in this project (.dev/lessons/implementer.md):"] + [f"  - {x}" for x in lessons]
     r = safe_route(store, a.task)
     if r:
-        out += ["", risk.tier_line(r), router.route_line(r)]
+        out += ["", risk.tier_line(r), router.route_line(r), implementer_line(r)]
     print("\n".join(out))
+
+
+def implementer_line(r: dict) -> str:
+    """The one model/effort to spawn the task's implementer with: the route. When the router moved it away from the
+    tier's arm, say so, so the orchestrator never has to choose between the two lines (§9 "Router")."""
+    line = f"Implementer: spawn with model {r['final_model']}, effort {r['final_effort']} (the Route line"
+    tier_arm = str(r.get("arm") or "")
+    if tier_arm and tier_arm != r.get("final_arm"):
+        line += f"; it replaces the tier's {tier_arm.replace('/', ' / ')}: {r['route'].get('reason', r['route'].get('reason_code'))}"
+    return line + ")"
 
 
 def risk_args(a: argparse.Namespace) -> dict:

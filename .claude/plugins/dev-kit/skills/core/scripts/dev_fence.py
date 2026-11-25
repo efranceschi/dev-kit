@@ -254,9 +254,9 @@ def decide(payload: dict, root: Path) -> dict | None:
             ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
             if MANUAL_ADOPT.search(str(ti.get("command") or "")):
                 return deny(dev, "dev-kit: a round never applies a task's worktree by hand: it would work on the task without "
-                                 "recording its start. Use `dev_state.py start T-nnn --resume` (inline task: it applies the "
-                                 "earlier attempt, staged) or `slot open N --task T-nnn --worktree` + `slot apply N` "
-                                 "(implementer), conventions.md §17.", "manual_adopt", "orchestrator", None, "Bash")
+                                 "recording its start. Use `dev_state.py start T-nnn --resume`, then "
+                                 "`slot open N --task T-nnn --worktree` (it reuses the worktree for the implementer) and "
+                                 "`slot apply N`, conventions.md §17.", "manual_adopt", "orchestrator", None, "Bash")
         return None  # the main session: never fenced
     bound = read_json(dev / "run" / "agent-slots.json").get(aid) or {}
     agent = str(bound.get("agent") or payload.get("agent_type") or "").removeprefix("dev-kit:").lower()
