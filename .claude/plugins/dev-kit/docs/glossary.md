@@ -46,9 +46,10 @@
 | **next release** | The first planned release not released yet; when all its milestones have passed their gates, release audits it and writes its release review for your approval. Releases cut before 3.0 are kept under R0. |
 | **out of scope finding** | A problem in shared code the milestone did not change; it becomes an issue and does not score in the gate. |
 | **output file** | Where an auditor writes its result (given in its prompt); the kit validates it, and the agent answers in a few lines. |
-| **park** | Pause-point action: never wait; record the question with the recommended answer, block only what depends on it and continue (the default of most points under the unattended level, available at any level). |
+| **park** | Pause-point action: never wait; record the question with the recommended answer, block only what depends on it and continue (the default of most points at the unattended presence step; at the milestone step the parked questions are asked together at the end of each milestone). |
 | **pause policy** | What the kit does at each pause point: ask, preauthorize within a limit, apply the recommendation, or park. |
 | **planned release** | A group of 2 to 5 milestones under a '## R<n>' heading of plan.md that delivers a complete value journey; a critical delivery (payments, auth, sensitive migration) ends one. Milestones of a later release start only after the earlier one is released. |
+| **presence step** | How much of a run you follow, separate from the autonomy level: supervised (asks at every pause point), assisted (decides the operational points, asks the product and external ones), milestone (asks those together at the end of each milestone) or unattended (never waits). Your exceptions per point win over the step. |
 | **production health check** | production.health: a command or URL checked every interval_min by prod-check (by the autopilot at each milestone and by /dev-kit:status); a failure opens one expedite issue. |
 | **prompt suggestion** | Claude Code's greyed-out guess of your next prompt; every dev-kit report ends with the next command so it is offered. Tab or Right arrow takes it. |
 | **QA harness** | Playwright with mocks that captures every screen and state (qa:shots) and runs axe (qa:a11y); added by plan to the first UI milestone. |

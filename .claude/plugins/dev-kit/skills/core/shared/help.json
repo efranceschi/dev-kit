@@ -760,7 +760,7 @@
         },
         {
           "command": "/dev-kit:settings run overnight without asking",
-          "what": "unattended level with the floors kept"
+          "what": "presence step unattended, with the floors kept"
         },
         {
           "command": "/dev-kit:settings tips off",
@@ -1081,7 +1081,7 @@
         "alone"
       ],
       "steps": [
-        "Choose 'unattended with floors' in the interview, or later: /dev-kit:settings run overnight without asking",
+        "Choose the presence step 'unattended' in the interview, or later: /dev-kit:settings run overnight without asking ('milestone' if you want to answer once per milestone)",
         "Cover permission prompts: /fewer-permission-prompts and --permission-mode acceptEdits",
         "Run inside tmux: claude --permission-mode acceptEdits \"/dev-kit:autopilot\"",
         "In the morning: /dev-kit:status, /dev-kit:backlog, /dev-kit:costs, /dev-kit:interview --gaps"
@@ -1487,11 +1487,15 @@
     },
     {
       "term": "park",
-      "definition": "Pause-point action: never wait; record the question with the recommended answer, block only what depends on it and continue (the default of most points under the unattended level, available at any level)."
+      "definition": "Pause-point action: never wait; record the question with the recommended answer, block only what depends on it and continue (the default of most points at the unattended presence step; at the milestone step the parked questions are asked together at the end of each milestone)."
     },
     {
       "term": "pause policy",
       "definition": "What the kit does at each pause point: ask, preauthorize within a limit, apply the recommendation, or park."
+    },
+    {
+      "term": "presence step",
+      "definition": "How much of a run you follow, separate from the autonomy level: supervised (asks at every pause point), assisted (decides the operational points, asks the product and external ones), milestone (asks those together at the end of each milestone) or unattended (never waits). Your exceptions per point win over the step."
     },
     {
       "term": "model ladder",

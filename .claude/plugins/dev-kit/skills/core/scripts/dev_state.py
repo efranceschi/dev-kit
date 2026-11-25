@@ -166,6 +166,9 @@ DEFAULT_AUTONOMY = {
                      "router": {"mode": "apply", "balance": "balanced", "budget_usd_per_milestone": None}},
     # What to do at each pause point (conventions.md §10). Default: ask, i.e. the supervised behaviour.
     "pause_policy": {},
+    # Presence step (§10): supervised | assisted | milestone | unattended, plus the user's exceptions per point.
+    # pause_policy and model_policy.mode are materialized from it (apply_presence).
+    "presence": {"step": "supervised", "overrides": {}},
     "on_park": "stop_when_idle",
     "notify_on_park": False,
     # Local deploy at the end of each approved milestone (conventions.md §11).
@@ -333,6 +336,120 @@ UNATTENDED_PAUSE_POLICY = {
     "ci_timeout": {"action": "park"},
 }
 
+# Presence (conventions.md §10): how much of a run the user follows, separate from the level (which decides the
+# technical choices made alone). Each step fills every pause point and the model escalation mode; the user's own
+# exceptions (`presence.overrides`) always win over the step. pause_policy stays the materialized result, so every
+# reader, an older kit included, sees the same action per point. `milestone` parks product and external decisions
+# (an older kit parks them too) and autopilot asks the parked questions together at the end of each milestone.
+PRESENCE_STEPS = ("supervised", "assisted", "milestone", "unattended")
+PRESENCE_OPERATIONAL = {
+    "dirty_tree": {"action": "auto_recommend"}, "rounds_exhausted": {"action": "auto_recommend"},
+    "ci_timeout": {"action": "park"}, "blocked_env": {"action": "park"},
+}
+PRESENCE_PRESETS = {
+    "supervised": ({p: {"action": "ask"} for p in PAUSE_ACTIONS}, "ask"),
+    "assisted": ({**{p: {"action": "ask"} for p in PAUSE_ACTIONS}, **PRESENCE_OPERATIONAL}, "preapproved"),
+    "milestone": ({**{p: {"action": "park"} for p in PAUSE_ACTIONS if "park" in PAUSE_ACTIONS[p]},
+                   **PRESENCE_OPERATIONAL}, "preapproved"),
+    "unattended": (UNATTENDED_PAUSE_POLICY, "preapproved"),
+}
+PRESENCE_NOTICE_DAYS = 7  # the migration notice shows in status and Needs you for a week, or until a step is chosen
+
+
+def presence_base(state: dict, step: str) -> tuple[dict, str]:
+    """The pause policy and model mode a step gives, before the user's exceptions. An existing project keeps
+    dirty_tree at ask (the tree may hold the user's own work, conventions §16)."""
+    pp, mode = PRESENCE_PRESETS[step]
+    pp = _copy(pp)
+    if state.get("brownfield"):
+        pp["dirty_tree"] = {"action": "ask"}
+    return pp, mode
+
+
+def apply_presence(state: dict, step: str | None = None, overrides: dict | None = None) -> None:
+    """Materialize autonomy.pause_policy and model_policy.mode from the presence step and its exceptions."""
+    auto = state.setdefault("autonomy", _copy(DEFAULT_AUTONOMY))
+    pr = auto.get("presence") if isinstance(auto.get("presence"), dict) else {}
+    step = step or pr.get("step") or "supervised"
+    if step not in PRESENCE_STEPS:
+        fail(f"autonomy.presence must be {' | '.join(PRESENCE_STEPS)}")
+    ov = dict(pr.get("overrides") or {}) if overrides is None else dict(overrides)
+    pp, mode = presence_base(state, step)
+    for k, v in ov.items():
+        if k != "model_escalation":
+            pp[k] = _copy(v)
+    auto["pause_policy"] = pp
+    auto["model_policy"] = {**(auto.get("model_policy") or {"tiers": {}}), "mode": ov.get("model_escalation", mode)}
+    auto["presence"] = {**pr, "step": step, "overrides": ov}
+
+
+def set_presence_overrides(state: dict, patch: dict) -> None:
+    """Record the user's own exceptions (a pause point's rule, or model_escalation) over the step. A rule equal to
+    the step's own value, or the value "default", removes the exception."""
+    auto = state.setdefault("autonomy", _copy(DEFAULT_AUTONOMY))
+    pr = auto.get("presence") if isinstance(auto.get("presence"), dict) else {}
+    step = pr.get("step") or "supervised"
+    base, mode = presence_base(state, step)
+    ov = dict(pr.get("overrides") or {})
+    for k, v in patch.items():
+        own = mode if k == "model_escalation" else base.get(k)
+        if v in ("default", {"action": "default"}) or v == own:
+            ov.pop(k, None)
+        else:
+            ov[k] = v
+    apply_presence(state, step, ov)
+
+
+def migrate_presence(s: dict) -> bool:
+    """A state from before presence steps (3.17): derive the step and the exceptions so that every pause point and the
+    model mode keep exactly the action they had. `unattended` was a level; it becomes level high + step unattended.
+    Returns True when it migrated (in memory; the next command that saves writes it)."""
+    auto = s.get("autonomy")
+    if not isinstance(auto, dict) or isinstance(auto.get("presence"), dict):
+        return False
+    level = auto.get("level")
+    old_pp = auto.get("pause_policy") if isinstance(auto.get("pause_policy"), dict) else {}
+    old_mode = (auto.get("model_policy") or {}).get("mode", "ask")
+    step = "unattended" if level == "unattended" else "supervised"
+    base, mode = presence_base(s, step)
+    ov = {}
+    for point in PAUSE_ACTIONS:
+        had = old_pp.get(point) if isinstance(old_pp.get(point), dict) else {"action": "ask"}
+        if had != base.get(point):
+            ov[point] = _copy(had)
+    if old_mode != mode:
+        ov["model_escalation"] = old_mode
+    if level == "unattended":
+        auto["level"] = "high"
+    auto["presence"] = {"step": step, "overrides": {}, "migrated": {"from_level": level, "at": now(), "notice": True}}
+    apply_presence(s, step, ov)
+    s["needs_presence_adr"] = True
+    return True
+
+
+def presence_notice(state: dict) -> str | None:
+    """The one-time line shown after the migration (status, Needs you), for a week or until a step is chosen."""
+    pr = ((state.get("autonomy") or {}).get("presence") or {})
+    mig = pr.get("migrated") or {}
+    if not mig.get("notice"):
+        return None
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(str(mig.get("at")).replace("Z", "+00:00"))).days
+    except ValueError:
+        age = 0
+    if age >= PRESENCE_NOTICE_DAYS:
+        return None
+    return (f"New: presence steps (supervised, assisted, milestone, unattended). This project is at {pr.get('step')}, "
+            f"which behaves as before (was level {mig.get('from_level') or '?'}). Change it with /dev-kit:settings")
+
+
+def presence_line(state: dict) -> str:
+    pr = ((state.get("autonomy") or {}).get("presence") or {})
+    ov = pr.get("overrides") or {}
+    return (f"Presence: {pr.get('step') or 'supervised'}"
+            + (" · exceptions: " + ", ".join(f"{k} {v.get('action') if isinstance(v, dict) else v}" for k, v in sorted(ov.items()))
+               if ov else ""))
+
 
 LOCAL_DEPLOY_MODES = ("off", "keep_running", "smoke")
 PRODUCTION_WHEN = ("none", "per_milestone", "per_milestone_flagged", "on_release", "manual")
@@ -415,12 +532,11 @@ def merge_quality(q: dict, patch: dict) -> dict:
 
 
 def apply_level(state: dict, level: str) -> None:
-    """Apply a level preset. Leaving unattended restores the supervised pause and model policies.
-    Existing projects keep dirty_tree at ask (the tree may hold the user's own work, conventions §16)."""
+    """Apply a level preset (the technical choices made alone). `unattended` is kept as an alias: level high plus the
+    presence step unattended. The presence step and its exceptions are left as they are (conventions §10)."""
     if level not in LEVEL_PRESETS:
         fail(f"autonomy.level must be {' | '.join(LEVELS)}")
     auto = state.setdefault("autonomy", _copy(DEFAULT_AUTONOMY))
-    previous = auto.get("level")
     preset = LEVEL_PRESETS[level]
     auto["level"] = level
     auto["decide_alone"] = list(preset["decide_alone"])
@@ -437,14 +553,11 @@ def apply_level(state: dict, level: str) -> None:
                     cur[dk] = max(dv, cur.get(dk, 0))
             else:
                 q[k] = max(v, q.get(k, 0))
-    if level == "unattended":
-        auto["pause_policy"] = _copy(UNATTENDED_PAUSE_POLICY)
-        auto["model_policy"] = {**auto.get("model_policy", {"tiers": {}}), "mode": "preapproved"}
-    elif previous == "unattended":
-        auto["pause_policy"] = {}
-        auto["model_policy"] = {**auto.get("model_policy", {"tiers": {}}), "mode": "ask"}
-    if state.get("brownfield"):
-        auto.setdefault("pause_policy", {})["dirty_tree"] = {"action": "ask"}
+    if level == "unattended":  # before 3.17 a level; now level high + presence step unattended (§10)
+        auto["level"] = "high"
+        apply_presence(state, "unattended")
+    elif state.get("brownfield") or isinstance(auto.get("presence"), dict):
+        apply_presence(state)
 
 
 def check_autonomy_field(field: str, val: object) -> object:
@@ -918,6 +1031,8 @@ class Store:
 
     def save(self) -> None:
         """Mark the state to be written at commit. Outside a transaction it takes one: lock, write, done."""
+        if self.state.pop("needs_presence_adr", None):
+            record_presence_adr(self)
         if self._depth > 0:
             self._state_dirty = True
             return
@@ -1331,8 +1446,8 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
                 if r.get("verdict") == "n/a":
                     r.update({"verdict": "pending", "note": f"reopened: mode {old['mode']} -> {bf['mode']}", "at": now()})
                     print(f"review {name}: n/a -> pending (mode changed to {bf['mode']})")
-        auto = store.state.setdefault("autonomy", _copy(DEFAULT_AUTONOMY))
-        auto.setdefault("pause_policy", {})["dirty_tree"] = {"action": "ask"}
+        store.state.setdefault("autonomy", _copy(DEFAULT_AUTONOMY))
+        apply_presence(store.state)  # an existing project keeps dirty_tree at ask unless the user said otherwise
     if a.autonomy_json:
         try:
             patch = json.loads(a.autonomy_json)
@@ -1347,15 +1462,25 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
         level = patch.pop("level", None)
         if level is not None:
             apply_level(store.state, level)  # preset first; explicit fields below override it
+        presence = patch.pop("presence", None)
+        if presence is not None:
+            pr = presence if isinstance(presence, dict) else {"step": presence}
+            if not isinstance(pr, dict) or set(pr) - {"step", "overrides"} or not isinstance(pr.get("overrides", {}), dict):
+                fail('autonomy.presence must be a step or {"step": "<step>", "overrides": {"<point>": {"action": ...}}}')
+            ov = dict(pr.get("overrides") or {})
+            mov = ov.get("model_escalation")
+            if mov is not None and mov not in MODEL_POLICY_MODES:
+                fail(f"presence.overrides.model_escalation must be one of {', '.join(MODEL_POLICY_MODES)}")
+            check_pause_policy({k: v for k, v in ov.items() if k != "model_escalation"})
+            apply_presence(store.state, pr.get("step") or (auto.get("presence") or {}).get("step"), ov)
+        pp_patch = patch.pop("pause_policy", None)
+        mp_mode = (patch.get("model_policy") or {}).get("mode") if isinstance(patch.get("model_policy"), dict) else None
         for f in list(patch):
             if f == "ui":
                 check_autonomy_field(f, patch[f])
                 patch[f] = {**DEFAULT_AUTONOMY["ui"], **auto.get("ui", {}), **patch[f]}
-            elif f not in ("pause_policy", "production", "local_deploy"):
+            elif f not in ("production", "local_deploy"):
                 patch[f] = check_autonomy_field(f, patch[f])
-        if "pause_policy" in patch:
-            check_pause_policy(patch["pause_policy"])
-            patch["pause_policy"] = {**auto.get("pause_policy", {}), **patch["pause_policy"]}
         if "production" in patch:
             check_production({**DEFAULT_AUTONOMY["production"], **auto.get("production", {}), **patch["production"]})
             patch["production"] = {**DEFAULT_AUTONOMY["production"], **auto.get("production", {}), **patch["production"]}
@@ -1367,8 +1492,12 @@ def cmd_init(store: Store, a: argparse.Namespace) -> None:
         auto.update(patch)
         if q_patch is not None:
             merge_quality(auto.setdefault("quality", _copy(DEFAULT_AUTONOMY["quality"])), q_patch)
-        if store.state.get("brownfield"):
-            auto.setdefault("pause_policy", {})["dirty_tree"] = {"action": "ask"}
+        if pp_patch is not None:  # a pause point set by hand is the user's exception over the presence step
+            check_pause_policy(pp_patch)
+            set_presence_overrides(store.state, pp_patch)
+        if mp_mode is not None:
+            set_presence_overrides(store.state, {"model_escalation": mp_mode})
+        apply_presence(store.state)
     store.save()
     stage_gitignore(store)
     oq = store.dev / "open-questions.md"
@@ -5665,7 +5794,7 @@ def backlog_data(store: Store) -> dict:
         if rows:
             pending[m] = rows
     nxt = next((m for m in store.milestone_order() if store.milestones()[m].get("gate", "pending") == "pending"), None)
-    warnings = []
+    warnings = [n] if (n := presence_notice(store.state)) else []
     if hot_in_cur > 2:
         warnings.append(f"{hot_in_cur} hotfixes in {cur}: expedite is being overused")
     deploy = [d for env in sorted(store.state.get("deploys") or {}) if (d := deploy_drift(store, env))]
@@ -6205,11 +6334,33 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
         top, _, sub = field.partition(".")
         if field == "level":
             apply_level(store.state, val)
+        elif top == "presence":
+            if sub == "overrides":
+                if not isinstance(parsed, dict):
+                    fail('autonomy.presence.overrides must be a JSON object ({} clears every exception)')
+                ov = {k: v for k, v in parsed.items() if k != "model_escalation"}
+                check_pause_policy(ov)
+                if parsed.get("model_escalation") not in (None, *MODEL_POLICY_MODES):
+                    fail(f"model_escalation must be one of {', '.join(MODEL_POLICY_MODES)}")
+                apply_presence(store.state, None, parsed)
+            elif sub:
+                fail("set autonomy.presence <step> | autonomy.presence.overrides <json> | autonomy.pause_policy.<point> <action|default>")
+            else:
+                apply_presence(store.state, val)
+            pr = auto["presence"]
+            if (pr.get("migrated") or {}).get("notice"):
+                pr["migrated"]["notice"] = False  # the user chose: the migration notice is done
+            print(presence_line(store.state))
         elif top == "pause_policy":
+            if not sub:
+                fail("set one point at a time: autonomy.pause_policy.<point> <action|default> (or autonomy.presence <step>)")
             rule = parsed if isinstance(parsed, dict) else {"action": val}
-            patch = rule if not sub else {sub: rule}
-            check_pause_policy(patch)
-            auto["pause_policy"] = {**auto.get("pause_policy", {}), **patch}
+            if rule.get("action") != "default":
+                check_pause_policy({sub: rule})
+            elif sub not in PAUSE_ACTIONS:
+                fail(f"unknown pause point {sub}; one of {', '.join(PAUSE_ACTIONS)}")
+            set_presence_overrides(store.state, {sub: "default" if rule.get("action") == "default" else rule})
+            print(presence_line(store.state))
             if store.state.get("brownfield") and pause_action(store.state, "dirty_tree") != "ask":
                 print("note: existing project; dirty_tree is no longer ask, so the user's own uncommitted work may be stashed", file=sys.stderr)
         elif sub:
@@ -6245,6 +6396,8 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
             store_autonomy_object(auto, top, merge_quality(base, parsed) if top == "quality" else {**base, **parsed})
         else:
             auto[field] = check_autonomy_field(field, val if field in ("commit_style", "tips", "on_park", "task_checks") else parsed)
+        if top == "model_policy":  # the escalation mode set by hand is the user's exception over the presence step
+            set_presence_overrides(store.state, {"model_escalation": auto["model_policy"].get("mode", "ask")})
     elif key.startswith("stack."):
         store.state.setdefault("stack", {})[key.split(".", 1)[1]] = val
     else:
@@ -6312,8 +6465,9 @@ def render_short(store: Store) -> str:
     st = stale_report(store) if s.get("artifacts") else {"stale": [], "reviews": []}
     if st["stale"] or st["reviews"]:
         items = [x["artifact"] for x in st["stale"]] + [f"review {x['review']}" for x in st["reviews"]]
-        return "\n".join([l1, l2, l3, f"[dev-kit] stale: {', '.join(items)} (dev_state.py stale)"])
-    return "\n".join([l1, l2, l3])
+        l3 += f"\n[dev-kit] stale: {', '.join(items)} (dev_state.py stale)"
+    note = presence_notice(s)
+    return "\n".join([l1, l2, l3] + ([f"[dev-kit] {note}"] if note else []))
 
 
 # --------------------------------------------------------------------------- project lifecycle (conventions.md §19)
@@ -6386,6 +6540,15 @@ def migrate_state(store: Store) -> None:
     s = store.state
     if isinstance(s.get("autonomy"), dict):
         s["autonomy"].pop("board_executor", None)  # 3.12: the board no longer runs anything
+    if migrate_presence(s):  # 3.17: presence steps; a copy of the state is kept before the next save changes it
+        try:
+            bdir = store.dev / "backup"
+            if not any(bdir.glob("state-pre-presence-*.json")):
+                bdir.mkdir(parents=True, exist_ok=True)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                (bdir / f"state-pre-presence-{stamp}.json").write_text(store.path.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass
     for g in (s.get("release_state") or {}).values():  # 3.0.0-alpha.6 renamed the "dossier" to the release review
         if isinstance(g, dict):
             for x in [g, *(g.get("history") or [])]:
@@ -6462,6 +6625,24 @@ def migrate_releases(store: Store, text: str) -> tuple[str, list[str]] | None:
         g.setdefault("history", []).append({"at": now(), "event": "released", "version": ", ".join(map(str, vers)) or None,
                                             "note": "released before 3.0"})
     return "\n".join(out).rstrip("\n") + "\n", notes
+
+
+def record_presence_adr(store: "Store") -> None:
+    """The ADR of the presence migration (3.17), written with the first save after it."""
+    pr = ((store.state.get("autonomy") or {}).get("presence") or {})
+    mig = pr.get("migrated") or {}
+    ov = pr.get("overrides") or {}
+    try:
+        adr = append_adr(store, "Autonomy presence steps", [
+            "- context: dev-kit 3.17 separates the level (technical choices made alone) from the presence step (what a run "
+            "does at each pause point: supervised, assisted, milestone, unattended; conventions.md §10).",
+            f"- decision: level {mig.get('from_level') or '?'} became presence {pr.get('step')}"
+            + (f" with the exceptions {', '.join(sorted(ov))}" if ov else "") + "; every pause point and the model escalation "
+            "mode keep the action they had (a copy of the previous state is in .dev/backup/).",
+            "- consequences: nothing changes in how runs stop; /dev-kit:settings can move the project to assisted or milestone."])
+        mig["adr"] = adr
+    except OSError:
+        pass
 
 
 def append_adr(store: Store, title: str, body: list[str], source: str = "auto") -> str:
@@ -7285,8 +7466,12 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
     if held:
         print("Locks: " + ", ".join(f"{n} by {(r or {}).get('holder', '?')}" + (" (expired)" if _lock_expired(r) else "") for n, r in held))
     pp = s.get("autonomy", {}).get("pause_policy", {})
-    if pp:
-        print("Pause policy: " + " · ".join(f"{k} {v.get('action')}" for k, v in sorted(pp.items())) + f" · on park: {s.get('autonomy', {}).get('on_park', 'stop_when_idle')}")
+    print(presence_line(s) + f" · on park: {s.get('autonomy', {}).get('on_park', 'stop_when_idle')}")
+    if pp and any(v.get("action") != "ask" for v in pp.values()):
+        print("Pause policy: " + " · ".join(f"{k} {v.get('action')}" for k, v in sorted(pp.items()) if v.get("action") != "ask")
+              + " · every other point: ask")
+    if presence_notice(s):
+        print(presence_notice(s))
     for m in store.milestone_order():
         pv = store.milestones()[m].get("preview")
         if pv and not pv.get("stopped_at"):

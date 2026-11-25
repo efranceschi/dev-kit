@@ -61,7 +61,7 @@ All 27 skills by category, with arguments and examples: [skills](docs/skills.md)
 - **Milestones** M1, M2… are the cadence of construction; each ends with a quality gate: a hard floor (build, tests, secrets), its `exit_check` and a score of 0–100 per dimension against the cut-off set in the interview. Building and QA belong to the milestone, not to the project phase.
 - **Releases** R1, R2… group milestones; each is audited, gets a release review and waits for your approval before production. With release flags, milestones can reach production earlier behind the release's flag.
 - **You confirm** the PRD and the plan at checkpoints, and approve each release; everything else runs on its own.
-- **Autonomy** is yours to set: supervised (asks at each decision point, always with a recommendation) or unattended (parks what needs you and keeps going).
+- **Autonomy** is yours to set: in four steps: supervised (asks at each decision point, always with a recommendation), assisted (decides the operational points, asks only what is yours), milestone (asks your questions together at the end of each milestone) or unattended (parks what needs you and keeps going).
 - **Bugs and ideas** found at any time enter by class of service without renumbering milestones.
 - Every question comes with a recommended option; short tips (`💡`) explain each mechanism the first times it matters.
 

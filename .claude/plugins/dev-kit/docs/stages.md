@@ -15,7 +15,7 @@ What to do at each stage of a project, in the order of the [flow diagram](dev-ki
 
 Every stage is driven from a Claude Code session, in one of two ways, and you can switch at any time:
 
-- **The autopilot.** `/dev-kit:autopilot` runs the driver in your session and asks its questions in the chat (or parks them, at the `unattended` level). `--until plan` stops after planning, `--milestones N` after N milestones (resume in a fresh session or after `/clear`: a fresh context is cheaper), `--parallel N` builds N tasks of a milestone at once (1 to 6, default 3), each implementer in its own git worktree; only tasks with no file in common run together, and more at once costs no more tokens but uses more CPU and disk and reaches your account's usage limits sooner. Only one autopilot drives a project at a time.
+- **The autopilot.** `/dev-kit:autopilot` runs the driver in your session and asks its questions in the chat (or parks them: at the `milestone` presence step it asks them together at the end of each milestone, at `unattended` it never waits). `--until plan` stops after planning, `--milestones N` after N milestones (resume in a fresh session or after `/clear`: a fresh context is cheaper), `--parallel N` builds N tasks of a milestone at once (1 to 6, default 3), each implementer in its own git worktree; only tasks with no file in common run together, and more at once costs no more tokens but uses more CPU and disk and reaches your account's usage limits sooner. Only one autopilot drives a project at a time.
 - **Step by step**, one skill at a time (each section below lists them).
 
 **The board only shows.** `/dev-kit:board` follows the project as it happens: the top bar shows the **Autopilot** while `/dev-kit:autopilot` runs (and for how long), the task board its implementers at work. It never starts, stops or answers anything: every decision is taken in Claude Code.
@@ -45,7 +45,7 @@ What the product is and how it is built, before any plan.
 
 **Needs you**
 
-- **The interview** is yours: answer in your own language. The answers that matter most later are the quality bar, how much of the run you want to follow (`supervised` or `unattended`), production and the issue buffer. Change them later with `/dev-kit:settings` or `/dev-kit:interview --gaps`.
+- **The interview** is yours: answer in your own language. The answers that matter most later are the quality bar, how much of the run you want to follow (`supervised`, `assisted`, `milestone` or `unattended`), production and the issue buffer. Change them later with `/dev-kit:settings` or `/dev-kit:interview --gaps`.
 - **Confirm PRD.** When the PRD review passes, the session shows its summary (personas, stories by priority, how many acceptance criteria, what is out of scope; the board's Needs you has it too, with a link to the whole document). Confirm, or ask for changes in your own words: the PRD is revised, reviewed again and comes back to you. The architecture does not start before you confirm. Tell the session ("confirm the PRD"); `/dev-kit:backlog` lists it while it waits.
 - Decisions on the always-ask list (paid services, deleting data, public exposure, the security model, credentials) come as questions, each with a recommendation.
 
@@ -97,7 +97,7 @@ A gate passes only with the hard floor met (the build and the suite pass, no sec
 
 - **Questions** a task cannot go on without. The task waits (blocked, with the question), the rest of the milestone goes on, and your answer unblocks it.
 - **Permission prompts** of the run (a command, an edit outside the project), when the permission mode does not cover them. They come to the terminal; cover them with a permission mode or `/fewer-permission-prompts` for an unattended run.
-- **Fix rounds used up**, or the same finding back twice ("needs your decision"): accept with an ADR, replan, or give more rounds. The `unattended` level applies the recommendation by itself, never with a critical or high finding open or security below its minimum.
+- **Fix rounds used up**, or the same finding back twice ("needs your decision"): accept with an ADR, replan, or give more rounds. The `assisted`, `milestone` and `unattended` presence steps apply the recommendation by themselves, never with a critical or high finding open or security below its minimum.
 - **Production deploys** when you set them to ask.
 
 **Unstuck**

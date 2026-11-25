@@ -254,32 +254,38 @@ Every question that asks the user to decide (escalation, rounds exhausted, conse
 | document review converged two rounds in a row (`convergence.converged`: no critical/high, mediums falling or flat) | accept with `--force` + ADR; remaining mediums become questions or the next revision's input (never for security) |
 | rounds exhausted, only medium/low open, gap ≤ 5 | accept with `--force` + ADR (never for security) |
 | rounds exhausted, critical/high open or gap > 5 | replan |
-| consent in the interview | mode `ask` with the default ladder |
+| consent in the interview | the mode of the presence step (§10) with the default ladder |
 
 ## 10. Pause policy (how autonomous a run is)
 
-Before any AskUserQuestion, a skill reads `autonomy.pause_policy.<point>.action` (`DS status --json`); a missing point means `ask` (supervised, the default). The interview sets it (block 9); `autonomy.level unattended` fills the recommended values below.
+Before any AskUserQuestion, a skill reads `autonomy.pause_policy.<point>.action` (`DS status --json`); a missing point means `ask`. Two settings decide it, independent of the level (§6, which decides the technical choices made alone):
+- **The presence step** (`autonomy.presence.step`): how much of a run the user follows. `supervised` (the default of a state without one) asks at every point; `assisted` (the interview's recommendation) decides the operational points alone and asks the product and external ones; `milestone` never interrupts inside a milestone: it parks the product and external points and autopilot asks the parked questions together at the end of each milestone; `unattended` never waits. The interview sets it (block 9), `/dev-kit:settings` changes it (`DS set autonomy.presence <step>`).
+- **The user's exceptions** (`autonomy.presence.overrides`): a point set by hand (`DS set autonomy.pause_policy.<point> <action>`, or `default` to drop it), or `model_escalation`, always wins over the step and survives a change of step; `DS set autonomy.presence.overrides {}` clears them. `dev_state.py` writes the result into `pause_policy` and `model_policy.mode`, so every reader, an older kit included, sees the same action per point. An existing project keeps `dirty_tree` at `ask` at every step (§16) unless it is an exception.
 
-| point | when it happens | actions allowed | `unattended` value |
-|---|---|---|---|
-| `paid_services` | something billable is needed | ask · preauthorize (`limit.max_monthly`, currency) · park | park |
-| `delete_data` | destructive migration, dropping data | ask · preauthorize (`limit.environments`, never production) · park | preauthorize dev, test |
-| `public_exposure` | push, deploy, publish, open ports | ask · preauthorize (`limit.targets`) · park | park |
-| `scope_change_major` | an AC or must-have would change | ask · park | park |
-| `security_model_change` | auth, permissions, token lifetime, crypto | ask · auto_recommend · park | auto_recommend |
-| `credentials` | a secret the user has not provided | ask · park | park |
-| `rounds_exhausted` | fix rounds exhausted, or the same finding came back twice (`dev_state.py` blocks the cards involved, with the reason) | ask · auto_recommend · park | auto_recommend |
-| `dirty_tree` | uncommitted changes nobody owns | ask · auto_recommend (`git stash push -m "dev-kit auto <date>"`) | auto_recommend |
-| `blocked_env` | three tasks blocked in a row, tests or server cannot run | ask · park | park |
-| `production_deploy` | `deploy` to production (§12) | ask · preauthorize (`limit.targets`) · park | park |
-| `ci_timeout` | CI still pending on the round's commit after `autonomy.ci.timeout_min` (§7) | ask · park | park |
-| model escalation | §9 | governed by `autonomy.model_policy.mode` | preapproved |
+| point | family | when it happens | actions allowed | `supervised` | `assisted` | `milestone` | `unattended` |
+|---|---|---|---|---|---|---|---|
+| `dirty_tree` | operational | uncommitted changes nobody owns | ask · auto_recommend (`git stash push -m "dev-kit auto <date>"`) | ask | auto_recommend | auto_recommend | auto_recommend |
+| `rounds_exhausted` | operational | fix rounds exhausted, or the same finding came back twice (`dev_state.py` blocks the cards involved, with the reason) | ask · auto_recommend · park | ask | auto_recommend | auto_recommend | auto_recommend |
+| `ci_timeout` | operational | CI still pending on the round's commit after `autonomy.ci.timeout_min` (§7) | ask · park | ask | park | park | park |
+| `blocked_env` | operational | three tasks blocked in a row, tests or server cannot run | ask · park | ask | park | park | park |
+| model escalation | operational | §9 | `autonomy.model_policy.mode` | ask | preapproved | preapproved | preapproved |
+| `security_model_change` | product | auth, permissions, token lifetime, crypto | ask · auto_recommend · park | ask | ask | park | auto_recommend |
+| `scope_change_major` | product | an AC or must-have would change | ask · park | ask | ask | park | park |
+| `paid_services` | external | something billable is needed | ask · preauthorize (`limit.max_monthly`, currency) · park | ask | ask | park | park |
+| `credentials` | external | a secret the user has not provided | ask · park | ask | ask | park | park |
+| `delete_data` | external | destructive migration, dropping data | ask · preauthorize (`limit.environments`, never production) · park | ask | ask | park | preauthorize dev, test |
+| `public_exposure` | external | push, deploy, publish, open ports | ask · preauthorize (`limit.targets`) · park | ask | ask | park | park |
+| `production_deploy` | external | `deploy` to production (§12) | ask · preauthorize (`limit.targets`) · park | ask | ask | park | park |
+
+A `preauthorize` with its limit (a monthly spend cap, the environments where data may be deleted, the deploy targets) is an exception that fits any step. The release approval and the PRD and plan checkpoints (§19) are not pause points: they wait for the user at every step.
+
+**Migration (3.17).** A state written before presence steps is converted on load, keeping the action of every point: a level without `pause_policy` becomes `supervised`; `level unattended` becomes level `high` + step `unattended`; a point set by hand, or a model mode other than the step's, becomes an exception. A copy of the state goes to `.dev/backup/state-pre-presence-<stamp>.json`, the first save records an ADR, and `status` and the board's Needs you show a one-line notice for a week or until a step is chosen. `DS set autonomy.level unattended` still works (it sets level `high` and the step `unattended`).
 
 What each action does:
 - `ask`: AskUserQuestion with the recommended option first (§9 "Recommendation rule").
 - `preauthorize`: decide alone **within the recorded limit**; anything beyond it is treated as `park`. Record `ADR-nnn` with `source: policy`.
 - `auto_recommend`: apply the option the §9 recommendation rule selects, record `ADR-nnn` with `source: policy` and the reason, and continue. For `rounds_exhausted`, "accept" means `DS gate <M> passed --score <n> --force --note "policy:rounds_exhausted"` (or `DS review ... --force --note "policy:..."`); `dev_state.py` refuses it when a critical/high finding is open or security is below its minimum. When the recommendation is "replan" or "revisit the spec", treat it as `park`.
-- `park`: never wait. `DS add-question` with the recommended answer as the assumption, `DS block` only the tasks that depend on it (missing credentials: build against a stub or mock and block only the task that needs the real secret), and continue with all independent work. If `notify_on_park` is true and a notification tool is available, send one short message per parked item.
+- `park`: never wait. `DS add-question` with the recommended answer as the assumption (at the step `milestone`, autopilot asks it at the end of the milestone), `DS block` only the tasks that depend on it (missing credentials: build against a stub or mock and block only the task that needs the real secret), and continue with all independent work. If `notify_on_park` is true and a notification tool is available, send one short message per parked item.
 - `autonomy.on_park`: `stop_when_idle` (default) ends the run when nothing else can advance; `stop_first` ends it at the first parked item. Either way the final report lists every parked item with its recommendation and the command to resume (`interview --gaps`, then `autopilot`).
 
 Floors no policy can lift (the interview shows them, it does not ask): never force security or a gate with critical/high open; never delete production data; never rewrite git history; never change an AC without the user (always `park`).

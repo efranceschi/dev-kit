@@ -526,7 +526,7 @@ Shows and changes the project's settings in plain words: autonomy, quality bar, 
 **Examples:**
 
 - `/dev-kit:settings`: see how the kit is configured
-- `/dev-kit:settings run overnight without asking`: unattended level with the floors kept
+- `/dev-kit:settings run overnight without asking`: presence step unattended, with the floors kept
 - `/dev-kit:settings tips off`: no more tips
 
 **Produces:** the changed setting in .dev/state.json and an ADR for decisions

@@ -2,6 +2,23 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.17.0 — 2026-11-25
+
+Eduardo asked when the autopilot stops and whether autonomy could have steps between "ask everything" and "never wait". The level and the pause policy were one setting: `unattended` was a level that also filled the pause points. They are now two independent settings, with two new steps in between.
+
+### Added
+- Presence steps (`autonomy.presence`, conventions §10): how much of a run you follow, separate from the level (which still decides the technical choices made alone). `supervised` asks at every pause point (as `high` did); `assisted` decides the operational points alone (dirty tree, fix rounds used up, CI timeout, blocked environment, model escalation) and asks the product and external ones; `milestone` never interrupts inside a milestone: it parks the product and external decisions and autopilot asks them all together at the end of each milestone, then goes on with the answers; `unattended` never waits (as before). The interview recommends `assisted`; `/dev-kit:settings` changes it (`DS set autonomy.presence <step>`).
+- Exceptions over the step (`autonomy.presence.overrides`): a point set by hand, or the model escalation mode, wins over the step and survives a change of step; `DS set autonomy.pause_policy.<point> default` drops one, `DS set autonomy.presence.overrides {}` clears them all. A `preauthorize` with its limit (spend cap, data environments, deploy targets) fits any step.
+- `status` shows the presence step and its exceptions (`Presence: …`), and only the points that are not `ask`.
+
+### Changed
+- `autonomy.level unattended` is kept as an alias: level `high` plus the step `unattended`. A level no longer changes the pause points; going back from `unattended` is `DS set autonomy.presence supervised`.
+- `pause_policy` and `model_policy.mode` are written from the step and the exceptions, so every reader (an older kit included) sees the same action per point. At `milestone` the parked points are recorded as `park`: an older kit parks them too, never waits.
+- `qa` leaves debt above the cap in Needs you at every step but `supervised`; `review` leaves a checkpoint pending at `unattended`.
+
+### Migration
+- A state written before 3.17 is converted on load and keeps the action of every pause point and the model mode: a level without pause policy becomes `supervised`; `unattended` becomes level `high` + step `unattended`; every point set by hand, and a model mode other than the step's, becomes an exception. Existing projects keep `dirty_tree` at `ask` at every step. A copy of the state goes to `.dev/backup/state-pre-presence-<stamp>.json`, the first save records an ADR ("Autonomy presence steps"), and `status`, `status --short` and the board's Needs you show a one-line notice for a week or until a step is chosen. Nobody is moved to `assisted` automatically.
+
 ## 3.16.1 — 2026-11-25
 
 Eduardo saw the QA tab still selected in Construction after M6 passed its gate and M7 started building.

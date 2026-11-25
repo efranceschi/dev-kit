@@ -21,7 +21,7 @@ To try it without installing: `claude --plugin-dir .claude/plugins/dev-kit`. Ope
 
 Answers that matter most later:
 - **Quality bar** (`standard`, `premium`, `prototype`): the score each milestone must reach.
-- **How much of the run you want to follow** (`supervised` or `unattended`).
+- **How much of the run you want to follow** (`supervised`, `assisted`, `milestone` or `unattended`).
 - **Issues found during the build:** buffer per milestone and cool-down.
 - **Delivery:** local preview per milestone and how production is deployed.
 

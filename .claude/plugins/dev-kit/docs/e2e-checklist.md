@@ -51,7 +51,7 @@ Tick each item; note the Claude Code version used.
 - [ ] Repo with Conventional Commits, `docs/adr/0001-*.md`, tag `v2.3.0` and a deploy workflow: `discovery.md` §11 proposes `commit_style` `{type}: {summary}`, the ADR appears as `source: imported`, `production.method` is `external`; a task commit is `feat: …` with trailer `Refs: T-001`; `release --dry-run` proposes `v2.4.0`.
 - [ ] Mode **maintenance** with first milestone `7`: after onboarding the phase is `stable` (no task yet; `construction · M7` once the first issue adds a task), `plan.md` has an empty `## M7 — Maintenance`, reviews `prd`/`design`/`plan` are `n/a`; `/dev-kit:issue` with a medium bug schedules a task in M7 (no queue); `status --short` says `existing project: maintenance`; when the task is done `implement` points to `qa M7`; after the gate passes, the next issue opens `M8 — Maintenance` (`add-task` into M7 is refused).
 - [ ] Onboarding order: `.dev/state.json` exists before discovery; a failing test at the baseline becomes issue `origin: baseline` (visible in `backlog --json`); `session_start` and the onboarding's `skill_start` are in `telemetry.jsonl`.
-- [ ] With `autonomy.level unattended` in the existing project, `pause_policy.dirty_tree` is still `ask`; an uncommitted file of the user is never stashed.
+- [ ] At every presence step (`autonomy.presence`) in the existing project, `pause_policy.dirty_tree` is still `ask`; an uncommitted file of the user is never stashed.
 - [ ] Switching maintenance → feature (`/dev-kit:start "add X"`) reopens reviews `prd`/`design`/`plan` as `pending`.
 - [ ] A repo with only `setup.py` (or only PHP files, or `apps/web/package.json`) is detected as existing (`"greenfield": false`) and onboarded.
 - [ ] Mode **import** with a `docs/prd.md`: the interview asks only blocks the document does not cover and `prd` cites the original ids.
@@ -66,7 +66,7 @@ Tick each item; note the Claude Code version used.
 
 ## 6. Autonomy policy
 - [ ] With `autonomy.level = cautious`, `implement` asks before a library choice; with `high` it logs an ADR instead.
-- [ ] A `paid_services` decision triggers a question at every supervised level; under `unattended` it is parked (`pause_policy.paid_services` = `park`), never decided alone.
+- [ ] A `paid_services` decision triggers a question at the `supervised` and `assisted` steps; at `milestone` and `unattended` it is parked (`pause_policy.paid_services` = `park`), never decided alone.
 - [ ] `dev_state.py set autonomy.level cautious` raises the cut-offs to 90/85/75 and moves `library_choice` to `always_ask`; back to `high` restores the lists.
 
 ## 7. Board, costs, feedback, deploy, issues

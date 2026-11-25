@@ -19,7 +19,7 @@
     {"id": "status-costs", "context": "status", "spinner": true, "command": "/dev-kit:costs", "en": "Curious how much each stage cost? /dev-kit:costs shows tokens and estimated US$ per stage."},
     {"id": "status-feedback", "context": "status", "spinner": true, "command": "/dev-kit:feedback", "en": "/dev-kit:feedback grades each stage of the session and suggests improvements to the kit."},
     {"id": "status-backlog", "context": "status", "spinner": true, "command": "/dev-kit:backlog", "en": "/dev-kit:backlog lists everything pending: issues, tasks, parked questions, deferred findings and deploys."},
-    {"id": "status-unattended", "context": "status", "spinner": true, "en": "To let autopilot run overnight: autonomy level unattended plus a permission allowlist (/fewer-permission-prompts)."},
+    {"id": "status-unattended", "context": "status", "spinner": true, "en": "To let autopilot run overnight: presence step unattended (or milestone) plus a permission allowlist (/fewer-permission-prompts)."},
     {"id": "implement-hotfix", "context": "implement", "en": "Hotfix tasks run before everything else, even with a pending gate. Only one hotfix is open at a time."},
     {"id": "settings-words", "context": "settings", "spinner": true, "en": "Ask for settings in plain words, e.g. /dev-kit:settings stricter gates, or /dev-kit:settings show to see them all."},
     {"id": "autopilot-fresh-session", "context": "autopilot", "spinner": true, "command": "/dev-kit:autopilot --milestones 2", "en": "Long runs cost more per turn as the session grows. --milestones N stops after N gates; resume in a new session."},

@@ -83,9 +83,9 @@ class TestAutonomy(Base):
         a = self.state()["autonomy"]
         self.assertEqual(a["pause_policy"]["dirty_tree"]["action"], "auto_recommend")
         self.assertEqual(a["model_policy"]["mode"], "preapproved")
-        self.run_state("set", "autonomy.level", "high")
+        self.run_state("set", "autonomy.presence", "supervised")  # 3.17: presence, not the level, goes back
         a = self.state()["autonomy"]
-        self.assertEqual(a["pause_policy"], {})
+        self.assertTrue(all(v["action"] == "ask" for v in a["pause_policy"].values()))
         self.assertEqual(a["model_policy"]["mode"], "ask")
 
     def test_cautious_preset_raises_bars_and_lists(self) -> None:

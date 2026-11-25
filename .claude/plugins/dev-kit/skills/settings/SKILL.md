@@ -19,8 +19,9 @@ The user never runs a script: this skill translates what they ask into the right
 ## What can be changed
 | the user says | setting (`DS set …`) | notes |
 |---|---|---|
-| "more / less autonomous", "run overnight" | `autonomy.level` (`high`, `balanced`, `cautious`, `unattended`) | a level applies its preset; show the pause points it fills (`conventions.md` §10) |
-| "never ask me about X", "always ask before deploying" | `autonomy.pause_policy.<point>` as `{"action": …, "limit": …}` | actions allowed per point in §10; `preauthorize` needs its limit (spend cap or `"unlimited"` only when the user says so, environments, targets) |
+| "interrupt me less", "ask only what matters", "ask me once per milestone", "run overnight" | `autonomy.presence` (`supervised`, `assisted`, `milestone`, `unattended`) | how much of a run the user follows (`conventions.md` §10): show the matrix of the step (point · action) and the exceptions kept; the user's exceptions survive a change of step |
+| "decide more / fewer technical choices alone" | `autonomy.level` (`high`, `balanced`, `cautious`; `unattended` = `high` + presence `unattended`) | a level fills `decide_alone` and `always_ask`; it leaves the presence step as it is |
+| "never ask me about X", "always ask before deploying" | `autonomy.pause_policy.<point>` as `{"action": …, "limit": …}`, or `default` to drop the exception | recorded as an exception over the presence step (`autonomy.presence.overrides`; `{}` clears them all); actions allowed per point in §10; `preauthorize` needs its limit (spend cap or `"unlimited"` only when the user says so, environments, targets) |
 | "stricter / looser gates", "premium quality" | `autonomy.quality` (`min_overall`, `review_min_overall`, `min_dimension`, `dimension_min.<dim>`) | presets `standard`, `premium`, `prototype` (`interview` block 8) |
 | "use a stronger model when it fails", "never escalate" | `autonomy.model_policy.mode` (`ask`, `preapproved`, `off`), `tiers` | §9 ladder |
 | "prioritise speed / cost / quality", "spend less on models" | `autonomy.model_policy.router.balance` (`balanced`, `speed`, `cost`, `quality`, or `{"cost": 1, "time": 1, "quality": 2}`) | §9 "Router": the weights of the expected cost; floors never move |

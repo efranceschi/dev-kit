@@ -21,7 +21,7 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 
 ## Let it run overnight
 
-1. Choose 'unattended with floors' in the interview, or later: /dev-kit:settings run overnight without asking
+1. Choose the presence step 'unattended' in the interview, or later: /dev-kit:settings run overnight without asking ('milestone' if you want to answer once per milestone)
 2. Cover permission prompts: /fewer-permission-prompts and --permission-mode acceptEdits
 3. Run inside tmux: claude --permission-mode acceptEdits "/dev-kit:autopilot"
 4. In the morning: /dev-kit:status, /dev-kit:backlog, /dev-kit:costs, /dev-kit:interview --gaps

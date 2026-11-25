@@ -23,6 +23,7 @@ Stored in `.dev/state.json` under `autonomy`. Set by `interview` (block 9); chan
   },
   "model_policy": {"mode": "ask", "tiers": {}},
   "pause_policy": {},
+  "presence": {"step": "supervised", "overrides": {}},
   "on_park": "stop_when_idle",
   "issue_buffer_pct": 20,
   "cooldown": {"enabled": false, "max_tasks": 5},
@@ -55,47 +56,19 @@ Agents give findings; `dev_score.py` turns them into 0–100 scores per dimensio
 | `balanced` | library_choice, file_structure, naming, test_strategy, dev_tooling | high list + ui_details, data_model_details, minor_scope_tradeoffs | user wants to review design-level choices |
 | `cautious` | naming, file_structure | everything else | first time using the kit, or regulated domains |
 
-Setting a level replaces `decide_alone` and `always_ask` with its preset. Leaving `unattended` restores the supervised defaults (empty `pause_policy`, `model_policy.mode` `ask`). In an existing project `dev_tooling` is always in `always_ask` and `pause_policy.dirty_tree` stays `ask` (`conventions.md` §16).
-| `unattended` | as `high` | as `high`, but each pause point follows `pause_policy` (recommended values in `conventions.md` §10) and `model_policy` is `preapproved`: the run never waits, parked items are reported at the end | long runs without the user present |
+Setting a level replaces `decide_alone` and `always_ask` with its preset; it leaves the presence step and its exceptions as they are. In an existing project `dev_tooling` is always in `always_ask` and `pause_policy.dirty_tree` stays `ask` (`conventions.md` §16).
 
-`always_ask` says which decisions the agent cannot take on its own judgment; `pause_policy` says what happens when one comes up (`ask`, `preauthorize` within a recorded limit, `auto_recommend`, `park`). The floors in `conventions.md` §10 are enforced by `dev_state.py` and cannot be lifted by the interview.
+`unattended` is no longer a level: since 3.17 `set autonomy.level unattended` means level `high` plus the presence step `unattended`, and a state that had it is migrated so.
 
-## Decision categories
+## Presence steps (`autonomy.presence`)
 
-| category | examples |
-|---|---|
-| `library_choice` | which validation/ORM/HTTP/testing library within the chosen stack |
-| `file_structure` | folder layout, module boundaries |
-| `naming` | identifiers, routes, table names |
-| `test_strategy` | which layers to test for a task, test doubles |
-| `ui_details` | spacing, component variants, empty-state copy, icon choice |
-| `data_model_details` | nullable fields, indexes, enum values not fixed by the PRD |
-| `minor_scope_tradeoffs` | deferring a nice-to-have, simplifying an interaction without removing an AC |
-| `dev_tooling` | linter config, formatter, CI steps, scripts |
-| `paid_services` | signing up for or enabling anything billable |
-| `delete_data` | destructive migrations, dropping tables, deleting user files |
-| `public_exposure` | deploying publicly, opening ports, publishing packages, pushing to remote |
-| `scope_change_major` | adding/removing/altering an AC, changing a must-have |
-| `security_model_change` | auth mechanism, permission model, token lifetime, encryption choices |
-| `credentials` | anything requiring a secret the user has not provided |
-| `model_escalation` | raising an agent's model or effort (`conventions.md` §9; governed by `model_policy`) |
+How much of a run the user follows, independent of the level (`conventions.md` §10 has the full matrix):
 
-`production_deploy` is a pause point, not a category: every production `deploy` goes through `pause_policy.production_deploy` (`conventions.md` §10, §12).
+| step | operational points (dirty tree, rounds used up, CI timeout, blocked environment, model escalation) | product and external points (scope, security model, paid services, credentials, deleting data, exposure, production) | typical use |
+|---|---|---|---|
+| `supervised` | ask | ask | following a first project closely |
+| `assisted` (recommended) | decided alone, with an ADR | ask | most projects: you are asked only what is yours to decide |
+| `milestone` | decided alone | parked, asked together at the end of each milestone | a few check-ins a day |
+| `unattended` | decided alone | parked (security model: recommendation applied; data: deleted in dev and test only) | runs nobody watches |
 
-## Procedure when a gap appears
-
-1. Look it up: `brief.md` → `prd.md` → `architecture.md` → `decisions.md` (→ `discovery.md` in existing projects, where the code already answers many questions). If answered, use it.
-2. Classify. If in `always_ask`: apply `pause_policy.<category>` (`conventions.md` §10). Only for `ask` (the default): stop, ask with AskUserQuestion (recommended option first), record as `ADR-nnn` with `source: user`. Otherwise record `source: policy`.
-3. Else: choose the most probable option given the brief, write `ADR-nnn (auto)` in `decisions.md` (context, decision, alternatives, why), and continue. If the user may plausibly disagree, also run `dev_state.py add-question "<question>" --skill <skill>` so `interview --gaps` can surface it later.
-4. In `autopilot`, batch `always_ask` questions when possible: finish everything that does not depend on the answer, then ask once with all pending questions.
-
-## ADR format (`shared/templates/adr.md`)
-
-```markdown
-### ADR-007 (auto) — Use Zod for request validation
-- date: 2026-10-30 · status: accepted · source: auto | user | interview | policy | discovered | imported
-- context: brief block 5 says TypeScript + Next.js; no validation lib chosen
-- decision: Zod, shared schemas between client and server
-- alternatives: Yup (less TS inference), class-validator (decorators, heavier)
-- consequences: schemas live in `src/schemas/`; AC-3, AC-4 validation tests target them
-```
+`{"step": "assisted", "overrides": {"security_model_change": {"action": "ask"}}}`: the exceptions win over the step. The release approval, the PRD and plan confirmations and the floors stay with the user at every step.
