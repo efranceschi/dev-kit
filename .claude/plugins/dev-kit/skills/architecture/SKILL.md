@@ -2,7 +2,7 @@
 name: architecture
 description: Decides and documents the technical architecture (.dev/architecture.md) - stack (detected or chosen), repository layout, data model, API contracts, cross-cutting concerns, environments and test strategy - and records ADRs in .dev/decisions.md. Use after prd, or when a structural decision must be revisited.
 argument-hint: "[constraints or 'review']"
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, Agent, AskUserQuestion, WebSearch, WebFetch
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, Agent, AskUserQuestion, WebSearch, WebFetch, Skill
 ---
 
 # architecture
@@ -29,11 +29,12 @@ Detected stack: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_detect_sta
 3b. Release flags (`conventions.md` §21): when the brief asks to ship approved milestones dark, or `autonomy.release_flags.enabled` is true, choose the flag mechanism (an environment variable read at start, a config file, or a flag service already in the stack), record it in `architecture.md` §7 (how a flag is read in code, how it is switched on and off in production, and how long a switch takes to apply) with an ADR, and store it: `dev_state.py set autonomy.release_flags '{"enabled": true, "provider": "<mechanism, one line>"}'`. Without flags, write "release flags: off".
 4. Append ADRs to `.dev/decisions.md` for every non-obvious choice (`source: auto` or `user`). Add `Q-nnn` questions for choices the user may want to revisit.
 5. Persist stack: `dev_state.py init --stack-json '{"lang":..., "framework":..., "pkg":..., "test":..., "lint":..., "db":..., "detected_from":[...]}'` and `dev_state.py artifact mark architecture`. If the brief says the product has no UI (API/CLI only), record it with `dev_state.py review design n/a --note "no UI: <API|CLI|...>"`: the lifecycle then marks `ux` and `ui` as skipped and goes to planning (`conventions.md` §19).
+5a. **Architecture diagram**: invoke the skill `dev-kit:diagram` (Skill tool; `update` when `docs/diagrams/architecture.svg` already exists) and follow it fully. Before any code exists it draws the architecture as planned, so the board's Architecture tab shows the shape of the system from conception on, and the person reviewing the architecture sees it as a picture. It edits `.dev/architecture.md` §2 (the link), which is why it runs before the mark below. Skip it only when the architecture did not change (`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_diagram.py" --root "${CLAUDE_PROJECT_DIR}" check` exits 0).
 6. Run the self-check (`${CLAUDE_SKILL_DIR}/../core/shared/prompts/self-check.md`, which includes `dev_state.py xref`) and fix what it finds, then `dev_state.py artifact mark architecture`.
 7. Summarise the decisions in ≤ 10 lines and name the next step.
 
 ## `review` mode
-Spawn `architect` with "challenge" instructions on the current `architecture.md`; apply accepted changes as superseding ADRs; do not rewrite from scratch.
+Spawn `architect` with "challenge" instructions on the current `architecture.md`; apply accepted changes as superseding ADRs; do not rewrite from scratch. When `.dev/architecture.md` changed, redraw the diagram (step 5a, with `update`) before `artifact mark architecture`.
 
 ## Rules
 - No dependency may appear later in code without an ADR or a line in the stack table; `code-reviewer` enforces this.

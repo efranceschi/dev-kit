@@ -2,6 +2,19 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.20.0 — 2026-11-26
+
+Eduardo asked when `/dev-kit:diagram` runs without being asked: only inside `docs`, at release time, so the board's Architecture tab stayed empty or out of date for the whole construction. The diagram now also runs at the two moments the architecture takes shape or changes.
+
+### Changed
+- `architecture` (new step 5a) invokes `dev-kit:diagram` before `artifact mark architecture`: the diagram is drawn as planned from `.dev/architecture.md`, so the Architecture tab shows the system from conception on and the architecture is reviewed as a picture too. Its `review` mode redraws it (`update`) when `architecture.md` changed. The autopilot inherits both.
+- `qa`: after `DS gate <M> passed`, `dev_diagram.py check`; when the diagram is missing (exit 3) or out of date (exit 4), it runs `dev-kit:diagram update` and commits it as `docs: architecture diagram`, so the picture follows the system as built milestone by milestone. A current diagram costs nothing.
+- `diagram`: before construction (no done task) it draws the whole architecture as planned (`as planned` in the subtitle, no `(planned)` labels); after linking the SVG from `architecture.md` §2 it renders again, because the stamp hashes that file and the diagram was otherwise out of date at once. A new "Who runs it" section lists the callers.
+- `docs` still runs it every time, as the release's final version; `implement` never does.
+
+### Migration
+Nothing to do: a project with no diagram gets one at its next passed gate or its next `architecture`.
+
 ## 3.19.0 — 2026-11-26
 
 Field report (T-110): during the autopilot, the check "is the full pipeline still running?" matched its own command line (`ps | grep`), so the run reported "running" for 12 hours while the suite had finished green at 00:28. Nothing in the kit gave the orchestrator a reliable way to run a long command and learn that it ended, and nothing stopped one that ran too long.

@@ -583,7 +583,7 @@ Project documentation from the artifacts and code: README, architecture diagram 
 
 The high-level architecture diagram of the system being built, in draw.io's style without draw.io: an SVG for the board and the README, plus a .drawio file.
 
-**When:** The board's Architecture tab has no diagram yet, the architecture changed, or as part of docs (which always runs it).
+**When:** Runs by itself at the end of architecture (the planned diagram), after a passed QA gate when it is missing or out of date (as built), and in docs (always). By hand when the board's Architecture tab has no diagram yet or the architecture changed.
 
 **Usage:** `/dev-kit:diagram [update]`
 
