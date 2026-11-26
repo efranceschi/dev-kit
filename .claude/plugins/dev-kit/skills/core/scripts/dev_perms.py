@@ -19,6 +19,10 @@ scripts an auditor writes in its own scratch folder `.dev/tmp/` (run with `timeo
 audit never waits for `gzip -c dist/app.js | wc -c`; `round run` also passes the same rules to Claude Code as
 --allowedTools. A permission outside the set that nobody answers is recorded in .dev/run/permission-misses.json: `show` lists it with the rule that would allow it,
 and the board shows it (read-only) in Needs you.
+
+Deleting scratch: a plain `rm` whose every path is inside .dev/tmp/ or .dev/preview/ (no glob, variable, `..`, `cd`
+or symlink on the way, nothing git tracks; rm_scratch_paths) is allowed at once by the same hook, in a round child and
+in the main session while /dev-kit:autopilot runs. `dev_state.py tmp clean` deletes there with the same checks.
 """
 from __future__ import annotations
 
@@ -116,6 +120,111 @@ def safe_rules() -> list[str]:
     for r in ("node", "python3"):
         out += [f"Bash(timeout * {r} {SCRATCH}*)"]
     return list(dict.fromkeys(out))
+
+
+# ---------------------------------------------------------------- deleting scratch (.dev/tmp/, .dev/preview/)
+# Machine-local, git-ignored folders the kit's agents write scratch into. A plain `rm` of paths inside them is allowed
+# at once by the PermissionRequest hook (round child, or the main session while /dev-kit:autopilot runs), and
+# `dev_state.py tmp clean` deletes there with the same checks. Nothing else under .dev/ (state, PRD, run/) ever is.
+SCRATCH_DIRS = ("tmp", "preview")
+RM_FLAGS = re.compile(r"^(?:-[frRvd]+|--force|--recursive|--verbose|--dir)$")
+NO_EXPAND = re.compile(r"[*?\[\]{}$~`\\]")
+
+
+def _tracked(root: Path, paths: list[Path]) -> bool:
+    """Whether git tracks any of these paths (or a file under them); False when git cannot tell."""
+    import subprocess
+    for x in paths:
+        d = Path(x).parent  # asked from the path's own checkout (a task worktree is a checkout of its own)
+        while not d.is_dir() and d != d.parent:
+            d = d.parent
+        try:
+            r = subprocess.run(["git", "-C", str(d), "ls-files", "-z", "--", str(Path(x).absolute())],
+                               capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode == 0 and r.stdout.strip(b"\0"):
+            return True
+    return False
+
+
+def scratch_target(root: Path, cwd: Path, arg: str) -> Path | None:
+    """The path `arg` (an rm argument, relative to cwd) names, when it is strictly inside .dev/tmp/ or .dev/preview/
+    of root, or of a task worktree in .dev/run/worktrees/; None otherwise. Refused: globs, variables, `~`, `..`, the scratch folder itself, a scratch folder or a
+    folder on the way that is a symlink (or resolves anywhere else), and a symlink written with a trailing slash
+    (`rm -r link/` would empty its target). A final part that is a symlink is fine: rm removes the link only."""
+    if not arg or NO_EXPAND.search(arg) or arg.startswith("-"):
+        return None
+    slash = arg.endswith("/")
+    raw = Path(arg) if os.path.isabs(arg) else Path(cwd) / arg
+    if ".." in raw.parts:
+        return None
+    p = Path(os.path.normpath(str(raw)))
+    root_n = Path(os.path.normpath(str(root)))
+    real_root = Path(os.path.realpath(root_n))
+    try:
+        rel = p.relative_to(root_n / ".dev")
+    except ValueError:
+        try:  # cwd is reported resolved (macOS /private/var) while the project root may not be
+            rel, root_n = p.relative_to(real_root / ".dev"), real_root
+        except ValueError:
+            return None
+    if len(rel.parts) > 4 and rel.parts[:2] == ("run", "worktrees") and rel.parts[3] == ".dev":
+        # a task's worktree (.dev/run/worktrees/<T>/) has its own git-ignored .dev/tmp/
+        wt = Path("run", "worktrees", rel.parts[2])
+        if Path(os.path.realpath(root_n / ".dev" / wt)) != real_root / ".dev" / wt:
+            return None
+        root_n, real_root, rel = root_n / ".dev" / wt, real_root / ".dev" / wt, Path(*rel.parts[4:])
+    if len(rel.parts) < 2 or rel.parts[0] not in SCRATCH_DIRS:
+        return None
+    base = root_n / ".dev" / rel.parts[0]
+    if Path(os.path.realpath(base)) != real_root / ".dev" / rel.parts[0]:
+        return None  # .dev or the scratch folder is a symlink to somewhere else
+    if Path(os.path.realpath(p.parent)) != real_root / ".dev" / Path(*rel.parts[:-1]):
+        return None  # a folder on the way is a symlink
+    if slash and p.is_symlink():
+        return None
+    return p
+
+
+def rm_scratch_paths(root: Path, cwd: Path, cmd: str) -> list[Path] | None:
+    """The paths a Bash command deletes when it is only `rm [-f|-r|-v|-d] <paths>` (wrapped in read-only commands of
+    the safe set at most) and every path is a scratch_target that git does not track; None otherwise. A `cd`
+    anywhere in the line refuses it: the paths would no longer be judged from the right folder."""
+    if not isinstance(cmd, str) or not cmd.strip() or len(cmd) > 2000:
+        return None
+    parts = _split(cmd)
+    if not parts:
+        return None
+    found: list[Path] = []
+    for seg in parts:
+        if re.match(r"^(?:cd|pushd|popd)\b", seg.strip()):
+            return None
+        try:
+            words = shlex.split(seg)
+        except ValueError:
+            return None
+        if words and words[0] == "rm":
+            args, opts_done = [], False
+            for w in words[1:]:
+                if not opts_done and w == "--":
+                    opts_done = True
+                elif not opts_done and w.startswith("-"):
+                    if not RM_FLAGS.match(w):
+                        return None
+                else:
+                    t = scratch_target(root, cwd, w)
+                    if t is None:
+                        return None
+                    args.append(t)
+            if not args:
+                return None
+            found += args
+        elif not segment_safe(seg):
+            return None
+    if not found or _tracked(root, found):
+        return None
+    return found
 
 
 # ---------------------------------------------------------------- settings files

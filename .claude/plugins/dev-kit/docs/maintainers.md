@@ -30,7 +30,8 @@ How the plugin is built, tested and documented. Users do not need this page.
                                  status line, banner and board: never stored except as a cache in state.json
     scripts/dev_perms.py         the permissions an unattended run needs: the kit's safe set for audits (read-only inspection,
                                  sizes, scanners, timed .dev/tmp/ scripts), show / apply to .claude/settings*.json, and the
-                                 permissions denied while nobody answered (Needs you); used by the PermissionRequest hook
+                                 permissions denied while nobody answered (Needs you); rm_scratch_paths judges a plain rm
+                                 of .dev/tmp|preview paths; used by the PermissionRequest hook and `tmp clean`
     scripts/dev_risk.py          risk tier of a task (signals, weights, floors) and risk profile of a milestone, predicted ×
                                  real rows (imported by dev_state.py and dev_router.py; no command line)
     scripts/dev_router.py        model/effort router with feedback loops over .dev/router.json: route, observe, learn, explain,

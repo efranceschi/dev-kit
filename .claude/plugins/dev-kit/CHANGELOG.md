@@ -2,6 +2,18 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.22.0 — 2026-11-26
+
+Eduardo saw many permission pauses during autopilot for `rm` inside `.dev/`. No skill or agent asks for it: agents clean their own scratch in `.dev/tmp/` on their own, the kit's safe set held only read-only commands, and the permission hook acted only in a round child, so in the main session every `rm` waited for an answer. Deleting scratch is now pre-authorised, but only scratch and only when the kit can verify it; a settings rule such as `Bash(rm .dev/*)` was rejected because Claude Code matches it on the start of the text (`rm .dev/tmp/../../src` would pass).
+
+### Added
+- `dev_perms.rm_scratch_paths`: a plain `rm [-f|-r|-v|-d] <paths>` whose every path is strictly inside `.dev/tmp/` or `.dev/preview/` (of the project or of a task worktree in `.dev/run/worktrees/`). Refused: globs, variables, `~`, `..`, a `cd` in the same line, a symlinked `.dev`, scratch folder or folder on the way, a symlink written with a trailing slash (`rm -r link/` empties its target), the scratch folder itself, any other command that is not read-only, and a file git tracks.
+- The `PermissionRequest` hook allows such an `rm` at once in a round child and, in the main session, while `/dev-kit:autopilot` is open in it (its `skill_start` without `skill_end`). Outside autopilot the main session's prompts are unchanged.
+- `dev_state.py tmp clean [PATH ...] [--older-than-min N] [--json]`: deletes scratch with the same checks (a symlink is removed, never its target). Without paths it deletes the entries of `.dev/tmp/` unchanged for an hour, so a parallel worker's scratch stays. A passed gate runs that sweep.
+
+### Changed
+- `conventions.md` §17 and `resource-isolation.md`: never a raw `rm`, `mv` or `rmdir` on the kit's files under `.dev/`; delete your scratch with a written-out `rm -rf .dev/tmp/<name>-<N>` or `tmp clean`, or leave it to the sweep.
+
 ## 3.21.0 — 2026-11-26
 
 Eduardo asked whether other kinds of diagram made sense besides the high-level one, and to show them on the board. Two did: the data model (it changes most during construction and is what a migration review needs) and the deployment (what a release and `ops-reviewer` need). Sequence, class and module diagrams were left out: there are many, they age with every task, and Mermaid in the docs already covers the critical flows.

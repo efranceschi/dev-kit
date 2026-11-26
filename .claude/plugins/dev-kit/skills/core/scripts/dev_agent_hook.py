@@ -12,11 +12,13 @@ Reads the hook payload from stdin.
   ("dev-kit · <project> · <milestone, or phase and step>") and show one line with the next command (systemMessage).
 - Stop, with autonomy.ui.notify on: show the notices queued by dev_state.py (gates, blocks, autopilot) as a
   desktop notification (OSC 9 terminal sequence) and a line in the chat, then clear the queue.
-- PermissionRequest, only in a round child (`dev_state.py round run`, DEV_KIT_ROUND_ID set), where nobody is at
+- PermissionRequest, in a round child (`dev_state.py round run`, DEV_KIT_ROUND_ID set), where nobody is at
   the console: a Bash command made only of the kit's safe set (dev_perms.py: read-only inspection, a timed
   measurement script in .dev/tmp/) is allowed at once. Any other permission is left to Claude Code (in a headless
   child nobody answers, so it is denied) and is kept in .dev/run/permission-misses.json with the rule that would
-  allow it (`dev_perms.py show`, read-only in the board's Needs you). Anywhere else it returns nothing.
+  allow it (`dev_perms.py show`, read-only in the board's Needs you). A plain `rm` of paths inside .dev/tmp/ or
+  .dev/preview/ only (dev_perms.rm_scratch_paths) is allowed too, there and in the main session while
+  /dev-kit:autopilot runs in it. Anywhere else it returns nothing.
 - Sessions, for /dev-kit:spog (dev_spog.py): one small file per Claude Code session, .dev/run/sessions/<session>.json
   {"session", "state": "working|waiting|idle", "why": "permission|question", "since", "at", "tool"}: UserPromptSubmit,
   PostToolUse and the subagent events mean working; a permission_prompt or elicitation_dialog Notification, a
@@ -298,16 +300,36 @@ def permission(root: Path, dev: Path, payload: dict) -> dict | None:
     import dev_perms
     rnd = os.environ.get("DEV_KIT_ROUND_ID") or ""
     tool = str(payload.get("tool_name") or "")
-    if not rnd or not tool or tool in ("AskUserQuestion", "ExitPlanMode"):
+    if not tool or tool in ("AskUserQuestion", "ExitPlanMode"):
         return None
     ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
-    if tool == "Bash" and dev_perms.is_safe(str(ti.get("command") or "")):
-        return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
+    allow = {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
+    if not rnd:
+        # the main session: only deleting scratch, and only while /dev-kit:autopilot runs in it
+        if tool == "Bash" and autopilot_running(dev, payload) and scratch_rm(root, payload, ti):
+            return allow
+        return None
+    if tool == "Bash" and (dev_perms.is_safe(str(ti.get("command") or "")) or scratch_rm(root, payload, ti)):
+        return allow
     target = next((str(ti[k]) for k in ("command", "file_path", "notebook_path", "url", "path", "pattern", "query") if ti.get(k)),
                   "") or json.dumps(ti, ensure_ascii=False)
     agent = str(payload.get("agent_type") or "").removeprefix("dev-kit:")
     with_miss(root, tool, target, agent, "auditor_skipped" if agent in AUDITOR_AGENTS else "no_answer", suggested_rule(payload), rnd)
     return None
+
+
+def scratch_rm(root: Path, payload: dict, ti: dict) -> bool:
+    """A plain `rm` of paths inside .dev/tmp/ or .dev/preview/ only (dev_perms.rm_scratch_paths)."""
+    import dev_perms
+    cwd = Path(str(payload.get("cwd") or root))
+    return bool(dev_perms.rm_scratch_paths(root, cwd, str(ti.get("command") or "")))
+
+
+def autopilot_running(dev: Path, payload: dict) -> bool:
+    """Whether /dev-kit:autopilot is open (skill_start without skill_end) in this Claude Code session."""
+    import dev_telemetry as tel
+    sid = tok(payload.get("session_id"))
+    return any(x["skill"] == "autopilot" and x["session"] in (sid, "-") for x in tel.open_skills(dev))
 
 
 def suggested_rule(payload: dict) -> str | None:

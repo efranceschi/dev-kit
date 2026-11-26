@@ -81,6 +81,7 @@ Subcommands
   job ACTION    start NAME --cmd "<command>" [--timeout-min N] | wait NAME [--max S] | status | log | stop | ack: a
                 long command under a supervisor that records its exit code and stops it at its limit (never ps|grep), §17
   cleanup       kill agents' leftover processes recorded in .dev/run/*.pids (only inside this project)
+  tmp clean     [PATH ...] [--older-than-min N]: delete scratch inside .dev/tmp/ or .dev/preview/ (never a raw rm), §17
   add-issue     register a bug / improvement / change in the queue (--type --class --title ...), conventions §15
   issue I       show or update an issue (--status --class --link T --duplicate-of I --note)
   pull-issues M fill the milestone's issue buffer from the queue (never creates milestones)
@@ -4386,6 +4387,12 @@ def cmd_gate(store: Store, a: argparse.Namespace) -> None:
                      + f" · {next_command(store)}")
     if a.value == "passed":
         close_loop(store, a.milestone)
+        try:
+            swept = sweep_tmp(store)
+        except OSError:
+            swept = []
+        if swept:
+            print(f"scratch: deleted {len(swept)} old entr{'y' if len(swept) == 1 else 'ies'} of .dev/tmp/")
         print_tip(store, "gate_passed", a)
 
 
@@ -4794,6 +4801,67 @@ def cmd_lock(store: Store, a: argparse.Namespace) -> None:
                 print(f"{a.name} is held by {rec.get('holder')} since {rec.get('at')}; retry later or pass --wait <seconds>")
                 sys.exit(3)
             time.sleep(min(5.0, max(0.2, deadline - time.monotonic())))
+
+
+TMP_SWEEP_AGE_S = 3600  # a sweep without paths leaves what changed in the last hour (a parallel worker's scratch)
+
+
+def _remove_scratch(p: Path) -> None:
+    if p.is_symlink() or not p.is_dir():
+        p.unlink(missing_ok=True)  # a symlink goes, never what it points to
+    else:
+        shutil.rmtree(p)
+
+
+def sweep_tmp(store: Store, older_than_s: float = TMP_SWEEP_AGE_S) -> list[str]:
+    """Delete the entries of .dev/tmp/ not changed for older_than_s (each checked like `tmp clean`); returns them."""
+    import dev_perms
+    base = store.dev / "tmp"
+    if base.is_symlink() or not base.is_dir():
+        return []
+    cut, gone = time.time() - older_than_s, []
+    for e in sorted(base.iterdir()):
+        try:
+            if e.lstat().st_mtime > cut or dev_perms.scratch_target(store.root, store.root, str(e)) is None:
+                continue
+            if dev_perms._tracked(store.root, [e]):
+                continue
+            _remove_scratch(e)
+            gone.append(e.relative_to(store.root).as_posix())
+        except OSError:
+            continue
+    return gone
+
+
+def cmd_tmp(store: Store, a: argparse.Namespace) -> None:
+    """`tmp clean [PATH ...]`: delete scratch inside .dev/tmp/ or .dev/preview/ with the checks of the permission
+    hook (dev_perms.scratch_target: no `..`, glob, symlink on the way, nothing git tracks), so no agent needs a raw
+    `rm` under .dev/. Without paths: every entry of .dev/tmp/ unchanged for --older-than-min (default 60)."""
+    import dev_perms
+    store.load()
+    cwd = Path.cwd()
+    if not cwd.resolve().is_relative_to(store.root.resolve()):
+        cwd = store.root  # relative paths are the project's when run from elsewhere (with --root)
+    if a.paths:
+        targets = []
+        for x in a.paths:
+            t = dev_perms.scratch_target(store.root, cwd, x)
+            if t is None:
+                fail(f"tmp clean: {x} is not inside .dev/tmp/ or .dev/preview/ (or goes through a symlink, `..` or a glob); nothing deleted")
+            targets.append(t)
+        if dev_perms._tracked(store.root, targets):
+            fail("tmp clean: git tracks some of these paths; nothing deleted (`git rm` them yourself if that is meant)")
+        gone = []
+        for t in targets:
+            if t.exists() or t.is_symlink():
+                _remove_scratch(t)
+                gone.append(t.relative_to(store.root).as_posix() if t.is_relative_to(store.root) else str(t))
+    else:
+        gone = sweep_tmp(store, (a.older_than_min if a.older_than_min is not None else TMP_SWEEP_AGE_S / 60) * 60)
+    if a.json:
+        print(json.dumps({"deleted": gone}))
+    else:
+        print(f"deleted {len(gone)} scratch entr{'y' if len(gone) == 1 else 'ies'}" + (": " + ", ".join(gone[:8]) + (" ..." if len(gone) > 8 else "") if gone else ""))
 
 
 def cmd_cleanup(store: Store, a: argparse.Namespace) -> None:
@@ -8784,6 +8852,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--timeout-min", type=float, help="start: the time limit (default autonomy.quality.watchdog.job_timeout_min)")
     s.add_argument("--max", type=int, default=JOB_WAIT_MAX_S, help="wait: seconds to wait at most (at most 540)")
     s.add_argument("--lines", type=int, default=40); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("tmp"); s.set_defaults(fn=cmd_tmp)
+    s.add_argument("action", choices=["clean"]); s.add_argument("paths", nargs="*")
+    s.add_argument("--older-than-min", type=float, help="clean without paths: leave what changed more recently (default 60)")
+    s.add_argument("--json", action="store_true")
     s = sub.add_parser("xref"); s.set_defaults(fn=cmd_xref)
     s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
     s = sub.add_parser("stale"); s.set_defaults(fn=cmd_stale)

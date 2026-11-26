@@ -229,5 +229,88 @@ class TestRoundStall(Base):
         self.assertIn("auditors", out)
 
 
+class TestScratchRm(Base):
+    """3.22.0: deleting scratch in .dev/tmp/ needs no permission prompt, and nothing else under .dev/ is let through."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.dev / "tmp" / "perf-1").mkdir(parents=True)
+        (self.dev / "tmp" / "perf-1" / "run.log").write_text("x", encoding="utf-8")
+        (self.root / "src").mkdir()
+        (self.root / "src" / "a.py").write_text("x", encoding="utf-8")
+
+    def ok(self, cmd: str, cwd: Path | None = None) -> bool:
+        return bool(dev_perms.rm_scratch_paths(self.root, cwd or self.root, cmd))
+
+    def test_only_plain_rm_of_scratch_paths_passes(self) -> None:
+        for cmd in ("rm -rf .dev/tmp/perf-1", "rm .dev/tmp/perf-1/run.log .dev/preview/shot.png", "rm -rf -- .dev/tmp/x 2>/dev/null",
+                    f"rm -rf {self.root}/.dev/tmp/perf-1", "rm -rf .dev/run/worktrees/T-001/.dev/tmp/x"):
+            self.assertTrue(self.ok(cmd), cmd)
+        self.assertTrue(self.ok("rm -rf tmp/perf-1", self.dev))
+        for cmd in ("rm -rf .dev/tmp", "rm -rf .dev/tmp/../../src", "rm -rf .dev/tmp/*", "rm -rf .dev/state.json",
+                    "rm -rf .dev/run/locks", "rm -rf ~/.dev/tmp/x", "rm -rf $HOME/x", "rm -i .dev/tmp/x",
+                    "rm -rf .dev/tmp/x src/a.py", "cd src && rm -rf .dev/tmp/x", "rm -rf .dev/tmp/x; git push",
+                    "rm -rf .dev/tmp/x > out", "sudo rm -rf .dev/tmp/x", "rm -rf $(pwd)/.dev/tmp/x", "rmdir .dev/tmp/x"):
+            self.assertFalse(self.ok(cmd), cmd)
+        self.assertFalse(self.ok("rm -rf ../.dev/tmp/x", self.root / "src"))
+
+    def test_symlinks_and_tracked_files_are_refused(self) -> None:
+        (self.dev / "tmp" / "lnk").symlink_to(self.root / "src")
+        self.assertTrue(self.ok("rm .dev/tmp/lnk"))  # rm removes the link itself
+        self.assertFalse(self.ok("rm -rf .dev/tmp/lnk/"))  # would empty src/
+        self.assertFalse(self.ok("rm -rf .dev/tmp/lnk/a.py"))
+        (self.dev / "tmp" / "kept.txt").write_text("x", encoding="utf-8")
+        self.git("add", "-f", ".dev/tmp/kept.txt")
+        self.assertFalse(self.ok("rm .dev/tmp/kept.txt"))
+
+    def test_a_symlinked_scratch_folder_is_refused(self) -> None:
+        other = Path(self.tmp.name) / "elsewhere"
+        other.mkdir()
+        (self.dev / "preview").mkdir(exist_ok=True)
+        (self.dev / "preview").rmdir()
+        (self.dev / "preview").symlink_to(other)
+        self.assertFalse(self.ok("rm -rf .dev/preview/x"))
+
+    def hook(self, cmd: str, rnd: str = "", session: str = "s1") -> dict | None:
+        import dev_agent_hook as hook
+        with mock.patch.dict(os.environ, {"DEV_KIT_ROUND_ID": rnd} if rnd else {}):
+            if not rnd:
+                os.environ.pop("DEV_KIT_ROUND_ID", None)
+            return hook.permission(self.root, self.dev, {"tool_name": "Bash", "tool_input": {"command": cmd},
+                                                         "session_id": session, "cwd": str(self.root)})
+
+    def test_the_hook_allows_it_in_a_round_and_while_autopilot_runs(self) -> None:
+        import dev_telemetry as tel
+        self.assertEqual(self.hook("rm -rf .dev/tmp/perf-1", rnd="qa-M1-x")["hookSpecificOutput"]["decision"]["behavior"], "allow")
+        self.assertIsNone(self.hook("rm -rf .dev/tmp/perf-1"))  # main session, no autopilot: Claude Code asks as usual
+        tel.skill_clock(self.dev, "skill_start", "autopilot", None, session="s1")
+        self.assertEqual(self.hook("rm -rf .dev/tmp/perf-1")["hookSpecificOutput"]["decision"]["behavior"], "allow")
+        self.assertIsNone(self.hook("rm -rf .dev/tmp/perf-1", session="other"))
+        self.assertIsNone(self.hook("rm -rf src"))
+        self.assertIsNone(self.hook("gzip -c src/a.py | wc -c"))  # the main session's other prompts are unchanged
+        tel.skill_clock(self.dev, "skill_end", "autopilot", None, session="s1")
+        self.assertIsNone(self.hook("rm -rf .dev/tmp/perf-1"))
+
+    def test_tmp_clean_deletes_scratch_only(self) -> None:
+        self.ds("tmp", "clean", ".dev/tmp/perf-1")
+        self.assertFalse((self.dev / "tmp" / "perf-1").exists())
+        p = self.ds("tmp", "clean", "src/a.py", expect=None)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertTrue((self.root / "src" / "a.py").exists())
+        (self.dev / "tmp" / "lnk").symlink_to(self.root / "src")
+        self.ds("tmp", "clean", ".dev/tmp/lnk")
+        self.assertTrue((self.root / "src" / "a.py").exists())
+        self.assertFalse((self.dev / "tmp" / "lnk").is_symlink())
+
+    def test_tmp_clean_without_paths_leaves_recent_scratch(self) -> None:
+        old = self.dev / "tmp" / "old-1"
+        old.mkdir()
+        t = time.time() - 7200
+        os.utime(old, (t, t))
+        out = json.loads(self.ds("tmp", "clean", "--json").stdout)
+        self.assertEqual(out["deleted"], [".dev/tmp/old-1"])
+        self.assertTrue((self.dev / "tmp" / "perf-1").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
