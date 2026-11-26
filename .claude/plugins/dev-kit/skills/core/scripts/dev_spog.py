@@ -63,7 +63,7 @@ CACHE_S = 30        # a project's view is rebuilt when its files change, or at l
 SESSION_STALE_S = 12 * 3600  # a session with no hook event for this long is treated as closed
 ITEMS_SHOWN = 3     # rows per kind of need on a project card (the rest are counted)
 # the order that costs most to leave waiting, as in the board's Needs you; a live session waiting comes first
-NEED_KINDS = ("session_permission", "session_question", "prod_health", "release_approval", "qa_exhausted", "checkpoint",
+NEED_KINDS = ("session_permission", "session_question", "prod_health", "long_job", "release_approval", "qa_exhausted", "checkpoint",
               "hotfix", "blocked", "question", "issue_queue", "debt", "lesson", "denied")
 CODE_ID = db.CODE_ID
 
@@ -198,6 +198,8 @@ def needs(st: dict, sess: list[dict]) -> list[dict]:
         k = n.get("kind")
         if k == "prod_health":
             groups["prod_health"].append(_item(n.get("issue"), n.get("detail") or n.get("target"), n.get("since")))
+        elif k == "long_job":
+            groups["long_job"].append(_item(n.get("job"), n.get("why"), n.get("since")))
         elif k == "checkpoint":
             groups["checkpoint"].append(_item(n.get("target"), n.get("title"), n.get("since")))
         elif k == "debt_over_cap":

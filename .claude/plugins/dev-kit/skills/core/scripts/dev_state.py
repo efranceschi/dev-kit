@@ -78,6 +78,8 @@ Subcommands
   event TYPE    append an allowlisted event to .dev/telemetry.jsonl (--set k=v, --json)
   feedback      brief feedback about the dev-kit (--worked/--failed/--improve area:note)
   telemetry     summary | report | export [--all | --since D] [--json] [--out FILE] [--events]: session log, per-stage grades, export
+  job ACTION    start NAME --cmd "<command>" [--timeout-min N] | wait NAME [--max S] | status | log | stop | ack: a
+                long command under a supervisor that records its exit code and stops it at its limit (never ps|grep), §17
   cleanup       kill agents' leftover processes recorded in .dev/run/*.pids (only inside this project)
   add-issue     register a bug / improvement / change in the queue (--type --class --title ...), conventions §15
   issue I       show or update an issue (--status --class --link T --duplicate-of I --note)
@@ -239,7 +241,9 @@ DEFAULT_AUTONOMY = {
         "deferred_cap": {"total": 20, "medium": 10},
         # How long one auditor may work before the fence makes it write its result, and how long a QA round may go
         # without any tool call before it counts as stalled (qa-watch, round run; conventions.md §17).
-        "watchdog": {"auditor_budget_min": 30, "stall_min": 20},
+        # job_*: the time limit of a long command run with `job start`, and how long its output may stay silent before
+        # it shows in Needs you.
+        "watchdog": {"auditor_budget_min": 30, "stall_min": 20, "job_timeout_min": 90, "job_stall_min": 30},
     },
 }
 
@@ -660,9 +664,10 @@ def check_autonomy_field(field: str, val: object) -> object:
                 or not all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 1000 for v in dc.values())):
             fail('autonomy.quality.deferred_cap must be {"total": 20, "medium": 10} (0 turns a cap off)')
         wd = val.get("watchdog", {})
-        if (not isinstance(wd, dict) or set(wd) - {"auditor_budget_min", "stall_min"}
+        if (not isinstance(wd, dict) or set(wd) - {"auditor_budget_min", "stall_min", "job_timeout_min", "job_stall_min"}
                 or not all(isinstance(v, int) and not isinstance(v, bool) and 5 <= v <= 240 for v in wd.values())):
-            fail('autonomy.quality.watchdog must be {"auditor_budget_min": 30, "stall_min": 20} (minutes, 5 to 240)')
+            fail('autonomy.quality.watchdog must be {"auditor_budget_min": 30, "stall_min": 20, "job_timeout_min": 90, '
+                 '"job_stall_min": 30} (minutes, 5 to 240)')
     elif field == "ui":
         if not isinstance(val, dict) or set(val) - set(UI_KEYS) or not all(isinstance(v, bool) for v in val.values()):
             fail(f"autonomy.ui must be an object with true/false values for {', '.join(UI_KEYS)}")
@@ -5124,6 +5129,298 @@ def cmd_verify(store: Store, a: argparse.Namespace) -> None:
     sys.exit(0 if due else 3)
 
 
+# ------------------------------------------------------------------ long commands as kit jobs (conventions.md §17)
+# A long command (the full suite, a build, a scan) runs under a supervisor: `job start` launches it detached, the
+# supervisor writes its exit code into .dev/run/jobs/<name>.json when it ends (the sentinel), kills it at its time
+# limit, and `job wait` reads that file with a bounded wait. Whether it is running is never guessed from a process
+# listing: `ps | grep` and `pgrep -f` match their own command line and report "running" forever.
+JOB_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,40}$")
+JOB_ENDED = ("passed", "failed", "timed_out", "stopped")
+JOB_WAIT_MAX_S = 540  # below the 10 min a Bash tool call may last
+
+
+def jobs_dir(store: Store) -> Path:
+    return store.dev / "run" / "jobs"
+
+
+def job_cfg(store: Store) -> dict:
+    """The job watchdog (autonomy.quality.watchdog): the time limit of a job and how long its log may stay silent
+    before it shows in Needs you. DEV_KIT_JOB_TIMEOUT_S / DEV_KIT_JOB_STALL_S pin them in seconds (tests)."""
+    wd = quality_cfg(store).get("watchdog") or {}
+    out = {"timeout_s": int(wd.get("job_timeout_min", 90)) * 60.0, "stall_s": int(wd.get("job_stall_min", 30)) * 60.0}
+    for k, env in (("timeout_s", "DEV_KIT_JOB_TIMEOUT_S"), ("stall_s", "DEV_KIT_JOB_STALL_S")):
+        with contextlib.suppress(ValueError):
+            if os.environ.get(env):
+                out[k] = max(1.0, float(os.environ[env]))
+    return out
+
+
+def _iso_ts(t: float) -> str:
+    return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _proc_start(pid: object) -> str | None:
+    """The kernel's start time of a process (Linux), so a reused PID is never taken for the job; None elsewhere."""
+    try:
+        stat = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8", errors="replace")
+        return stat.rsplit(")", 1)[1].split()[19]
+    except (OSError, ValueError, IndexError, TypeError):
+        return None
+
+
+def _same_proc(pid: object, start: object) -> bool:
+    if not pid or not _pid_alive(pid):
+        return False
+    if _zombie(pid):
+        return False
+    cur = _proc_start(pid)
+    return not (start and cur and cur != start)
+
+
+def _zombie(pid: object) -> bool:
+    try:
+        stat = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8", errors="replace")
+        return stat.rsplit(")", 1)[1].split()[0] in ("Z", "X")
+    except (OSError, ValueError, IndexError, TypeError):
+        return False
+
+
+def job_view(store: Store, rec: dict, ref: float | None = None) -> dict:
+    """A job record as it is now: `running` only while its supervisor is alive and has not written an end; `lost`
+    when the supervisor is gone without one (killed, the machine restarted). Adds elapsed, log silence, stalled."""
+    ref = ref or time.time()
+    v = dict(rec)
+    if v.get("state") == "starting" and ref - float(v.get("started_ts") or ref) > 30:
+        v["state"] = "lost"  # the supervisor never came up
+    if v.get("state") == "running" and not _same_proc(v.get("supervisor"), v.get("supervisor_start")):
+        again = _read_json(jobs_dir(store) / f"{v.get('name')}.json")  # it may have ended between the two reads
+        v = dict(again) if again.get("state") in JOB_ENDED else {**v, "state": "lost"}
+    ack = jobs_dir(store) / f"{v.get('name')}.ack"
+    with contextlib.suppress(OSError, ValueError):
+        v["acked"] = float(ack.read_text(encoding="utf-8").strip()) == float(v.get("started_ts") or 0)
+    started = float(v.get("started_ts") or ref)
+    end = float(v.get("ended_ts") or ref)
+    v["elapsed_s"] = round(max(0.0, end - started))
+    log = store.root / str(v.get("log") or "")
+    try:
+        last_out = log.stat().st_mtime if v.get("log") else started
+    except OSError:
+        last_out = started
+    v["silent_s"] = round(max(0.0, ref - max(started, last_out))) if v.get("state") == "running" else 0
+    v["stalled"] = v.get("state") == "running" and v["silent_s"] > float(v.get("stall_s") or 1800)
+    return v
+
+
+def jobs_all(store: Store) -> list[dict]:
+    d = jobs_dir(store)
+    out = []
+    for p in sorted(d.glob("*.json")) if d.is_dir() else []:
+        rec = _read_json(p)
+        if rec.get("name"):
+            out.append(job_view(store, rec))
+    return out
+
+
+def job_needs(store: Store) -> list[dict]:
+    """Needs you: a job that hit its time limit, lost its supervisor, or whose output has been silent past
+    job_stall_min while it runs. `job ack NAME` (or starting it again) takes it off."""
+    try:
+        rows = jobs_all(store)
+    except Exception:  # noqa: BLE001 - a status read never fails on a job file
+        return []
+    out = []
+    for j in rows:
+        if j.get("acked"):
+            continue
+        why = "timed_out" if j["state"] == "timed_out" else "lost" if j["state"] == "lost" else "stalled" if j["stalled"] else None
+        if why:
+            out.append({"kind": "long_job", "job": j["name"], "why": why, "elapsed_s": j["elapsed_s"], "silent_s": j["silent_s"],
+                        "timeout_s": j.get("timeout_s"), "since": j.get("started_at"), "log": j.get("log"),
+                        "command": str(j.get("command") or "")[:120]})
+    return out
+
+
+def _job_write(store: Store, rec: dict) -> None:
+    atomic_write(jobs_dir(store) / f"{rec['name']}.json", json.dumps(rec, indent=2) + "\n")
+
+
+def job_supervise(store: Store, name: str) -> int:
+    """The supervisor (run detached by `job start`): runs the command in its own process group, writes the end
+    (exit code, state) into the job file, and stops the whole group at the time limit."""
+    path = jobs_dir(store) / f"{name}.json"
+    rec = _read_json(path)
+    if not rec or rec.get("state") != "starting":
+        return 1
+    log = store.root / rec["log"]
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("ab") as out:
+        try:
+            proc = subprocess.Popen(["sh", "-c", rec["command"]], cwd=rec.get("cwd") or str(store.root), stdout=out,
+                                    stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+        except OSError as e:
+            out.write(f"\n[dev-kit job] cannot start: {e}\n".encode())
+            rec.update(state="failed", exit_code=127, ended_ts=time.time(), ended_at=_iso_ts(time.time()))
+            _job_write(store, rec)
+            return 1
+        rec.update(state="running", pid=proc.pid, pid_start=_proc_start(proc.pid), supervisor=os.getpid(),
+                   supervisor_start=_proc_start(os.getpid()))
+        _job_write(store, rec)
+        deadline = float(rec["started_ts"]) + float(rec["timeout_s"])
+        state, code = None, None
+        while True:
+            try:
+                code = proc.wait(timeout=1.0)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            if path.with_suffix(".stop").exists():
+                state = "stopped"
+            elif time.time() >= deadline:
+                state = "timed_out"
+            if state:
+                with contextlib.suppress(OSError):
+                    os.killpg(proc.pid, signal.SIGTERM)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=10)
+                with contextlib.suppress(OSError):  # whatever of the group ignored SIGTERM (a child in the background)
+                    os.killpg(proc.pid, signal.SIGKILL)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=10)
+                code = 124 if state == "timed_out" else proc.returncode
+                out.write(f"\n[dev-kit job] {state} after {round(time.time() - float(rec['started_ts']))}s\n".encode())
+                break
+    t = time.time()
+    rec = {**_read_json(path), "exit_code": code, "ended_ts": t, "ended_at": _iso_ts(t),
+           "state": state or ("passed" if code == 0 else "failed")}
+    _job_write(store, rec)
+    with contextlib.suppress(OSError):
+        path.with_suffix(".stop").unlink()
+    store.event("job", name=name, transition=rec["state"], exit_code=code if isinstance(code, int) else -1,
+                duration_s=round(t - float(rec["started_ts"])))
+    if rec["state"] == "timed_out":
+        queue_notice(store, f"dev-kit: job {name} hit its {round(float(rec['timeout_s']) / 60)} min limit and was stopped")
+    return 0
+
+
+def _mins(s: object) -> str:
+    return f"{round(float(s) / 60)} min" if float(s) >= 90 else f"{round(float(s))}s"
+
+
+def _job_line(j: dict) -> str:
+    mins = _mins
+    head = f"{j['name']}: {j['state']}"
+    if j["state"] in ("passed", "failed", "timed_out", "stopped"):
+        head += f" (exit {j.get('exit_code')}) after {mins(j['elapsed_s'])} · ended {j.get('ended_at')}"
+    elif j["state"] == "running":
+        head += f" for {mins(j['elapsed_s'])} of {mins(j.get('timeout_s') or 0)} · output silent {mins(j['silent_s'])}"
+        head += " · STALLED" if j["stalled"] else ""
+    elif j["state"] == "lost":
+        head += " (its supervisor is gone without an exit code: run it again)"
+    return head + f" · log {j.get('log')}"
+
+
+def cmd_job(store: Store, a: argparse.Namespace) -> None:
+    """Long commands under a supervisor (conventions.md §17): start NAME --cmd "<command>" [--timeout-min N] |
+    wait NAME [--max S] | status [NAME] | log NAME [--lines N] | stop NAME | ack NAME. `wait` exits 0 passed,
+    1 failed, 3 still running (call it again), 4 timed out, stopped or lost."""
+    store.load()
+    d = jobs_dir(store)
+    if a.action != "status" and (not a.name or not JOB_NAME.match(a.name)):
+        fail(f"job {a.action} needs a NAME (lowercase letters, digits, . _ -; e.g. full-suite)")
+    path = d / f"{a.name}.json" if a.name else None
+    if a.action == "supervise":
+        sys.exit(job_supervise(store, a.name))
+    if a.action == "start":
+        if not (a.cmd or "").strip():
+            fail('job start needs --cmd "<command>"')
+        cur = _read_json(path)
+        if cur and job_view(store, cur)["state"] in ("running", "starting"):
+            fail(f"job {a.name} is already running (since {cur.get('started_at')}): `job wait {a.name}` or `job stop {a.name}`")
+        cfg = job_cfg(store)
+        timeout_s = a.timeout_min * 60.0 if a.timeout_min else cfg["timeout_s"]
+        t = time.time()
+        log = f".dev/tmp/jobs/{a.name}.log"
+        (store.root / log).parent.mkdir(parents=True, exist_ok=True)
+        (store.root / log).write_bytes(b"")
+        rec = {"name": a.name, "command": a.cmd, "cwd": str(Path(a.cwd).resolve()) if a.cwd else str(store.root),
+               "state": "starting", "started_ts": t, "started_at": _iso_ts(t), "timeout_s": timeout_s,
+               "stall_s": cfg["stall_s"], "log": log}
+        for extra in (".stop", ".ack"):
+            with contextlib.suppress(OSError):
+                path.with_suffix(extra).unlink()
+        _job_write(store, rec)
+        subprocess.Popen([sys.executable, "-I", str(Path(__file__).resolve()), "--root", str(store.root), "job", "supervise", a.name],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               start_new_session=True, close_fds=True)
+        # the supervisor records its own pid and the command's with `running`; wait for it so `wait` can tell lost
+        end = time.monotonic() + 10
+        while time.monotonic() < end and _read_json(path).get("state") == "starting":
+            time.sleep(0.05)
+        store.event("job", name=a.name, transition="start", exit_code=-1, duration_s=0)
+        print(f"job {a.name} started (limit {_mins(timeout_s)}) · log {log} · wait with "
+              f"`dev_state.py job wait {a.name}`")
+        return
+    if a.action == "status":
+        rows = [job_view(store, _read_json(path))] if a.name and path.exists() else ([] if a.name else jobs_all(store))
+        if a.name and not rows:
+            fail(f"no job {a.name}", 3)
+        if a.json:
+            print(json.dumps(rows[0] if a.name else rows, indent=2))
+            return
+        print("\n".join(_job_line(j) for j in rows) if rows else "no jobs")
+        return
+    rec = _read_json(path)
+    if not rec:
+        fail(f"no job {a.name} (start it with `job start {a.name} --cmd \"<command>\"`)", 3)
+    if a.action == "log":
+        try:
+            lines = (store.root / rec["log"]).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            lines = []
+        print("\n".join(lines[-max(1, a.lines):]))
+        return
+    if a.action == "ack":
+        atomic_write(path.with_suffix(".ack"), f"{rec.get('started_ts')}\n")
+        print(f"job {a.name}: acknowledged (off Needs you)")
+        return
+    if a.action == "stop":
+        v = job_view(store, rec)
+        if v["state"] != "running":
+            print(f"job {a.name} is not running ({v['state']})")
+            return
+        path.with_suffix(".stop").write_text("stop\n", encoding="utf-8")
+        end = time.monotonic() + 20
+        while time.monotonic() < end and job_view(store, _read_json(path))["state"] == "running":
+            time.sleep(0.2)
+        v = job_view(store, _read_json(path))
+        if v["state"] == "running":
+            with contextlib.suppress(OSError, TypeError, ValueError):
+                os.killpg(int(rec["pid"]), signal.SIGKILL)
+        print(_job_line(job_view(store, _read_json(path))))
+        return
+    # wait: bounded, reading the job file the supervisor writes at the end
+    deadline = time.monotonic() + max(0, min(JOB_WAIT_MAX_S, a.max))
+    while True:
+        v = job_view(store, _read_json(path))
+        if v["state"] not in ("running", "starting") or time.monotonic() >= deadline:
+            break
+        time.sleep(min(2.0, max(0.1, deadline - time.monotonic())))
+    if a.json:
+        print(json.dumps(v, indent=2))
+    else:
+        print(_job_line(v))
+        if v["state"] == "failed":
+            try:
+                tail = (store.root / v["log"]).read_text(encoding="utf-8", errors="replace").splitlines()[-15:]
+            except OSError:
+                tail = []
+            print("\n".join(f"  | {ln}" for ln in tail))
+        elif v["state"] in ("running", "starting"):
+            print(f"still running: call `job wait {a.name}` again" + (" · its output is silent past the stall limit: look at the log"
+                                                                     if v.get("stalled") else ""))
+    sys.exit({"passed": 0, "failed": 1, "running": 3, "starting": 3}.get(v["state"], 4))
+
+
 def cmd_ledger(store: Store, a: argparse.Namespace) -> None:
     """Work ledger (conventions.md §18): reuse verified work whose inputs did not change."""
     store.load()
@@ -6441,9 +6738,10 @@ def checkpoint_needs(store: Store) -> list[dict]:
 
 
 def all_needs(store: Store) -> list[dict]:
-    """Needs-you items the state derives (production health, checkpoints, deferred debt, proposed lessons, the issue
+    """Needs-you items the state derives (production health, long jobs past their limits, checkpoints, deferred debt, proposed lessons, the issue
     queue), in that order."""
-    return health_needs(store) + checkpoint_needs(store) + debt_needs(store) + lesson_needs(store) + queue_needs(store)
+    return (health_needs(store) + job_needs(store) + checkpoint_needs(store) + debt_needs(store) + lesson_needs(store)
+            + queue_needs(store))
 
 
 def lesson_needs(store: Store) -> list[dict]:
@@ -8479,6 +8777,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--test", help="bisect: the command that runs the failing tests"); s.add_argument("--setup",
                    help="bisect: run once in the scratch worktree first (e.g. link node_modules)")
     s.add_argument("--timeout", type=int, default=900); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("job"); s.set_defaults(fn=cmd_job)
+    s.add_argument("action", choices=["start", "wait", "status", "log", "stop", "ack", "supervise"])
+    s.add_argument("name", nargs="?"); s.add_argument("--cmd", help="start: the shell command to run")
+    s.add_argument("--cwd", help="start: run it there (default: the project root)")
+    s.add_argument("--timeout-min", type=float, help="start: the time limit (default autonomy.quality.watchdog.job_timeout_min)")
+    s.add_argument("--max", type=int, default=JOB_WAIT_MAX_S, help="wait: seconds to wait at most (at most 540)")
+    s.add_argument("--lines", type=int, default=40); s.add_argument("--json", action="store_true")
     s = sub.add_parser("xref"); s.set_defaults(fn=cmd_xref)
     s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
     s = sub.add_parser("stale"); s.set_defaults(fn=cmd_stale)

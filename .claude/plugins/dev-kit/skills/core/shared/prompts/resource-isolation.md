@@ -13,7 +13,7 @@ Several agents may run at the same time on the same host, against the same proje
 
 ## Processes
 - Every process you start in the background: append its PID to `.dev/run/<your-agent-name>-<N>.pids` right after starting it (`cmd & echo $! >> .dev/run/<name>-<N>.pids`).
-- Never use `pkill`, `killall`, `kill` by name, or `pgrep -f`. Never wait with loops such as `until ! pgrep …` (they match their own command line and never end). Wait with `wait <pid>`, or poll a URL or file with a timeout (`timeout 60 sh -c 'until curl -fs …; do sleep 1; done'`).
+- Never use `pkill`, `killall`, `kill` by name, `pgrep -f` or `ps … | grep` (the fence denies the last two). Never wait with loops such as `until ! pgrep …` (they match their own command line and never end). Wait with `wait <pid>`, or poll a URL or file with a timeout (`timeout 60 sh -c 'until curl -fs …; do sleep 1; done'`).
 - Before your final message, stop exactly the PIDs you recorded (`kill <pid>`), check they are gone, and remove your pid file. Leave nothing running in the background. The orchestrator runs `dev_state.py cleanup` after you as a safety net, not as your cleanup.
 
 ## Long commands

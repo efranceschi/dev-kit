@@ -23,7 +23,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     SKILL.md                     marker (disable-model-invocation: true, user-invocable: false)
     scripts/dev_state.py         state: init, sync-plan, next, start, done, block, unblock, drop, add-task, add-question,
                                  fix-tasks, freeze, affected, hard-floor, ci, debt, gate, review, checkpoint, artifact, stale, xref, tests, ledger, brief, tier, set-risk, risk-profile,
-                                 risk-report, lock, qa-watch, strings, contrast, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
+                                 risk-report, lock, qa-watch, job (long commands under a supervisor), strings, contrast, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
                                  preview, deploy, cleanup, event, feedback, telemetry, tip, tips, notify,
                                  plan edits (move-task, new-milestone, reorder, plan-apply --ops), answer-question, release-record;
                                  lifecycle() derives the project phase (conventions §19) for status, next command,

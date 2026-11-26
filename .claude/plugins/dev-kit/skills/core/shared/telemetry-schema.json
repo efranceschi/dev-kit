@@ -276,6 +276,12 @@
       "exit_code": "num",
       "reconciled": "num"
     },
+    "job": {
+      "name": "tok",
+      "transition": "tok",
+      "exit_code": "num",
+      "duration_s": "num"
+    },
     "auditor_stalled": {
       "scope": "tok",
       "agent": "tok",

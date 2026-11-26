@@ -2,6 +2,25 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.19.0 — 2026-11-26
+
+Field report (T-110): during the autopilot, the check "is the full pipeline still running?" matched its own command line (`ps | grep`), so the run reported "running" for 12 hours while the suite had finished green at 00:28. Nothing in the kit gave the orchestrator a reliable way to run a long command and learn that it ended, and nothing stopped one that ran too long.
+
+### Added
+- `dev_state.py job start NAME --cmd "<command>" [--timeout-min N] [--cwd DIR]`: runs a long command (the full suite, a build, a scan) under a detached supervisor in its own process group, output in `.dev/tmp/jobs/<name>.log`. The supervisor records the exit code and the end in `.dev/run/jobs/<name>.json` (the sentinel) and stops the whole group at the time limit (`timed_out`, exit 124).
+- `dev_state.py job wait NAME [--max S] [--json]`: a bounded wait (at most 540 s per call) on that file: exit 0 passed, 1 failed (with the end of the log), 3 still running (call it again), 4 timed out, stopped or lost. A job whose supervisor died without writing an end is `lost`, never `running` (the PID is matched with its kernel start time, so a reused PID is not taken for it). `job status [NAME]`, `job log NAME`, `job stop NAME`, `job ack NAME`.
+- Needs you › "Long runs that need a look" (board and `/dev-kit:spog`): a job that hit its limit, was lost, or whose output stayed silent past `job_stall_min` while it runs, until `job ack` or the next start. A timed-out job also queues a desktop notification.
+- `autonomy.quality.watchdog` accepts `job_timeout_min` (default 90) and `job_stall_min` (default 30).
+- `/dev-kit:debug` checks: `job_lost`, `job_timed_out`, `job_running`.
+
+### Changed
+- The fence denies `pgrep -f` and `ps … | grep` (and loops around them) to everyone, the main session included, and points to `job wait`; `kill -0 <pid>`, `wait <pid>` and `pgrep <name>` still pass.
+- `implement` (the full suite of step 6b), `qa` (the shared baseline), `release` (suite and build) and the onboarding test baseline run their long commands as jobs; conventions §17 has the rule.
+- `/dev-kit:debug`'s process check no longer counts a zombie as alive.
+
+### Migration
+Nothing to do: the new keys have defaults, and `.dev/run/` and `.dev/tmp/` are already machine-local.
+
 ## 3.18.0 — 2026-11-26
 
 Eduardo asked whether the kit should build first and test once when the milestone or the release closes, because the same work seemed to run again and again. The review kept test-first per task (it is how an implementer knows it is done, and what keeps a break from spreading to the tasks built on it) and removed the three real repetitions: the full suite after every merged task, the suite run again at release on code the last gate had verified, and the gate reviewing again the UI files the task checks had just reviewed.

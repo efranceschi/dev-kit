@@ -1593,11 +1593,12 @@
     const dneeds = allNeeds.filter((x) => x.kind === "debt_over_cap");
     const lneeds = allNeeds.filter((x) => x.kind === "lesson");
     const hneeds = allNeeds.filter((x) => x.kind === "prod_health");
-    const qneeds = allNeeds.filter((x) => !["checkpoint", "debt_over_cap", "lesson", "prod_health"].includes(x.kind));
+    const jneeds = allNeeds.filter((x) => x.kind === "long_job");
+    const qneeds = allNeeds.filter((x) => !["checkpoint", "debt_over_cap", "lesson", "prod_health", "long_job"].includes(x.kind));
     const n = blocked.length + data.questions.length + hot.length + stuck.length + denied.length + waitingRel.length + allNeeds.length;
     // which phase each item belongs to: the tabs show the count, the rows a tag that opens the phase
     const cpPrd = cneeds.filter((x) => x.target === "prd").length;
-    needsBy = { conception: cpPrd, planning: qneeds.length + cneeds.length - cpPrd, construction: blocked.length + hot.length + stuck.length + dneeds.length, stable: hneeds.length, releases: waitingRel.length };
+    needsBy = { conception: cpPrd, planning: qneeds.length + cneeds.length - cpPrd, construction: blocked.length + hot.length + stuck.length + dneeds.length + jneeds.length, stable: hneeds.length, releases: waitingRel.length };
     if (denied.length) needsBy[data.phase] = (needsBy[data.phase] || 0) + denied.length;
     data.questions.forEach((q) => { needsBy[questionPhase(q)] += 1; });
     // the strip exists only while something needs the user; warnings alone ride along but do not open it
@@ -1628,6 +1629,7 @@
     const hidden = Math.max(0, (data.denied_total || 0) - denied.length);
     const groups = [
       ["health", tr("Production is failing its health check"), hneeds.map(healthRow), "stable"],
+      ["jobs", tr("Long runs that need a look"), jneeds.map(jobRow), "construction"],
       ["approve", tr("Releases waiting for your approval"), waitingRel.map((r) => h("li", {}, h("span", { class: "id", text: r.id }),
         h("span", { text: tr("{title} · {v} closed", { title: r.title, v: plural(r.closed.length, "milestone") }) }),
         h("button", { type: "button", class: "link-btn", text: tr("Open"), onclick: () => openRelease(r.id) }),
@@ -1699,6 +1701,16 @@
       h("span", { class: "chip lane-hotfix", text: tr("expedite") }),
       h("span", { class: "sub", text: x.target || "" }),
       cmd(fix));
+  }
+  /** Needs you › a long command run as a kit job (conventions §17) that hit its time limit, lost its supervisor, or
+   * whose output went silent: its end is read from the exit code the supervisor records, never from a process list. */
+  function jobRow(x) {
+    const text = x.why === "timed_out" ? tr("Stopped at its {limit} limit after {elapsed}.", { limit: dur(x.timeout_s || 0), elapsed: dur(x.elapsed_s || 0) })
+      : x.why === "lost" ? tr("Ended without an exit code (its supervisor is gone): it has to run again.")
+        : tr("Running for {elapsed}, no output for {silent}.", { elapsed: dur(x.elapsed_s || 0), silent: dur(x.silent_s || 0) });
+    return h("li", {}, h("span", { class: "id", text: x.job }), h("span", { text }),
+      x.command ? h("span", { class: "sub clamp2", text: x.command }) : null,
+      h("span", { class: "sub" }, tr("Log: {log} · look in Claude Code with ", { log: x.log || "?" }), cmd("/dev-kit:debug")));
   }
   /** Needs you › the issue queue (conventions §15): above the limit, or an issue waiting too long; planned in Claude Code. */
   function queueNeedRow(x) {
@@ -2470,7 +2482,7 @@
     const q = b.queue || {};
     const n = (c) => (q[c] || []).length;
     const open = data.milestones.filter((m) => !isClosed(m)).length;
-    const qneeds = (b.needs || []).filter((x) => !["checkpoint", "debt_over_cap", "lesson", "prod_health"].includes(x.kind)).length;
+    const qneeds = (b.needs || []).filter((x) => !["checkpoint", "debt_over_cap", "lesson", "prod_health", "long_job"].includes(x.kind)).length;
     const hneeds = (b.needs || []).filter((x) => x.kind === "prod_health").length;
     return placeNeeds("stable", markHere([
       { key: "stable", label: tr("Stable"), kind: "ship", sub: data.phase === "stable" ? tr("nothing open") : tr("Open milestones: {n}", { n: open }), state: data.phase === "stable" ? "done" : "todo",

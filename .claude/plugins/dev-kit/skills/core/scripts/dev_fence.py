@@ -13,6 +13,9 @@ agent without a slot, a project without .dev/state.json) passes untouched.
 - Bash (every kit agent, slot or not): `git commit --no-verify` / `-n`, `git push --force` / `-f`, `git rebase` and
   `git reset --hard` are denied. The orchestrator uses the kit's scripts, never these.
 
+- Bash (everyone, the main session included): telling whether a process runs from its command line (`pgrep -f`,
+  `ps … | grep`) is denied: it matches itself and says "running" forever. `dev_state.py job` instead.
+
 - In a headless round (`dev_state.py round run`, DEV_KIT_ROUND_ID set), the orchestrator itself: applying a task's
   worktree by hand (`git apply`/`am`/`cherry-pick`, `git checkout|restore` from a dev-kit/T-nnn branch, `cp`/`rsync`
   out of a worktrees/ folder) is denied; `slot apply` and `start T-nnn --resume` do it and record the start. Every
@@ -55,6 +58,9 @@ MANUAL_ADOPT = re.compile(
     r"\bgit\s+(?:-C\s+\S+\s+)?(?:apply|am|cherry-pick)\b"
     r"|\bgit\s+(?:-C\s+\S+\s+)?(?:checkout|restore|merge)\b[^;&|\n]*dev-kit/T-\d+"
     r"|\b(?:cp|rsync|ditto)\b[^;&|\n]*worktrees/")
+# Waiting on a process by its command line: `pgrep -f`, `ps … | grep` (and loops around them) match their own command
+# line, so they report "running" long after the work ended. Long commands run as kit jobs instead (§17).
+SELF_MATCH = re.compile(r"\bpgrep\b[^;&|\n]*\s-[A-Za-z]*f|\bps\b[^;&|\n]*\|\s*(?:e|f)?grep\b")
 KIT_AGENTS = None
 
 
@@ -249,6 +255,15 @@ def decide(payload: dict, root: Path) -> dict | None:
             note_activity(dev, payload, rnd)
         except Exception:  # noqa: BLE001 - the board's view must never break the fence
             pass
+    if payload.get("tool_name") == "Bash":
+        ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+        if SELF_MATCH.search(str(ti.get("command") or "")):
+            return deny(dev, "dev-kit: never tell whether something runs from a process listing (`pgrep -f`, `ps | grep`): "
+                             "the search matches its own command line and says \"running\" after the work ended. Run long "
+                             "commands with `dev_state.py job start NAME --cmd \"<command>\"` and wait with `dev_state.py job "
+                             "wait NAME` (it reads the exit code the supervisor records); for a PID you started, "
+                             "`kill -0 <pid>` or `wait <pid>` (conventions.md §17).", "self_match_poll",
+                        "orchestrator" if not aid else str(payload.get("agent_type") or "agent"), None, "Bash")
     if not aid:
         if rnd and payload.get("tool_name") == "Bash":
             ti = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}

@@ -239,9 +239,13 @@ def tail(p: Path, n: int) -> str:
 def alive(pid: object) -> bool:
     try:
         os.kill(int(pid), 0)  # type: ignore[arg-type]
-        return True
     except (OSError, ValueError, TypeError):
         return False
+    try:  # a zombie (ended, not yet reaped) is not running (Linux; elsewhere the signal check decides)
+        stat = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8", errors="replace")  # type: ignore[arg-type]
+        return stat.rsplit(")", 1)[1].split()[0] not in ("Z", "X")
+    except (OSError, IndexError, ValueError):
+        return True
 
 
 def kit_version() -> str:
@@ -352,6 +356,16 @@ def checks(root: Path) -> list[dict]:
         if s != "in_progress":
             add("dirty_files_of_unstarted_task", "error" if round_alive else "warn",
                 f"the main checkout has uncommitted changes in files of {tid}, which is {s}", ", ".join(sorted(set(fs))[:12]))
+    for jf in sorted((run / "jobs").glob("*.json")) if (run / "jobs").is_dir() else []:
+        j = read_json(jf)
+        name, state = j.get("name") or jf.stem, j.get("state")
+        if state in ("running", "starting") and not alive(j.get("supervisor")):
+            add("job_lost", "warn", f"job {name} says {state} but its supervisor is gone: it ended without an exit code "
+                "(killed, or the machine restarted); run it again", f".dev/run/jobs/{jf.name} since {j.get('started_at')}")
+        elif state == "running":
+            add("job_running", "info", f"job {name} is running", f"since {j.get('started_at')}, limit {round(float(j.get('timeout_s') or 0) / 60)} min")
+        elif state == "timed_out":
+            add("job_timed_out", "warn", f"job {name} hit its time limit and was stopped", f"ended {j.get('ended_at')}, log {j.get('log')}")
     if started:
         add("round_running", "info", f"round {rnd.get('round')} started {started}", f"pids {rnd.get('pid')}/{rnd.get('child')}")
     return out

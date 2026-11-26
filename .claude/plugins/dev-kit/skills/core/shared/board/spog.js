@@ -36,7 +36,7 @@
   const STATUS_LABEL = { waiting: N_("Waiting for you"), running: N_("Running"), idle: N_("Idle"), missing: N_("Folder not found"),
     not_project: N_("No longer a dev-kit project"), unreadable: N_("Could not read its state") };
   const NEED_LABEL = { session_permission: N_("A session waits for a permission"), session_question: N_("A session waits for your answer"),
-    prod_health: N_("Production health"), release_approval: N_("Release approvals"), qa_exhausted: N_("QA rounds used up"),
+    prod_health: N_("Production health"), long_job: N_("Long runs that need a look"), release_approval: N_("Release approvals"), qa_exhausted: N_("QA rounds used up"),
     checkpoint: N_("Confirmations"), hotfix: N_("Hotfixes"), blocked: N_("Blocked tasks"), question: N_("Questions"),
     issue_queue: N_("Issue queue"), debt: N_("Deferred debt above the cap"), lesson: N_("Proposed lessons"), denied: N_("Denied permissions") };
   const PHASE_NAME = { conception: N_("Conception"), planning: N_("Planning"), construction: N_("Construction"), stable: N_("Stable") };
