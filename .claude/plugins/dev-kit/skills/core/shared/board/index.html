@@ -234,10 +234,15 @@
         <button type="button" role="tab" id="ins-tab-burndown" aria-controls="ins-burndown" data-view="burndown" data-i18n="Burndown">Burndown</button>
         <button type="button" role="tab" id="ins-tab-velocity" aria-controls="ins-velocity" data-view="velocity" data-i18n="Velocity">Velocity</button>
         <button type="button" role="tab" id="ins-tab-gates" aria-controls="ins-gates" data-view="gates" data-i18n="Gates">Gates</button>
+        <button type="button" role="tab" id="ins-tab-models" aria-controls="ins-models" data-view="models" data-i18n="Models">Models</button>
       </div>
       <button type="button" class="btn" id="metrics-close" aria-label="Close" data-i18n="Close" data-i18n-aria-label="Close">Close</button>
     </div>
     <div class="modal-body">
+      <div role="tabpanel" id="ins-models" aria-labelledby="ins-tab-models" tabindex="0" hidden>
+        <p class="card-sub" id="models-sub"></p>
+        <div id="models"></div>
+      </div>
       <div role="tabpanel" id="ins-gates" aria-labelledby="ins-tab-gates" tabindex="0" hidden>
         <p class="card-sub" id="dod-sub"></p>
         <div id="dod"></div>

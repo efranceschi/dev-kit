@@ -2,6 +2,23 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.23.0 — 2026-11-26
+
+Eduardo asked whether the model/effort matrix tunes itself per project when tasks keep failing and pass only after a higher model or effort. It did so only in part: two failures in a row raised a context until the end of the milestone, and the gate raised a context whose rule arm kept needing rounds. The case he described was lost: a retry runs one tier up, so its context key changed, and the gate deleted the failure records and filed the pass under the new key with `fails=1` on the arm that had solved it. The router now keeps both attempts where the task started and learns from the escalations themselves.
+
+### Added
+- Auto-tune (`dev_router.py`, slow loop at every passed gate): escalation records (`escalations` in `.dev/router.json`), one per task that passed only on a higher arm than its first attempt, and per auditor re-run on a higher arm. A context goes one tier up when escalation solved at least 3 tasks and 60% of the first attempts at the rule arm, weighted by age (half-life 3 milestones); after 5 clean runs up there one task probes the rule arm and a clean probe undoes the tune. State in `tune` and `tune_log`.
+- `autonomy.model_policy.router.auto_tune` (`apply` default, `suggest`, `off`) and `router.max_offset` (`1` default, or `2` to allow two tiers when the escalations needed two).
+- Optional `tags:` on plan tasks (synced to state): a tag with that evidence on its own is tuned alone (`<context>#tag:<tag>`).
+- `dev_router.py untune <context>`: undo one tune; only newer escalations can bring it back. `explain` lists active tunes, their evidence and the undo command.
+- Board, Metrics › Models: the tuned contexts with evidence, since when, clean runs and the next probe, recent changes and recent escalations (read-only; it shows the undo command).
+
+### Changed
+- `DS start` keeps the first attempt of a retried task in `tier.first` (context, arm, rule, returns), plus the route's `reason_code` and tune key; `sync-plan` no longer drops a started task's recorded tier.
+- The fast and slow loops file a retry under its first attempt's context: `T#first` (failed, on the first arm) and `T#final` (passed, on the arm that solved it, `fails` 0), so the learned offsets and expected costs see "X failed, X+1 solved" too. Learned weights count each task once.
+- A retry steps up from the arm the attempt really ran on (a router raise included), not only from its rule tier.
+- The `Route:` line names an auto-tune (`auto-tune +1: escalation solved 3 of 4 (T-012, …)`), a probe, or, in `suggest`, what it would do.
+
 ## 3.22.0 — 2026-11-26
 
 Eduardo saw many permission pauses during autopilot for `rm` inside `.dev/`. No skill or agent asks for it: agents clean their own scratch in `.dev/tmp/` on their own, the kit's safe set held only read-only commands, and the permission hook acted only in a round child, so in the main session every `rm` waited for an answer. Deleting scratch is now pre-authorised, but only scratch and only when the kit can verify it; a settings rule such as `Bash(rm .dev/*)` was rejected because Claude Code matches it on the start of the text (`rm .dev/tmp/../../src` would pass).

@@ -128,7 +128,7 @@
 
   const store = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
   const TASK_RE = /^T-\d{1,5}$/;
-  const INS = ["burndown", "velocity", "gates"];
+  const INS = ["burndown", "velocity", "gates", "models"];
   let query = "";            // text filter of the kanban
   let typeFilter = "";       // task type filter of the kanban
   let mobileCol = null;      // column shown on narrow screens (null = pick the most useful one)
@@ -2756,6 +2756,39 @@
   // metrics: burndown, velocity and gates, drawn when the modal opens (the charts measure their box)
   const INS_KEY = "board-metrics-v1";
   let insView = INS.includes(store.get(INS_KEY, "")) ? store.get(INS_KEY, "") : "burndown";
+  // ------------------------------------------------------------------ Models: what the router learned (auto-tune)
+  // A context that kept failing on its first arm and passing only one tier up now starts there; the board shows
+  // which, on what evidence, and the command that undoes it (the board itself never writes).
+  const TUNE_MODE = tmap({ apply: N_("turned on"), suggest: N_("suggest only"), off: N_("turned off") });
+  function renderModels() {
+    const md = data.models;
+    const sub = $("models-sub");
+    if (!md) {
+      sub.textContent = "";
+      fill($("models"), h("div", { class: "empty", text: tr("Nothing learned yet: the router learns at each passed gate.") }));
+      return;
+    }
+    sub.textContent = tr("Auto-tune {mode} · at most +{max} tier · {n} escalations on file", { mode: TUNE_MODE[md.mode] || md.mode, max: md.max_offset, n: md.escalations });
+    const rows = (md.active || []).map((a) => h("li", {},
+      h("span", {}, h("code", { text: a.context }), " ", a.tag ? h("span", { class: "chip", text: tr("tag {v}", { v: a.tag }) }) : null,
+        " ", h("span", { class: "chip bad", text: tr("+{v} tier", { v: a.offset }) })),
+      h("span", { class: "sub", text: [tr("escalation solved {w} of {n}", { w: a.wins, n: a.of }), (a.evidence || []).join(", "),
+        a.since ? tr("since {v}", { v: a.since }) : null,
+        a.probe ? tr("the next task probes the rule arm") : tr("{v} clean runs up there", { v: a.clean })].filter(Boolean).join(" · ") }),
+      h("span", { class: "sub" }, tr("Undo: "), cmd(`dev_router.py untune '${a.key}'`))));  // i18n-ok: a command
+    const table = rows.length ? h("ul", { class: "list" }, rows)
+      : h("div", { class: "empty", text: tr("No context adjusted: every task starts on its rule's model and effort.") });
+    const WHY = { escalation: N_("escalation kept solving it"), faded: N_("the evidence faded"), probe: N_("the rule arm passed its probe"), untune: N_("undone by hand") };
+    const log = (md.log || []).slice().reverse().map((c) => h("li", {},
+      h("code", { text: c.key }), h("span", { text: ` +${c.from} → +${c.to}` }), h("span", { class: "sub", text: [WHY[c.code] ? tr(WHY[c.code]) : c.why, c.milestone].filter(Boolean).join(" · ") })));
+    const esc = (md.recent || []).map((e) => h("li", {},
+      h("span", { class: "id", text: e.key }), h("span", { text: `${e.from} → ${e.to}` }), h("span", { class: "sub", text: [e.context, e.milestone].filter(Boolean).join(" · ") })));
+    fill($("models"), table,
+      md.mode === "off" ? h("p", { class: "pending-line", text: tr("Auto-tune is off: turn it on in Claude Code with "), }, cmd("/dev-kit:settings")) : null,
+      log.length ? [h("p", { class: "card-sub chart-title", text: tr("Recent changes") }), h("ul", { class: "list" }, log)] : null,
+      esc.length ? [h("p", { class: "card-sub chart-title", text: tr("Recent escalations (failed, then passed higher)") }), h("ul", { class: "list" }, esc)] : null);
+  }
+
   function renderMetrics() {
     if (!mdlg.open || !data || !data.ok) return;
     INS.forEach((k) => {
@@ -2768,6 +2801,7 @@
     $("metrics-sub").textContent = m ? `${m.id} · ${m.title || ""}` : "";
     if (insView === "burndown") renderBurndown(m);
     else if (insView === "velocity") renderVelocity(currentId());
+    else if (insView === "models") renderModels();
     else renderGates();
   }
   const setIns = (k, focus) => { insView = k; store.set(INS_KEY, k); renderMetrics(); if (focus) $(`ins-tab-${k}`).focus(); };

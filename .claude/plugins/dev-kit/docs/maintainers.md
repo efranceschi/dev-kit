@@ -35,7 +35,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     scripts/dev_risk.py          risk tier of a task (signals, weights, floors) and risk profile of a milestone, predicted ×
                                  real rows (imported by dev_state.py and dev_router.py; no command line)
     scripts/dev_router.py        model/effort router with feedback loops over .dev/router.json: route, observe, learn, explain,
-                                 reset (conventions §9 "Router"); dev_state.py calls it on start, done, block, reopen and gate
+                                 untune, reset, with auto-tune from escalations (conventions §9 "Router"); dev_state.py calls it on start, done, block, reopen and gate
     scripts/dev_score.py         0–100 score per dimension (low cap, dedupe, delta mode, legacy findings ignored)
     scripts/dev_ledger.py        work ledger: fingerprints of verified work, incremental plans, spot checks (conventions §18)
     scripts/dev_telemetry.py     allowlisted session log, stage grades (imported by the other scripts)

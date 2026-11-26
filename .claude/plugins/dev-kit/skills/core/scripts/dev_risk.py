@@ -26,6 +26,7 @@ RISK_FIELDS = ("risk", "complexity", "uncertainty", "risk_reasons", "opportunity
 # model/effort of each tier for the implementer; `speed-fix` is the fix of a low finding (mechanical change)
 TIER_ARM = {"speed": "haiku/medium", "balanced": "sonnet/medium", "balanced+": "sonnet/high", "quality": "opus/high"}
 FIX_LOW_ARM = "haiku/low"
+ARM_TIER_IDX = {"haiku/low": 0, "haiku/medium": 0, "sonnet/medium": 1, "sonnet/high": 2, "opus/medium": 3, "opus/high": 3}
 BASE_ARM = "sonnet/medium"  # the implementer's frontmatter (1.31 behaviour)
 
 # signal -> (default weight, label). Floor signals: the router never routes a task with one below its rule tier.
@@ -140,6 +141,8 @@ def model_policy(state: dict) -> dict:
     r.setdefault("mode", "apply")
     r.setdefault("balance", "balanced")
     r.setdefault("budget_usd_per_milestone", None)
+    r.setdefault("auto_tune", "apply")
+    r.setdefault("max_offset", 1)
     mp["router"] = r
     return mp
 
@@ -285,11 +288,14 @@ def task_tier(store, tid: str) -> dict:
     source = "rule"
     floor = any(s["signal"] in FLOOR_SIGNALS for s in sigs)
     arm = TIER_ARM[tier]
-    prev = (t.get("tier") or {}).get("rule") if isinstance(t.get("tier"), dict) else None
+    rec = t.get("tier") if isinstance(t.get("tier"), dict) else {}
+    prev = rec.get("rule")
     retried = any(s["signal"] in ("failed_before", "reopened_high") for s in sigs) and int(t.get("returns", 0) or 0) + \
         int(t.get("blocked_count", 0) or 0) > 0
     if retried and prev in TIERS:
-        up = TIERS[min(TIERS.index(prev) + 1, len(TIERS) - 1)]
+        # one step above the previous attempt: its rule, or the arm it really ran on when the router raised it
+        prev_i = max(TIERS.index(prev), ARM_TIER_IDX.get(rec.get("arm"), 0))
+        up = TIERS[min(prev_i + 1, len(TIERS) - 1)]
         if TIERS.index(up) > TIERS.index(tier):
             tier, source, arm = up, "retry", TIER_ARM[up]
     sev = finding_severity(store, t) if t.get("type") == "fix" else None

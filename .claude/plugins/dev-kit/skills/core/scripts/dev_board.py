@@ -69,6 +69,7 @@ SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))  # -I drops the script dir
 import dev_state as ds  # noqa: E402
 import dev_diagram as dg  # noqa: E402
+import dev_router as router  # noqa: E402
 
 ASSETS = SCRIPTS.parent / "shared" / "board"
 STATIC = {"/": "index.html", "/index.html": "index.html", "/assets/board.css": "board.css",
@@ -958,6 +959,21 @@ def denied_count(root: Path) -> int:
     return len(dev_perms.misses(root))
 
 
+def model_tuning(store) -> dict | None:
+    """What the router learned about model/effort per context (read-only: router.json is never written here)."""
+    if not ds.risk.router_file(store.dev).exists():
+        return None
+    data = router.load(store.dev)
+    cfg = ds.risk.model_policy(store.state)["router"]
+    out = router.tune_summary(data, cfg)
+    out["router_mode"] = cfg.get("mode", "apply")
+    out["recent"] = [{k: e.get(k) for k in ("key", "kind", "context", "from", "to", "milestone", "at")}
+                     for e in sorted((data.get("escalations") or {}).values(), key=lambda e: e.get("at") or "", reverse=True)[:8]]
+    out["mistakes"] = len(data.get("mistakes") or [])
+    out["learned"] = data.get("learned") or []
+    return out
+
+
 def build_state(root: Path, board: dict | None = None) -> dict:
     store = ds.Store(root)
     if not store.exists():
@@ -1049,6 +1065,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
                   for k, f in sorted((s.get("facts") or {}).items(), key=lambda kv: int(kv[0][2:]) if kv[0][2:].isdigit() else 0,
                                      reverse=True) if isinstance(f, dict)],
         "docs": docs_list(root),
+        "models": _safe(lambda: model_tuning(store)),   # the router's auto-tune (Metrics › Models)
         "diagram": _safe(lambda: dg.status(root)),
         "diagrams": _safe(lambda: dg.statuses(root)),   # architecture, data, deploy: the Architecture tab's views
         "milestone_costs": {m: {k: v.get(k) for k in ("usd", "usd_complete", "tokens", "partial")}

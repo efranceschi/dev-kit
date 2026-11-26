@@ -461,5 +461,207 @@ class TestRouterFastLoop(Base):
         self.assertFalse((self.root / ".dev" / "router.json").exists())
 
 
+
+class TestAutoTune(unittest.TestCase):
+    """Auto-tune: a context that escalation keeps solving starts higher (pure functions on a hand-made router.json)."""
+    CTX = "task:balanced:ui:feature"
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dev = Path(self.tmp.name)
+        self.cfg = {"mode": "apply", "balance": "balanced", "budget_usd_per_milestone": None, "auto_tune": "apply", "max_offset": 1}
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def add(self, d: dict, tid: str, *, escalated_to: str | None = None, milestone: str = "M1", arm: str = "sonnet/medium",
+            tags: list[str] | None = None, at: str | None = None, probe: bool = False, clean: bool = True) -> None:
+        at = at or f"2026-11-{10 + int(tid[2:]) % 18:02d}T00:00:00Z"
+        base = {"task": tid, "kind": "task", "context": self.CTX, "rule_arm": "sonnet/medium", "milestone": milestone,
+                "tags": tags or [], "escape": False, "probe": probe}
+        if escalated_to:
+            d["records"][f"{tid}#first"] = {**base, "key": f"{tid}#first", "arm": arm, "at": at, "fails": 1, "rounds": 0, "attempt": "first"}
+            d["records"][f"{tid}#final"] = {**base, "key": f"{tid}#final", "arm": escalated_to, "at": at, "fails": 0, "rounds": 0,
+                                            "attempt": "retry"}
+            router.note_escalation(d, tid, self.CTX, arm, escalated_to, milestone, tags or [], solved=True, at=at)
+        else:
+            d["records"][f"{tid}#final"] = {**base, "key": f"{tid}#final", "arm": arm, "at": at, "rounds": 0 if clean else 1,
+                                            "fails": 0, "attempt": "first"}
+
+    def decide(self, d: dict, **kw) -> dict:
+        args = {"floor_idx": 0, "fixed": False, "cfg": self.cfg, "milestone": "M3", "spent": 0.0}
+        args.update(kw)
+        return router.decide(self.dev, d, self.CTX, "sonnet/medium", **args)
+
+    def tuned(self, n_esc: int = 3, n_clean: int = 1) -> dict:
+        d = router.empty()
+        d["learned"] = ["M1"]
+        for i in range(n_esc):
+            self.add(d, f"T-{i + 1:03d}", escalated_to="sonnet/high")
+        for i in range(n_clean):
+            self.add(d, f"T-{i + 50:03d}")
+        router._learn_tune(d, milestone="M1")
+        return d
+
+    def test_escalation_that_keeps_solving_raises_the_context(self) -> None:
+        d = self.tuned()
+        t = d["tune"][self.CTX]
+        self.assertEqual((t["offset"], t["wins"], t["of"]), (1, 3, 4))
+        self.assertEqual(t["evidence"], ["T-001", "T-002", "T-003"])
+        r = self.decide(d)
+        self.assertEqual((r["arm"], r["reason_code"]), ("sonnet/high", "auto_tune"))
+        self.assertIn("auto-tune +1: escalation solved 3 of 4 (T-001, T-002, T-003)", r["reason"])
+        self.assertEqual(d["tune_log"][-1]["to"], 1)
+
+    def test_below_the_thresholds_nothing_changes(self) -> None:
+        self.assertNotIn(self.CTX, self.tuned(n_esc=2, n_clean=0)["tune"])   # 2 wins < TUNE_MIN
+        d = self.tuned(n_esc=3, n_clean=3)                                   # 3 of 6 = 50% < 60%
+        self.assertNotIn(self.CTX, d["tune"])
+        self.assertNotIn("tune", self.decide(d))
+
+    def test_old_evidence_fades(self) -> None:
+        d = self.tuned()
+        d["learned"] = [f"M{i}" for i in range(1, 11)]          # nine gates later
+        for i in range(3):                                      # three clean first attempts in the latest milestone
+            self.add(d, f"T-{i + 80:03d}", milestone="M10")
+        router._learn_tune(d, milestone="M10")
+        self.assertEqual(d["tune"][self.CTX]["offset"], 0)
+        self.assertIn("faded", d["tune_log"][-1]["why"])
+
+    def test_suggest_and_off_modes(self) -> None:
+        d = self.tuned()
+        r = self.decide(d, cfg={**self.cfg, "auto_tune": "suggest"})
+        self.assertNotEqual(r["reason_code"], "auto_tune")
+        self.assertTrue(r["tune"]["suggested"])
+        line = router.route_line({"final_model": "sonnet", "final_effort": "medium", "route": r})
+        self.assertIn("suggests sonnet / high (router.auto_tune suggest)", line)
+        off = self.decide(d, cfg={**self.cfg, "auto_tune": "off"})
+        self.assertNotEqual(off["reason_code"], "auto_tune")
+        self.assertNotIn("tune", off)
+
+    def test_two_tiers_only_with_max_offset_2(self) -> None:
+        d = router.empty()
+        d["learned"] = ["M1"]
+        for i in range(3):
+            self.add(d, f"T-{i + 1:03d}", escalated_to="opus/high")
+        router._learn_tune(d, max_offset=1, milestone="M1")
+        self.assertEqual(d["tune"][self.CTX]["offset"], 1)
+        router._learn_tune(d, max_offset=2, milestone="M1")
+        self.assertEqual(d["tune"][self.CTX]["offset"], 2)
+        self.assertEqual(self.decide(d)["arm"], "sonnet/high")  # the setting caps it at decision time too
+        self.assertEqual(self.decide(d, cfg={**self.cfg, "max_offset": 2})["arm"], "opus/high")
+
+    def test_a_tag_with_its_own_evidence_is_tuned_alone(self) -> None:
+        d = router.empty()
+        d["learned"] = ["M1"]
+        for i in range(3):
+            self.add(d, f"T-{i + 1:03d}", escalated_to="sonnet/high", tags=["payments"])
+        for i in range(4):
+            self.add(d, f"T-{i + 50:03d}")
+        router._learn_tune(d, milestone="M1")
+        self.assertNotIn(self.CTX, [k for k, v in d["tune"].items() if v["offset"]])  # 3 of 7 overall
+        self.assertEqual(d["tune"][f"{self.CTX}#tag:payments"]["offset"], 1)
+        self.assertEqual(self.decide(d, tags=["Payments"])["reason_code"], "auto_tune")
+        self.assertNotIn("tune", self.decide(d))
+
+    def test_clean_runs_up_there_lead_to_one_probe_and_a_clean_probe_undoes(self) -> None:
+        d = self.tuned()
+        for i in range(router.TUNE_PROBE_AFTER):
+            self.add(d, f"T-{i + 20:03d}", arm="sonnet/high", at=f"2026-12-0{1 + i}T00:00:00Z")
+        router._learn_tune(d, milestone="M2")
+        self.assertTrue(d["tune"][self.CTX]["probe"])
+        r = self.decide(d)
+        self.assertEqual((r["arm"], r["reason_code"]), ("sonnet/medium", "tune_probe"))
+        self.assertEqual(self.decide(d, probed={self.CTX})["reason_code"], "auto_tune")  # one probe at a time
+        self.add(d, "T-090", at="2026-12-20T00:00:00Z", probe=True)
+        router._learn_tune(d, milestone="M3")
+        t = d["tune"][self.CTX]
+        self.assertEqual((t["offset"], t["reset_at"]), (0, "2026-12-20T00:00:00Z"))
+        self.assertIn("probe T-090 passed", d["tune_log"][-1]["why"])
+        router._learn_tune(d, milestone="M3")                  # older evidence no longer counts
+        self.assertEqual(d["tune"][self.CTX]["offset"], 0)
+
+    def test_a_failed_probe_keeps_the_tune(self) -> None:
+        d = self.tuned()
+        for i in range(router.TUNE_PROBE_AFTER):
+            self.add(d, f"T-{i + 20:03d}", arm="sonnet/high", at=f"2026-12-0{1 + i}T00:00:00Z")
+        self.add(d, "T-091", escalated_to="sonnet/high", at="2026-12-20T00:00:00Z", probe=True)
+        router._learn_tune(d, milestone="M3")
+        t = d["tune"][self.CTX]
+        self.assertEqual((t["offset"], t["clean"], t["probe"]), (1, 0, False))
+
+    def test_untune_by_the_user(self) -> None:
+        d = self.tuned()
+        router.untune(d, self.CTX)
+        self.assertEqual(d["tune"][self.CTX]["offset"], 0)
+        router._learn_tune(d, milestone="M1")
+        self.assertEqual(d["tune"][self.CTX]["offset"], 0)     # the old escalations are before reset_at
+        self.assertNotIn("tune", self.decide(d))
+        s = router.tune_summary(d, self.cfg)
+        self.assertEqual((s["active"], s["mode"]), ([], "apply"))
+
+
+class TestAutoTuneFlow(Base):
+    def setUp(self) -> None:
+        super().setUp()
+        self.init(PLAN.replace("- files: src/components/UsersList.tsx", "- files: src/components/UsersList.tsx\n- tags: Payments, ui"))
+
+    def test_tags_reach_the_state(self) -> None:
+        self.assertEqual(self.state()["tasks"]["T-002"]["tags"], ["payments", "ui"])
+
+    def test_retry_is_filed_under_the_first_attempt_and_the_gate_records_the_escalation(self) -> None:
+        self.ds("start", "T-001")
+        self.ds("done", "T-001")
+        self.ds("start", "T-002")
+        first_ctx = self.state()["tasks"]["T-002"]["tier"]["context"]
+        self.ds("block", "T-002", "--reason", "did not converge")
+        self.ds("unblock", "T-002")
+        self.ds("start", "T-002")
+        tier = self.state()["tasks"]["T-002"]["tier"]
+        self.assertEqual((tier["first"]["context"], tier["first"]["arm"]), (first_ctx, "sonnet/medium"))
+        self.assertNotEqual(tier["context"], first_ctx)        # the retry runs one tier up
+        self.ds("sync-plan")                                    # a re-sync keeps the recorded tier
+        self.assertIn("first", self.state()["tasks"]["T-002"]["tier"])
+        self.ds("done", "T-002")
+        esc = self.router_json()["escalations"]["T-002"]
+        self.assertEqual((esc["context"], esc["from"], esc["to"]), (first_ctx, "sonnet/medium", "sonnet/high"))
+        for tid in ("T-003", "T-004", "T-005"):
+            self.ds("start", tid, "--force")
+            self.ds("done", tid, "--force")
+        (self.root / ".dev" / "qa" / "M1").mkdir(parents=True, exist_ok=True)
+        (self.root / ".dev" / "qa" / "M1" / "findings-round-1.json").write_text('{"round": 1, "findings": []}', encoding="utf-8")
+        self.ds("gate", "M1", "passed", "--score", "90")
+        recs = self.router_json()["records"]
+        self.assertEqual((recs["T-002#first"]["context"], recs["T-002#first"]["fails"]), (first_ctx, 1))
+        self.assertEqual((recs["T-002#final"]["context"], recs["T-002#final"]["arm"], recs["T-002#final"]["fails"]),
+                         (first_ctx, "sonnet/high", 0))
+        self.assertIn("auto-tune apply", self.dr("explain").stdout)
+
+    def test_retry_steps_up_from_the_arm_it_really_ran_on(self) -> None:
+        self.ds("start", "T-002", "--force")
+        st = self.state()
+        st["tasks"]["T-002"]["tier"].update({"arm": "sonnet/high", "routed": True})
+        (self.root / ".dev" / "state.json").write_text(json.dumps(st), encoding="utf-8")
+        self.ds("block", "T-002", "--reason", "did not converge")
+        self.ds("unblock", "T-002")
+        self.assertEqual(self.tier("T-002")["tier"], "quality")  # above sonnet/high, not just above the balanced rule
+
+    def test_settings_validate_auto_tune(self) -> None:
+        self.ds("set", "autonomy.model_policy.router.auto_tune", "suggest")
+        self.ds("set", "autonomy.model_policy.router.max_offset", "2")
+        self.ds("set", "autonomy.model_policy.router.auto_tune", "maybe", expect=None)
+        self.assertEqual(self.state()["autonomy"]["model_policy"]["router"]["auto_tune"], "suggest")
+        self.ds("set", "autonomy.model_policy.router.max_offset", "3", expect=None)
+        self.assertEqual(self.state()["autonomy"]["model_policy"]["router"]["max_offset"], 2)
+
+    def test_untune_cli(self) -> None:
+        self.dr("untune", "task:balanced:ui:feature", expect=1)
+        d = router.empty()
+        d["tune"] = {"task:balanced:ui:feature": {"offset": 1, "wins": 3, "of": 3, "evidence": ["T-002"]}}
+        router.save(self.root / ".dev", d)
+        self.assertIn("undone", self.dr("untune", "task:balanced:ui:feature").stdout)
+        self.assertEqual(self.router_json()["tune"]["task:balanced:ui:feature"]["offset"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

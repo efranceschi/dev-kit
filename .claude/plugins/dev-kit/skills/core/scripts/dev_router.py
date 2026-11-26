@@ -16,8 +16,15 @@ Subcommands
   learn M                     after M's gate: re-read findings, telemetry and ledger, update the records, the context
                               offsets and the rule's learned weights (slow loop); --backfill also seeds every closed
                               milestone that has no record yet (projects older than the router)
-  explain                     contexts, arms, offsets, mistakes, learned weights, savings against the rule (--json)
+  explain                     contexts, arms, offsets, auto-tune, mistakes, learned weights, savings (--json)
+  untune K                    undo the auto-tune of context K (it starts again from new evidence only)
   reset                       forget what was learned (--context K for one context)
+
+Auto-tune (slow loop, router.auto_tune apply | suggest | off): a task that failed and passed only after a retry on a
+higher arm leaves an escalation record in the context of its *first* attempt (auditors re-run on a higher arm too).
+When escalation solved >= 3 tasks and >= 60% of the first attempts at the rule arm (weighted, half-life 3 milestones),
+the context starts one tier up (two with router.max_offset 2); after 5 clean runs up there one task probes the rule arm,
+and a clean probe undoes the tune. Plan `tags:` refine a context when a tag has enough evidence of its own.
 
 Floors it never breaks: a task with an auth, external-send or schema signal is never routed below its rule tier;
 security-auditor never below sonnet/high; spec-tracer always opus/high; no route more than one tier away from the
@@ -54,6 +61,11 @@ EXPLORE_EVERY = 4    # deterministic exploration: every 4th eligible observation
 DEFAULT_ROUND = {"usd": 2.0, "s": 1800.0}  # one QA round + fixes, until the project has measured its own
 ESCAPE_ROUNDS = 1.5  # an escape costs a fix task and a re-audit: 1.5 rounds
 QUALITY_ESCAPE = 3.0
+TUNE_MIN = 3           # escalations that solved the task before a context is auto-tuned
+TUNE_RATIO = 0.6       # share of first attempts at the rule arm (weighted) that escalation solved
+TUNE_HALF_LIFE = 3.0   # milestones: evidence from 3 gates ago weighs half
+TUNE_PROBE_AFTER = 5   # clean runs at the tuned arm before one task probes the rule arm again
+TUNE_MODES = ("apply", "suggest", "off")
 
 
 def now() -> str:
@@ -64,7 +76,7 @@ def now() -> str:
 
 def empty() -> dict:
     return {"version": 1, "records": {}, "contexts": {}, "mistakes": [], "weights": {}, "weight_log": [],
-            "norms": dict(DEFAULT_ROUND), "learned": []}
+            "norms": dict(DEFAULT_ROUND), "learned": [], "escalations": {}, "tune": {}, "tune_log": []}
 
 
 def load(dev: Path) -> dict:
@@ -169,8 +181,29 @@ def candidates(rule_arm: str, floor_idx: int, fixed: bool) -> list[str]:
     return out
 
 
+def tune_keys(ctx: str, tags: list[str] | None) -> list[str]:
+    """Auto-tune keys of a context: one per plan tag (more specific, checked first), then the context itself."""
+    return [f"{ctx}#tag:{t}" for t in sorted({str(x).strip().lower() for x in tags or [] if str(x).strip()})] + [ctx]
+
+
+def active_tune(data: dict, ctx: str, tags: list[str] | None = None) -> tuple[str, dict] | None:
+    """The tune that applies to a context: the highest offset among its tag keys and itself (a tag wins a tie)."""
+    best = None
+    for k in tune_keys(ctx, tags):
+        t = (data.get("tune") or {}).get(k) or {}
+        if int(t.get("offset", 0) or 0) > 0 and (best is None or int(t["offset"]) > int(best[1]["offset"])):
+            best = (k, t)
+    return best
+
+
+def tune_reason(t: dict, off: int) -> str:
+    ev = ", ".join(t.get("evidence") or [])
+    return f"auto-tune +{off}: escalation solved {t.get('wins', 0)} of {t.get('of', 0)}" + (f" ({ev})" if ev else "")
+
+
 def decide(dev: Path, data: dict, ctx: str, rule_arm: str, *, floor_idx: int, fixed: bool, cfg: dict,
-           milestone: str | None, spent: float, override: bool = False) -> dict:
+           milestone: str | None, spent: float, override: bool = False, tags: list[str] | None = None,
+           probed: set[str] | None = None) -> dict:
     """Pure decision from router.json: {arm, reason, explore, offset, reason_code, candidates}."""
     mode = cfg.get("mode", "apply")
     res = {"context": ctx, "rule_arm": rule_arm, "arm": rule_arm, "explore": False, "reason_code": "rule",
@@ -195,19 +228,39 @@ def decide(dev: Path, data: dict, ctx: str, rule_arm: str, *, floor_idx: int, fi
         scored.append({"arm": arm, "n": n, "E": e})
     res["candidates"] = scored
     n_ctx = len(recs)
-    # 1) fast loop: two failures in a row in this milestone raise the context one tier
+    # 1) raises, the highest wins: fast loop (two failures in a row in this milestone), auto-tune (escalation kept
+    #    solving this context), learned offset (the rule arm keeps needing extra rounds)
+    one_up = next((x["arm"] for x in scored if ARM_TIER[x["arm"]] == ARM_TIER[rule_arm] + 1), None)
+    ups: list[tuple[int, str, str, str]] = []
     bump = c.get("bump") or {}
-    if bump.get("milestone") and bump.get("milestone") == milestone:
-        up = next((x["arm"] for x in scored if ARM_TIER[x["arm"]] == ARM_TIER[rule_arm] + 1), None)
-        if up:
-            res.update(arm=up, reason_code="fast_bump", reason=f"two failures in a row in {milestone}: one tier up")
-            return _finish(res, rule_arm, stats)
-    # 2) learned offset (slow loop): the rule arm keeps needing extra rounds
-    if c.get("offset", 0) > 0:
-        up = next((x["arm"] for x in scored if ARM_TIER[x["arm"]] == ARM_TIER[rule_arm] + 1), None)
-        if up:
-            res.update(arm=up, reason_code="learned_up", reason=f"learned: rule arm needed extra rounds (n={n_ctx})")
-            return _finish(res, rule_arm, stats)
+    if one_up and bump.get("milestone") and bump.get("milestone") == milestone:
+        ups.append((ARM_TIER[one_up], one_up, "fast_bump", f"two failures in a row in {milestone}: one tier up"))
+    tune_mode = cfg.get("auto_tune", "apply")
+    tuned = active_tune(data, ctx, tags) if tune_mode != "off" else None
+    probe = False
+    if tuned:
+        key, t = tuned
+        off = max(1, min(int(t["offset"]), int(cfg.get("max_offset", 1) or 1)))
+        j = min(ARM_TIER[rule_arm] + off, len(TIER_ARMS) - 1)
+        arm_t = TIER_ARMS[j]
+        res["tune"] = {"key": key, "offset": off, "arm": arm_t, "probe": bool(t.get("probe")), "reason": tune_reason(t, off)}
+        if tune_mode == "suggest":
+            res["tune"]["suggested"] = True
+        elif t.get("probe") and key not in (probed or set()):
+            probe = True  # one task at a time: another one already probing this key runs tuned
+        elif j > ARM_TIER[rule_arm]:
+            ups.append((j, arm_t, "auto_tune", tune_reason(t, off)))
+    if one_up and c.get("offset", 0) > 0:
+        ups.append((ARM_TIER[one_up], one_up, "learned_up", f"learned: rule arm needed extra rounds (n={n_ctx})"))
+    if ups:
+        _, arm_u, code, why = max(ups, key=lambda u: u[0])  # max keeps the first of a tie: the order above
+        res.update(arm=arm_u, reason_code=code, reason=why)
+        return _finish(res, rule_arm, stats)
+    if probe:
+        res.update(arm=rule_arm, reason_code="tune_probe",
+                   reason=f"auto-tune probe: {res['tune']['key']} had {tuned[1].get('clean', 0)} clean runs one tier up; "
+                          "the rule arm gets one task (clean: the tune is undone)")
+        return _finish(res, rule_arm, stats)
     if n_ctx < MIN_N:
         res["reason"] = f"rule (context n={n_ctx} < {MIN_N})"
         return _finish(res, rule_arm, stats)
@@ -261,12 +314,25 @@ def route_task(store, tid: str, data: dict | None = None) -> dict:
     t = store.tasks()[tid]
     floor_idx = ARM_TIER[info["arm"]] if info["floor"] else 0
     d = decide(store.dev, data, info["context"], info["arm"], floor_idx=floor_idx, fixed=False, cfg=cfg,
-               milestone=t.get("milestone"), spent=spent_in(data, t.get("milestone")), override=info["source"] == "plan")
+               milestone=t.get("milestone"), spent=spent_in(data, t.get("milestone")), override=info["source"] == "plan",
+               tags=t.get("tags"), probed=_probing(store, tid, data))
     if not info["applied"]:
         d["applied_arm"] = risk.BASE_ARM
         d["reason"] = f"risk_tiers {info['mode']}: agent base"
     model, effort = d["applied_arm"].split("/")
     return {**info, "route": d, "final_arm": d["applied_arm"], "final_model": model, "final_effort": effort}
+
+
+def _probing(store, tid: str, data: dict) -> set[str]:
+    """Tune keys some other task is already probing (started on the rule arm after the tune was set)."""
+    out = set()
+    for k, v in store.tasks().items():
+        rec = v.get("tier") if isinstance(v.get("tier"), dict) else {}
+        key = rec.get("tune")
+        if k != tid and rec.get("reason_code") == "tune_probe" and key and \
+                (rec.get("at") or "") > (((data.get("tune") or {}).get(key) or {}).get("at") or ""):
+            out.add(key)
+    return out
 
 
 def route_audit(store, agent: str, milestone: str, data: dict | None = None) -> dict:
@@ -293,8 +359,11 @@ def route_line(r: dict) -> str:
     if d.get("saves_usd") is not None:
         extra = f"; saves ~US${d['saves_usd']:.2f} and ~{d['saves_min']:g} min per task"
     mode = "" if d["mode"] == "apply" else "; router " + str(d["mode"]) + ": rule applies"
+    tune = d.get("tune") or {}
+    sug = (f"; {tune['reason']} suggests {tune['arm'].replace('/', ' / ')} (router.auto_tune suggest)"
+           if tune.get("suggested") else "")
     return (f"Route: {r['final_model']} / {r['final_effort']} ({d.get('reason', d['reason_code'])}; context {d['context']}"
-            f"{extra}{'; exploration' if d.get('explore') else ''}{mode})")
+            f"{extra}{'; exploration' if d.get('explore') else ''}{sug}{mode})")
 
 
 # --------------------------------------------------------------------------- feedback loops
@@ -306,9 +375,12 @@ def observe(store, tid: str, outcome: str, data: dict | None = None, *, save_now
     t = store.tasks()[tid]
     rec_t = t.get("tier") if isinstance(t.get("tier"), dict) else {}
     info = risk.task_tier(store, tid)
-    ctx = rec_t.get("context") or info["context"]
+    first = rec_t.get("first") if isinstance(rec_t.get("first"), dict) else None
     arm = rec_t.get("arm") or info["arm"]
-    rule_arm = rec_t.get("rule_arm") or risk.TIER_ARM.get(rec_t.get("rule") or info["tier"], info["arm"])
+    attempt_rule = rec_t.get("rule_arm") or risk.TIER_ARM.get(rec_t.get("rule") or info["tier"], info["arm"])
+    # a retry is filed under the context of the task's first attempt: "X failed, X+1 solved" stays one context
+    ctx = (first or {}).get("context") or rec_t.get("context") or info["context"]
+    rule_arm = (first or {}).get("rule_arm") or attempt_rule
     key = f"{tid}#{int(t.get('returns', 0) or 0)}.{int(t.get('blocked_count', 0) or 0)}"
     c = data["contexts"].setdefault(ctx, {"streak_fail": 0, "cooldown": 0, "offset": 0})
     failed = outcome in ("blocked", "reopened")
@@ -321,16 +393,35 @@ def observe(store, tid: str, outcome: str, data: dict | None = None, *, save_now
         if c["streak_fail"] >= 2:
             c["bump"] = {"milestone": t.get("milestone"), "at": now()}
             c["streak_fail"] = 0
-        if ARM_TIER.get(arm, 1) < ARM_TIER.get(rule_arm, 1):
-            mistake(data, ctx, tid, arm, rule_arm, f"routed below the rule and {outcome}")
+        if ARM_TIER.get(arm, 1) < ARM_TIER.get(attempt_rule, 1):
+            mistake(data, ctx, tid, arm, attempt_rule, f"routed below the rule and {outcome}")
     rec = data["records"].get(key) or {"key": key, "task": tid, "kind": "task", "context": ctx, "arm": arm,
                                        "rule_arm": rule_arm, "milestone": t.get("milestone"), "at": now()}
-    rec.update({"outcome": outcome, "fails": 1 if failed else 0, "rounds": int(t.get("returns", 0) or 0)})
+    rounds = int(t.get("returns", 0) or 0) - int((first or {}).get("returns_at", 0) or 0)
+    rec.update({"outcome": outcome, "fails": 1 if failed else 0, "rounds": max(0, rounds), "tags": _tags(t),
+                "attempt": "retry" if first else "first", "probe": rec_t.get("reason_code") == "tune_probe"})
     data["records"][key] = rec
+    if outcome == "done" and first:
+        note_escalation(data, tid, ctx, first.get("arm"), arm, t.get("milestone"), _tags(t), solved=True)
     if save_now:
         save(store.dev, data)
     return {"task": tid, "context": ctx, "arm": arm, "outcome": outcome, "streak_fail": c.get("streak_fail", 0),
             "bump": c.get("bump"), "cooldown": c.get("cooldown", 0)}
+
+
+def _tags(t: dict) -> list[str]:
+    return sorted({str(x).strip().lower() for x in t.get("tags") or [] if str(x).strip()})
+
+
+def note_escalation(data: dict, key: str, ctx: str, frm: str | None, to: str | None, milestone: str | None,
+                    tags: list[str], *, solved: bool, kind: str = "task", at: str | None = None) -> None:
+    """One record per task (or auditor of a milestone) that passed only on a higher arm than its first attempt."""
+    if not frm or not to or ARM_TIER.get(to, 0) <= ARM_TIER.get(frm, 0):
+        data.setdefault("escalations", {}).pop(key, None)
+        return
+    data.setdefault("escalations", {})[key] = {"key": key, "kind": kind, "context": ctx, "from": frm, "to": to,
+                                               "steps": ARM_TIER[to] - ARM_TIER[frm], "solved": bool(solved),
+                                               "milestone": milestone, "tags": tags, "at": at or now()}
 
 
 def mistake(data: dict, ctx: str, tid: str, arm: str, rule_arm: str, why: str) -> None:
@@ -377,17 +468,40 @@ def learn(store, milestone: str, *, backfill: bool = False, events: list[dict] |
             if r["status"] != "done":
                 continue
             key = f"{r['task']}#final"
+            t = store.tasks()[r["task"]]
+            rec_t = t.get("tier") if isinstance(t.get("tier"), dict) else {}
+            first = rec_t.get("first") if isinstance(rec_t.get("first"), dict) and rec_t["first"].get("context") else None
             arm = r["arm"] or _arm_from_models(r["models"]) or risk.TIER_ARM[r["tier"]]
             rule_arm = risk.TIER_ARM[r["tier"]]
-            # the fast-loop records of this task are replaced by its final record
-            for k in [k for k in data["records"] if k.startswith(r["task"] + "#") and k != key]:
+            done_at = t.get("done_at") or now()
+            # the fast-loop records of this task are replaced by its final record (and its first attempt, if retried)
+            for k in [k for k in data["records"] if k.startswith(r["task"] + "#") and k not in (key, f"{r['task']}#first")]:
                 data["records"].pop(k)
             usd = price_usd(store.dev, arm, r["tokens_in"], r["tokens_out"], r["tokens"]) if r["tokens"] or r["tokens_in"] else None
-            data["records"][key] = {"key": key, "task": r["task"], "kind": "task", "context": r["context"], "arm": arm,
-                                    "rule_arm": rule_arm, "milestone": m, "at": store.tasks()[r["task"]].get("done_at") or now(),
-                                    "usd": usd, "s": r["duration_s"] or None, "rounds": r["rounds"], "escape": r["escape"],
-                                    "fails": 1 if r["blocked"] or r["ledger"] in ("failed", "blocked") else 0,
-                                    "signals": r["signals"], "tier": r["tier"], "floor": r["floor"], "retro": r["retro"]}
+            rec = {"key": key, "task": r["task"], "kind": "task", "context": r["context"], "arm": arm,
+                   "rule_arm": rule_arm, "milestone": m, "at": done_at,
+                   "usd": usd, "s": r["duration_s"] or None, "rounds": r["rounds"], "escape": r["escape"],
+                   "fails": 1 if r["blocked"] or r["ledger"] in ("failed", "blocked") else 0,
+                   "signals": r["signals"], "tier": r["tier"], "floor": r["floor"], "retro": r["retro"],
+                   "tags": _tags(t), "attempt": "first", "probe": rec_t.get("reason_code") == "tune_probe"}
+            if first:
+                # retried: the failure belongs to the first attempt and the pass to the arm that solved it, both in
+                # the first attempt's context, so the context learns that one tier up was what it needed
+                fkey = f"{r['task']}#first"
+                data["records"][fkey] = {"key": fkey, "task": r["task"], "kind": "task", "context": first["context"],
+                                         "arm": first.get("arm") or first.get("rule_arm"), "rule_arm": first.get("rule_arm") or rule_arm,
+                                         "milestone": m, "at": first.get("at") or done_at, "usd": None, "s": None,
+                                         "rounds": int(first.get("returns_at", 0) or 0), "escape": False, "fails": 1,
+                                         "signals": r["signals"], "tier": first.get("rule") or r["tier"], "tags": _tags(t),
+                                         "attempt": "first", "probe": first.get("reason_code") == "tune_probe"}
+                rec.update(context=first["context"], rule_arm=first.get("rule_arm") or rule_arm, attempt="retry", fails=0,
+                           rounds=max(0, int(r["rounds"]) - int(first.get("returns_at", 0) or 0)))
+                note_escalation(data, r["task"], first["context"], first.get("arm"), arm, m, _tags(t),
+                                solved=not r["escape"], at=done_at)
+            else:
+                data["records"].pop(f"{r['task']}#first", None)
+                data.setdefault("escalations", {}).pop(r["task"], None)
+            data["records"][key] = rec
             added += 1
             if r["escape"] and ARM_TIER.get(arm, 1) < ARM_TIER[rule_arm]:
                 mistake(data, r["context"], r["task"], arm, rule_arm, "routed below the rule and a high finding escaped")
@@ -400,9 +514,12 @@ def learn(store, milestone: str, *, backfill: bool = False, events: list[dict] |
     data["norms"] = measure_norms(events, store.milestones())
     _learn_offsets(data)
     changes = _learn_weights(data)
+    cfg = risk.model_policy(store.state)["router"]
+    tune_changes = _learn_tune(data, max_offset=int(cfg.get("max_offset", 1) or 1), milestone=targets[-1] if targets else None)
     save(store.dev, data)
     return {"milestones": targets, "records": added, "weights": data["weights"], "weight_changes": changes,
-            "mistakes": len(data["mistakes"]), "contexts": len({r["context"] for r in data["records"].values()})}
+            "tune_changes": tune_changes, "mistakes": len(data["mistakes"]),
+            "contexts": len({r["context"] for r in data["records"].values()})}
 
 
 def _arm_from_models(models: list[str]) -> str | None:
@@ -433,11 +550,16 @@ def _learn_audits(store, data: dict, milestone: str, events: list[dict]) -> int:
         tokens_out = sum(int(e.get("tokens_out") or 0) for e in rs)
         tokens = sum(int(e.get("tokens") or 0) for e in rs)
         key = f"{milestone}:{agent}"
-        data["records"][key] = {"key": key, "kind": "audit", "agent": agent, "context": f"audit:{agent.split('-')[0]}:{prof['profile']}",
+        ctx = f"audit:{agent.split('-')[0]}:{prof['profile']}"
+        arms = [a for a in (_arm_from_models([f"{e.get('model') or ''}/{e.get('effort') or ''}"]) for e in rs) if a]
+        top = max(arms, key=lambda a: ARM_TIER[a], default=arm)
+        # re-run on a higher arm and the gate passed: the higher arm is what this dimension needed
+        note_escalation(data, key, ctx, arm, top, milestone, [], solved=True, kind="audit", at=rs[-1].get("ts") or first.get("ts"))
+        data["records"][key] = {"key": key, "kind": "audit", "agent": agent, "context": ctx,
                                 "arm": arm, "rule_arm": rule, "milestone": milestone, "at": first.get("ts") or now(),
                                 "usd": price_usd(store.dev, arm, tokens_in, tokens_out, tokens) if tokens else None,
                                 "s": sum(float(e.get("duration_s") or 0) for e in rs) or None,
-                                "rounds": len(rs) - 1, "escape": False, "fails": 0}
+                                "rounds": len(rs) - 1, "escape": False, "fails": 0, "attempt": "first"}
         n += 1
     return n
 
@@ -462,11 +584,115 @@ def _learn_offsets(data: dict) -> None:
                 c["offset"] = 0
 
 
+def _clean(r: dict) -> bool:
+    return not (r.get("rounds") or r.get("fails") or r.get("escape"))
+
+
+def _learn_tune(data: dict, *, max_offset: int = 1, milestone: str | None = None) -> list[dict]:
+    """Auto-tune per context (and per context + plan tag), recomputed from the records at every gate.
+
+    Population: first attempts at the rule arm or below. Win: a first attempt that failed and passed on a higher arm
+    (an escalation record). Weight of a record: 0.5 ** (milestones since it / TUNE_HALF_LIFE). A context goes up one
+    tier when wins >= TUNE_MIN and weighted wins / weighted population >= TUNE_RATIO (two tiers when max_offset is 2
+    and the wins that needed two tiers pass the same test). Runs up there that are clean count towards a probe of the
+    rule arm; a clean probe, or `untune`, sets reset_at: older evidence no longer counts."""
+    order = {m: i for i, m in enumerate(data.get("learned") or [])}
+    last = len(order) - 1
+
+    def weight(m: str | None) -> float:
+        age = last - order.get(m, last) if m in order else 0
+        return 0.5 ** (max(0, age) / TUNE_HALF_LIFE)
+
+    esc = data.get("escalations") or {}
+    by: dict[str, list[dict]] = {}
+    for r in data["records"].values():
+        if r.get("attempt", "first") != "first" or not r.get("rule_arm") or r.get("arm") not in ARM_TIER:
+            continue
+        for k in tune_keys(r["context"], r.get("tags")):
+            by.setdefault(k, []).append(r)
+    tune = data.setdefault("tune", {})
+    changes: list[dict] = []
+    for k in sorted(set(by) | set(tune)):
+        old = dict(tune.get(k) or {})
+        reset_at = old.get("reset_at") or ""
+        recs = [r for r in by.get(k, []) if (r.get("at") or "") > reset_at]
+        pop = [r for r in recs if ARM_TIER[r["arm"]] <= ARM_TIER.get(r["rule_arm"], 0)]
+        wins = [r for r in pop if (esc.get(r.get("task") if r.get("kind") == "task" else r.get("key")) or {}).get("solved")]
+        pw = sum(weight(r.get("milestone")) for r in pop)
+        ww = sum(weight(r.get("milestone")) for r in wins)
+        two = [r for r in wins if esc.get(r.get("task") if r.get("kind") == "task" else r.get("key"), {}).get("steps", 1) >= 2]
+        tw = sum(weight(r.get("milestone")) for r in two)
+        off = 0
+        if len(wins) >= TUNE_MIN and pw and ww / pw >= TUNE_RATIO:
+            off = 1
+            if max_offset >= 2 and len(two) >= TUNE_MIN and tw / pw >= TUNE_RATIO:
+                off = 2
+        new = {"offset": off, "wins": len(wins), "of": len(pop), "ratio": round(ww / pw, 2) if pw else 0.0,
+               "evidence": sorted({r.get("task") or r.get("key") for r in wins})[-5:]}
+        if old.get("reset_at"):
+            new["reset_at"] = old["reset_at"]
+        if old.get("dismissed"):
+            new["dismissed"] = old["dismissed"]
+        if off:
+            new["since"] = old.get("since") if old.get("offset") else milestone
+            new["at"] = old.get("at") if old.get("offset") else max((r.get("at") or "" for r in wins), default="")
+            up = [r for r in recs if ARM_TIER[r["arm"]] > ARM_TIER.get(r["rule_arm"], 0) and (r.get("at") or "") > (new["at"] or "")]
+            new["clean"] = sum(1 for r in up if _clean(r))
+            probes = sorted((r for r in recs if r.get("probe") and (r.get("at") or "") > (new["at"] or "")), key=lambda r: r.get("at") or "")
+            if probes and _clean(probes[-1]):
+                # the rule arm passed its probe: the tune is undone and only newer evidence can bring it back
+                new = {"offset": 0, "wins": 0, "of": 0, "ratio": 0.0, "evidence": [], "reset_at": probes[-1].get("at") or now()}
+                changes.append({"key": k, "from": old.get("offset", 0), "to": 0, "why": f"probe {probes[-1].get('task')} passed at the rule arm", "code": "probe",
+                                "milestone": milestone, "at": new["reset_at"]})
+                tune[k] = new
+                continue
+            if probes:  # a failed probe: the tune holds and counting starts again after it
+                new["at"] = probes[-1].get("at") or new["at"]
+                new["clean"] = 0
+            new["probe"] = new["clean"] >= TUNE_PROBE_AFTER
+        if int(old.get("offset", 0) or 0) != off:
+            why = (f"escalation solved {new['wins']} of {new['of']} first attempts" if off else
+                   "evidence faded below the threshold")
+            changes.append({"key": k, "from": int(old.get("offset", 0) or 0), "to": off, "why": why,
+                            "code": "escalation" if off else "faded",
+                            "evidence": new["evidence"], "milestone": milestone,
+                            "at": new.get("at") or max((r.get("at") or "" for r in recs), default="")})
+        if off or old.get("reset_at") or k in tune:
+            tune[k] = new
+    data["tune_log"] = (data.get("tune_log") or []) + changes
+    return changes
+
+
+def untune(data: dict, key: str) -> dict:
+    """The user undoes a tune: offset 0 and older evidence no longer counts (new escalations can bring it back)."""
+    old = (data.get("tune") or {}).get(key) or {}
+    stamp = now()
+    data.setdefault("tune", {})[key] = {"offset": 0, "wins": 0, "of": 0, "ratio": 0.0, "evidence": [], "reset_at": stamp,
+                                        "dismissed": stamp}
+    data["tune_log"] = (data.get("tune_log") or []) + [{"key": key, "from": int(old.get("offset", 0) or 0), "to": 0,
+                                                         "why": "undone by the user (untune)", "code": "untune", "at": stamp}]
+    return data["tune"][key]
+
+
+def tune_summary(data: dict, cfg: dict | None = None) -> dict:
+    """What the board and `explain` show: active tunes, recent changes and the settings that drive them."""
+    cfg = cfg or {}
+    active = []
+    for k, t in sorted((data.get("tune") or {}).items()):
+        if int(t.get("offset", 0) or 0) > 0:
+            ctx, _, tag = k.partition("#tag:")
+            active.append({"key": k, "context": ctx, "tag": tag or None, "offset": int(t["offset"]), "wins": t.get("wins", 0),
+                           "of": t.get("of", 0), "ratio": t.get("ratio", 0.0), "evidence": t.get("evidence") or [],
+                           "since": t.get("since"), "clean": t.get("clean", 0), "probe": bool(t.get("probe"))})
+    return {"mode": cfg.get("auto_tune", "apply"), "max_offset": int(cfg.get("max_offset", 1) or 1), "active": active,
+            "log": (data.get("tune_log") or [])[-10:], "escalations": len(data.get("escalations") or {})}
+
+
 def _learn_weights(data: dict) -> list[dict]:
     """Learned deltas of the rule's weights, recomputed from every task record (bounded ±2; floor signals never go
     down): a signal in ≥ 3 tasks with escape rate ≥ 50% goes +1 (+2 with ≥ 6 tasks); a signal seen only in ≥ 3
     quality tasks that all passed with no finding and no round goes -1."""
-    recs = [r for r in data["records"].values() if r.get("kind") == "task"]
+    recs = [r for r in data["records"].values() if r.get("kind") == "task" and not str(r.get("key", "")).endswith("#first")]
     old = dict(data.get("weights") or {})
     new: dict[str, int] = {}
     for sig in risk.RISK_WEIGHTS:
@@ -509,7 +735,8 @@ def explain(store, data: dict | None = None) -> dict:
             saved_usd += ref - float(r["usd"])
     return {"contexts": ctxs, "mistakes": data["mistakes"], "weights": data["weights"], "weight_log": data["weight_log"],
             "norms": data["norms"], "learned": data["learned"], "records": len(data["records"]),
-            "savings": {"routed_runs": routed, "usd_vs_rule": round(saved_usd, 2)}}
+            "savings": {"routed_runs": routed, "usd_vs_rule": round(saved_usd, 2)},
+            "tune": tune_summary(data, risk.model_policy(store.state)["router"])}
 
 
 # --------------------------------------------------------------------------- CLI
@@ -559,6 +786,8 @@ def cmd_learn(a: argparse.Namespace) -> None:
           f"{r['mistakes']} mistake(s) on file")
     for c in r["weight_changes"]:
         print(f"  weight {c['signal']}: {c['from']:+d} -> {c['to']:+d}")
+    for c in r.get("tune_changes") or []:
+        print(f"  auto-tune {c['key']}: +{c['from']} -> +{c['to']} ({c['why']})")
 
 
 def cmd_explain(a: argparse.Namespace) -> None:
@@ -579,6 +808,23 @@ def cmd_explain(a: argparse.Namespace) -> None:
     for k, v in sorted(r["weights"].items()):
         print(f"  learned weight {k}: {v:+d}")
     print(f"  savings against the rule: US${r['savings']['usd_vs_rule']:.2f} over {r['savings']['routed_runs']} routed run(s)")
+    tu = r["tune"]
+    print(f"  auto-tune {tu['mode']} (max +{tu['max_offset']}): {len(tu['active'])} context(s) tuned, "
+          f"{tu['escalations']} escalation(s) on file")
+    for t in tu["active"]:
+        print(f"    {t['key']}: +{t['offset']} since {t['since'] or '-'}, escalation solved {t['wins']} of {t['of']} "
+              f"({', '.join(t['evidence'])}); {t['clean']} clean run(s) up there" + ("; next task probes the rule arm" if t["probe"] else "")
+              + f"; undo: dev_router.py untune '{t['key']}'")
+
+
+def cmd_untune(a: argparse.Namespace) -> None:
+    store, ds = _store(a.root)
+    data = load(store.dev)
+    if a.context not in (data.get("tune") or {}):
+        ds.fail(f"no auto-tune for {a.context}; see dev_router.py explain")
+    untune(data, a.context)
+    save(store.dev, data)
+    print(f"router: auto-tune of {a.context} undone; only escalations from now on can bring it back")
 
 
 def cmd_reset(a: argparse.Namespace) -> None:
@@ -588,6 +834,8 @@ def cmd_reset(a: argparse.Namespace) -> None:
         data["records"] = {k: v for k, v in data["records"].items() if v.get("context") != a.context}
         data["contexts"].pop(a.context, None)
         data["mistakes"] = [m for m in data["mistakes"] if m.get("context") != a.context]
+        data["escalations"] = {k: v for k, v in (data.get("escalations") or {}).items() if v.get("context") != a.context}
+        data["tune"] = {k: v for k, v in (data.get("tune") or {}).items() if k.partition("#tag:")[0] != a.context}
         save(store.dev, data)
         print(f"router: forgot {a.context}")
     else:
@@ -607,6 +855,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("learn"); s.set_defaults(fn=cmd_learn); s.add_argument("milestone", nargs="?")
     s.add_argument("--backfill", action="store_true"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("explain"); s.set_defaults(fn=cmd_explain); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("untune"); s.set_defaults(fn=cmd_untune); s.add_argument("context")
     s = sub.add_parser("reset"); s.set_defaults(fn=cmd_reset); s.add_argument("--context")
     return p
 

@@ -359,7 +359,8 @@ class TestTransitions(Base):
         s = self.state()
         self.assertEqual(s["autonomy"]["model_policy"],
                          {"mode": "ask", "tiers": {}, "risk_tiers": "apply", "risk_weights": {},
-                          "router": {"mode": "apply", "balance": "balanced", "budget_usd_per_milestone": None}})
+                          "router": {"mode": "apply", "balance": "balanced", "budget_usd_per_milestone": None,
+                                 "auto_tune": "apply", "max_offset": 1}})
         self.assertIn("model_escalation", s["autonomy"]["always_ask"])
         self.run_state("set", "autonomy.model_policy", "preapproved")
         self.assertEqual(self.state()["autonomy"]["model_policy"]["mode"], "preapproved")

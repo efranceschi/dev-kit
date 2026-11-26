@@ -47,6 +47,7 @@ Existing projects: no walking skeleton (scaffold, tooling and CI exist; skip T-0
 - risk_reasons: integrates T-001; first write to the orders table
 - opportunity: none       # or: downgrade-ok, parallel-safe, batchable, reuse:<module>
 - tier: (optional override) speed | balanced | balanced+ | quality, only with tier_reason: why the rule is not enough
+- tags: (optional) payments, migration (labels the router's auto-tune also learns from, §9 "Router")
 
 Task notes for accumulating files: a task writes its CHANGELOG entry to `changelog.d/T-xxx.md` (and setup notes to `docs/setup.d/T-xxx.md`) instead of editing `CHANGELOG.md` or `README.md`; `docs` and `release` merge the fragments. A milestone that reads a new external data source starts with a spike task that confirms the source's coverage assumption (see the PRD data ACs).
 

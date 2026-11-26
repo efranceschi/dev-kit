@@ -164,9 +164,11 @@ DEFAULT_AUTONOMY = {
     # risk_tiers: per-task tier from the risk rule (dev_risk.py): apply | suggest (shown, agent base used) | off.
     # risk_weights: per-project weight overrides of the rule's signals, e.g. {"schema": 3}.
     # router: model/effort router that learns from the project's runs (dev_router.py): mode apply | suggest | off,
-    # balance balanced | speed | cost | quality (or {"cost": 1, "time": 1, "quality": 2}), optional budget per milestone.
+    # balance balanced | speed | cost | quality (or {"cost": 1, "time": 1, "quality": 2}), optional budget per milestone,
+    # auto_tune apply | suggest | off (a context that escalation keeps solving starts higher), max_offset 1 | 2.
     "model_policy": {"mode": "ask", "tiers": {}, "risk_tiers": "apply", "risk_weights": {},
-                     "router": {"mode": "apply", "balance": "balanced", "budget_usd_per_milestone": None}},
+                     "router": {"mode": "apply", "balance": "balanced", "budget_usd_per_milestone": None,
+                                "auto_tune": "apply", "max_offset": 1}},
     # What to do at each pause point (conventions.md §10). Default: ask, i.e. the supervised behaviour.
     "pause_policy": {},
     # Presence step (§10): supervised | assisted | milestone | unattended, plus the user's exceptions per point.
@@ -299,8 +301,12 @@ def check_model_policy(mp: object) -> None:
         if k in rw and rw[k] < 1:
             fail(f"autonomy.model_policy.risk_weights.{k} is a floor signal and must stay at 1 or more")
     r = mp.get("router", {})
-    if not isinstance(r, dict) or set(r) - {"mode", "balance", "budget_usd_per_milestone"}:
-        fail("autonomy.model_policy.router must be an object with mode, balance, budget_usd_per_milestone")
+    if not isinstance(r, dict) or set(r) - {"mode", "balance", "budget_usd_per_milestone", "auto_tune", "max_offset"}:
+        fail("autonomy.model_policy.router must be an object with mode, balance, budget_usd_per_milestone, auto_tune, max_offset")
+    if r.get("auto_tune", "apply") not in ROUTE_MODES:
+        fail(f"autonomy.model_policy.router.auto_tune must be one of {', '.join(ROUTE_MODES)}")
+    if r.get("max_offset", 1) not in (1, 2) or isinstance(r.get("max_offset", 1), bool):
+        fail("autonomy.model_policy.router.max_offset must be 1 or 2")
     if r.get("mode", "apply") not in ROUTE_MODES:
         fail(f"autonomy.model_policy.router.mode must be one of {', '.join(ROUTE_MODES)}")
     b = r.get("balance", "balanced")
@@ -1234,6 +1240,10 @@ def parse_plan(text: str) -> tuple[dict, dict]:
                 ops = [o for o in risk.parse_opportunity(val) if o != "none"]
                 if ops:
                     task["opportunity"] = ops
+            elif key == "tags":
+                tags = sorted({x.strip().lower() for x in val.split(",") if x.strip() and x.strip().lower() != "none"})
+                if tags:
+                    task["tags"] = tags  # optional labels; the router's auto-tune learns per tag too (§9 "Router")
             else:
                 task.setdefault("extra", {})[key] = val
             continue
@@ -1639,9 +1649,11 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
             cur = store.tasks()[tid]
             for k in ("title", "milestone", "type", "deps", "acceptance", "test_notes", "files", "seq"):
                 cur[k] = t[k]
-            for k in ("contract", "consumes", "shared", "dep_reasons", "flag") + risk.RISK_FIELDS:
+            for k in ("contract", "consumes", "shared", "dep_reasons", "flag", "tags") + risk.RISK_FIELDS:
                 if k in t:
                     cur[k] = t[k]
+                elif k == "tier" and isinstance(cur.get("tier"), dict):
+                    continue  # the tier recorded at start (with its first attempt), not a plan override
                 else:
                     cur.pop(k, None)
             updated_t += 1
@@ -1651,7 +1663,7 @@ def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int],
                 "status": "todo", "deps": t["deps"], "acceptance": t["acceptance"],
                 "test_notes": t["test_notes"], "files": t["files"], "commit": None,
                 "blocked_reason": None, "source": None, "started_at": None, "done_at": None, "seq": t["seq"],
-                **{k: t[k] for k in ("contract", "consumes", "shared", "dep_reasons", "flag") + risk.RISK_FIELDS if k in t},
+                **{k: t[k] for k in ("contract", "consumes", "shared", "dep_reasons", "flag", "tags") + risk.RISK_FIELDS if k in t},
             }
             added_t += 1
     store.state["next_task_id"] = max_id + 1
@@ -1957,9 +1969,21 @@ def start_task(store: Store, tid: str, force: bool, keep_started: bool = False, 
         t["branch"] = ahead["branch"]
         t["ahead_of"] = ahead["waits_for"]
     if r:
+        prev = t.get("tier") if isinstance(t.get("tier"), dict) else None
+        failed_before = int(t.get("returns", 0) or 0) + int(t.get("blocked_count", 0) or 0) > 0
+        first = None
+        if prev and failed_before and prev.get("context"):
+            # a retry: keep where the first attempt ran, so the router learns which arm that context really needed
+            first = prev.get("first") or {k: prev.get(k) for k in ("context", "arm", "rule_arm", "rule", "at", "reason_code")}
+            first.setdefault("returns_at", int(t.get("returns", 0) or 0))
         t["tier"] = {"rule": r["tier"], "score": r["score"], "source": r["source"], "rule_arm": r["arm"],
                      "arm": r["final_arm"], "routed": r["final_arm"] != r["arm"], "context": r["route"]["context"],
-                     "signals": sorted({s["signal"] for s in r["reasons"]}), "at": now()}
+                     "signals": sorted({s["signal"] for s in r["reasons"]}), "at": now(),
+                     "reason_code": r["route"].get("reason_code")}
+        if (r["route"].get("tune") or {}).get("key"):
+            t["tier"]["tune"] = r["route"]["tune"]["key"]
+        if first:
+            t["tier"]["first"] = first
     store.save()
     store.log(f"start {a.task} {t['title']}" + (f" tier={r['tier']} arm={r['final_arm']}" if r else "") + (f" (by {via})" if via else ""))
     store.event("task", task=a.task, transition="start", type=t.get("type"), milestone=t.get("milestone"), parallel=bool(a.force and others),
