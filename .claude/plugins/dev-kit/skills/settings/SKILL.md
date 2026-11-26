@@ -32,6 +32,7 @@ The user never runs a script: this skill translates what they ask into the right
 | "more fix rounds", "stop reviews sooner" | `autonomy.max_fix_rounds_per_gate`, `autonomy.max_review_rounds` | 1–10 |
 | "do not reuse earlier audits", "check more of the reused work" | `autonomy.incremental.enabled`, `.spot_check_pct`, `.full_on_last_gate` | §18; reuse never closes findings, and release always audits everything |
 | "check each task more / less" | `autonomy.task_checks` (`ui`, `all`, `off`) | `off` keeps the implementer's self-check |
+| "run the whole test suite less / more often" | `autonomy.verify.full_suite` (`per_task`, `per_batch`, `per_milestone`), `autonomy.verify.batch_size` (1–50, default 4) | affected tests still run on every task; a red suite is bisected to its task |
 | "room for bugs in each milestone", "cool-down" | `autonomy.issue_buffer_pct` (0–50), `autonomy.cooldown` `{"enabled", "max_tasks"}` | §15 |
 | "milestones of 8 to 15 tasks", "bigger milestones" | `autonomy.milestone_size` `{"min": 5, "max": 12}`: planned tasks + buffer slots + cool-down; outside it `sync-plan` warns unless the milestone has `size_reason:` | §4 |
 | "don't build ahead", "wait for my approval before the next release", "no overlap between milestones" | `autonomy.pipeline` `{"releases_ahead": 1, "milestone_overlap": true}`: how many releases may be built ahead of one waiting for approval (0 = none), and whether independent tasks of the next milestone run while the current one is in QA; both on their own branches | §19 |

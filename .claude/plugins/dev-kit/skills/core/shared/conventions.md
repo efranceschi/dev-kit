@@ -447,6 +447,8 @@ Rework is where long runs spend their time: the same suite run by three agents, 
 
 Test runs keep their own record (`dev_state.py tests record|lookup`, `qa` §2), with the same rules.
 
+**Full-suite cadence (`autonomy.verify`, default `{"full_suite": "per_batch", "batch_size": 4}`).** Every task is still built test-first and every merge still runs lint, type-check and the task's affected tests; only the full suite is batched. `per_task` runs it after every merged task; `per_batch` every `batch_size` tasks, at the end of each parallel batch and of the run; `per_milestone` only when the milestone's tasks are done (every mode runs it then, so the gate reuses it). `dev_state.py verify status|due [--boundary]` says what no green full run covers yet and whether the suite is due; a red run is bisected with `dev_state.py verify bisect --test "<failing tests>"` (a scratch worktree, oldest pending commit to HEAD) to the task that broke it, which gets a fix task implemented before any other. A wider batch saves runs and costs a later signal: the larger the batch, the more tasks may build on a break before it shows. `release` reuses a green run on the release commit instead of running the suite again.
+
 **Rules that keep the quality** (enforced by `dev_ledger.py`, applied by the skills):
 1. **Conservative invalidation.** Any change to an input, a context file, the kit version or the salt invalidates the unit. A stale spec (`dev_state.py stale`) is a changed context. When unsure, redo.
 2. **Findings never close from the cache.** A unit whose last result was `findings` is always reviewed again, and an open finding stays open (and scored) until an auditor marks it `closed` with evidence.

@@ -417,5 +417,56 @@ class TestTestRuns(Base):
         self.assertIn("one deploy per approved gate", proc.stderr)
 
 
+class TestVerifyCadence(Base):
+    """autonomy.verify (3.18.0): when implement runs the full suite, and the bisect of a red full run."""
+
+    git = TestTestRuns.git
+    commit = TestTestRuns.commit
+
+    def test_per_batch_due_and_bisect(self) -> None:
+        self.git("init", "-q")
+        self.init_with_plan()
+        self.commit(".gitignore", ".dev/\n")
+        self.commit("src/a.txt", "good\n")
+        st = json.loads(self.run_state("verify", "status", "--json").stdout)
+        self.assertEqual((st["mode"], st["batch_size"], st["base"]), ("per_batch", 4, None))
+        self.run_state("verify", "due", expect=3)                              # nothing committed by a task
+        self.run_state("tests", "record", "--kind", "all", "--passed", "5", "--failed", "0")
+        self.run_state("set", "autonomy.verify.batch_size", "3")
+        self.run_state("start", "T-001")
+        c1 = self.commit("src/b.txt", "one\n")
+        self.run_state("done", "T-001", "--commit", c1)
+        self.assertIn("1 of 3", self.run_state("verify", "due", expect=3).stdout)
+        self.run_state("verify", "due", "--boundary", expect=0)                # end of a batch or of the run
+        self.run_state("set", "autonomy.verify.full_suite", "per_milestone")
+        self.run_state("verify", "due", "--boundary", expect=3)
+        self.run_state("set", "autonomy.verify.full_suite", "per_task")
+        self.run_state("verify", "due", expect=0)
+        self.run_state("set", "autonomy.verify", "per_batch")
+        self.run_state("start", "T-002")
+        c2 = self.commit("src/a.txt", "bad\n")
+        self.run_state("done", "T-002", "--commit", c2)
+        st = json.loads(self.run_state("verify", "status", "--json").stdout)
+        self.assertEqual([p["task"] for p in st["pending"]], ["T-001", "T-002"])
+        self.assertTrue(st["due"])                                            # M1 has no task left
+        self.assertEqual(st["milestone_done"], ["M1"])
+        res = json.loads(self.run_state("verify", "bisect", "--test", "grep -q good src/a.txt", "--json").stdout)
+        self.assertEqual((res["verdict"], res["first_bad"], res["task"]), ("found", c2, "T-002"))
+        self.assertFalse((self.root / ".dev" / "run" / "worktrees" / "verify-bisect").exists())
+        self.assertEqual(self.git("rev-parse", "HEAD"), c2)                    # the main checkout is untouched
+        flaky = json.loads(self.run_state("verify", "bisect", "--test", "true", "--json").stdout)
+        self.assertEqual(flaky["verdict"], "passes_on_head")
+        self.run_state("tests", "record", "--kind", "all", "--passed", "6", "--failed", "0")
+        st = json.loads(self.run_state("verify", "status", "--json").stdout)
+        self.assertEqual((st["covered"], st["pending"], st["due"]), (True, [], False))
+        self.run_state("verify", "bisect", "--test", "true", expect=1)        # nothing to bisect
+
+    def test_verify_validation(self) -> None:
+        self.init_with_plan()
+        self.run_state("set", "autonomy.verify.full_suite", "nightly", expect=1)
+        self.run_state("set", "autonomy.verify.batch_size", "0", expect=1)
+        self.run_state("verify", "bisect", "--test", "true", expect=1)        # no green run to start from
+
+
 if __name__ == "__main__":
     unittest.main()

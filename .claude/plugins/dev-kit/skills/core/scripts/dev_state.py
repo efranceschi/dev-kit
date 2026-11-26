@@ -210,6 +210,11 @@ DEFAULT_AUTONOMY = {
     # Incremental work (conventions.md §18): reuse verified units whose inputs did not change. spot_check_pct of the
     # reused units is re-verified each round; full_on_last_gate turns the cache off for the last milestone gate.
     "incremental": {"enabled": True, "spot_check_pct": 10, "full_on_last_gate": False},
+    # When implement runs the full suite (conventions.md §18): per_task = after every merged task | per_batch = after
+    # each parallel batch, every batch_size tasks, at the end of a run and when the milestone's tasks are done |
+    # per_milestone = only when the milestone's tasks are done. Every merge still runs lint, type-check and the task's
+    # affected tests; a red full suite is bisected to the task that broke it (dev_state.py verify bisect).
+    "verify": {"full_suite": "per_batch", "batch_size": 4},
     # Production deploy (conventions.md §12). when: per_milestone | on_release | manual | none.
     "production": {"when": "none", "method": None, "host": None, "targets": [], "smoke": [], "prerequisites": []},
     "task_time_budget_min": 30,
@@ -322,6 +327,7 @@ LIMIT_KEYS = {"paid_services": "max_monthly", "delete_data": "environments", "pu
 PROD_NAMES = {"prod", "production", "prd", "live"}
 ON_PARK = ("stop_when_idle", "stop_first")
 TASK_CHECKS = ("ui", "all", "off")
+FULL_SUITE_MODES = ("per_task", "per_batch", "per_milestone")
 UNATTENDED_PAUSE_POLICY = {
     "paid_services": {"action": "park"},
     "delete_data": {"action": "preauthorize", "limit": {"environments": ["dev", "test"]}},
@@ -614,6 +620,12 @@ def check_autonomy_field(field: str, val: object) -> object:
                 or not isinstance(val.get("releases_ahead", 1), int) or isinstance(val.get("releases_ahead", 1), bool)
                 or not 0 <= val.get("releases_ahead", 1) <= 3 or not isinstance(val.get("milestone_overlap", True), bool)):
             fail('autonomy.pipeline must be {"releases_ahead": 0-3, "milestone_overlap": true | false}')
+    elif field == "verify":
+        if (not isinstance(val, dict) or set(val) - {"full_suite", "batch_size"}
+                or val.get("full_suite", "per_batch") not in FULL_SUITE_MODES
+                or not isinstance(val.get("batch_size", 4), int) or isinstance(val.get("batch_size", 4), bool)
+                or not 1 <= val.get("batch_size", 4) <= 50):
+            fail('autonomy.verify must be {"full_suite": "per_task" | "per_batch" | "per_milestone", "batch_size": 1-50}')
     elif field == "git":
         br = val.get("base_branch") if isinstance(val, dict) else None
         if (not isinstance(val, dict) or set(val) - {"base_branch"} or not isinstance(br, (str, type(None)))
@@ -4941,12 +4953,183 @@ def _norm_rel(store: Store, rel: str) -> str:
     return f".dev/{rel}"
 
 
+def _norm_ctx(store: Store, c: str) -> str:
+    """One spelling per context file, so two skills that name it differently (`skills/implement/../core/...` and
+    `skills/qa/../core/...`, or relative and absolute) give the same ledger fingerprint."""
+    p = Path(c) if Path(c).is_absolute() else store.root / c
+    try:
+        p = p.resolve()
+    except OSError:
+        return c
+    try:
+        return str(p.relative_to(store.root.resolve()))
+    except ValueError:
+        return str(p)
+
+
+def _green_full_runs(store: Store) -> list[dict]:
+    path = test_runs_path(store)
+    recs = []
+    if path.exists():
+        for ln in path.read_text(encoding="utf-8").splitlines():
+            try:
+                r = json.loads(ln)
+            except json.JSONDecodeError:
+                continue
+            if r.get("kind") == "all" and r.get("failed") == 0 and not r.get("dirty") and r.get("sha"):
+                recs.append(r)
+    return recs
+
+
+def verify_status(store: Store) -> dict:
+    """The full-suite policy (autonomy.verify) against what is committed: the last green full run that HEAD contains
+    and the done tasks committed after it, which no full run has covered yet."""
+    cfg = {**DEFAULT_AUTONOMY["verify"], **(store.state.get("autonomy", {}).get("verify") or {})}
+    head = _git(store, "rev-parse", "HEAD")
+    base = None
+    for r in reversed(_green_full_runs(store)):
+        if head and (r["sha"] == head or _git(store, "merge-base", "--is-ancestor", r["sha"], head) is not None):
+            base = r
+            break
+    scope = [".", ":(exclude).dev", ":(exclude)*.md", ":(exclude)docs"]
+    covered = bool(base and head and (base["sha"] == head or _git(store, "diff", "--name-only", base["sha"], head, "--", *scope) == ""))
+    ms = store.milestones()
+    pending = []
+    for tid, t in sorted(store.tasks().items(), key=lambda kv: int(kv[0][2:]) if kv[0][2:].isdigit() else 0):
+        c = t.get("commit")
+        if covered or t.get("status") != "done" or not c or not head:
+            continue
+        if _git(store, "merge-base", "--is-ancestor", c, head) is None:
+            continue  # not on this branch (another pipeline branch, or rewritten)
+        if base:
+            if c == base["sha"] or _git(store, "merge-base", "--is-ancestor", c, base["sha"]) is not None:
+                continue  # the green run already contains it
+        elif (ms.get(t.get("milestone")) or {}).get("gate") in ("passed", "skipped"):
+            continue  # no green run recorded: only the milestones still open count
+        pending.append({"task": tid, "commit": c, "milestone": t.get("milestone")})
+    open_ms = sorted({p["milestone"] for p in pending if p["milestone"]})
+    milestone_done = [m for m in open_ms if not any(v.get("milestone") == m and v.get("status") not in ("done", "dropped")
+                                                    for v in store.tasks().values())]
+    return {"mode": cfg["full_suite"], "batch_size": cfg["batch_size"], "head": head,
+            "base": base["sha"] if base else None, "covered": covered, "pending": pending, "milestone_done": milestone_done}
+
+
+def verify_due(st: dict, boundary: bool) -> tuple[bool, str]:
+    n = len(st["pending"])
+    if not n:
+        return False, "nothing to verify: a green full run covers HEAD" if st["covered"] else "nothing to verify: no task committed since the last green full run"
+    if st["milestone_done"]:
+        return True, f"the tasks of {', '.join(st['milestone_done'])} are done ({n} task(s) not covered by a full run)"
+    if st["mode"] == "per_task":
+        return True, f"per_task: {n} task(s) not covered by a full run"
+    if st["mode"] == "per_batch":
+        if n >= st["batch_size"]:
+            return True, f"per_batch: {n} task(s) since the last green full run (batch_size {st['batch_size']})"
+        if boundary:
+            return True, f"per_batch: end of a batch or of the run, {n} task(s) not covered"
+        return False, f"per_batch: {n} of {st['batch_size']} task(s); run the full suite at the end of the batch or the run"
+    return False, f"per_milestone: {n} task(s) wait for the end of the milestone (qa runs the suite if the run stops first)"
+
+
+def _bisect_run(wt: Path, cmd: str, timeout: int) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(["sh", "-c", cmd], cwd=str(wt), capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, 124, "", f"timed out after {timeout}s")
+    except OSError as e:
+        return subprocess.CompletedProcess(cmd, 1, "", str(e))
+
+
+def verify_bisect(store: Store, test_cmd: str, setup: str | None, timeout: int) -> dict:
+    """Find the first commit since the last green full run where `test_cmd` fails, in a scratch worktree (the main
+    checkout and its HEAD are never touched). Walks the pending task commits oldest first (a batch is small)."""
+    st = verify_status(store)
+    if not st["base"]:
+        fail("verify bisect: no green full-suite run on this branch to start from; fix forward on HEAD")
+    commits = (_git(store, "rev-list", "--reverse", f"{st['base']}..{st['head']}") or "").split()
+    if not commits:
+        fail("verify bisect: HEAD is the last green full run; nothing to bisect")
+    wt = store.dev / "run" / "worktrees" / "verify-bisect"
+    if wt.exists():
+        _gitc(store.root, "worktree", "remove", "--force", str(wt))
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    r = _gitc(store.root, "worktree", "add", "--detach", str(wt), st["head"])
+    if r.returncode != 0:
+        fail(f"verify bisect: cannot create the scratch worktree: {(r.stderr or '').strip()[:200]}")
+    by_commit = {t.get("commit"): tid for tid, t in store.tasks().items() if t.get("commit")}
+    tried = []
+    first_bad = None
+    try:
+        if setup:
+            s = _bisect_run(wt, setup, timeout)
+            if s.returncode != 0:
+                fail(f"verify bisect: setup failed ({s.returncode}): {(s.stderr or s.stdout).strip()[-300:]}")
+        # HEAD first: a test that passes there in a clean tree is flaky or depends on local state, not on a commit
+        res = _bisect_run(wt, test_cmd, timeout)
+        tried.append({"commit": st["head"], "ok": res.returncode == 0})
+        if res.returncode == 0:
+            return {"base": st["base"], "head": st["head"], "first_bad": None, "task": None, "tried": tried,
+                    "verdict": "passes_on_head", "note": "the tests pass on HEAD in a clean worktree: flaky, or they depend on local state"}
+        lo, hi = 0, len(commits) - 1  # commits[hi] (HEAD) fails; base passes
+        while lo < hi:
+            mid = (lo + hi) // 2
+            _gitc(wt, "checkout", "--quiet", "--detach", commits[mid])
+            res = _bisect_run(wt, test_cmd, timeout)
+            tried.append({"commit": commits[mid], "ok": res.returncode == 0})
+            if res.returncode == 0:
+                lo = mid + 1
+            else:
+                hi = mid
+        first_bad = commits[lo]
+    finally:
+        _gitc(store.root, "worktree", "remove", "--force", str(wt))
+    subject = _git(store, "log", "-1", "--format=%s", first_bad) or ""
+    task = by_commit.get(first_bad)
+    if not task:
+        m = re.search(r"\b(T-\d+)\b", subject)
+        task = m.group(1) if m else None
+    store.event("verify_bisect", commit=first_bad[:12], task=task or "-", steps=len(tried))
+    return {"base": st["base"], "head": st["head"], "first_bad": first_bad, "task": task, "subject": subject,
+            "tried": tried, "verdict": "found"}
+
+
+def cmd_verify(store: Store, a: argparse.Namespace) -> None:
+    """Full-suite cadence (autonomy.verify, conventions.md §18): status, whether the full suite is due now, and the
+    bisect of a red full run to the task that broke it."""
+    store.load()
+    if a.action == "bisect":
+        if not a.test:
+            fail("verify bisect needs --test \"<command that runs the failing tests>\"")
+        res = verify_bisect(store, a.test, a.setup, a.timeout)
+        if a.json:
+            print(json.dumps(res, indent=2))
+        elif res["verdict"] == "found":
+            print(f"first bad commit {res['first_bad'][:7]} ({res['task'] or 'no task'}): {res['subject']}"
+                  f" · {len(res['tried'])} run(s) since {res['base'][:7]}")
+        else:
+            print(res["note"])
+        return
+    st = verify_status(store)
+    due, why = verify_due(st, a.boundary)
+    st = {**st, "due": due, "reason": why}
+    if a.action == "status":
+        if a.json:
+            print(json.dumps(st, indent=2))
+        else:
+            print(f"full suite: {st['mode']} (batch {st['batch_size']}) · last green full run "
+                  f"{(st['base'] or 'none')[:7]} · not covered: {', '.join(p['task'] for p in st['pending']) or 'none'}")
+            print(("due: " if due else "not due: ") + why)
+        return
+    print(json.dumps(st) if a.json else ("due: " if due else "not due: ") + why)
+    sys.exit(0 if due else 3)
+
+
 def cmd_ledger(store: Store, a: argparse.Namespace) -> None:
     """Work ledger (conventions.md §18): reuse verified work whose inputs did not change."""
     store.load()
     inc = {"enabled": True, "spot_check_pct": 10, **(store.state.get("autonomy", {}).get("incremental") or {})}
     salt = _csv(getattr(a, "salt", None)) + [f"kit:{tel.kit_version()}"]
-    context = _csv(getattr(a, "context", None))
+    context = [_norm_ctx(store, c) for c in _csv(getattr(a, "context", None))]
     no_cache = bool(getattr(a, "no_cache", False)) or not inc.get("enabled", True)
     spot = inc.get("spot_check_pct", 10) if getattr(a, "spot_pct", None) is None else a.spot_pct
     seed = getattr(a, "seed", None) or datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -5091,7 +5274,7 @@ def cmd_brief(store: Store, a: argparse.Namespace) -> None:
         out += ["", "Commands (architecture.md §8):"] + [f"  - {k}: {v}" for k, v in cmds]
     out += ["", "Verification you run (conventions.md §18): unit tests, lint and type-check, plus only the integration tests "
             "of this task's ACs and of the modules you changed (e.g. -k AC-n or their paths). The orchestrator runs the full "
-            "suite once after merging, so do not run it more than once yourself.",
+            "suite after merging (per batch by default, autonomy.verify), so do not run it more than once yourself.",
             "Worktree rules (resource-isolation.md): one simple command per Bash call; no heredocs and no `cd … &&` chains; "
             "write scripts and files with Write/Edit; link node_modules/.venv from the Project root instead of installing; "
             "never commit or touch git state; take a lock (dev_state.py lock acquire <resource> --holder <you>) before "
@@ -6379,13 +6562,15 @@ def cmd_set(store: Store, a: argparse.Namespace) -> None:
             node[parts[-1]] = parsed
             store_autonomy_object(auto, top, merged)
         elif top in ("production", "local_deploy", "cooldown", "quality", "model_policy", "ui", "queue", "milestone_size", "ci", "pipeline",
-                     "release_flags", "git"):
+                     "release_flags", "git", "verify"):
             if top == "local_deploy" and not isinstance(parsed, dict):
                 parsed = {"mode": val}
             elif top == "model_policy" and not isinstance(parsed, dict):
                 parsed = {"mode": val}
             elif top == "ci" and not isinstance(parsed, dict):
                 parsed = {"provider": val}
+            elif top == "verify" and not isinstance(parsed, dict):
+                parsed = {"full_suite": val}
             elif top == "cooldown" and not isinstance(parsed, dict):
                 if val not in ("on", "off", "true", "false", "yes", "no"):
                     fail('autonomy.cooldown must be on | off or {"enabled": true, "max_tasks": 5}')
@@ -6431,7 +6616,7 @@ def store_autonomy_object(auto: dict, top: str, obj: dict) -> None:
         obj = {**DEFAULT_AUTONOMY["local_deploy"], **obj}
     elif top in ("cooldown", "quality"):
         check_autonomy_field(top, obj)
-    elif top in ("queue", "milestone_size", "ci", "pipeline", "release_flags", "git"):
+    elif top in ("queue", "milestone_size", "ci", "pipeline", "release_flags", "git", "verify"):
         obj = {**DEFAULT_AUTONOMY[top], **obj}
         check_autonomy_field(top, obj)
     elif top == "ui":
@@ -8288,6 +8473,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--sha"); s.add_argument("--command"); s.add_argument("--passed", type=int); s.add_argument("--failed", type=int)
     s.add_argument("--coverage", type=float); s.add_argument("--duration", type=float); s.add_argument("--paths")
     s.add_argument("--json", action="store_true")
+    s = sub.add_parser("verify"); s.set_defaults(fn=cmd_verify)
+    s.add_argument("action", choices=["status", "due", "bisect"]); s.add_argument("--boundary", action="store_true",
+                   help="due: the end of a parallel batch or of the run")
+    s.add_argument("--test", help="bisect: the command that runs the failing tests"); s.add_argument("--setup",
+                   help="bisect: run once in the scratch worktree first (e.g. link node_modules)")
+    s.add_argument("--timeout", type=int, default=900); s.add_argument("--json", action="store_true")
     s = sub.add_parser("xref"); s.set_defaults(fn=cmd_xref)
     s.add_argument("--json", action="store_true"); s.add_argument("--strict", action="store_true")
     s = sub.add_parser("stale"); s.set_defaults(fn=cmd_stale)

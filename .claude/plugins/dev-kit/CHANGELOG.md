@@ -2,6 +2,24 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.18.0 — 2026-11-26
+
+Eduardo asked whether the kit should build first and test once when the milestone or the release closes, because the same work seemed to run again and again. The review kept test-first per task (it is how an implementer knows it is done, and what keeps a break from spreading to the tasks built on it) and removed the three real repetitions: the full suite after every merged task, the suite run again at release on code the last gate had verified, and the gate reviewing again the UI files the task checks had just reviewed.
+
+### Added
+- Full-suite cadence (`autonomy.verify`, conventions §18): `full_suite` is `per_task` (as before), `per_batch` (default: every `batch_size` tasks, default 4, at the end of each parallel batch and of the run) or `per_milestone` (only when the milestone's tasks are done). Every mode also runs it when the milestone's tasks are done, so `qa` reuses a green run. Every merge still runs lint, type-check and the task's affected tests.
+- `dev_state.py verify status|due [--boundary]`: the last green full run on this branch, the done tasks no full run covers yet, and whether the suite is due now (exit 0 due, 3 not).
+- `dev_state.py verify bisect --test "<failing tests>" [--setup "<cmd>"]`: finds the first commit since the last green full run that fails those tests, in a scratch worktree (the main checkout is never touched), and names its task; `passes_on_head` when the failure does not reproduce in a clean tree. `implement` turns it into a fix task run before any other, and never starts a batch on a red suite.
+
+### Changed
+- `implement` runs lint, type-check and the affected tests after each merge, and the full suite per `autonomy.verify` (step 6b); the parallel integration no longer runs the full suite once per task.
+- `implement` records the copy and static a11y task checks in the ledger (`audit:copy`, `audit:a11y`, same context and salt as `qa`), so the gate's first round reuses the unchanged files they passed; files with a finding left are reviewed again, and the harness's dynamic a11y checks still run.
+- `release` step 2 reuses a green full run, lint and type-check recorded on the release commit instead of running them again; the build always runs. The release audit is still the full sweep without cache.
+- Ledger context paths are normalised (`skills/implement/../core/...` and `skills/qa/../core/...` are the same file), so two skills naming a checklist differently share fingerprints.
+
+### Migration
+- Projects without `autonomy.verify` use the default `per_batch`: the full suite runs less often than before (at most every 4 tasks and always before the gate). `DS set autonomy.verify per_task` restores the 3.17 behaviour.
+
 ## 3.17.0 — 2026-11-25
 
 Eduardo asked when the autopilot stops and whether autonomy could have steps between "ask everything" and "never wait". The level and the pause policy were one setting: `unattended` was a level that also filled the pause points. They are now two independent settings, with two new steps in between.

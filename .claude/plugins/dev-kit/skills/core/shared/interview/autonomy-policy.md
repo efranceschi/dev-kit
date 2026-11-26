@@ -30,7 +30,8 @@ Stored in `.dev/state.json` under `autonomy`. Set by `interview` (block 9); chan
   "local_deploy": {"mode": "off", "port": null, "notify": false},
   "production": {"when": "none", "method": null, "host": null, "targets": [], "smoke": [], "prerequisites": []},
   "tips": "on",
-  "task_checks": "ui"
+  "task_checks": "ui",
+  "verify": {"full_suite": "per_batch", "batch_size": 4}
 }
 ```
 
