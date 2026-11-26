@@ -848,12 +848,16 @@
     {
       "name": "diagram",
       "category": "ship",
-      "one_line": "The high-level architecture diagram of the system being built, in draw.io's style without draw.io: an SVG for the board and the README, plus a .drawio file.",
+      "one_line": "The diagrams of the system being built, in draw.io's style without draw.io: high-level architecture, data model and deployment, as SVGs for the board and the docs, plus .drawio files.",
       "when": "Runs by itself at the end of architecture (the planned diagram), after a passed QA gate when it is missing or out of date (as built), and in docs (always). By hand when the board's Architecture tab has no diagram yet or the architecture changed.",
       "args": [
         {
           "arg": "update",
-          "meaning": "redraw the existing diagram from the architecture and the code as built (without it, a missing diagram is created)"
+          "meaning": "redraw the existing diagrams from the architecture and the code as built (without it, a missing diagram is created)"
+        },
+        {
+          "arg": "architecture | data | deploy",
+          "meaning": "only that diagram (without it, every one that applies: architecture always, data with a data model, deploy with a deployment)"
         }
       ],
       "examples": [
@@ -863,10 +867,14 @@
         },
         {
           "command": "/dev-kit:diagram update",
-          "what": "redraws it after the architecture changed"
+          "what": "redraws them after the architecture changed"
+        },
+        {
+          "command": "/dev-kit:diagram data",
+          "what": "draws only the data model: entities, keys and relationships"
         }
       ],
-      "produces": "docs/diagrams/architecture.json (the model), architecture.svg and architecture.drawio",
+      "produces": "docs/diagrams/architecture, data-model and deployment, each as .json (the model), .svg and .drawio",
       "related": [
         "architecture",
         "docs",

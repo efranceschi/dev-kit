@@ -12,6 +12,7 @@ Verify that the documentation matches the product as built. **Execute what the d
 ## Architecture diagram
 - `docs/diagrams/architecture.svg` exists and `dev_diagram.py check` says it is current (missing or out of date → `high`); it is linked from the README and from `.dev/architecture.md` §2.
 - It shows every deployable unit, data store, queue and outside service the code has, once each, and nothing the code does not have (a difference → `medium`); it stays high level (no classes or endpoints).
+- A project with a database has `docs/diagrams/data-model.svg` (every entity of the schema once, keys marked, relationships with their cardinality), and one that is deployed has `docs/diagrams/deployment.svg` (every host, platform and managed service of production); a missing one or a difference → `medium`. `dev_diagram.py check --kind all` covers them once they exist.
 
 ## User guide
 - One section per persona journey in `ux-flows.md`; steps match the actual UI labels (grep the strings; compare with screenshots); features the guide describes exist; features that exist but are missing from the guide (main flows) → `medium`.

@@ -2591,35 +2591,56 @@
 
   // ------------------------------------------------------------------ the map: the five lanes of the flow at once, with where the project is
   // ------------------------------------------------------------------ architecture: the diagram of the system being built
-  // docs/diagrams/architecture.svg (served by /api/diagram) drawn by /dev-kit:diagram in Claude Code; the board only shows it
+  // docs/diagrams/{architecture,data-model,deployment}.svg (served by /api/diagram?kind=…) drawn by /dev-kit:diagram in Claude Code;
+  // the board only shows them, one at a time: the system, its data model, where it runs
   const DIAGRAM_NEW = "/dev-kit:diagram", DIAGRAM_UPDATE = "/dev-kit:diagram update";
-  let archZoom = false;
-  const diagramBusy = () => [DIAGRAM_NEW, DIAGRAM_UPDATE].map((c) => runningRun(c)).find(Boolean) || null;
+  const DIAGRAM_KINDS = [
+    { key: "architecture", label: N_("System"), title: N_("High-level view of the system being built") },
+    { key: "data", label: N_("Data"), title: N_("Data model: entities and their relationships") },
+    { key: "deploy", label: N_("Deployment"), title: N_("Where it runs: environments, hosts and managed services") },
+  ];
+  let archZoom = false, archKind = "architecture";
+  const kindArg = (k) => (k === "architecture" ? "" : ` ${k}`);
+  const diagramBusy = (k) => [DIAGRAM_NEW + kindArg(k), DIAGRAM_UPDATE + kindArg(k), ...(k === "architecture" ? [] : [DIAGRAM_NEW, DIAGRAM_UPDATE])]
+    .map((c) => runningRun(c)).find(Boolean) || null;
+  const diagramOf = (k) => (data.diagrams && data.diagrams[k]) || (k === "architecture" ? data.diagram : null) || { exists: false };
   function renderArch() {
-    const d = data.diagram || { exists: false };
-    const busy = diagramBusy();
+    const k = archKind;
+    const kd = DIAGRAM_KINDS.find((x) => x.key === k);
+    fill($("arch-kinds"), DIAGRAM_KINDS.map((x) => {
+      const dx = diagramOf(x.key);
+      return h("button", { type: "button", class: "seg-btn", "data-kind": x.key, "aria-pressed": String(x.key === k),
+        title: tr(x.title), text: tr(x.label) + (dx.exists && (dx.stale || !dx.current) ? " •" : "") });
+    }));
+    const d = diagramOf(k);
+    const busy = diagramBusy(k);
     const sub = $("arch-sub");
     if (d.exists) {
-      fill(sub, d.at ? tr("High-level view of the system being built, drawn on {v}", { v: fmtDT(d.at) }) : tr("High-level view of the system being built"),
+      fill(sub, d.at ? tr("{what}, drawn on {v}", { what: tr(kd.title), v: fmtDT(d.at) }) : tr(kd.title),
         d.stale || !d.current ? h("span", { class: "stale", text: ` · ${tr("out of date: the architecture changed since")}` }) : null,
-        d.stale || !d.current ? [" · ", tr("update it in Claude Code with "), cmd(DIAGRAM_UPDATE)] : null,
+        d.stale || !d.current ? [" · ", tr("update it in Claude Code with "), cmd(DIAGRAM_UPDATE + kindArg(k))] : null,
         busy ? ` · ${tr("Claude Code is drawing it now")}` : null);
-    } else fill(sub, tr("High-level view of the system being built"));
+    } else fill(sub, tr(kd.title));
     const v = encodeURIComponent(d.at || "");
-    fill($("arch-actions"), d.exists ? h("a", { class: "btn btn-sm", href: `/api/diagram?v=${v}`, target: "_blank", rel: "noopener", text: tr("Open full size") }) : null);
+    const src = `/api/diagram?kind=${k}&v=${v}`;
+    fill($("arch-actions"), d.exists ? h("a", { class: "btn btn-sm", href: src, target: "_blank", rel: "noopener", text: tr("Open full size") }) : null);
     const view = $("arch-view");
     view.classList.toggle("zoom", archZoom && d.exists);
     view.classList.toggle("has-img", Boolean(d.exists));
     if (d.exists) {
-      const img = h("img", { src: `/api/diagram?v=${v}`, alt: tr("Architecture diagram of the system being built"), title: tr("Click to zoom") });
+      const img = h("img", { src, alt: tr(kd.title), title: tr("Click to zoom") });
       img.addEventListener("click", () => { archZoom = !archZoom; view.classList.toggle("zoom", archZoom); });
       fill(view, img);
       return;
     }
     fill(view, h("div", { class: "empty" },
-      busy ? tr("No diagram yet: Claude Code is drawing it with /dev-kit:diagram. It shows here when it is done.")
-        : tr("No diagram yet. Run /dev-kit:diagram in Claude Code to draw it.")));
+      busy ? tr("No diagram yet: Claude Code is drawing it with {cmd}. It shows here when it is done.", { cmd: DIAGRAM_NEW + kindArg(k) })
+        : tr("No diagram yet. Run {cmd} in Claude Code to draw it.", { cmd: DIAGRAM_NEW + kindArg(k) })));
   }
+  $("arch-kinds").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-kind]");
+    if (b && b.dataset.kind !== archKind) { archKind = b.dataset.kind; archZoom = false; renderArch(); }
+  });
 
   function renderMap() {
     const m = data.milestones.find((x) => x.id === data.current_milestone) || currentMilestone();

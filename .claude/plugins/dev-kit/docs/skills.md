@@ -54,7 +54,7 @@ Every skill is invoked as `/dev-kit:<name>`. Not sure which one? `/dev-kit:help 
 |---|---|
 | [`deploy`](#deploy) | Production deploy of an approved milestone or release: preflight, backup, dry-run, install, migrations, smoke checks. |
 | [`docs`](#docs) | Project documentation from the artifacts and code: README, architecture diagram (always), user guide, API reference, CHANGELOG. |
-| [`diagram`](#diagram) | The high-level architecture diagram of the system being built, in draw.io's style without draw.io: an SVG for the board and the README, plus a .drawio file. |
+| [`diagram`](#diagram) | The diagrams of the system being built, in draw.io's style without draw.io: high-level architecture, data model and deployment, as SVGs for the board and the docs, plus .drawio files. |
 | [`release`](#release) | Ships the next release (the milestones closed since the last release, or the next planned release): audits, the release review and your approve/reject decision for a planned release, then version, CHANGELOG, tag, production deploy and the release record; patch releases for hotfixes. |
 
 ## Observe
@@ -581,22 +581,24 @@ Project documentation from the artifacts and code: README, architecture diagram 
 
 ### diagram
 
-The high-level architecture diagram of the system being built, in draw.io's style without draw.io: an SVG for the board and the README, plus a .drawio file.
+The diagrams of the system being built, in draw.io's style without draw.io: high-level architecture, data model and deployment, as SVGs for the board and the docs, plus .drawio files.
 
 **When:** Runs by itself at the end of architecture (the planned diagram), after a passed QA gate when it is missing or out of date (as built), and in docs (always). By hand when the board's Architecture tab has no diagram yet or the architecture changed.
 
-**Usage:** `/dev-kit:diagram [update]`
+**Usage:** `/dev-kit:diagram [update] [architecture | data | deploy]`
 
 | Argument | Meaning |
 |---|---|
-| `update` | redraw the existing diagram from the architecture and the code as built (without it, a missing diagram is created) |
+| `update` | redraw the existing diagrams from the architecture and the code as built (without it, a missing diagram is created) |
+| `architecture | data | deploy` | only that diagram (without it, every one that applies: architecture always, data with a data model, deploy with a deployment) |
 
 **Examples:**
 
 - `/dev-kit:diagram`: draws docs/diagrams/architecture.svg and .drawio
-- `/dev-kit:diagram update`: redraws it after the architecture changed
+- `/dev-kit:diagram update`: redraws them after the architecture changed
+- `/dev-kit:diagram data`: draws only the data model: entities, keys and relationships
 
-**Produces:** docs/diagrams/architecture.json (the model), architecture.svg and architecture.drawio
+**Produces:** docs/diagrams/architecture, data-model and deployment, each as .json (the model), .svg and .drawio
 
 **Related:** [`architecture`](#architecture), [`docs`](#docs), [`board`](#board)
 

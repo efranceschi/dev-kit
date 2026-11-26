@@ -2,6 +2,24 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.21.0 — 2026-11-26
+
+Eduardo asked whether other kinds of diagram made sense besides the high-level one, and to show them on the board. Two did: the data model (it changes most during construction and is what a migration review needs) and the deployment (what a release and `ops-reviewer` need). Sequence, class and module diagrams were left out: there are many, they age with every task, and Mermaid in the docs already covers the critical flows.
+
+### Added
+- `dev_diagram.py --kind architecture|data|deploy` on `render`, `check` and `example`: each kind has its own model, SVG and `.drawio` in `docs/diagrams/` (`architecture.*`, `data-model.*`, `deployment.*`). `check --kind all` checks the architecture diagram and the other two once they have a model.
+- Each diagram is out of date only when its own source changes: the stamp hashes `.dev/architecture.md` whole for architecture, only §4 (data model) for data and only §7 (environments) for deploy (the whole file when the section is not found).
+- Node kinds `entity` (a table: name header, one row per field, `PK`/`FK` marked; `fields`, at most 12) and `network` (DNS, CDN, load balancer); edge style `relation` (no arrow, the label is the cardinality, `1 — N`). Neighbours move apart so the label of the line between them fits, and side-to-side lines stay straight when nodes differ in height.
+- Board, Architecture tab: a System · Data · Deployment switch shows one picture at a time (a `•` marks one out of date); `/api/diagram?kind=…` serves each; the empty state names the command for that kind (`/dev-kit:diagram data`).
+
+### Changed
+- `/dev-kit:diagram [update] [architecture | data | deploy]`: without a kind it draws every one that applies (architecture always, data when §4 has entities, deploy when §7 says where it runs), with the rules for each model, and links them from `architecture.md` §2, §4 and §7 and the developer docs.
+- `architecture`, `qa` (after a passed gate) and `docs` use `check --kind all`, so they draw and refresh the three; commits are `docs: diagrams`.
+- `docs-reviewer` and the docs checklist: a project with a database and no data diagram, or a deployment and no deployment diagram, is `medium`, as is an entity, host or managed service missing from them.
+
+### Migration
+Nothing to do: existing `architecture.*` files keep their paths and stamps. The data and deployment diagrams appear at the next `architecture`, passed gate or `docs`.
+
 ## 3.20.0 — 2026-11-26
 
 Eduardo asked when `/dev-kit:diagram` runs without being asked: only inside `docs`, at release time, so the board's Architecture tab stayed empty or out of date for the whole construction. The diagram now also runs at the two moments the architecture takes shape or changes.

@@ -1071,6 +1071,7 @@ main[aria-busy="true"] .phase-panel { opacity: .55; }
 .arch-title { flex: 1 1 260px; min-width: 0; }
 .arch-title h2 { margin: 0; font-size: 16px; }
 .arch-title .stale { color: var(--warn-text, var(--text-secondary)); font-weight: 600; }
+.arch-kinds .seg-btn { padding: 5px 12px; }
 .arch-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .arch-view { position: relative; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); padding: 12px; display: grid; place-items: center; }
 .arch-view.has-img { background: #fff; }

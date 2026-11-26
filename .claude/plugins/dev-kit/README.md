@@ -45,7 +45,7 @@ Step by step: [getting started](docs/getting-started.md). What each stage expect
 | change autonomy, release flags, health check | `/dev-kit:settings` |
 | know how much it cost | `/dev-kit:costs` |
 | review the session or send feedback to the author | `/dev-kit:feedback` |
-| draw the architecture diagram of what is being built (shown on the board's Architecture tab) | `/dev-kit:diagram` |
+| draw the diagrams of what is being built: architecture, data model, deployment (shown on the board's Architecture tab) | `/dev-kit:diagram` |
 | find out why a run looks stuck, or make a dump for a dev-kit patch | `/dev-kit:debug` |
 | run it overnight | [recipe](docs/recipes.md#let-it-run-overnight) |
 

@@ -25,7 +25,7 @@ Language for prose. README.md, docs/, CHANGELOG.md, CLAUDE.md, `.env.example`, `
 4. Compare the user guide with the UI: grep labels and headings in the code; if the app can run and Playwright is present, spot-check two flows against the guide's steps.
 5. Compare API docs with routes/schemas; call one or two documented endpoints against the running app when possible and check the examples.
 6. Compare CHANGELOG with `git log` `[T-xxx]` commits since the last tag; check version/date.
-7. Check the architecture diagram: run `python3 -I <KIT>/scripts/dev_diagram.py check` (exit 3 missing, 4 out of date: both `high`) and compare `docs/diagrams/architecture.svg` with the code as built (a container, store or outside service the code has and the diagram lacks, or the reverse, is `medium`).
+7. Check the diagrams: run `python3 -I <KIT>/scripts/dev_diagram.py check --kind all` (exit 3 missing, 4 out of date: both `high`) and compare `docs/diagrams/architecture.svg` with the code as built (a container, store or outside service the code has and the diagram lacks, or the reverse, is `medium`); when the project has a database and no `docs/diagrams/data-model.svg`, or a deployment and no `docs/diagrams/deployment.svg`, that is `medium`; an entity of the schema missing from the data diagram, or a host or managed service missing from the deployment diagram, is `medium`.
 8. Check links (relative paths exist), screenshots' currency, CLAUDE.md "dev-kit" section accuracy, and writing quality in the document language.
 
 ## Rules

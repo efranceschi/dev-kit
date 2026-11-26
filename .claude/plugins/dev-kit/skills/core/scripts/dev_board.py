@@ -1050,6 +1050,7 @@ def build_state(root: Path, board: dict | None = None) -> dict:
                                      reverse=True) if isinstance(f, dict)],
         "docs": docs_list(root),
         "diagram": _safe(lambda: dg.status(root)),
+        "diagrams": _safe(lambda: dg.statuses(root)),   # architecture, data, deploy: the Architecture tab's views
         "milestone_costs": {m: {k: v.get(k) for k in ("usd", "usd_complete", "tokens", "partial")}
                             for m, v in ms_costs.items() if isinstance(v, dict)},
         "releases": [{k: r.get(k) for k in ("version", "tag", "milestones", "at", "hotfix", "release")}
@@ -1080,9 +1081,11 @@ def signature(root: Path) -> tuple:
             out.append((name, st.st_mtime_ns, st.st_size))
         except OSError:
             out.append((name, 0, 0))
-    for rel in (dg.SVG, dg.MODEL, *dg.SOURCES):  # the diagram lives in docs/, its source in .dev/architecture.md
+    # the diagrams live in docs/diagrams/, their source in .dev/architecture.md
+    for p in [*(q for k in dg.DIAGRAMS for q in dg.paths(root, k)[:2]), *(root / rel for rel in dg.SOURCES)]:
+        rel = p.relative_to(root).as_posix()
         try:
-            st = (root / rel).stat()
+            st = p.stat()
             out.append((rel, st.st_mtime_ns, st.st_size))
         except OSError:
             out.append((rel, 0, 0))
@@ -1332,17 +1335,23 @@ class Handler(BaseHTTPRequestHandler):
         self.server.stop()
 
     def _diagram(self):
-        """The project's architecture diagram (docs/diagrams/architecture.svg), as an image: only that file, never
-        through a link out of the project, at most DIAGRAM_MAX bytes. Shown in an <img>, so scripts in it never run."""
+        """A diagram of the project (`?kind=architecture|data|deploy`, default architecture: docs/diagrams/<stem>.svg),
+        as an image: only those files, never through a link out of the project, at most DIAGRAM_MAX bytes. Shown in
+        an <img>, so scripts in it never run."""
         root = self.server.root.resolve()
+        q = urllib.parse.parse_qs(self.path.partition("?")[2])
+        kind = (q.get("kind") or ["architecture"])[0]
+        if kind not in dg.DIAGRAMS:
+            return self._json(404, {"ok": False, "error": "unknown diagram kind"})
         try:
-            p = (root / dg.SVG).resolve()
+            p = dg.paths(root, kind)[1].resolve()
             ok = p.is_relative_to(root) and p.is_file()
             size = p.stat().st_size if ok else 0
         except OSError:
             ok, size = False, 0
         if not ok:
-            return self._json(404, {"ok": False, "error": "no diagram", "hint": "run /dev-kit:diagram"})
+            return self._json(404, {"ok": False, "error": "no diagram",
+                                    "hint": "run /dev-kit:diagram" + ("" if kind == "architecture" else f" {kind}")})
         if size > DIAGRAM_MAX:
             return self._json(413, {"ok": False, "error": f"too large ({size} bytes)"})
         self._send(200, p.read_bytes(), "image/svg+xml; charset=utf-8",

@@ -805,7 +805,17 @@
     "✓ plan confirmed": "✓ plan confirmed",
     "✓ {v}": "✓ {v}",
     "✕ below cut-off": "✕ below cut-off",
-    "✕ failing": "✕ failing"
+    "✕ failing": "✕ failing",
+    "System": "System",
+    "Data": "Data",
+    "Deployment": "Deployment",
+    "Diagram": "Diagram",
+    "Data model: entities and their relationships": "Data model: entities and their relationships",
+    "Where it runs: environments, hosts and managed services": "Where it runs: environments, hosts and managed services",
+    "{what}, drawn on {v}": "{what}, drawn on {v}",
+    "No diagram yet: Claude Code is drawing it with {cmd}. It shows here when it is done.": "No diagram yet: Claude Code is drawing it with {cmd}. It shows here when it is done.",
+    "No diagram yet. Run {cmd} in Claude Code to draw it.": "No diagram yet. Run {cmd} in Claude Code to draw it.",
+    "The system being built: its architecture, data model and deployment diagrams": "The system being built: its architecture, data model and deployment diagrams"
   },
   "plurals": {
     "agent": {

@@ -1,22 +1,30 @@
 #!/usr/bin/env python3
-"""dev_diagram.py - the architecture diagram of the system being built, drawn in the style of draw.io, with no draw.io.
+"""dev_diagram.py - the diagrams of the system being built, drawn in the style of draw.io, with no draw.io.
 
 Standard library only. The model (what the system is made of) is written by /dev-kit:diagram; this script only
 checks it and draws it, always the same way for the same model:
 
-  render [--model PATH] [--svg PATH] [--drawio PATH] [--json]
+Three kinds (`--kind`, default architecture), each its own model, picture and draw.io file:
+  architecture  the high-level view: users, clients, services, jobs, stores and outside services, and how they talk
+  data          the data model: entities with their key fields, and their relationships (.dev/architecture.md §4)
+  deploy        where it runs: environments, hosts, managed services, network edges (.dev/architecture.md §7)
+
+  render [--kind K] [--model PATH] [--svg PATH] [--drawio PATH] [--json]
           check the model and write the SVG (shown by the board and the README) and a .drawio file (the same
           diagram, for whoever wants to open or edit it in draw.io; nobody needs draw.io for anything)
-  check [--json] [--info]
-          is there a diagram, was it drawn from the current model, and did .dev/architecture.md change since
-          (exit 0 current, 3 missing, 4 out of date; --info: always 0)
-  example
+  check [--kind K|all] [--json] [--info]
+          is there a diagram, was it drawn from the current model, and did its part of .dev/architecture.md change
+          since (exit 0 current, 3 missing, 4 out of date; --info: always 0). `all`: the architecture diagram, plus
+          the data and deploy diagrams once they have a model (a missing architecture diagram is 3, any out of date 4)
+  example [--kind K]
           print a model to start from
 
 Default paths, in the project (part of its documentation, committed like the rest of docs/):
   docs/diagrams/architecture.json    the model
   docs/diagrams/architecture.svg     the picture
   docs/diagrams/architecture.drawio  the same picture as a draw.io file
+  docs/diagrams/data-model.{json,svg,drawio}   the data diagram
+  docs/diagrams/deployment.{json,svg,drawio}   the deploy diagram
 
 The model:
   {"title": "...", "subtitle": "...",
@@ -26,10 +34,13 @@ The model:
    "legend": {"client": "Client", ...}}
 Layers are drawn top to bottom in their order (users and clients first, data and external services last), nodes
 left to right in their order. Kinds: actor, client, service, worker, database, storage, queue, cache, external,
-component. Edges are routed at right angles between the layers; one that skips layers runs down the right side.
+network, component, and entity (a data-model table: `"fields": ["PK id uuid", "FK customer_id", "total numeric"]`,
+at most 12; a leading PK or FK is drawn as a key mark). Edge style `relation` (no arrow) joins entities, its label
+is the cardinality (`1 — N`). Edges are routed at right angles between the layers; one that skips layers runs down the right side.
 
-The SVG starts with a comment holding the hash of the model and of .dev/architecture.md it was drawn from, which is
-what `check` compares.
+The SVG starts with a comment holding the hash of the model and of the part of .dev/architecture.md it was drawn
+from (the whole file for architecture, §4 data model for data, §7 environments for deploy; the whole file when the
+section is not found), which is what `check` compares.
 
 Exit codes: 0 ok · 1 usage or invalid model (the errors are printed) · 3 no diagram · 4 diagram out of date
 """
@@ -49,6 +60,14 @@ MODEL = "docs/diagrams/architecture.json"
 SVG = "docs/diagrams/architecture.svg"
 DRAWIO = "docs/diagrams/architecture.drawio"
 SOURCES = (".dev/architecture.md",)   # a change here makes the diagram out of date
+# the kinds of diagram: file stem, and the section of architecture.md each is drawn from (None: the whole file)
+DIAGRAMS = {
+    "architecture": {"stem": "architecture", "section": None},
+    "data": {"stem": "data-model", "section": re.compile(r"^##\s+(4\.|.*data model)", re.I)},
+    "deploy": {"stem": "deployment", "section": re.compile(r"^##\s+(7\.|.*(environment|deploy))", re.I)},
+}
+MAX_FIELDS = 12
+FIELD_H, ENTITY_HEAD = 18, 30
 MAX_LAYERS, MAX_PER_LAYER, MAX_NODES, MAX_EDGES = 8, 8, 40, 80
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
 STAMP_RE = re.compile(r"<!-- dev-kit diagram model=([0-9a-f]{64}) sources=([0-9a-f]{64}|none) at=(\S+) -->")
@@ -64,13 +83,15 @@ KINDS = {
     "queue": ("#e1d5e7", "#9673a6", "process"),
     "cache": ("#f8cecc", "#b85450", "rounded"),
     "external": ("#f5f5f5", "#666666", "external"),
+    "network": ("#b1ddf0", "#10739e", "rounded"),
     "component": ("#ffffff", "#36393d", "rounded"),
+    "entity": ("#dae8fc", "#6c8ebf", "entity"),
 }
 LEGEND = {"actor": "User", "client": "Client", "service": "Service", "worker": "Worker / job", "database": "Database",
           "storage": "Storage", "queue": "Queue / events", "cache": "Cache", "external": "External service",
-          "component": "Component"}
-EDGE_STYLES = ("sync", "async", "data")
-EDGE_LEGEND = {"sync": "Call", "async": "Message / event", "data": "Reads / writes"}
+          "network": "Network / edge", "component": "Component", "entity": "Entity"}
+EDGE_STYLES = ("sync", "async", "data", "relation")
+EDGE_LEGEND = {"sync": "Call", "async": "Message / event", "data": "Reads / writes", "relation": "Relationship"}
 
 FONT = "Helvetica, Arial, sans-serif"
 NODE_W, NODE_H, NODE_GAP = 180, 72, 48
@@ -83,7 +104,53 @@ SMALL_W = 6.0         # the same at 11px
 
 # --------------------------------------------------------------------------- model
 
-def example() -> dict:
+def paths(root: Path, kind: str = "architecture") -> tuple[Path, Path, Path]:
+    """The model, the SVG and the .drawio file of a kind of diagram, in the project."""
+    stem = DIAGRAMS[kind]["stem"]
+    return root / f"docs/diagrams/{stem}.json", root / f"docs/diagrams/{stem}.svg", root / f"docs/diagrams/{stem}.drawio"
+
+
+def example(kind: str = "architecture") -> dict:
+    if kind == "data":
+        return {
+            "title": "Example — data model",
+            "subtitle": "Entities and relationships",
+            "layers": [
+                {"id": "people", "label": "Customers", "nodes": [
+                    {"id": "customer", "label": "Customer", "kind": "entity", "fields": ["PK id uuid", "email text", "created_at timestamptz"]}]},
+                {"id": "sales", "label": "Sales", "nodes": [
+                    {"id": "order", "label": "Order", "kind": "entity", "fields": ["PK id uuid", "FK customer_id", "total numeric", "status text"]},
+                    {"id": "item", "label": "Order item", "kind": "entity", "fields": ["PK id uuid", "FK order_id", "FK product_id", "qty int"]},
+                    {"id": "product", "label": "Product", "kind": "entity", "fields": ["PK id uuid", "name text", "price numeric"]}]},
+            ],
+            "edges": [
+                {"from": "customer", "to": "order", "label": "1 — N", "style": "relation"},
+                {"from": "order", "to": "item", "label": "1 — N", "style": "relation"},
+                {"from": "item", "to": "product", "label": "N — 1", "style": "relation"},
+            ],
+        }
+    if kind == "deploy":
+        return {
+            "title": "Example — deployment",
+            "subtitle": "Production",
+            "layers": [
+                {"id": "internet", "label": "Internet", "nodes": [{"id": "user", "label": "Customer", "kind": "actor"}]},
+                {"id": "edge", "label": "Edge", "nodes": [{"id": "cdn", "label": "CDN and TLS", "kind": "network", "tech": "Cloudflare"}]},
+                {"id": "vm", "label": "Production VM", "nodes": [
+                    {"id": "api", "label": "API container", "kind": "service", "tech": "Docker"},
+                    {"id": "jobs", "label": "Worker container", "kind": "worker", "tech": "Docker"}]},
+                {"id": "managed", "label": "Managed services", "nodes": [
+                    {"id": "db", "label": "Database", "kind": "database", "tech": "PostgreSQL 16"},
+                    {"id": "backup", "label": "Backups", "kind": "storage", "tech": "S3"}]},
+            ],
+            "edges": [
+                {"from": "user", "to": "cdn", "label": "HTTPS"},
+                {"from": "cdn", "to": "api", "label": "HTTPS"},
+                {"from": "api", "to": "db", "label": "SQL / TLS", "style": "data"},
+                {"from": "jobs", "to": "db", "style": "data"},
+                {"from": "db", "to": "backup", "label": "nightly", "style": "async"},
+            ],
+        }
     return {
         "title": "Example — architecture",
         "subtitle": "High-level view",
@@ -168,8 +235,19 @@ def validate(m: object) -> tuple[dict, list[str]]:
             if kind not in KINDS:
                 errors.append(f"{w}.kind: one of {', '.join(KINDS)} ({kind!r})")
                 kind = "component"
-            clean.append({"id": str(nid), "label": _text(n.get("label"), f"{w}.label", 48, errors), "kind": kind,
-                          "tech": _text(n.get("tech"), f"{w}.tech", 40, errors, required=False)})
+            node = {"id": str(nid), "label": _text(n.get("label"), f"{w}.label", 48, errors), "kind": kind,
+                    "tech": _text(n.get("tech"), f"{w}.tech", 40, errors, required=False)}
+            fields = n.get("fields")
+            if fields is not None:
+                if kind != "entity":
+                    errors.append(f"{w}.fields: only an entity has fields")
+                elif not isinstance(fields, list):
+                    errors.append(f"{w}.fields: must be a list of texts")
+                else:
+                    if len(fields) > MAX_FIELDS:
+                        errors.append(f"{w}.fields: at most {MAX_FIELDS} ({len(fields)}); keep the keys and the fields that matter")
+                    node["fields"] = [_text(v, f"{w}.fields[{k}]", 40, errors) for k, v in enumerate(fields[:MAX_FIELDS])]
+            clean.append(node)
         out["layers"].append({"id": str(lid), "label": _text(lay.get("label"), f"{where}.label", 40, errors), "nodes": clean})
     ids = {n["id"] for lay in out["layers"] for n in lay["nodes"]}
     if len(ids) > MAX_NODES:
@@ -244,14 +322,24 @@ def wrap(text: str, width: float, char_w: float, lines: int) -> list[str]:
     return out or [""]
 
 
+def node_h(n: dict) -> float:
+    """An entity grows with its fields; every other node has the same height."""
+    if n["kind"] == "entity":
+        return max(NODE_H, ENTITY_HEAD + FIELD_H * len(n.get("fields") or []) + 8)
+    return NODE_H
+
+
 def layout(m: dict) -> dict:
     """Positions of every lane, node and edge (route points and label place), and the size of the picture."""
     layers = m["layers"]
     where = {n["id"]: (li, ni) for li, lay in enumerate(layers) for ni, n in enumerate(lay["nodes"])}
     widest = max(len(lay["nodes"]) for lay in layers)
-    lane_w = max(widest * NODE_W + (widest - 1) * NODE_GAP + 2 * LANE_PAD_X,
+    # the gap between neighbours grows so that the label of an edge drawn between them fits in it
+    gap = max([NODE_GAP] + [len(e["label"]) * SMALL_W + 28 for e in m["edges"]
+                            if where[e["from"]][0] == where[e["to"]][0] and abs(where[e["from"]][1] - where[e["to"]][1]) == 1])
+    lane_w = max(widest * NODE_W + (widest - 1) * gap + 2 * LANE_PAD_X,
                  max(len(m["title"]) * 11.0, len(m.get("subtitle") or "") * SMALL_W) - 0.0, 360)
-    lane_h = LANE_HEAD + 2 * LANE_PAD + NODE_H
+    lane_hs = [LANE_HEAD + 2 * LANE_PAD + max(node_h(n) for n in lay["nodes"]) for lay in layers]
 
     # 1. what each edge needs: its sides, the gaps it crosses horizontally and whether it takes the right corridor
     plans = []
@@ -290,13 +378,13 @@ def layout(m: dict) -> dict:
     lanes, nodes = [], {}
     for li, lay in enumerate(layers):
         n = len(lay["nodes"])
-        content = n * NODE_W + (n - 1) * NODE_GAP
+        content = n * NODE_W + (n - 1) * gap
         nx = x0 + (lane_w - content) / 2
-        lanes.append({"id": lay["id"], "label": lay["label"], "x": x0, "y": y, "w": lane_w, "h": lane_h})
+        lanes.append({"id": lay["id"], "label": lay["label"], "x": x0, "y": y, "w": lane_w, "h": lane_hs[li]})
         for ni, node in enumerate(lay["nodes"]):
-            nodes[node["id"]] = {**node, "x": nx + ni * (NODE_W + NODE_GAP), "y": y + LANE_HEAD + LANE_PAD, "w": NODE_W, "h": NODE_H}
-        y += lane_h + gap_h.get(li, GAP_MIN if li < len(layers) - 1 else 0)
-    gap_top = {li: lanes[li]["y"] + lane_h for li in range(len(layers))}
+            nodes[node["id"]] = {**node, "x": nx + ni * (NODE_W + gap), "y": y + LANE_HEAD + LANE_PAD, "w": NODE_W, "h": node_h(node)}
+        y += lane_hs[li] + gap_h.get(li, GAP_MIN if li < len(layers) - 1 else 0)
+    gap_top = {li: lanes[li]["y"] + lanes[li]["h"] for li in range(len(layers))}
     corridor_x = x0 + lane_w + 24
     width = corridor_x + (corridor * TRACK + 8 if corridor else -24) + MARGIN
     height = y
@@ -320,7 +408,8 @@ def layout(m: dict) -> dict:
             if side in ("t", "b"):
                 pt = (nd["x"] + nd["w"] * f, nd["y"] + (0 if side == "t" else nd["h"]))
             else:
-                pt = (nd["x"] + (0 if side == "l" else nd["w"]), nd["y"] + nd["h"] * f)
+                # along the common height of a lane's nodes (they share their top), so a side-to-side line stays straight
+                pt = (nd["x"] + (0 if side == "l" else nd["w"]), nd["y"] + NODE_H * f)
             p[f"{end}_pt"] = pt
             p[f"{end}_frac"] = f
 
@@ -430,6 +519,25 @@ def _node_svg(n: dict) -> list[str]:
             out.append(f'<text x="{_f(cx)}" y="{_f(ty + 14)}" text-anchor="middle" font-size="11" fill="#555555">{escape(wrap(tech, w, SMALL_W, 1)[0])}</text>')
         out.append("</g>")
         return out
+    if shape == "entity":
+        # a table, as draw.io draws one: the name in a coloured header, one row per field, keys marked
+        out.append(f'<rect x="{_f(x)}" y="{_f(y)}" width="{_f(w)}" height="{_f(h)}" rx="4" fill="#ffffff" stroke="{stroke}" stroke-width="1.5"/>'
+                   f'<path d="M{_f(x + 0.75)} {_f(y + ENTITY_HEAD)}V{_f(y + 4)}Q{_f(x + 0.75)} {_f(y + 0.75)} {_f(x + 4)} {_f(y + 0.75)}'
+                   f'H{_f(x + w - 4)}Q{_f(x + w - 0.75)} {_f(y + 0.75)} {_f(x + w - 0.75)} {_f(y + 4)}V{_f(y + ENTITY_HEAD)}Z" fill="{fill}"/>'
+                   f'<path d="M{_f(x)} {_f(y + ENTITY_HEAD)}H{_f(x + w)}" stroke="{stroke}" stroke-width="1.5"/>')
+        out.append(f'<text x="{_f(cx)}" y="{_f(y + 20)}" text-anchor="middle" font-size="13" font-weight="bold" fill="#1a1a1a">'
+                   f'{escape(wrap(n["label"], w - 16, CHAR_W, 1)[0])}</text>')
+        fy = y + ENTITY_HEAD + 4
+        for fld in n.get("fields") or []:
+            key, _, rest = fld.partition(" ")
+            is_key = key.upper() in ("PK", "FK") and rest
+            if is_key:
+                out.append(f'<text x="{_f(x + 8)}" y="{_f(fy + 13)}" font-size="10" font-weight="bold" fill="{stroke}">{escape(key.upper())}</text>')
+            txt = wrap(rest if is_key else fld, w - (38 if is_key else 16), SMALL_W, 1)[0]
+            out.append(f'<text x="{_f(x + (30 if is_key else 8))}" y="{_f(fy + 13)}" font-size="11" fill="#333333">{escape(txt)}</text>')
+            fy += FIELD_H
+        out.append("</g>")
+        return out
     if shape == "cylinder":
         ry = 9
         out.append(f'<path d="M{_f(x)} {_f(y + ry)}A{_f(w / 2)} {ry} 0 0 1 {_f(x + w)} {_f(y + ry)}V{_f(y + h - ry)}'
@@ -473,9 +581,10 @@ def to_svg(m: dict, lay: dict, stamp: str) -> str:
     for e in lay["edges"]:
         d = "M" + "L".join(f"{_f(x)} {_f(y)}" for x, y in e["points"])
         dash = ' stroke-dasharray="6 4"' if e["style"] == "async" else ' stroke-dasharray="2 3"' if e["style"] == "data" else ""
-        start = ' marker-start="url(#dk-arrow)"' if e["both"] else ""
+        start = ' marker-start="url(#dk-arrow)"' if e["both"] and e["style"] != "relation" else ""
+        end = "" if e["style"] == "relation" else ' marker-end="url(#dk-arrow)"'
         o.append(f'<path class="edge" data-from="{escape(e["from"])}" data-to="{escape(e["to"])}" d="{d}" fill="none" '
-                 f'stroke="#333333" stroke-width="1.5"{dash}{start} marker-end="url(#dk-arrow)"/>')
+                 f'stroke="#333333" stroke-width="1.5"{dash}{start}{end}/>')
     for n in lay["nodes"].values():
         o.extend(_node_svg(n))
     for e in lay["edges"]:   # labels last, over the lines
@@ -496,7 +605,8 @@ def to_svg(m: dict, lay: dict, stamp: str) -> str:
         else:
             s = it["key"]
             dash = ' stroke-dasharray="6 4"' if s == "async" else ' stroke-dasharray="2 3"' if s == "data" else ""
-            o.append(f'<path d="M{_f(x)} {_f(y - 4)}H{_f(x + 26)}" stroke="#333333" stroke-width="1.5"{dash} marker-end="url(#dk-arrow)"/>'
+            arrow = "" if s == "relation" else ' marker-end="url(#dk-arrow)"'
+            o.append(f'<path d="M{_f(x)} {_f(y - 4)}H{_f(x + 26)}" stroke="#333333" stroke-width="1.5"{dash}{arrow}/>'
                      f'<text x="{_f(x + 32)}" y="{_f(y)}" font-size="11" fill="#555555">{escape(text)}</text>')
     o.append("</svg>")
     return "\n".join(o) + "\n"
@@ -508,7 +618,7 @@ def _attr(v: str) -> str:
     return escape(v, {'"': "&quot;", "\n": "&#10;"})
 
 
-def to_drawio(m: dict, lay: dict) -> str:
+def to_drawio(m: dict, lay: dict, kind: str = "architecture") -> str:
     """The same picture as an uncompressed draw.io file: lanes are swimlanes, nodes their children, edges keep
     the route points and the ports."""
     cells = ['<mxCell id="0"/>', '<mxCell id="1" parent="0"/>']
@@ -522,8 +632,13 @@ def to_drawio(m: dict, lay: dict) -> str:
         fill, stroke, shape = KINDS[n["kind"]]
         base = {"rounded": "rounded=1;arcSize=12;", "cylinder": "shape=cylinder3;boundedLbl=1;size=9;",
                 "process": "shape=process;size=0.07;", "external": "rounded=1;arcSize=12;dashed=1;",
-                "umlActor": "shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;outlineConnect=0;"}[shape]
+                "umlActor": "shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;outlineConnect=0;",
+                "entity": "rounded=0;verticalAlign=top;align=left;spacingLeft=8;spacingTop=4;"}[shape]
         value = f"<b>{escape(n['label'])}</b>" + (f"<br><font style=\"font-size:11px\" color=\"#555555\">[{escape(n['tech'])}]</font>" if n.get("tech") else "")
+        if shape == "entity":
+            value = (f"<div style=\"text-align:center\"><b>{escape(n['label'])}</b></div><hr>"
+                     + "<br>".join(escape(v) for v in n.get("fields") or []))
+            fill = "#ffffff"
         ln = lanes[lane_of[n["id"]]]
         x, y, w, h = n["x"] - ln["x"], n["y"] - ln["y"], n["w"], n["h"]
         if shape == "umlActor":
@@ -536,10 +651,11 @@ def to_drawio(m: dict, lay: dict) -> str:
         ex, ey = side_xy[e["a_side"]](e["a_frac"])
         nx, ny = side_xy[e["b_side"]](e["b_frac"])
         dash = "dashed=1;dashPattern=6 4;" if e["style"] == "async" else "dashed=1;dashPattern=2 3;" if e["style"] == "data" else ""
-        both = "startArrow=classic;startFill=1;" if e["both"] else ""
+        both = "startArrow=classic;startFill=1;" if e["both"] and e["style"] != "relation" else ""
+        arrow = "endArrow=none;" if e["style"] == "relation" else "endArrow=classic;endFill=1;"
         pts = "".join(f'<mxPoint x="{_f(x)}" y="{_f(y)}"/>' for x, y in e["points"][1:-1])
         cells.append(f'<mxCell id="edge-{i + 1}" value="{_attr(e["label"])}" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;'
-                     f'endArrow=classic;endFill=1;{both}{dash}strokeColor=#333333;strokeWidth=1.5;fontSize=11;labelBackgroundColor=#ffffff;'
+                     f'{arrow}{both}{dash}strokeColor=#333333;strokeWidth=1.5;fontSize=11;labelBackgroundColor=#ffffff;'
                      f'exitX={_f(ex)};exitY={_f(ey)};exitDx=0;exitDy=0;entryX={_f(nx)};entryY={_f(ny)};entryDx=0;entryDy=0;" '
                      f'edge="1" parent="1" source="{e["from"]}" target="{e["to"]}">'
                      f'<mxGeometry relative="1" as="geometry">{"<Array as=" + chr(34) + "points" + chr(34) + ">" + pts + "</Array>" if pts else ""}</mxGeometry></mxCell>')
@@ -547,7 +663,7 @@ def to_drawio(m: dict, lay: dict) -> str:
                  f'style="text;html=1;align=left;verticalAlign=top;fontSize=20;" vertex="1" parent="1">'
                  f'<mxGeometry x="{MARGIN}" y="{MARGIN}" width="{_f(lay["lane_w"])}" height="{TITLE_H - 8}" as="geometry"/></mxCell>')
     W, H = int(lay["width"]) + 1, int(lay["height"]) + 1
-    return (f'<mxfile host="dev-kit" type="device">\n<diagram id="architecture" name="{_attr(m["title"])}">\n'
+    return (f'<mxfile host="dev-kit" type="device">\n<diagram id="{kind}" name="{_attr(m["title"])}">\n'
             f'<mxGraphModel dx="{W}" dy="{H}" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" '
             f'page="1" pageScale="1" pageWidth="{W}" pageHeight="{H}" math="0" shadow="0">\n<root>\n'
             + "\n".join(cells) + "\n</root>\n</mxGraphModel>\n</diagram>\n</mxfile>\n")
@@ -559,12 +675,32 @@ def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-def sources_sha(root: Path) -> str:
+def section(text: str, head: re.Pattern) -> str | None:
+    """The `## ` section of a markdown text whose heading matches, up to the next `## ` heading (None: not found)."""
+    lines = text.splitlines(keepends=True)
+    for i, ln in enumerate(lines):
+        if head.match(ln):
+            j = i + 1
+            while j < len(lines) and not lines[j].startswith("## "):
+                j += 1
+            return "".join(lines[i:j])
+    return None
+
+
+def sources_sha(root: Path, kind: str = "architecture") -> str:
+    """The hash of what a diagram is drawn from: architecture.md, or only its section for data and deploy, so a
+    change to the data model leaves the deploy diagram current."""
+    head = DIAGRAMS[kind]["section"]
     parts = []
     for rel in SOURCES:
         p = root / rel
         if p.is_file():
-            parts.append(rel.encode() + b"\0" + p.read_bytes())
+            raw = p.read_bytes()
+            if head is not None:
+                part = section(raw.decode("utf-8", errors="replace"), head)
+                if part is not None:
+                    raw = part.encode("utf-8")
+            parts.append(rel.encode() + b"\0" + raw)
     return _sha(b"\0\0".join(parts)) if parts else "none"
 
 
@@ -575,7 +711,7 @@ def _write(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def render(root: Path, model: Path, svg: Path, drawio: Path) -> tuple[dict, list[str]]:
+def render(root: Path, model: Path, svg: Path, drawio: Path, kind: str = "architecture") -> tuple[dict, list[str]]:
     try:
         raw = model.read_bytes()
     except OSError:
@@ -589,10 +725,10 @@ def render(root: Path, model: Path, svg: Path, drawio: Path) -> tuple[dict, list
         return {}, errors
     lay = layout(clean)
     at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    stamp = f"<!-- dev-kit diagram model={_sha(raw)} sources={sources_sha(root)} at={at} -->"
+    stamp = f"<!-- dev-kit diagram model={_sha(raw)} sources={sources_sha(root, kind)} at={at} -->"
     _write(svg, to_svg(clean, lay, stamp))
-    _write(drawio, to_drawio(clean, lay))
-    return {"ok": True, "svg": _rel(root, svg), "drawio": _rel(root, drawio), "model": _rel(root, model),
+    _write(drawio, to_drawio(clean, lay, kind))
+    return {"ok": True, "kind": kind, "svg": _rel(root, svg), "drawio": _rel(root, drawio), "model": _rel(root, model),
             "nodes": len(lay["nodes"]), "edges": len(lay["edges"]), "layers": len(lay["lanes"]),
             "size": [int(lay["width"]), int(lay["height"])], "at": at}, []
 
@@ -604,12 +740,13 @@ def _rel(root: Path, p: Path) -> str:
         return str(p)
 
 
-def status(root: Path, model: Path | None = None, svg: Path | None = None) -> dict:
-    """Whether the project has a diagram and whether it is current. Read by `check` and by the board."""
-    model = model or root / MODEL
-    svg = svg or root / SVG
-    out = {"exists": svg.is_file(), "model_exists": model.is_file(), "svg": SVG, "drawio": DRAWIO, "model": MODEL,
-           "current": False, "stale": False, "at": None, "reasons": []}
+def status(root: Path, model: Path | None = None, svg: Path | None = None, kind: str = "architecture") -> dict:
+    """Whether the project has a diagram of this kind and whether it is current. Read by `check` and by the board."""
+    dm, ds, dd = paths(root, kind)
+    model = model or dm
+    svg = svg or ds
+    out = {"kind": kind, "exists": svg.is_file(), "model_exists": model.is_file(), "svg": _rel(root, ds),
+           "drawio": _rel(root, dd), "model": _rel(root, dm), "current": False, "stale": False, "at": None, "reasons": []}
     if not out["exists"]:
         out["reasons"].append("no diagram yet")
         return out
@@ -628,10 +765,21 @@ def status(root: Path, model: Path | None = None, svg: Path | None = None) -> di
         out["current"] = False
     if not out["current"]:
         out["reasons"].append("the model changed since the SVG was drawn (run render)" if model.is_file() else "the model is missing")
-    if st.group(2) != sources_sha(root):
+    if st.group(2) != sources_sha(root, kind):
         out["stale"] = True
-        out["reasons"].append(".dev/architecture.md changed since the diagram was drawn")
+        where = {"data": " (its data model)", "deploy": " (its environments)"}.get(kind, "")
+        out["reasons"].append(f".dev/architecture.md{where} changed since the diagram was drawn")
     return out
+
+
+def statuses(root: Path) -> dict:
+    """Every kind, for the board: {kind: status}."""
+    return {k: status(root, kind=k) for k in DIAGRAMS}
+
+
+def expected(root: Path) -> list[str]:
+    """The kinds `check --kind all` holds the project to: architecture always, data and deploy once started."""
+    return [k for k in DIAGRAMS if k == "architecture" or any(p.is_file() for p in paths(root, k)[:2])]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -639,22 +787,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", default=os.environ.get("CLAUDE_PROJECT_DIR") or ".")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("render", help="check the model and draw the SVG and the .drawio file")
+    r.add_argument("--kind", choices=list(DIAGRAMS), default="architecture")
     r.add_argument("--model")
     r.add_argument("--svg")
     r.add_argument("--drawio")
     r.add_argument("--json", action="store_true")
     c = sub.add_parser("check", help="is the diagram there and current")
+    c.add_argument("--kind", choices=[*DIAGRAMS, "all"], default="architecture")
     c.add_argument("--json", action="store_true")
     c.add_argument("--info", action="store_true", help="exit 0 whatever the answer (for a line injected in a skill)")
-    sub.add_parser("example", help="print a model to start from")
+    e = sub.add_parser("example", help="print a model to start from")
+    e.add_argument("--kind", choices=list(DIAGRAMS), default="architecture")
     a = ap.parse_args(argv)
     root = Path(a.root).resolve()
     if a.cmd == "example":
-        print(json.dumps(example(), indent=2, ensure_ascii=False))
+        print(json.dumps(example(a.kind), indent=2, ensure_ascii=False))
         return 0
     if a.cmd == "render":
-        p = lambda v, d: (Path(v) if Path(v).is_absolute() else root / v) if v else root / d  # noqa: E731
-        res, errors = render(root, p(a.model, MODEL), p(a.svg, SVG), p(a.drawio, DRAWIO))
+        dm, ds, dd = paths(root, a.kind)
+        p = lambda v, d: (Path(v) if Path(v).is_absolute() else root / v) if v else d  # noqa: E731
+        res, errors = render(root, p(a.model, dm), p(a.svg, ds), p(a.drawio, dd), a.kind)
         if errors:
             if a.json:
                 print(json.dumps({"ok": False, "errors": errors}, ensure_ascii=False))
@@ -666,18 +818,23 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(res, ensure_ascii=False) if a.json else
               f"drew {res['svg']} and {res['drawio']}: {res['layers']} layers, {res['nodes']} nodes, {res['edges']} edges")
         return 0
-    st = status(root)
+    kinds = expected(root) if a.kind == "all" else [a.kind]
+    sts = [status(root, kind=k) for k in kinds]
     if a.json:
-        print(json.dumps(st, ensure_ascii=False))
-    elif not st["exists"]:
-        print(f"no architecture diagram ({SVG}): run /dev-kit:diagram")
-    elif st["current"] and not st["stale"]:
-        print(f"{SVG} is current (drawn {st['at']})")
+        print(json.dumps(sts[0] if a.kind != "all" else {"kinds": {s["kind"]: s for s in sts}}, ensure_ascii=False))
     else:
-        print(f"{SVG} is out of date: " + "; ".join(st["reasons"]) + " — run /dev-kit:diagram update")
+        for st in sts:
+            arg = "" if st["kind"] == "architecture" else f" {st['kind']}"
+            if not st["exists"]:
+                print(f"no {st['kind']} diagram ({st['svg']}): run /dev-kit:diagram{arg}")
+            elif st["current"] and not st["stale"]:
+                print(f"{st['svg']} is current (drawn {st['at']})")
+            else:
+                print(f"{st['svg']} is out of date: " + "; ".join(st["reasons"]) + f" — run /dev-kit:diagram update{arg}")
     if a.info:
         return 0
-    return 0 if st["exists"] and st["current"] and not st["stale"] else 3 if not st["exists"] else 4
+    codes = [0 if st["exists"] and st["current"] and not st["stale"] else 3 if not st["exists"] else 4 for st in sts]
+    return 3 if 3 in codes else max(codes)
 
 
 if __name__ == "__main__":

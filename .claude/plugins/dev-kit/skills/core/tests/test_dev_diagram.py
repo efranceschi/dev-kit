@@ -196,5 +196,110 @@ class TestDocsMakeItMandatory(unittest.TestCase):
         self.assertIn("dev_diagram.py check", reviewer)
 
 
+class TestKinds(Base):
+    """3.21: the data and deploy diagrams, each with its own files and its own part of architecture.md."""
+    ARCH = "# Architecture\n## 2. System context\nweb, api\n## 4. Data model\ncustomer, order\n## 7. Environments and deployment\none VM\n"
+
+    def write(self, kind: str, m: dict) -> None:
+        p = dg.paths(self.root, kind)[0]
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(m), encoding="utf-8")
+
+    def test_examples_are_valid_and_entities_have_fields(self):
+        for k in dg.DIAGRAMS:
+            clean, errors = dg.validate(dg.example(k))
+            self.assertEqual(errors, [], k)
+        clean, _ = dg.validate(dg.example("data"))
+        order = next(n for lay in clean["layers"] for n in lay["nodes"] if n["id"] == "order")
+        self.assertEqual(order["fields"][0], "PK id uuid")
+        m = dg.example("architecture")
+        m["layers"][1]["nodes"][0]["fields"] = ["PK id"]          # only an entity has fields
+        _, errors = dg.validate(m)
+        self.assertTrue(any("only an entity has fields" in e for e in errors))
+        m = dg.example("data")
+        m["layers"][0]["nodes"][0]["fields"] = [f"f{i}" for i in range(13)]
+        _, errors = dg.validate(m)
+        self.assertTrue(any("at most 12" in e for e in errors))
+
+    def test_entities_grow_and_relations_have_no_arrow(self):
+        clean, _ = dg.validate(dg.example("data"))
+        lay = dg.layout(clean)
+        self.assertGreater(lay["nodes"]["order"]["h"], dg.NODE_H)
+        for e in lay["edges"]:          # a line between neighbours stays straight even when their heights differ
+            if e["from"] in ("order", "item") and e["to"] in ("item", "product"):
+                self.assertEqual(len(e["points"]), 2, e)
+        self.write("data", dg.example("data"))
+        self.assertEqual(self.run_dg("render", "--kind", "data").returncode, 0)
+        svg = ET.parse(dg.paths(self.root, "data")[1]).getroot()
+        for p in svg.findall(f".//{SVG_NS}path[@class='edge']"):
+            self.assertIsNone(p.get("marker-end"))
+        mx = ET.parse(dg.paths(self.root, "data")[2]).getroot()
+        self.assertEqual(mx.find("diagram").get("id"), "data")
+        self.assertTrue(all("endArrow=none" in c.get("style") for c in mx.findall(".//mxCell") if c.get("edge") == "1"))
+
+    def test_each_kind_is_stale_only_when_its_section_changes(self):
+        arch = self.root / ".dev" / "architecture.md"
+        arch.write_text(self.ARCH, encoding="utf-8")
+        for k in dg.DIAGRAMS:
+            self.write(k, dg.example(k))
+            self.assertEqual(self.run_dg("render", "--kind", k).returncode, 0)
+        self.assertEqual(self.run_dg("check", "--kind", "all").returncode, 0)
+        arch.write_text(self.ARCH.replace("customer, order", "customer, order, invoice"), encoding="utf-8")
+        self.assertEqual(dg.status(self.root, kind="deploy")["stale"], False)
+        self.assertEqual(dg.status(self.root, kind="data")["stale"], True)
+        self.assertEqual(dg.status(self.root, kind="architecture")["stale"], True)
+        r = self.run_dg("check", "--kind", "all")
+        self.assertEqual(r.returncode, 4)
+        self.assertIn("/dev-kit:diagram update data", r.stdout)
+        r = self.run_dg("check", "--kind", "deploy")
+        self.assertEqual(r.returncode, 0)
+
+    def test_all_holds_the_project_to_architecture_and_the_started_kinds(self):
+        self.assertEqual(dg.expected(self.root), ["architecture"])
+        self.assertEqual(self.run_dg("check", "--kind", "all").returncode, 3)
+        self.write("deploy", dg.example("deploy"))
+        self.assertEqual(dg.expected(self.root), ["architecture", "deploy"])
+        self.write_model(dg.example())
+        self.run_dg("render")
+        self.assertEqual(self.run_dg("check", "--kind", "all").returncode, 3)   # deploy has a model, no picture yet: missing
+        self.run_dg("render", "--kind", "deploy")
+        r = self.run_dg("check", "--kind", "all", "--json")
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(sorted(json.loads(r.stdout)["kinds"]), ["architecture", "deploy"])
+
+    def test_board_serves_each_kind(self):
+        from test_dev_board import BoardTest, request
+        bt = BoardTest("test_start_twice_reuses_the_same_server")
+        bt.setUp()
+        try:
+            bt.board("start", check=True)
+            st, body = request(bt.port, "GET", "/api/diagram?kind=data")
+            self.assertEqual(st, 404)
+            self.assertIn(b"/dev-kit:diagram data", body)
+            st, _ = request(bt.port, "GET", "/api/diagram?kind=../../etc")
+            self.assertEqual(st, 404)
+            p = dg.paths(bt.root, "data")[0]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(dg.example("data")), encoding="utf-8")
+            subprocess.run([sys.executable, "-I", str(SCRIPT), "--root", str(bt.root), "render", "--kind", "data"], check=True, capture_output=True)
+            st, body = request(bt.port, "GET", "/api/diagram?kind=data&v=x")
+            self.assertEqual(st, 200)
+            self.assertIn(b"Order item", body)
+            st, body = request(bt.port, "GET", "/api/state")
+            ds = json.loads(body)["diagrams"]
+            self.assertTrue(ds["data"]["exists"])
+            self.assertFalse(ds["deploy"]["exists"])
+        finally:
+            bt.tearDown()
+
+    def test_board_page_switches_between_the_kinds(self):
+        html = (CORE / "shared" / "board" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="arch-kinds"', html)
+        js = (CORE / "shared" / "board" / "board.js").read_text(encoding="utf-8")
+        self.assertIn("/api/diagram?kind=", js)
+        for k in ('key: "architecture"', 'key: "data"', 'key: "deploy"'):
+            self.assertIn(k, js)
+
+
 if __name__ == "__main__":
     unittest.main()
