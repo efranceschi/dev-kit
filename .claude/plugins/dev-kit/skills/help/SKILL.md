@@ -2,7 +2,7 @@
 name: help
 description: Help for the dev-kit inside Claude Code - with no argument, what to do next in this project and the map of skills by goal; with a skill name, how to use it with examples; with a question ("how do I report a bug?", "how much did I spend?", "what is a gate?"), the recipe, concept or command that answers it; with "agents", the agents and who calls them. Use when the user is lost, asks which skill to use, how something works, or what to do next. Read-only.
 argument-hint: "[skill | question | agents | concept]"
-allowed-tools: Read, Bash, Grep, Glob
+allowed-tools: Read, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # help
@@ -30,4 +30,4 @@ Read-only. The sources are in English (`${CLAUDE_SKILL_DIR}/../core/shared/help.
 3. Keep it short: the user wants to know what to type. Never invent a skill, argument or behaviour that is not in the catalog or the docs; if unsure, point to the doc page.
 4. End with one tip from `DS tip help` on its own line (only if `.dev/` exists and the tip is not empty), translated into the user's language. If `.dev/` exists, log `skill_end`.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the command that answers the question, or the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the command that answers the question, or the one `dev_state.py status --next` prints. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).

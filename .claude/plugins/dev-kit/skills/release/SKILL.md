@@ -39,7 +39,7 @@ Before `skill_end`, run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cos
 
 `--dry-run`: perform steps 1–5 and report what would happen in 6–8 without changing anything.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:release` after a submission (the decision), `/dev-kit:implement` after a rejection, `/dev-kit:deploy` when production waits for it, otherwise `/dev-kit:backlog`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:release` after a submission (the decision), `/dev-kit:implement` after a rejection, `/dev-kit:deploy` when production waits for it, otherwise `/dev-kit:backlog`. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

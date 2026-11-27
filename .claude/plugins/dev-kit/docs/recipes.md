@@ -90,7 +90,7 @@ Short answers to "how do I…?". In Claude Code, ask `/dev-kit:help <question>`.
 
 1. /dev-kit:settings status line (or spinner tips, notifications, session title) turns each one on or off
 2. Spinner tips and the status line go to .claude/settings.local.json, which stays out of git; tips show from the next session
-3. After each skill, the greyed-out suggestion in the prompt is usually the next /dev-kit command: press Tab or Right arrow, then Enter
+3. After each skill you start yourself, it asks whether to start the next /dev-kit command: Yes runs it; with No, the greyed-out suggestion in the prompt is usually that command: press Tab or Right arrow, then Enter
 
 ## Watch the project on a board (or share it)
 

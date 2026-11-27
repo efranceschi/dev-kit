@@ -2,7 +2,7 @@
 name: docs
 description: Generates project documentation from the dev-kit artifacts and the code - README (purpose, setup, run, test, deploy), the architecture diagram (always), user guide per persona, API reference when there is an API, CHANGELOG from task commits, and a CLAUDE.md section pointing to .dev/. Use before a release or when the user asks for docs.
 argument-hint: "[readme | guide | api | changelog | all]"
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, Skill
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, Skill, AskUserQuestion
 ---
 
 # docs
@@ -25,7 +25,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 6. **CLAUDE.md**: add or update a short section "dev-kit" telling future sessions that state lives in `.dev/`, how to resume (`/dev-kit:start`), the test/lint commands and the commit convention. Do not duplicate the whole brief.
 7. Verify every command in the docs actually runs (`--help` or dry run), every file path exists, and the diagrams are current (`dev_diagram.py check --kind all`, step 2a). When the docs were regenerated for a release, record `dev_state.py review docs pending --note "regenerated"` so the next release asks for `review docs` next (`conventions.md` §19); summarise files written. Next: `review docs` (the docs reviewer executes the commands and checks the guide against the UI), then `release`.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:review docs`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:review docs`. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

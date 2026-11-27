@@ -2,7 +2,7 @@
 name: prd
 description: Writes the product requirements document (.dev/prd.md) from the interview brief - problem, personas, MoSCoW scope, user stories with numbered testable acceptance criteria (AC-n), NFRs, risks and recorded assumptions. Use after interview, or to revise the PRD when scope changes.
 argument-hint: "[focus or change request]"
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # prd
@@ -29,7 +29,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 ## Revising (when a PRD already exists)
 Apply the change request; mark removed ACs as `(superseded by ADR-nnn)` rather than deleting; append new ACs with new numbers; note in `.dev/log.md` via a `dev_state.py add-question` only if the change needs confirmation. Tell the user that `plan` must be re-run to sync tasks.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:review prd`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:review prd`. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

@@ -2,7 +2,7 @@
 name: ui
 description: Defines the visual system and per-screen UI specifications (.dev/design/ui-spec.md) - design tokens, typography, spacing, component inventory with states and accessibility notes, layout patterns, responsive rules, dark mode, and a spec for every screen in ux-flows.md - so implementation stays consistent without per-task design review. Use after ux, or to (re)specify a screen or component.
 argument-hint: "[screen id, component or 'tokens']"
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, WebFetch
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, WebFetch, Skill
 ---
 
 # ui
@@ -32,7 +32,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 - Every screen in `ux-flows.md` §4 has a spec; every component referenced by a spec is in the inventory.
 - Visual choices follow the brief's tone and density; when the brief delegated identity, pick a restrained, consistent system over novelty.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:review design`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:review design`. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

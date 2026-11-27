@@ -2,7 +2,7 @@
 name: debug
 description: Diagnoses what the kit is doing in a project when something looks stuck or wrong - writes a debug dump (state, git, worktrees, run files, logs, telemetry) under .dev/run/debug/, checks the state against git and the running processes, explains what is happening and whether it is a project problem or a dev-kit gap, and drafts a report for a dev-kit patch. Use when the user asks if a run is stuck, why the board shows something odd, what a round is doing, or for a dump to send to the dev-kit author. Changes nothing in the project.
 argument-hint: "[\"what looks wrong\"] [--dump-only] [--share]"
-allowed-tools: Read, Bash, Grep, Glob
+allowed-tools: Read, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # debug
@@ -29,4 +29,4 @@ Let `DD` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_debug.py" --root
 - Read-only: the only files written are the dumps under `.dev/run/debug/`, which are never committed. Never paste a dump's content or a project secret into the chat or the report beyond what step 3 needs; anything meant to leave this machine comes from `--share`. Never change the state, git or a running process, and never kill a round.
 - Never guess a cause that the dump and the code do not show; say what is missing instead.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).

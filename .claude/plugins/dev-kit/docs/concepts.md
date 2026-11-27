@@ -140,7 +140,7 @@ Optionally, each approved milestone can run locally on `127.0.0.1` (`keep_runnin
 
 The kit also uses Claude Code's own interface, all of it display only:
 
-- **Next command, one key away.** Every skill ends with the next command alone on the last line, so Claude Code's greyed-out prompt suggestion usually offers it: Tab or Right arrow, then Enter. Claude Code predicts that suggestion itself; no plugin can set it, and it does not appear in plan mode, right after an error or with prompt suggestions turned off.
+- **Next command, one click away.** When you started the skill yourself, it ends by asking "Do you want to start <command>?": **Yes** (recommended) runs it at once, **No** leaves it as the last line. Autopilot, its round children and `claude -p` runs never ask, so nothing waits on it. Every skill ends with the next command alone on the last line, so Claude Code's greyed-out prompt suggestion usually offers it: Tab or Right arrow, then Enter. Claude Code predicts that suggestion itself; no plugin can set it, and it does not appear in plan mode, right after an error or with prompt suggestions turned off.
 - **Tips while you wait.** Short dev-kit tips, in your language, rotate under the spinner while Claude works.
 - **Status line.** Below the prompt: lifecycle phase (with the step in conception and planning) · milestone progress · running task · blocked tasks · open questions · next command.
 - **Session title and notifications.** A new session is named after the project and milestone and opens with one line naming the next command; gates, blocked tasks and the end of autopilot can raise a desktop notification.

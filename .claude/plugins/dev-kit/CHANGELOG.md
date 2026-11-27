@@ -2,6 +2,16 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.24.0 — 2026-11-27
+
+Eduardo asked that the next command a skill suggests in text, such as `/dev-kit:plan replan`, be offered as a question he can accept with one click, in every skill that ends by suggesting a command.
+
+### Changed
+- `conventions.md` §15, new rule "Next command as a question": after the report and the tip, a skill asks "Do you want to start `<command>`?" (AskUserQuestion, in the user's language) with **Yes (recommended)** and **No**. Yes invokes that skill with its arguments and follows it; No ends with the command alone on the last line, so Claude Code's greyed-out suggestion still offers it.
+- It is asked only when the user started the skill with their own prompt and someone is there to answer. Never when another skill invoked it (autopilot, `start`, a review sending work back), never in a round child (`--round-child`, `DEV_KIT_ROUND_ID`) or a `claude -p` run (when AskUserQuestion is unavailable or returns no answer, the line is written instead), never for `/dev-kit:autopilot` (only the user starts it), and not right after a question that already decided the next step. Autopilot runs never wait on it.
+- The "Last line" paragraph of the 26 skills that end with a next command, and `spog`, point to the new rule; their `allowed-tools` now include `AskUserQuestion` and `Skill`.
+- `concepts.md`, `maintainers.md` and the first-steps recipe describe the question.
+
 ## 3.23.1 — 2026-11-27
 
 Eduardo saw the autopilot end with "confirm the PRD with checkpoint confirm prd, or answer it on the board" and asked whether answering on the board had not been removed. It had: since 3.12.0 the board's only POST is stopping its server. The message came from texts the model relays: the review skill still said "the board offers the same buttons", and the review output handed the user an internal `dev_state.py` subcommand.

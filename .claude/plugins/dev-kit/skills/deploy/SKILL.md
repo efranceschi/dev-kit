@@ -2,7 +2,7 @@
 name: deploy
 description: Production deploy of an approved milestone or release - preflight (gate passed, clean tree, operational prerequisites present), backup, dry-run, install, migrations and smoke checks using the method recorded in the interview and architecture.md, then records what is deployed so status shows how far production is behind the checkout. Use after a milestone gate passes when the brief deploys per milestone, at release, or when the user asks to deploy or to check whether production is up to date.
 argument-hint: "[M3 | --check | --dry-run | --health | --rollback R2]"
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # deploy
@@ -35,7 +35,7 @@ Before `skill_end`, run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cos
 - Never skip the backup when the method supports one.
 - Production data is never deleted by this skill (`conventions.md` §10 floors).
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

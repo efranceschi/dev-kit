@@ -50,7 +50,7 @@ Stop when: requested tasks done; milestone complete (announce the gate); an `alw
 ## Never
 - Never skip or weaken tests to pass; never commit with failing lint, type-check or affected tests, and never start new tasks on a red full suite; never edit `state.json` manually; never push unless `may_push` is true and the brief asked for it.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:qa M1` when the milestone is complete, otherwise `/dev-kit:implement`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:qa M1` when the milestone is complete, otherwise `/dev-kit:implement`. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

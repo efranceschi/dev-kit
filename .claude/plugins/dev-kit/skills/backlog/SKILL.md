@@ -2,7 +2,7 @@
 name: backlog
 description: Everything still pending in a dev-kit project, shown in the chat - open hotfix, issue queue by class of service, buffer of the next milestone, pending and blocked tasks per milestone, open and parked questions, deferred QA findings and pending deploys - ending with a recommended next step. Use when the user asks what is pending, what is left, the list of issues or bugs, or what to do next. Read-only.
 argument-hint: "[issues | tasks | questions | findings | deploy]"
-allowed-tools: Read, Bash, Grep, Glob
+allowed-tools: Read, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # backlog
@@ -35,4 +35,4 @@ Read-only: this skill changes nothing.
 3. **Suggested next step:** one or two lines, recommended option first with the reason, chosen in this order: open hotfix → `/dev-kit:implement <task>`; blocked tasks or parked questions → `/dev-kit:interview --gaps`; milestone in progress → `/dev-kit:implement` (or `/dev-kit:autopilot`); a relevant deferred finding → `/dev-kit:issue --from <F-id> <scope>`; maintenance mode with queued issues → `/dev-kit:issue --schedule <I-id> <open maintenance milestone>`; production behind → `/dev-kit:deploy`.
 4. Log `skill_end`. End with one tip from `DS tip backlog` (or `DS tip expedite_overuse` when that warning is present), on its own line; skip if empty. (`DS backlog --json` prints no tip, so this is the only one.)
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the suggested next step. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the suggested next step. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).

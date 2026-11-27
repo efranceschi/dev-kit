@@ -89,7 +89,7 @@ Report in the user's language: what was built (milestones, tasks, commits), gate
 - Never bypass a gate silently; `--skip-gate` always leaves an ADR.
 - Never rewrite git history.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:autopilot` to resume, `/dev-kit:review prd` (or `plan`) when a checkpoint waits, otherwise `/dev-kit:interview --gaps` when it parked questions. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:autopilot` to resume, `/dev-kit:review prd` (or `plan`) when a checkpoint waits, otherwise `/dev-kit:interview --gaps` when it parked questions. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

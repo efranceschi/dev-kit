@@ -2,7 +2,7 @@
 name: spog
 description: One local page for every dev-kit project on this machine (single pane of glass), read-only - starts a small web server on 127.0.0.1 and opens a page with a card per project - whether it waits for you, runs or sits idle and since when, and what needs you (the board's Needs you items, plus a Claude Code session of the project waiting on a permission or a question) - sorted so the projects that need you come first, with the count in the tab's title. It can be run from any Claude Code session, inside a project or not. A project joins the list when /dev-kit:board or /dev-kit:spog runs in it; a project whose folder is gone stays greyed until it is forgotten. Use when the user works on several projects at once and wants to follow them all in one place, asks which project needs them, or asks to stop it, list the projects or forget one.
 argument-hint: "[stop | status | list | forget PATH... | forget --missing | --open | --no-open | --port N | --idle-min N]"
-allowed-tools: Bash, Read
+allowed-tools: Bash, Read, AskUserQuestion, Skill
 ---
 
 # spog
@@ -35,4 +35,4 @@ The page is read-only, like the board: it reads each registered project's `.dev/
    Mention that it stops by itself after 4 hours with no open tab (`--idle-min N` changes it; `0` = never), and that "waiting on a permission or a question" needs the kit's hooks (without them the rest of the page still works).
 4. Do not run anything else.
 
-**Last line** (`conventions.md` §15): inside a dev-kit project, end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Outside one, end without it.
+**Last line** (`conventions.md` §15): inside a dev-kit project, end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Outside one, end without it. When the user started this skill and is there to answer, offer that command first as a question (`conventions.md` §15, "Next command as a question").

@@ -43,7 +43,7 @@ Before `skill_end`, run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cos
 - Never mark a review passed by hand; the score comes from `dev_score.py` and `DS review` enforces the cut-off.
 - Keep reports short: lead with the verdict and score, then the blocking items.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the next stage, e.g. `/dev-kit:architecture` after `prd` passes. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the next stage, e.g. `/dev-kit:architecture` after `prd` passes. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 When state has `brownfield` (`conventions.md` §16): a target that does not apply (e.g. `design` when no `new` AC touches the UI; `prd`/`plan` in `maintenance` mode) is recorded as `DS review <target> n/a --note "<reason>"` instead of spawning a reviewer. Tell the reviewer the project is brownfield (`Baseline: <brownfield.baseline_ref>`) so it judges only `new`/`changed` content against the as-built baseline, and so pre-existing problems are marked `"legacy": true`.

@@ -58,4 +58,4 @@ If the injected output above contains a Python "can't open file" error, the kit 
 - Never move or recreate the `dev-kit-baseline` tag, and never modify existing source or docs during onboarding.
 - Never skip the interview for a new project unless the user explicitly says "skip the interview" (then run `interview` in express mode: one round with the four most critical questions).
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the next skill from the lifecycle table, unless you invoke it. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the next skill from the lifecycle table, unless you invoke it. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).

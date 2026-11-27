@@ -2,7 +2,7 @@
 name: plan
 description: Turns PRD, architecture and design into an executable implementation plan (.dev/plan.md) of milestones and small vertical-slice tasks with ids, dependencies, acceptance criteria, test notes and files, then syncs it into .dev/state.json. Use after ui (or architecture for UI-less products), when scope changes, or to re-plan remaining work.
 argument-hint: "[milestone focus | 'replan' | --annotate-risk | --annotate-exit]"
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # plan
@@ -40,7 +40,7 @@ For a plan written before `exit_check` existed (`sync-plan` warns "no exit_check
 ## `replan`
 Tasks paused by a scope change (`blocked_by` an issue, `conventions.md` §15; `backlog --json` → `paused`): decide each one in the new plan (keep it as is, rewrite it, or drop it); after `review plan` passes, `unblock` the kept ones and `drop` the others. Start with `dev_state.py stale`: replan against the current PRD, architecture and design, and update any of them that is itself stale first. Keep done/in_progress tasks untouched; rewrite only `todo` tasks of remaining milestones; new tasks get new ids; mark dropped tasks by deleting their section and running `dev_state.py drop T-xxx --reason "dropped in replan ADR-nnn"` (state keeps them for history; they no longer count for the milestone, `next` or `release`).
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:review plan`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:review plan`. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

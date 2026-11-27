@@ -2,7 +2,7 @@
 name: feedback
 description: Evaluation of a dev-kit work session for the user or for the dev-kit author - reads the structured session log (.dev/telemetry.jsonl), grades every stage 0-100 with a fixed formula and its reasons, and writes a timestamped report (what worked, what failed, prioritised suggestions for the kit) plus the matching data export, without any project data, and proposes lessons of method per role for the user to approve. Use when the user asks for the session's feedback, how the run went, an evaluation of the dev-kit, or a report to send to the kit's author. Changes nothing else.
 argument-hint: "[--all | --since YYYY-MM-DD]"
-allowed-tools: Read, Write, Bash, Grep, Glob
+allowed-tools: Read, Write, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # feedback
@@ -41,4 +41,4 @@ This skill only reads the log and writes two files under `.dev/feedback/`. It do
 - Never change a grade, and never add data that is not in the log.
 - Never include project content; the export already excludes it, and the report must not reintroduce it.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).

@@ -51,7 +51,7 @@ Let `DS` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root
 7. Run `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root "${CLAUDE_PROJECT_DIR}" ingest` and log `skill_end` (`conventions.md` §13–14).
 8. **Report** in the user's language, short: issue id, type and class (with the reason), what happens next and when, the recommended next command. `add-issue` already prints a tip (`💡 …`) for the class: relay it on its own line, translated; do not call `DS tip` again.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: where the issue was routed, e.g. `/dev-kit:implement T-031` for a hotfix or `/dev-kit:backlog`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: where the issue was routed, e.g. `/dev-kit:implement T-031` for a hotfix or `/dev-kit:backlog`. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

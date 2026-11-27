@@ -2,7 +2,7 @@
 name: interview
 description: Exhaustive requirements interview that captures everything needed to build the application autonomously - product, users, scope, data, stack, integrations, UX/UI, quality bar, autonomy policy and delivery - into .dev/brief.md, initial ADRs and state. Use at the start of a new project, or with --gaps to resolve open questions accumulated during autonomous work.
 argument-hint: "[initial idea | --gaps | --express]"
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # interview
@@ -52,7 +52,7 @@ Read `.dev/open-questions.md` (Open table). Group questions by theme, ask them i
 - Keep questions concrete with examples; avoid jargon for non-technical users (block 1 tells you their level).
 - Never record secret values; record variable names only.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the command the close step announces. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the command the close step announces. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

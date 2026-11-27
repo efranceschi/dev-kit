@@ -2,7 +2,7 @@
 name: board
 description: Live board of a dev-kit project in the browser, read-only - starts a small web server on 127.0.0.1 (or shared on the network with an access key, or behind a reverse proxy) and opens a dashboard laid out like the kit's flow diagram - its tabs are the lanes (conception, planning, milestones, releases, stable) plus a map and the architecture diagram, each screen fitting the window: the lane's steps as a flow, then same-size blocks (documents, reviews, roadmap, backlog, the task board, releases, production health), details in modals - with a "Needs you" button that turns red when something waits, what runs now (skills, agents, the Autopilot) and an activity drawer, light or dark. It only shows the project: every decision and every run happens in Claude Code. One server per project; stop it from the page or with "stop". Use when the user wants to see or follow the project visually, a dashboard, a board or a panel, or asks to stop or check it.
 argument-hint: "[stop | status | --open | --no-open | --port N | --host IP | --trusted-host NAME | --idle-min N]"
-allowed-tools: Bash, Read
+allowed-tools: Bash, Read, AskUserQuestion, Skill
 ---
 
 # board
@@ -34,4 +34,4 @@ The board is read-only: the server reads `.dev/` and writes only its own files i
    Mention that the board stops by itself after 2 hours with no open tab (`--idle-min N` changes it; `0` = never).
 4. Sharing on the network is the user's explicit request in this turn, so it does not go through `pause_policy.public_exposure`; never start it with `--host` from an autonomous run. Do not run anything else.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).

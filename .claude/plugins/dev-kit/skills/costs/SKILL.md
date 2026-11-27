@@ -2,7 +2,7 @@
 name: costs
 description: Cost summary of dev-kit work shown in the chat - token usage (input, output, cache write and read) and estimated cost in US$ (API-equivalent) per stage, agent, model or session, and with --time where the time went per agent and skill plus what the work ledger reused, read from Claude Code's local transcripts and attributed to stages by the session log; optional CSV with every token count so the user can price it with their own rates. Use when the user asks how much was spent, the project's or session's cost, tokens per stage, or which agent or stage costs the most. Read-only.
 argument-hint: "[--all | --since YYYY-MM-DD] [--by stage|agent|model|session|milestone] [--csv] [--time]"
-allowed-tools: Read, Bash, Grep, Glob
+allowed-tools: Read, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # costs
@@ -31,4 +31,4 @@ Let `DC` = `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_cost.py" --root 
 - Never edit the price table on your own and never present the estimate as a real charge.
 - Never show transcript content; only the numbers in the report.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).

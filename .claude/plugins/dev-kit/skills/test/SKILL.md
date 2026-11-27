@@ -2,7 +2,7 @@
 name: test
 description: Test strategy and test writing for dev-kit projects - writes or updates .dev/qa/test-plan.md (pyramid per layer, tools, mandatory e2e flows, coverage target) and adds or repairs tests for a task, module or path, mapping them to acceptance criteria. Use when tests are missing, failing, flaky, or when the user asks to improve coverage or define the testing approach.
 argument-hint: "[T-003 | path | 'plan' | 'fix-flaky']"
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # test
@@ -25,7 +25,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 - Behaviour over implementation; one reason to fail per test; deterministic data.
 - Do not change production code for testability without a note in the report; keep public contracts stable.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:implement`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:implement`. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

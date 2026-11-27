@@ -2,7 +2,7 @@
 name: ux
 description: Designs the user experience before UI - information architecture, journeys per persona, screen inventory, every screen state (loading, empty, error, success), forms and validation behaviour, microcopy guide and usability checkpoints - into .dev/design/ux-flows.md. Use after architecture for products with a user interface, or when a flow must be redesigned.
 argument-hint: "[flow, persona or screen to (re)design]"
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # ux
@@ -31,7 +31,7 @@ State: !`python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "$
 - Every AC that involves the interface must be reachable in at least one journey step; check this before finishing.
 - Do not specify colours, spacing or components here; that is `ui`.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:ui`. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:ui`. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

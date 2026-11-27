@@ -2,7 +2,7 @@
 name: diagram
 description: Draws the diagrams of the system being built in the style of draw.io, without draw.io - the high-level architecture (users, clients, services, jobs, stores, outside services and how they talk), the data model (entities, key fields, relationships) and the deployment (environments, hosts, managed services) - as SVGs in docs/diagrams/ (shown on the board's Architecture tab and in the docs) plus .drawio files anyone can open in draw.io. Use when the board's Architecture button asks for it, when the architecture changed, or as part of architecture, a passed QA gate (when out of date) and docs (mandatory there).
 argument-hint: "[update] [architecture | data | deploy]"
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # diagram
@@ -53,4 +53,4 @@ The board's Architecture tab shows the three pictures, one at a time (System · 
 ## Who runs it
 Besides the user: `architecture` (step 5a, and its `review` mode when the architecture changed) draws the planned diagrams; `qa` redraws them as built after a passed gate when `DG check --kind all` says one is missing or out of date; `docs` always runs it with `update` (the final version for the release). `implement` never runs it.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `python3 -I "${CLAUDE_SKILL_DIR}/../core/scripts/dev_state.py" --root "${CLAUDE_PROJECT_DIR}" status --next` prints. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).

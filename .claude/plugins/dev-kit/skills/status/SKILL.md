@@ -2,7 +2,7 @@
 name: status
 description: Read-only dashboard of a dev-kit project - lifecycle phase and step, next release, milestones, task progress, gates, blockers, open questions and the next task. Use when the user asks for progress, status, what's blocked, or what comes next. Makes no changes to the project or its state (it only records which tip was shown).
 argument-hint: "[--json]"
-allowed-tools: Read, Bash, Grep, Glob
+allowed-tools: Read, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # status
@@ -20,7 +20,7 @@ Arguments: $ARGUMENTS
 4. If `--json` was passed, print the raw JSON from `dev_state.py status --json` instead.
 5. End with the single recommended next command. Do not run it. To change how the kit behaves, point to `/dev-kit:settings`.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 

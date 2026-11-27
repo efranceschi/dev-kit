@@ -2,7 +2,7 @@
 name: settings
 description: Shows and changes the settings of a dev-kit project in plain language - autonomy level and pause points, quality cut-offs, model escalation, review and fix rounds, incremental reuse and spot checks, checks inside each task, issue buffer and cool-down, local preview and production deploy, tips (off, on, always, or shown again), and the Claude Code interface (spinner tips, status line, session title, desktop notifications) - validating every change against the floors and recording it. Use when the user wants to change how autonomous or strict the kit is, turn something on or off, see the current configuration, or asks "where do I configure X".
 argument-hint: "[show | <what to change, in words> | tips off|on|always|reset | status line | notifications]"
-allowed-tools: Read, Bash, Grep, Glob, AskUserQuestion
+allowed-tools: Read, Bash, Grep, Glob, AskUserQuestion, Skill
 ---
 
 # settings
@@ -67,4 +67,4 @@ The user never runs a script: this skill translates what they ask into the right
 - Never ask for or store a secret here; production prerequisites are names.
 - No state yet: say so and suggest `/dev-kit:start`.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: the one `dev_state.py status --next` prints. When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).

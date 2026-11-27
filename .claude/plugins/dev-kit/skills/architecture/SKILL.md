@@ -40,7 +40,7 @@ Spawn `architect` with "challenge" instructions on the current `architecture.md`
 - No dependency may appear later in code without an ADR or a line in the stack table; `code-reviewer` enforces this.
 - Prefer the simplest architecture satisfying the NFRs; justify every extra component with the AC or NFR it serves.
 
-**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:ux` (or `/dev-kit:plan` without a UI). Claude Code then offers it as the greyed-out prompt suggestion (Tab or Right arrow).
+**Last line** (`conventions.md` §15): end the final report with the next command alone on the last line, written in full: `/dev-kit:ux` (or `/dev-kit:plan` without a UI). When the user started this skill and is there to answer, offer it first as a question (`conventions.md` §15, "Next command as a question"): Yes (recommended) runs it, No ends with the line, which Claude Code then offers as the greyed-out prompt suggestion (Tab or Right arrow).
 
 ## Existing projects (brownfield)
 
