@@ -840,7 +840,21 @@
     "escalation kept solving it": "a escalação continuou resolvendo",
     "the evidence faded": "as evidências perderam peso",
     "the rule arm passed its probe": "o modelo da regra passou no teste",
-    "undone by hand": "desfeito à mão"
+    "undone by hand": "desfeito à mão",
+    "Single Pane of Glass": "Painel Único (Single Pane of Glass)",
+    "Single Pane of Glass · dev-kit": "Painel Único · dev-kit",
+    "({n}) Needs you · Single Pane of Glass": "({n}) Precisa de você · Painel Único",
+    "Got it": "Entendi",
+    "Stop the sound until something new needs you": "Parar o som até algo novo precisar de você",
+    "Sound alert on": "Alerta sonoro ligado",
+    "Sound alert": "Alerta sonoro",
+    "A soft chime while something needs you, until you press Got it or it is settled.": "Um toque suave enquanto algo precisa de você, até você clicar em Entendi ou o bloqueio ser resolvido.",
+    "Every 2 min": "A cada 2 min",
+    "Every 5 min": "A cada 5 min",
+    "Every 15 min": "A cada 15 min",
+    "Play it once": "Tocar uma vez",
+    "Sound alert off: click to turn it on": "Alerta sonoro desligado: clique para ligar",
+    "Sound alert on: click to mute it": "Alerta sonoro ligado: clique para silenciar"
   },
   "plurals": {
     "agent": {

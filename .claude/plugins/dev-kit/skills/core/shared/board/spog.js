@@ -147,6 +147,82 @@
       banner(tr("Could not stop the server ({message}). Use ", { message: e.message }), cmd("/dev-kit:spog stop"));
     }
   });
+  // ------------------------------------------------------------------ sound alert: a soft two-note chime while something needs the
+  // user and they have not acknowledged it, repeated every few minutes; "Got it" stops it until a project gets a new item (a count
+  // that grows), and the speaker button mutes it for good (both kept in this browser). Settled items stop it by themselves.
+  const SOUND_KEY = "spog-sound", EVERY_KEY = "spog-every", ACK_KEY = "spog-ack";
+  let muted = store.get(SOUND_KEY, "on") === "off";
+  let everyMin = [2, 5, 15].includes(Number(store.get(EVERY_KEY, "5"))) ? Number(store.get(EVERY_KEY, "5")) : 5;
+  let acked = (() => { try { return JSON.parse(store.get(ACK_KEY, "{}")) || {}; } catch (e) { return {}; } })();
+  let lastChime = 0;
+  let audio = null;
+  /** path|kind -> how many items: what needs the user now. */
+  const needCounts = () => {
+    const m = {};
+    ((data && data.projects) || []).forEach((p) => (p.needs || []).forEach((g) => { m[`${p.path}|${g.kind}`] = g.n; }));
+    return m;
+  };
+  /** The needs not acknowledged yet: a kind whose count grew since "Got it", or a new kind. */
+  const unacked = () => { const c = needCounts(); return Object.keys(c).filter((k) => c[k] > (acked[k] || 0)); };
+  function chime() {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state !== "running") { audio.resume(); return; }  // not allowed yet: the first click or key on the page plays it
+      const t0 = audio.currentTime + 0.02;
+      [[659.25, 0], [880, 0.22]].forEach(([f, dt]) => {  // E5 then A5, sine, quiet, a short decay
+        const o = audio.createOscillator(), g = audio.createGain();
+        o.type = "sine"; o.frequency.value = f;
+        g.gain.setValueAtTime(0, t0 + dt);
+        g.gain.linearRampToValueAtTime(0.06, t0 + dt + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.9);
+        o.connect(g).connect(audio.destination);
+        o.start(t0 + dt); o.stop(t0 + dt + 1);
+      });
+      lastChime = Date.now();
+    } catch (e) { /* no audio here */ }
+  }
+  // browsers start audio only after a gesture on the page: any click or key unlocks it
+  const unlock = () => {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === "suspended") audio.resume().then(() => { if (data) soundState(); });
+    } catch (e) { /* none */ }
+  };
+  document.addEventListener("click", unlock);
+  document.addEventListener("keydown", unlock);
+  function soundState() {
+    const pending = unacked();
+    const ringing = pending.length > 0 && !stopped;
+    $("ack-btn").hidden = !ringing;
+    $("needs-total").classList.toggle("ringing", ringing && !muted);
+    const sb = $("sound-btn");
+    sb.classList.toggle("muted", muted);
+    sb.setAttribute("aria-pressed", String(muted));
+    const label = muted ? tr("Sound alert off: click to turn it on") : tr("Sound alert on: click to mute it");
+    sb.setAttribute("aria-label", label);
+    sb.title = label;
+    document.querySelectorAll("[data-every]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.every) === everyMin)));
+    if (ringing && !muted && Date.now() - lastChime >= everyMin * 60000) chime();
+    if (!ringing) lastChime = 0;  // the next new item chimes at once
+  }
+  function ack() {
+    acked = needCounts();
+    store.set(ACK_KEY, JSON.stringify(acked));
+    soundState();
+  }
+  /** A count that went down lowers its mark too, so the next new item of that kind alerts again. */
+  function settleAcks() {
+    const c = needCounts();
+    let changed = false;
+    Object.keys(acked).forEach((k) => { const v = c[k] || 0; if (v < acked[k]) { if (v) acked[k] = v; else delete acked[k]; changed = true; } });
+    if (changed) store.set(ACK_KEY, JSON.stringify(acked));
+  }
+  $("ack-btn").addEventListener("click", ack);
+  $("sound-btn").addEventListener("click", () => { muted = !muted; store.set(SOUND_KEY, muted ? "off" : "on"); if (!muted) lastChime = 0; soundState(); });
+  $("sound-every").addEventListener("click", (e) => { const b = e.target.closest("[data-every]"); if (b) { everyMin = Number(b.dataset.every); store.set(EVERY_KEY, String(everyMin)); soundState(); } });
+  $("sound-test").addEventListener("click", () => { unlock(); setTimeout(chime, 60); });
+  setInterval(() => { if (data) soundState(); }, 15000);
+
   function banner(...kids) { const b = $("banner"); b.hidden = !kids.length; fill(b, kids); }
 
   // ------------------------------------------------------------------ filter
@@ -224,7 +300,7 @@
     $("needs-total").classList.toggle("calm", !n);
     $("needs-sr").textContent = n ? `: ${plural(n, "item")}` : tr(": nothing now");
     const waiting = (data.counts || {}).waiting || 0;
-    document.title = n ? tr("({n}) Needs you · dev-kit", { n }) : tr("dev-kit · all projects");
+    document.title = n ? tr("({n}) Needs you · Single Pane of Glass", { n }) : tr("Single Pane of Glass · dev-kit");
     const icon = document.querySelector('link[rel="icon"]');
     if (icon) icon.href = waiting ? "/assets/favicon-alert.svg" : "/assets/favicon.svg";
     if (!all.length) {
@@ -236,6 +312,8 @@
       fill($("projects"), shown.map(card));
     }
     before = new Map(all.map((p) => [p.path, p.needs_total || 0]));
+    settleAcks();
+    soundState();
     $("main").setAttribute("aria-busy", "false");
   }
 

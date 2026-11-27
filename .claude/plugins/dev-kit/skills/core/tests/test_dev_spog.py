@@ -268,6 +268,17 @@ class TestSpogText(unittest.TestCase):
         self.assertEqual(sorted((js_keys(js) | p.keys) - set(pt["strings"])), [])
         self.assertEqual(sorted(plural_nouns(js) - set(en["plurals"]) - set(pt["plurals"])), [])
 
+    def test_the_page_names_itself_and_has_a_sound_alert_with_ack_and_mute(self) -> None:
+        html = (BOARD / "spog.html").read_text(encoding="utf-8")
+        js = (BOARD / "spog.js").read_text(encoding="utf-8")
+        self.assertIn('<h1 data-i18n="Single Pane of Glass">', html)
+        self.assertIn("Single Pane of Glass", catalog("pt-BR")["strings"]["Single Pane of Glass"])
+        self.assertNotEqual(catalog("pt-BR")["strings"]["Single Pane of Glass"], "Single Pane of Glass")  # translated
+        for el in ('id="ack-btn"', 'id="sound-btn"', 'id="sound-every"', 'id="sound-test"'):
+            self.assertIn(el, html)
+        for code in ("function chime()", "function ack()", "function settleAcks()", "everyMin * 60000", '"spog-sound"'):
+            self.assertIn(code, js)
+
     def test_every_need_kind_has_a_label(self) -> None:
         js = (BOARD / "spog.js").read_text(encoding="utf-8")
         for k in sp.NEED_KINDS:

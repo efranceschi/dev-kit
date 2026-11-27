@@ -6,7 +6,7 @@
   <meta name="board-token" content="__BOARD_TOKEN__">
   <script type="application/json" id="i18n-catalogs">__BOARD_I18N__</script>
   <meta name="color-scheme" content="dark light">
-  <title>dev-kit · all projects</title>
+  <title>Single Pane of Glass · dev-kit</title>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/board.css">
   <link rel="stylesheet" href="/assets/spog.css">
@@ -20,7 +20,7 @@
       <img class="logo" src="/assets/favicon.svg" alt="">
       <div class="brand-text">
         <span class="kicker"><span data-i18n="dev-kit · every project">dev-kit · every project</span> <span class="kit-ver" id="kit-ver"></span></span>
-        <h1 data-i18n="All projects">All projects</h1>
+        <h1 data-i18n="Single Pane of Glass">Single Pane of Glass</h1>
       </div>
     </div>
 
@@ -32,6 +32,10 @@
       <span class="needs-btn calm" id="needs-total" role="status">
         <span class="needs-n" id="needs-n" aria-hidden="true">0</span><span class="needs-label" data-i18n="Needs you">Needs you</span><span class="visually-hidden" id="needs-sr"></span>
       </span>
+      <button type="button" class="btn btn-sm ack-btn" id="ack-btn" hidden title="Stop the sound until something new needs you" data-i18n-title="Stop the sound until something new needs you"><span data-i18n="Got it">Got it</span></button>
+      <button type="button" class="btn btn-icon sound-btn" id="sound-btn" aria-pressed="false" aria-label="Sound alert on" title="Sound alert on" data-i18n-aria-label="Sound alert on" data-i18n-title="Sound alert on">
+        <svg class="ico-sound" aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path class="snd-wave" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path class="snd-mute" d="M16 9.5l5 5M21 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
       <span class="live" id="live"><svg class="ant" viewBox="0 0 26 26" aria-hidden="true"><path class="ant-w ant-w1" d="M7 4 Q4 7 7 10 M19 4 Q22 7 19 10"/><path class="ant-w ant-w2" d="M4 1 Q0 7 4 13 M22 1 Q26 7 22 13"/><path class="ant-base" d="M13 15 V25 M8 25 H18"/><g class="ant-top"><path d="M13 15 V9"/><circle cx="13" cy="7" r="2.6"/></g></svg><span id="live-text" class="live-text" role="status" aria-live="polite" data-i18n-once="Connecting…">Connecting…</span></span>
       <button type="button" class="btn btn-icon" id="theme-btn" aria-label="Switch to light theme" title="Switch to light theme">
         <svg class="ico-sun" aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -51,6 +55,14 @@
           </div>
           <p class="pop-title" id="lang-label" data-i18n="Language">Language</p>
           <div class="seg-switch" role="group" aria-labelledby="lang-label" id="lang-switch"></div>
+          <p class="pop-title" id="sound-label" data-i18n="Sound alert">Sound alert</p>
+          <p class="pop-note top" data-i18n="A soft chime while something needs you, until you press Got it or it is settled.">A soft chime while something needs you, until you press Got it or it is settled.</p>
+          <div class="seg-switch" role="group" aria-labelledby="sound-label" id="sound-every">
+            <button type="button" class="seg-btn" data-every="2" data-i18n="Every 2 min">Every 2 min</button>
+            <button type="button" class="seg-btn" data-every="5" data-i18n="Every 5 min">Every 5 min</button>
+            <button type="button" class="seg-btn" data-every="15" data-i18n="Every 15 min">Every 15 min</button>
+          </div>
+          <button type="button" class="link-btn" id="sound-test" data-i18n="Play it once">Play it once</button>
           <hr>
           <button type="button" class="btn btn-danger wide" id="stop-btn">
             <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>

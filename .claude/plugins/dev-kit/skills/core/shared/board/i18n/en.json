@@ -840,7 +840,21 @@
     "escalation kept solving it": "escalation kept solving it",
     "the evidence faded": "the evidence faded",
     "the rule arm passed its probe": "the rule arm passed its probe",
-    "undone by hand": "undone by hand"
+    "undone by hand": "undone by hand",
+    "Single Pane of Glass": "Single Pane of Glass",
+    "Single Pane of Glass · dev-kit": "Single Pane of Glass · dev-kit",
+    "({n}) Needs you · Single Pane of Glass": "({n}) Needs you · Single Pane of Glass",
+    "Got it": "Got it",
+    "Stop the sound until something new needs you": "Stop the sound until something new needs you",
+    "Sound alert on": "Sound alert on",
+    "Sound alert": "Sound alert",
+    "A soft chime while something needs you, until you press Got it or it is settled.": "A soft chime while something needs you, until you press Got it or it is settled.",
+    "Every 2 min": "Every 2 min",
+    "Every 5 min": "Every 5 min",
+    "Every 15 min": "Every 15 min",
+    "Play it once": "Play it once",
+    "Sound alert off: click to turn it on": "Sound alert off: click to turn it on",
+    "Sound alert on: click to mute it": "Sound alert on: click to mute it"
   },
   "plurals": {
     "agent": {

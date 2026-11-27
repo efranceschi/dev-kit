@@ -2,6 +2,14 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.25.0 — 2026-11-27
+
+Eduardo asked the spog page to say plainly that it is the Single Pane of Glass, translated, and to call him with a subtle sound that repeats until he acknowledges it or the block is gone, with a way to silence it.
+
+### Added
+- The spog page is titled **Single Pane of Glass**, translated in Portuguese with the English name kept beside it, in its heading and its tab.
+- Sound alert on the spog page: a soft two-note chime while something needs you that you have not acknowledged, repeated every 5 minutes (2 or 15 in the ⋯ menu, which can also play it once). **Got it** in the top bar stops it until a project gets a new item (a count that grows); an item that is settled stops it by itself. The speaker button mutes it. The choices are kept in the browser. Browsers allow sound only after a click or a key on the page, so the first chime plays then.
+
 ## 3.24.0 — 2026-11-27
 
 Eduardo asked that the next command a skill suggests in text, such as `/dev-kit:plan replan`, be offered as a question he can accept with one click, in every skill that ends by suggesting a command.
