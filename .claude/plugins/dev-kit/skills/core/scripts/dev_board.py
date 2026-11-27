@@ -70,6 +70,7 @@ sys.path.insert(0, str(SCRIPTS))  # -I drops the script dir
 import dev_state as ds  # noqa: E402
 import dev_diagram as dg  # noqa: E402
 import dev_router as router  # noqa: E402
+import dev_journey as jr  # noqa: E402
 
 ASSETS = SCRIPTS.parent / "shared" / "board"
 STATIC = {"/": "index.html", "/index.html": "index.html", "/assets/board.css": "board.css",
@@ -974,6 +975,32 @@ def model_tuning(store) -> dict | None:
     return out
 
 
+JOURNEY_FILES = ("log.md", "telemetry.jsonl", "state.json", "costs/milestones.json", "run/prod-health.json")
+_JOURNEY_CACHE: dict[str, tuple] = {}
+
+
+def journey_data(root: Path) -> dict:
+    """The project's journey (dev_journey.py), rebuilt only when one of the files it reads changed."""
+    dev = root / ".dev"
+    sig = []
+    for name in JOURNEY_FILES:
+        try:
+            st = (dev / name).stat()
+            sig.append((name, st.st_mtime_ns, st.st_size))
+        except OSError:
+            sig.append((name, 0, 0))
+    hit = _JOURNEY_CACHE.get(str(root))
+    if hit and hit[0] == sig and hit[1].get("ok"):
+        now = jr.epoch(ds.now()) or 0
+        return {**hit[1], "generated_at": now, "end": max(now, hit[1]["end"])}
+    try:
+        out = jr.build(root)
+    except Exception as e:  # noqa: BLE001 - a broken file never breaks the board
+        return {"ok": False, "error": "journey_failed", "message": str(e)[:200]}
+    _JOURNEY_CACHE[str(root)] = (sig, out)
+    return out
+
+
 def build_state(root: Path, board: dict | None = None) -> dict:
     store = ds.Store(root)
     if not store.exists():
@@ -1321,6 +1348,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(code, d)
         if path == "/api/diagram":
             return self._diagram()
+        if path == "/api/journey":  # built only when asked: the Journey tab opens or its Refresh is clicked
+            return self._json(200, journey_data(self.server.root))
         if path == "/api/events":
             return self._events()
         name = STATIC.get(path)

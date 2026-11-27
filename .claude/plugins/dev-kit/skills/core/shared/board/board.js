@@ -141,7 +141,7 @@
   const LANE_NAME = tmap({ conception: N_("Conception"), planning: N_("Planning"), construction: N_("Milestones"), releases: N_("Releases"), stable: N_("Stable") });
   // the lane shown: null follows the project's phase. Not kept across reloads: the board always opens where the project is.
   let phasePick = null;
-  const shownPhase = () => (phasePick && (phasePick === "map" || phasePick === "arch" || LANES.includes(phasePick)) ? phasePick : (data && data.phase) || "conception");
+  const shownPhase = () => (phasePick && (phasePick === "map" || phasePick === "arch" || phasePick === "journey" || LANES.includes(phasePick)) ? phasePick : (data && data.phase) || "conception");
   let needsBy = {};          // items of "Needs you" per lane, shown as badges on the tabs and on the steps of the flow
   let view = VIEWS.includes(store.get(VIEW_KEY, "")) ? store.get(VIEW_KEY, "") : "tasks";
   let firstRender = true;
@@ -718,6 +718,7 @@
     $("phase-back").hidden = shown === here;
     $("ph-map").setAttribute("aria-pressed", String(shown === "map"));
     $("ph-arch").setAttribute("aria-pressed", String(shown === "arch"));
+    $("ph-journey").setAttribute("aria-pressed", String(shown === "journey"));
     fill($("phases"), LANES.map((k) => {
       const sel = k === shown;
       const st = laneState(k);
@@ -747,12 +748,14 @@
     closeDrawers(); closeList();
     phasePick = data && p === data.phase ? null : p;   // picking the current phase goes back to following it
     render();
-    const el = $(p === "map" ? "ph-map" : p === "arch" ? "ph-arch" : `ph-${shownPhase()}`);
+    const el = $(p === "map" ? "ph-map" : p === "arch" ? "ph-arch" : p === "journey" ? "ph-journey" : `ph-${shownPhase()}`);
     if (focus && el) el.focus();
   }
   $("phase-back").addEventListener("click", () => setPhase(data.phase, true));
   $("ph-map").addEventListener("click", () => setPhase(shownPhase() === "map" ? data.phase : "map"));
   $("ph-arch").addEventListener("click", () => setPhase(shownPhase() === "arch" ? data.phase : "arch"));
+  // the journey is read again each time its tab is opened (and with its Refresh button), never on the live updates
+  $("ph-journey").addEventListener("click", () => { const open = shownPhase() !== "journey"; setPhase(open ? "journey" : data.phase); if (open) loadJourney(); });
   $("phases").addEventListener("keydown", (e) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !data || !data.ok) return;
     const keys = LANES;
@@ -2642,6 +2645,445 @@
     if (b && b.dataset.kind !== archKind) { archKind = b.dataset.kind; archZoom = false; renderArch(); }
   });
 
+  // ------------------------------------------------------------------ the journey: every step the kit recorded, from the first command to now
+  // Built by dev_journey.py from .dev/ only when asked (the tab opens or Refresh is clicked), never on the live stream.
+  // One lane per phase of the flow plus questions and issues; the time axis is the calendar with idle stretches folded.
+  const J_LANES = ["conception", "planning", "construction", "releases", "stable", "inbox"];
+  const J_LANE = tmap({ conception: N_("Conception"), planning: N_("Planning"), construction: N_("Construction"), releases: N_("Releases"),
+    stable: N_("Stable"), inbox: N_("Questions and issues") });
+  const J_CATS = ["docs", "skills", "agents", "tasks", "checks", "delivery", "inbox"];
+  const J_CAT = tmap({ docs: N_("Documents and plan"), skills: N_("Skill runs"), agents: N_("Agents"), tasks: N_("Tasks"), checks: N_("Gates and reviews"),
+    delivery: N_("Releases and deploys"), inbox: N_("Questions and issues") });
+  const J_STATUS = tmap({ running: N_("running"), done: N_("done"), blocked: N_("blocked"), dropped: N_("dropped"), restarted: N_("started again"),
+    failed: N_("failed"), ok: N_("ok"), no_end: N_("no end recorded") });
+  const J_HIDE_KEY = "board-journey-hide";
+  const J_BARS = new Set(["task", "skill", "agent"]);
+  const J_ROWS = { construction: 6 };   // rows of bars per lane (others: 3); more overlap in the last one
+  const J_FOLD = 30, J_LABEL = 132, J_BAND = 24, J_AXIS = 28, J_BAR = 7;
+  let journey = null, jLoading = false, jError = null, jPath = [], jSel = null, jDrawn = "";
+  const jHide = new Set(String(store.get(J_HIDE_KEY, "")).split(",").filter((c) => J_CATS.includes(c)));
+
+  async function loadJourney() {
+    if (jLoading) return;
+    jLoading = true; jError = null; jDrawn = ""; renderJourney();
+    try {
+      const r = await fetch("/api/journey", { cache: "no-store" });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.message || d.error || String(r.status));
+      journey = d;
+      // the zoom stays on the same release, milestone or day when it still exists
+      jPath = jPath.filter((w) => w.kind === "day" || w.kind === "range" || jBandOf(w.kind, w.id));
+    } catch (e) { jError = String((e && e.message) || e); }
+    jLoading = false; jDrawn = "";
+    renderJourney();
+  }
+  const jNow = () => Math.max(Date.now() / 1000, journey.generated_at);
+  const jEnd = (it) => (it.e != null ? it.e : it.s === "running" ? jNow() : it.t);
+  const jBandOf = (kind, id) => (kind === "release" ? journey.releases : kind === "milestone" ? journey.milestones : []).find((b) => b.id === id) || null;
+  /** The window shown: the whole project, or the last zoom (a release, a milestone, a day or a stretch). */
+  const jWin = () => jPath[jPath.length - 1] || { kind: "all", from: journey.start, to: Math.max(journey.end, jNow()) };
+  const jBandWin = (kind, b) => ({ kind, id: b.id, from: b.from, to: b.to || jNow() });
+  const jDayStart = (t) => { const d = new Date(t * 1000); d.setHours(0, 0, 0, 0); return d.getTime() / 1000; };
+  const jDayWin = (t) => { const a = jDayStart(t); return { kind: "day", from: a, to: a + 86400, id: String(a) }; };
+  function jZoom(w) { jPath.push(w); jSel = null; jDrawn = ""; renderJourney(); }
+  function jZoomTo(i) { jPath = jPath.slice(0, i); jSel = null; jDrawn = ""; renderJourney(); }
+  const jWinName = (w) => (w.kind === "all" ? tr("Whole project") : w.kind === "day" ? new Date(w.from * 1000).toLocaleDateString(LANG, { weekday: "short", month: "short", day: "numeric" })
+    : w.kind === "range" ? `${fmtDT(w.from * 1000)} – ${fmtDT(w.to * 1000)}` : w.id);
+  const usd = (v) => (typeof v === "number" ? `US$ ${v.toFixed(2)}` : "");
+
+  /** The text of one step, in the language shown (the project's own text, such as a task title, is not translated). */
+  function jText(it) {
+    const v = it.v || {};
+    const sc = v.score != null ? tr(" · score {v}", { v: v.score }) : "";
+    switch (it.k) {
+      case "skill": return `/dev-kit:${v.skill}${it.r ? ` ${it.r}` : ""}`;
+      case "agent": return tr("{agent} on {scope}", { agent: v.agent, scope: it.r || (v.skill ? `/dev-kit:${v.skill}` : "—") });
+      case "task": return `${it.r} ${v.title || ""}`.trim();
+      case "task_done": return tr("{task} done", { task: it.r });
+      case "task_blocked": return tr("{task} blocked: {reason}", { task: it.r, reason: v.reason || "" });
+      case "task_unblocked": return tr("{task} unblocked", { task: it.r });
+      case "task_dropped": return tr("{task} dropped: {reason}", { task: it.r, reason: v.reason || "" });
+      case "task_reopened": return tr("{task} reopened: {reason}", { task: it.r, reason: v.reason || "" });
+      case "init": return tr("dev-kit started in the project");
+      case "artifact": return tr("{name} written", { name: v.name });
+      case "plan_sync": return tr("Plan synced: {text}", { text: v.text || "" });
+      case "plan_edit": return tr("Plan changed ({op}): {text}", { op: v.op, text: v.text || "" });
+      case "freeze": return tr("{milestone} scope frozen for QA", { milestone: it.r });
+      case "hard_floor": return tr("{milestone} hard floor: {result}", { milestone: it.r, result: v.result || "" });
+      case "ci": return tr("{milestone} CI: {status}", { milestone: it.r, status: v.status });
+      case "gate": return tr("QA gate of {milestone}: {value}", { milestone: it.r, value: GATE_WORD[v.value] || v.value }) + sc + (v.reason ? ` (${v.reason})` : "");
+      case "challenge": return tr("{milestone}: finding {finding} {verdict}", { milestone: it.r, finding: v.finding, verdict: v.verdict });
+      case "qa_decide": return tr("{milestone}: you decided {decision}", { milestone: it.r, decision: v.decision });
+      case "review": return tr("{name} review: {value}", { name: REVIEW_NAME[v.name] || v.name, value: v.value }) + sc;
+      case "checkpoint": return v.decision === "confirm" ? tr("You confirmed the {target}", { target: STEP_NAME[v.target] || v.target })
+        : tr("You asked to adjust the {target}", { target: STEP_NAME[v.target] || v.target });
+      case "preview": return tr("{milestone} preview: {status}", { milestone: it.r, status: v.status });
+      case "release_submitted": return tr("{release} submitted for your approval", { release: it.r });
+      case "release_approved": return tr("{release} approved", { release: it.r });
+      case "release_rejected": return tr("{release} rejected: {reason}", { release: it.r, reason: v.reason || "" });
+      case "released": return tr("Version {version} released ({what})", { version: v.version, what: v.what || "" });
+      case "flag": return tr("Flag {name}: {event}", { name: v.name, event: v.event });
+      case "deploy": return tr("Deploy to {env}: {status} ({sha})", { env: v.env, status: v.status, sha: v.sha });
+      case "prod_failed": return tr("Production check failed: {detail}", { detail: v.detail || "" });
+      case "health": return it.s === "ok" ? tr("Production healthy") : tr("Production failing: {detail}", { detail: v.detail || "" });
+      case "cooldown": return tr("Cool-down after {milestone}: {text}", { milestone: it.r, text: v.text || "" });
+      case "question_open": return tr("Question {id}: {text}", { id: it.r, text: v.text || "" });
+      case "question_answered": return tr("Question {id} answered: {text}", { id: it.r, text: v.text || "" });
+      case "issue_new": return tr("Issue {id} ({type}): {text}", { id: it.r, type: v.type, text: v.text || "" });
+      case "issue_pulled": return tr("Issues pulled into {milestone}: {text}", { milestone: it.r, text: v.text || "" });
+      default: return it.k;
+    }
+  }
+  /** The mark of a point: its shape and colour class. */
+  function jMark(it) {
+    const v = it.v || {};
+    if (it.k === "gate") return v.value === "passed" || v.value === "skipped" ? "flag m-ok" : "flag m-warn";
+    if (it.k === "released") return "star m-ok";
+    if (it.k === "release_rejected" || it.k === "prod_failed" || it.k === "task_blocked" || it.k === "task_dropped" || (it.k === "health" && it.s !== "ok")) return "dot m-bad";
+    if (it.k === "health") return "tick";
+    if (it.k === "review" || it.k === "checkpoint") return "diamond" + (v.value === "fail" ? " m-warn" : "");
+    if (it.c === "inbox") return it.k.startsWith("question") ? "dot m-q" : "tri";
+    if (it.c === "docs") return "square";
+    return "dot";
+  }
+
+  /** The time axis of a window: the calendar, each stretch with no activity longer than a threshold folded to a fixed width. */
+  function jScale(win, shown, W) {
+    const span = Math.max(60, win.to - win.from);
+    const thr = Math.min(86400, Math.max(3600, span * 0.02));
+    const iv = shown.filter((it) => jEnd(it) >= win.from && it.t <= win.to)
+      .map((it) => [Math.max(win.from, it.t), Math.min(win.to, jEnd(it))]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const busy = [];
+    for (const [a, b] of iv) {
+      const last = busy[busy.length - 1];
+      if (last && a <= last[1]) last[1] = Math.max(last[1], b); else busy.push([a, b]);
+    }
+    const segs = [];
+    let cur = win.from;
+    const push = (a, b, fold) => { if (b <= a) return; const l = segs[segs.length - 1]; if (l && !l.fold && !fold) l.b = b; else segs.push({ a, b, fold }); };
+    for (const [a, b] of busy.concat([[win.to, win.to]])) {
+      if (a - cur > thr) { const pad = Math.min(thr / 4, 3600); push(cur, cur + pad, false); push(cur + pad, a - pad, true); push(a - pad, a, false); }
+      else push(cur, a, false);
+      push(Math.max(cur, a), b, false);
+      cur = Math.max(cur, b);
+    }
+    if (!segs.length) segs.push({ a: win.from, b: win.to, fold: false });
+    const foldW = (g) => (g.b - g.a >= 86400 ? J_FOLD : 12);
+    const folded = segs.reduce((n, g) => n + (g.fold ? foldW(g) : 0), 0);
+    const active = segs.reduce((n, g) => n + (g.fold ? 0 : g.b - g.a), 0) || 1;
+    const k = Math.max(0, W - folded) / active;
+    let x = 0;
+    segs.forEach((g) => { g.x = x; g.w = g.fold ? foldW(g) : (g.b - g.a) * k; x += g.w; });
+    const at = (t) => {
+      if (t <= segs[0].a) return 0;
+      let lo = 0, hi = segs.length - 1;
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (segs[mid].a <= t) lo = mid; else hi = mid - 1; }
+      const g = segs[lo];
+      return g.x + Math.min(g.w, g.fold ? ((t - g.a) / Math.max(1, g.b - g.a)) * g.w : (t - g.a) * k);
+    };
+    return { at, segs, k, thr };
+  }
+  const J_STEPS = [900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800, 1209600, 2592000];
+  function jTicks(sc) {
+    const step = J_STEPS.find((st) => st * sc.k >= 76) || J_STEPS[J_STEPS.length - 1];
+    const out = [];
+    sc.segs.filter((g) => !g.fold).forEach((g) => {
+      let t = jDayStart(g.a);
+      if (step >= 86400) { while (t < g.a) t += 86400; }
+      else { while (t < g.a) t += step; }
+      const before = out.length;
+      for (; t <= g.b; t += step) out.push({ t, day: Math.abs(t - jDayStart(t)) < 1 });
+      if (out.length === before && g.b - g.a > 0) out.push({ t: g.a, day: false });  // a short stretch still gets its date
+    });
+    out.sort((x, y) => x.t - y.t);
+    return { step, ticks: out };
+  }
+
+  /** The filter chips (the legend too): one per kind of step, with how many there are in the window. */
+  function jFilters(inWin) {
+    return J_CATS.map((c) => {
+      const n = inWin.filter((it) => it.c === c).length;
+      const on = !jHide.has(c);
+      return h("button", { type: "button", class: `jr-chip jc-${c}`, "aria-pressed": String(on), title: on ? tr("Hide {v}", { v: J_CAT[c] }) : tr("Show {v}", { v: J_CAT[c] }),
+        onclick: () => { if (on) jHide.add(c); else jHide.delete(c); store.set(J_HIDE_KEY, [...jHide].join(",")); jDrawn = ""; renderJourney(); } },
+      h("span", { class: "jr-sw", "aria-hidden": "true" }), J_CAT[c], h("span", { class: "jr-n", text: fmtNum(n) }));
+    });
+  }
+  /** Where the zoom is (each level a button back to it) and the next level down. */
+  function jZoomBar(win) {
+    const crumbs = [{ kind: "all" }, ...jPath].map((w, i, all) => {
+      const last = i === all.length - 1;
+      return [i ? h("span", { class: "jr-sep", "aria-hidden": "true", text: "›" }) : null,
+        h("button", { type: "button", class: `link-btn jr-crumb${last ? " cur" : ""}`, "aria-current": last ? "true" : null, text: w.kind === "all" ? tr("Whole project") : jWinName(w),
+          onclick: last ? null : () => jZoomTo(i) })];
+    });
+    let kids = [];
+    if (win.kind === "all") {
+      kids = journey.releases.map((r) => ({ w: jBandWin("release", r), label: r.id + (r.version ? ` · v${r.version}` : "") }))
+        .concat(journey.milestones.filter((m) => !m.release).map((m) => ({ w: jBandWin("milestone", m), label: m.id })));
+    } else if (win.kind === "release") {
+      const r = jBandOf("release", win.id);
+      kids = (r ? r.milestones : []).map((id) => jBandOf("milestone", id)).filter(Boolean).map((m) => ({ w: jBandWin("milestone", m), label: m.id }));
+    } else if (win.kind === "milestone") {
+      const days = [...new Set(journey.items.filter((it) => it.m === win.id).map((it) => jDayStart(it.t)))].sort((a, b) => a - b);
+      kids = days.map((d) => ({ w: jDayWin(d), label: fmtDate(d * 1000) }));
+    }
+    return [h("div", { class: "jr-crumbs" }, crumbs.flat()),
+      kids.length ? h("div", { class: "jr-kids", role: "group", "aria-label": tr("Zoom in") }, h("span", { class: "sel-label", text: tr("Zoom in") }),
+        kids.slice(0, 24).map((x) => h("button", { type: "button", class: "jr-kid", text: x.label, onclick: () => jZoom(x.w) })),
+        kids.length > 24 ? h("span", { class: "sub", text: tr("+{v} more", { v: kids.length - 24 }) }) : null) : null];
+  }
+
+  function renderJourney() {
+    const sub = $("jr-sub"), chart = $("jr-chart");
+    fill($("jr-actions"), h("button", { type: "button", class: "btn btn-sm", disabled: jLoading || null, onclick: loadJourney,
+      title: tr("Read .dev/ again and redraw the journey; nothing is changed"), text: jLoading ? tr("Reading…") : tr("Refresh") }));
+    if (!journey) {
+      fill(sub, jError ? tr("Could not build the journey: {v}", { v: jError }) : tr("Reading what the kit recorded in .dev/…"));
+      fill($("jr-zoom")); fill($("jr-filters")); fill($("jr-detail"));
+      fill(chart, h("div", { class: "empty", text: jError ? tr("Could not build the journey: {v}", { v: jError }) : tr("Reading what the kit recorded in .dev/…") }));
+      return;
+    }
+    const W = Math.max(320, chart.clientWidth - 2);
+    const key = [journey.generated_at, W, jPath.length, JSON.stringify(jWin()), [...jHide].join(), jSel && jSel.key, LANG, jLoading].join("|");
+    if (key === jDrawn && chart.firstChild) return;
+    jDrawn = key;
+    const j = journey, win = jWin();
+    fill(sub, tr("Built {when} from .dev/ · {n} steps since {start}", { when: fmtDT(j.generated_at * 1000), n: j.items.length, start: fmtDate(j.start * 1000) }),
+      jError ? ` · ${tr("Could not build the journey: {v}", { v: jError })}` : null);
+    const inWin = j.items.filter((it) => jEnd(it) >= win.from && it.t <= win.to);
+    const shown = inWin.filter((it) => !jHide.has(it.c));
+    fill($("jr-zoom"), jZoomBar(win));
+    fill($("jr-filters"), jFilters(inWin));
+    const plotW = W - J_LABEL - 30;
+    // the bands and the "now" line take part in the axis, so a fold never hides where a milestone starts
+    const sc = jScale(win, shown.concat(j.milestones.map((m) => ({ t: m.from, e: m.from }))).concat([{ t: Math.min(win.to, jNow()), e: Math.min(win.to, jNow()) }]), plotW);
+    const X = (t) => J_LABEL + 8 + sc.at(Math.max(win.from, Math.min(win.to, t)));
+    // lanes: bars packed into rows, points in their own track below
+    const lanes = J_LANES.map((l) => {
+      const bars = shown.filter((it) => it.l === l && J_BARS.has(it.k)).sort((a, b) => a.t - b.t);
+      const pts = shown.filter((it) => it.l === l && !J_BARS.has(it.k));
+      const maxRows = J_ROWS[l] || 3, rowEnd = [];
+      bars.forEach((it) => {
+        const x0 = X(it.t), x1 = Math.max(x0 + 3, X(jEnd(it)));
+        let r = rowEnd.findIndex((e) => e + 2 <= x0);
+        if (r < 0 && rowEnd.length < maxRows) r = rowEnd.length;
+        if (r < 0) r = rowEnd.indexOf(Math.min(...rowEnd));
+        rowEnd[r] = Math.max(rowEnd[r] || 0, x1);
+        it._row = r; it._x0 = x0; it._x1 = x1;
+      });
+      return { l, bars, pts, rows: Math.max(1, rowEnd.length) };
+    });
+    // the lanes fill the height of the chart: thicker bars first (up to 12 px), then more room around them
+    const top = J_BAND * 2 + 6, rowsN = lanes.reduce((n, ln) => n + ln.rows, 0);
+    const room = Math.max(0, chart.clientHeight - 4 - top - J_AXIS - lanes.reduce((n, ln) => n + 30 + ln.rows * (J_BAR + 3), 0));
+    const barH = Math.min(12, J_BAR + room / Math.max(1, rowsN));
+    const pad = Math.max(0, room - rowsN * (barH - J_BAR)) / lanes.length;
+    let y = top;
+    lanes.forEach((ln) => { ln.y = y; ln.h = 10 + ln.rows * (barH + 3) + 20 + pad; y += ln.h; });
+    const H = y + J_AXIS;
+    const svg = s("svg", { class: "jr-svg", width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img",
+      "aria-label": tr("Journey of {project}: {n} steps from {from} to {to}", { project: data.project, n: shown.length, from: fmtDate(win.from * 1000), to: fmtDate(win.to * 1000) }) });
+    const g = (cls) => s("g", { class: cls });
+    const back = g("jr-back"), grid = g("jr-grid"), bands = g("jr-bands"), marks = g("jr-marks"), axis = g("jr-axis");
+    // lane backgrounds and names
+    lanes.forEach((ln, i) => {
+      back.append(s("rect", { class: `jr-lane lane-${ln.l === "inbox" ? "inbox" : ln.l}${i % 2 ? " odd" : ""}`, x: 0, y: ln.y, width: W, height: ln.h }),
+        s("rect", { class: `jr-lane-key lane-${ln.l}`, x: 0, y: ln.y + 4, width: 4, height: ln.h - 8, rx: 2 }),
+        s("text", { class: "jr-lane-name", x: 14, y: ln.y + ln.h / 2 - 2, text: J_LANE[ln.l] }),
+        s("text", { class: "jr-lane-n", x: 14, y: ln.y + ln.h / 2 + 12, text: ln.bars.length + ln.pts.length ? plural(ln.bars.length + ln.pts.length, "step") : "" }));
+    });
+    // folds first (their labels take their place on the axis), then the ticks: the first one of each day says the date
+    const taken = [];
+    sc.segs.filter((f) => f.fold).forEach((f) => {
+      const x = J_LABEL + 8 + f.x;
+      const days = (f.b - f.a) / 86400;
+      const fr = s("rect", { class: `jr-fold${f.w < J_FOLD ? " thin" : ""}`, x: x + (f.w < J_FOLD ? 3 : 2), y: J_BAND * 2 + 6, width: Math.max(2, f.w - (f.w < J_FOLD ? 6 : 4)),
+        height: H - J_AXIS - J_BAND * 2 - 6, rx: f.w < J_FOLD ? 2 : 4 });
+      fr.append(s("title", { text: tr("{a} to {b}: nothing was recorded", { a: fmtDT(f.a * 1000), b: fmtDT(f.b * 1000) }) }));
+      grid.append(fr);
+      if (f.w < J_FOLD) return;  // a short stretch (a night): a thin break, its length in the tooltip
+      const txt = days >= 1 ? tr("{v} d idle", { v: Math.round(days) }) : tr("{v} h idle", { v: Math.round((f.b - f.a) / 3600) });
+      grid.append(s("text", { class: "jr-fold-label", x: x + J_FOLD / 2, y: H - J_AXIS + 16, text: txt }));
+      taken.push([x + J_FOLD / 2 - 34, x + J_FOLD / 2 + 34]);
+    });
+    const { step, ticks } = jTicks(sc);
+    let lastLabel = -1e9, lastDay = null;
+    ticks.forEach((tk) => {
+      const x = X(tk.t);
+      grid.append(s("line", { class: `jr-tick${tk.day ? " day" : ""}`, x1: x, x2: x, y1: J_BAND * 2 + 6, y2: H - J_AXIS }));
+      const d = new Date(tk.t * 1000);
+      const day = jDayStart(tk.t);
+      const newDay = day !== lastDay;
+      const w = newDay || step >= 86400 ? 62 : 44;
+      if (x - lastLabel < w + 10 || x + w / 2 > W - 2 || taken.some(([a, b]) => x + w / 2 > a && x - w / 2 < b)) return;
+      lastLabel = x;
+      const label = newDay || step >= 86400 ? d.toLocaleDateString(LANG, { month: "short", day: "numeric" }) : d.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
+      lastDay = day;
+      axis.append(s("text", { class: `jr-tick-label${newDay ? " day" : ""}`, x, y: H - J_AXIS + 16, text: label, "data-day": tk.t }));
+    });
+    // bands: releases on top, milestones below, each a zoom target
+    const band = (b, kind, row) => {
+      const to = b.to || jNow();
+      if (to < win.from || b.from > win.to) return;
+      const x0 = X(b.from), x1 = Math.max(x0 + 4, X(to)), w = x1 - x0;
+      const took = dur(to - b.from);
+      const label = kind === "release" ? `${b.id}${b.version ? ` · v${b.version}` : ""} · ${took}${b.usd != null ? ` · ${usd(b.usd)}` : ""}`
+        : `${b.id} ${b.title || ""} · ${took}${b.usd != null ? ` · ${usd(b.usd)}` : ""}`;
+      const el = s("g", { class: `jr-band ${kind} ${b.to ? "closed" : "open"}`, "data-band": `${kind}:${b.id}`, tabindex: "0", role: "button",
+        "aria-label": tr("Zoom into {v}", { v: label }) },
+      s("rect", { x: x0, y: 4 + row * J_BAND, width: w, height: J_BAND - 6, rx: 5 }),
+      w > 26 ? s("text", { x: x0 + 7, y: 4 + row * J_BAND + 13, text: label.length * 6.4 > w - 12 ? label.slice(0, Math.max(1, Math.floor((w - 12) / 6.4) - 1)) + "…" : label }) : null);
+      el.append(s("title", { text: `${label}\n${fmtDT(b.from * 1000)} – ${b.to ? fmtDT(b.to * 1000) : tr("now")}` }));
+      bands.append(el);
+    };
+    j.releases.forEach((r) => band(r, "release", 0));
+    j.milestones.forEach((m) => band(m, "milestone", 1));
+    // marks: bars, then points (clustered when they would overlap)
+    const groups = [];
+    lanes.forEach((ln) => {
+      ln.bars.forEach((it) => {
+        const yy = ln.y + 8 + pad / 3 + it._row * (barH + 3);
+        const i = j.items.indexOf(it);
+        const r = s("rect", { class: `jr-bar jc-${it.c} st-${it.s || "ok"}${jSel && jSel.key === `i${i}` ? " sel" : ""}`, x: it._x0, y: yy, width: Math.max(3, it._x1 - it._x0), height: barH, rx: 2, "data-i": i });
+        marks.append(r);
+      });
+      const py = ln.y + ln.h - 13 - pad / 4;
+      const pts = ln.pts.map((it) => ({ it, x: X(it.t) })).sort((a, b) => a.x - b.x);
+      for (let a = 0; a < pts.length;) {
+        let b = a + 1;
+        while (b < pts.length && pts[b].x - pts[b - 1].x < 12 && pts[b].x - pts[a].x < 40) b += 1;
+        if (b - a === 1) {
+          const { it, x } = pts[a];
+          const i = j.items.indexOf(it);
+          const cls = `jr-pt ${jMark(it)} jc-${it.c}${jSel && jSel.key === `i${i}` ? " sel" : ""}`;  // i18n-ok: a class list
+          const m = jMark(it).split(" ")[0];
+          const el = m === "flag" ? s("path", { class: cls, d: `M${x} ${py + 6}V${py - 8}l9 3.5-9 3.5`, "data-i": i })
+            : m === "star" ? s("path", { class: cls, d: `M${x} ${py - 7}l2.1 4.4 4.8.6-3.5 3.3.9 4.7-4.3-2.3-4.3 2.3.9-4.7-3.5-3.3 4.8-.6z`, "data-i": i })
+              : m === "diamond" ? s("path", { class: cls, d: `M${x} ${py - 6}l6 6-6 6-6-6z`, "data-i": i })
+                : m === "square" ? s("rect", { class: cls, x: x - 4.5, y: py - 4.5, width: 9, height: 9, rx: 2, "data-i": i })
+                  : m === "tri" ? s("path", { class: cls, d: `M${x} ${py - 6}l6 10.5h-12z`, "data-i": i })
+                    : m === "tick" ? s("rect", { class: cls, x: x - 1, y: py - 5, width: 2, height: 10, "data-i": i })
+                      : s("circle", { class: cls, cx: x, cy: py, r: 4.5, "data-i": i });
+          marks.append(el);
+        } else {
+          const gi = groups.length;
+          const its = pts.slice(a, b).map((p) => p.it);
+          groups.push(its);
+          const cx = (pts[a].x + pts[b - 1].x) / 2;
+          const bad = its.some((it) => /bad|warn/.test(jMark(it)));
+          marks.append(s("g", { class: `jr-cluster${bad ? " bad" : ""}${jSel && jSel.key === `g${gi}` ? " sel" : ""}`, "data-g": gi },
+            s("rect", { x: Math.min(pts[a].x, cx - 9) - 2, y: py - 8, width: Math.max(22, pts[b - 1].x - pts[a].x + 8), height: 16, rx: 8 }),
+            s("text", { x: cx, y: py + 4, text: String(its.length) })));
+        }
+        a = b;
+      }
+    });
+    // now
+    const nowT = jNow();
+    if (nowT >= win.from && nowT <= win.to) {
+      const x = X(nowT);
+      grid.append(s("line", { class: "jr-now", x1: x, x2: x, y1: 2, y2: H - J_AXIS + 2 }));
+    }
+    svg.append(back, grid, bands, marks, axis);
+    svg.addEventListener("click", (e) => {
+      const el = e.target.closest("[data-i],[data-g],[data-band],[data-day]");
+      if (!el) return;
+      if (el.dataset.band) { const [kind, id] = el.dataset.band.split(":"); const b = jBandOf(kind, id); if (b) jZoom(jBandWin(kind, b)); return; }
+      if (el.dataset.day) { if (win.kind !== "day") jZoom(jDayWin(Number(el.dataset.day))); return; }
+      jSel = el.dataset.i != null ? { key: `i${el.dataset.i}`, item: j.items[Number(el.dataset.i)] } : { key: `g${el.dataset.g}`, group: groups[Number(el.dataset.g)] };
+      jDrawn = ""; renderJourney();
+    });
+    svg.addEventListener("keydown", (e) => {
+      const el = e.target.closest("[data-band]");
+      if (el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); el.dispatchEvent(new MouseEvent("click", { bubbles: true })); }
+    });
+    svg.addEventListener("mousemove", (e) => {
+      const el = e.target.closest("[data-i],[data-g]");
+      if (!el) { hideTip(); return; }
+      if (el.dataset.i != null) {
+        const it = j.items[Number(el.dataset.i)];
+        showTip(e, `${J_CAT[it.c]} · ${fmtDT(it.t * 1000)}`, [[jText(it), it.e != null || it.s === "running" ? dur(jEnd(it) - it.t) + (it.s && it.s !== "ok" && it.s !== "done" ? ` · ${J_STATUS[it.s] || it.s}` : "") : ""]]);
+      } else {
+        const its = groups[Number(el.dataset.g)];
+        showTip(e, tr("{v} at about the same time", { v: plural(its.length, "step") }), its.slice(0, 6).map((it) => [jText(it), ""]));
+      }
+    });
+    svg.addEventListener("mouseleave", hideTip);
+    fill(chart, svg);
+    renderJourneyDetail(win, inWin, shown);
+  }
+
+  /** The side panel: the step picked, the steps of a cluster, or a summary of the window. */
+  function renderJourneyDetail(win, inWin, shown) {
+    const el = $("jr-detail");
+    const row = (k, v) => (v === null || v === undefined || v === "" ? null : h("div", { class: "jr-kv" }, h("span", { class: "k", text: k }), h("span", { class: "v" }, v)));
+    const close = h("button", { type: "button", class: "link-btn jr-close", text: tr("Back to the summary"), onclick: () => { jSel = null; jDrawn = ""; renderJourney(); } });
+    if (jSel && jSel.item) {
+      const it = jSel.item, v = it.v || {};
+      const end = jEnd(it);
+      const task = it.k === "task" || it.k.startsWith("task_") ? it.r : TASK_RE.test(it.r || "") ? it.r : null;
+      const ms = it.m && jBandOf("milestone", it.m);
+      fill(el, h("p", { class: "jr-kicker" }, h("span", { class: `jr-sw jc-${it.c}`, "aria-hidden": "true" }), `${J_CAT[it.c]} · ${J_LANE[it.l]}`),
+        h("h3", { class: "jr-title", text: jText(it) }),
+        it.s && it.s !== "ok" ? h("span", { class: `badge ${it.s === "done" ? "good" : it.s === "failed" || it.s === "blocked" || it.s === "dropped" ? "bad" : "neutral"}`, text: J_STATUS[it.s] || it.s }) : null,
+        h("div", { class: "jr-kvs" },
+          row(tr("Started"), fmtDT(it.t * 1000)),
+          it.e != null && it.e !== it.t ? row(tr("Ended"), fmtDT(it.e * 1000)) : null,
+          end > it.t ? row(tr("Took"), dur(end - it.t) + (it.s === "running" ? ` ${tr("so far")}` : "")) : null,
+          row(tr("Model"), v.model ? `${v.model}${v.effort ? ` · ${v.effort}` : ""}` : null),
+          row(tr("Route"), v.arm || null),
+          row(tr("Tokens"), v.tokens != null ? compact(v.tokens) : null),
+          row(tr("Commit"), v.commit ? h("code", { text: v.commit }) : null),
+          row(tr("Score"), v.score != null ? String(v.score) : null),
+          row(tr("Reason"), v.reason && it.k === "task" ? v.reason : null),
+          row(tr("Milestone"), ms ? `${ms.id} ${ms.title || ""}` : it.m || null)),
+        h("div", { class: "jr-acts" },
+          task && data.tasks && data.tasks[task] ? h("button", { type: "button", class: "btn btn-sm", text: tr("Open task {v}", { v: task }), onclick: () => openTask(task) }) : null,
+          ms && !(win.kind === "milestone" && win.id === ms.id) ? h("button", { type: "button", class: "btn btn-sm", text: tr("Zoom into {v}", { v: ms.id }), onclick: () => jZoom(jBandWin("milestone", ms)) }) : null,
+          win.kind !== "day" ? h("button", { type: "button", class: "btn btn-sm", text: tr("See that day"), onclick: () => jZoom(jDayWin(it.t)) }) : null),
+        close);
+      return;
+    }
+    if (jSel && jSel.group) {
+      const its = jSel.group;
+      const a = Math.min(...its.map((x) => x.t)), b = Math.max(...its.map((x) => jEnd(x)));
+      fill(el, h("p", { class: "jr-kicker", text: `${fmtDT(a * 1000)}${b > a ? ` – ${fmtDT(b * 1000)}` : ""}` }),
+        h("h3", { class: "jr-title", text: tr("{v} at about the same time", { v: plural(its.length, "step") }) }),
+        h("ul", { class: "jr-list" }, its.slice(0, 40).map((it) => h("li", {}, h("button", { type: "button", class: "link-btn", onclick: () => { jSel = { key: `i${journey.items.indexOf(it)}`, item: it }; jDrawn = ""; renderJourney(); } },
+          h("span", { class: `jr-sw jc-${it.c}`, "aria-hidden": "true" }), h("time", { text: new Date(it.t * 1000).toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" }) }), " ", jText(it))))),
+        its.length > 40 ? h("p", { class: "jr-hint", text: tr("+{v} more", { v: its.length - 40 }) }) : null,
+        b - a > 60 ? h("button", { type: "button", class: "btn btn-sm", text: tr("Zoom in here"), onclick: () => jZoom({ kind: "range", from: a - 600, to: b + 600, id: `${a}` }) }) : null,
+        close);
+      return;
+    }
+    const band = (win.kind === "release" || win.kind === "milestone") ? jBandOf(win.kind, win.id) : null;
+    const to = Math.min(win.to, jNow());
+    const days = new Set(inWin.map((it) => jDayStart(it.t))).size;
+    const n = (k) => inWin.filter((it) => it.k === k).length;
+    const tasks = new Set(inWin.filter((it) => it.k === "task").map((it) => it.r)).size;
+    const gates = inWin.filter((it) => it.k === "gate");
+    const passed = gates.filter((x) => (x.v || {}).value === "passed").length;
+    const msIn = journey.milestones.filter((m) => m.from <= win.to && (m.to || jNow()) >= win.from);
+    const cost = band ? band.usd : win.kind === "all" ? msIn.reduce((x, m) => x + (typeof m.usd === "number" ? m.usd : 0), 0) || null : null;
+    fill(el, h("p", { class: "jr-kicker", text: tr("Summary") }),
+      h("h3", { class: "jr-title", text: band ? (win.kind === "milestone" ? `${band.id} ${band.title || ""}` : `${band.id}${band.version ? ` · v${band.version}` : ""}`) : jWinName(win) }),
+      band ? h("span", { class: `badge ${band.to ? "good" : "neutral"}`, text: band.to ? (win.kind === "release" ? tr("released") : tr("passed")) : tr("in progress") }) : null,
+      h("div", { class: "jr-kvs" },
+        row(tr("From"), fmtDT(win.from * 1000)),
+        row(tr("To"), band && !band.to ? tr("now") : fmtDT(to * 1000)),
+        row(tr("Took"), dur(to - win.from)),
+        row(tr("Days with activity"), fmtNum(days)),
+        row(tr("Tasks"), tasks ? fmtNum(tasks) : null),
+        row(tr("Skill runs"), n("skill") ? fmtNum(n("skill")) : null),
+        row(tr("Agents"), n("agent") ? fmtNum(n("agent")) : null),
+        row(tr("QA rounds"), gates.length ? tr("{v} ({v2} passed)", { v: gates.length, v2: passed }) : null),
+        row(tr("Releases"), n("released") ? fmtNum(n("released")) : null),
+        row(tr("Estimated cost"), cost != null ? usd(cost) : null)),
+      h("p", { class: "jr-hint", text: tr("Click a bar or a mark to see what happened; click a release, a milestone or a date to zoom in.") }),
+      shown.length < inWin.length ? h("p", { class: "jr-hint", text: tr("{v} hidden by the filters", { v: plural(inWin.length - shown.length, "step") }) }) : null);
+  }
+
   function renderMap() {
     const m = data.milestones.find((x) => x.id === data.current_milestone) || currentMilestone();
     const r = relPick();
@@ -2824,12 +3266,13 @@
     syncClock();
     keepFocus(() => {
       // global: the lane tabs, Needs you and activity; below, only the screen of the lane shown
-      ["map", "arch", ...LANES].forEach((k) => { $(`phase-${k}`).hidden = k !== panel; });
+      ["map", "arch", "journey", ...LANES].forEach((k) => { $(`phase-${k}`).hidden = k !== panel; });
       document.body.dataset.screen = panel;
       renderImpediments(); renderHeader(); renderFeed();
       applyView();
       if (panel === "map") renderMap();
       else if (panel === "arch") renderArch();
+      else if (panel === "journey") renderJourney();
       else if (panel === "conception") renderConception();
       else if (panel === "planning") renderPlanning();
       else if (panel === "construction") {

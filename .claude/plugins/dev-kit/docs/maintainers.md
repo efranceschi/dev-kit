@@ -50,6 +50,8 @@ How the plugin is built, tested and documented. Users do not need this page.
                                  the git commands no kit agent may run (conventions §17); `dev_state.py slot` opens the slot;
                                  in a headless round it also denies applying a worktree by hand and records the round's
                                  last action (.dev/run/round-activity.json) for the board
+    scripts/dev_journey.py       the board's Journey tab: every step of the project rebuilt from .dev/log.md, telemetry.jsonl and
+                                 state.json (read-only, deterministic; `build --json`), served on demand at /api/journey
     scripts/dev_debug.py         /dev-kit:debug: state-vs-git checks and a debug dump in .dev/run/debug/ (read-only;
                                  codes only, no names or secrets; --share also anonymises paths)
     scripts/dev_diagram.py       /dev-kit:diagram: checks the model docs/diagrams/architecture.json and draws it as an SVG
@@ -68,7 +70,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     shared/interview/ templates/ checklists/ prompts/   interview script, artifact templates, review checklists, output and isolation contracts
     tests/                       lint_suite.py, test_dev_state.py, test_dev_state_gaps.py, test_dev_board.py,
                                  test_dev_cost.py, test_dev_docs.py, test_dev_score.py, test_dev_ledger.py, test_dev_spec.py,
-                                 test_dev_ui.py, test_dev_router.py, test_dev_spog.py,
+                                 test_dev_ui.py, test_dev_router.py, test_dev_spog.py, test_dev_journey.py,
                                  test_v3_foundation.py, test_v3_quality.py, test_v3_roles.py, test_v3_flow.py, test_v3_board.py, test_v3_ops.py, test_v3_cross.py (3.0 acceptance criteria, one file
                                  per phase), test_v3_migration.py on fixtures/v2.6.1/ (2.6.1 projects written by the 2.6.1
                                  scripts; fixtures/v2.6.1/build_fixture_261.py rebuilds them)
@@ -115,6 +117,7 @@ The lint runs `dev_docs.py check`, which fails if a skill has no catalog entry, 
 
 - Flow diagram: `docs/dev-kit-flow.svg` is plain SVG edited by hand: a `viewBox` and no fixed size, text as `<text>`, no embedded image, colours as CSS classes with a dark variant in its `<style>` (the test `test_v3_docs.py` checks this). Keep it in step with the lifecycle in `concepts.md`.
 - Board screenshots (`.github/assets/dev-kit-board*.png`, `docs/images/board-*.png`) come from the real board fed by a fictional project, Larder, with made-up data. To refresh them: `python3 -I docs/demo/build_demo.py /tmp/demo/larder` (builds the project through `dev_state.py` commands), show its Autopilot as running with `python3 -I docs/demo/autopilot_running.py /tmp/demo/larder`, start the board on it with `python3 -I skills/core/scripts/dev_board.py --root /tmp/demo/larder start --no-open --port 0`, then `node docs/demo/capture.js <url> <out dir>` with the `url` from `/tmp/demo/larder/.dev/run/board.json` (Playwright, 1440×1000 at 2×), and copy the PNGs into place (`board-construction*.png` become `.github/assets/dev-kit-board*.png`; the others go to `docs/images/`, and each must be embedded in `GET_STARTED.md`, `docs/getting-started.md` or `docs/stages.md`). Stop the board with `dev_board.py --root /tmp/demo/larder stop`.
+- The Journey tab's screenshots need the session history a real project has: after `build_demo.py`, run `python3 -I docs/demo/journey_history.py /tmp/demo/larder` (skill runs, agents and a cost per milestone at the times of its log lines).
 - Stress the board before a change to how it lays out lists, selectors or charts: `python3 -I docs/demo/stress/build_stress.py huge /tmp/stress/huge` builds a project with far more of everything (`onerel`: one release of 20 milestones; `huge`: 20 releases, 60 milestones, about 1,200 tasks, 60 questions, 120 issues, 16 implementers at work; `text`: very long names, unbroken words, emoji and CJK). Serve the board on it with `python3 -I skills/core/scripts/dev_board.py --root /tmp/stress/huge serve --port 47002 --idle-min 0` (the server stops by itself when a kit file changes on disk: start it again after an edit), then `node docs/demo/stress/stress.js http://127.0.0.1:47002/ /tmp/stress/out huge --full --root /tmp/stress/huge`. It screenshots every screen at 1440, 1280 (dark), 1024 and 390 pixels wide and writes `huge-report.json`: the screens that scroll sideways, what spills out of its box, page errors, the size of `/api/state`, and the main-thread time of five live updates. The 3.14.0 targets: no sideways scroll at 1024 and up, no spill, no error, `/api/state` under 200 KB compressed and updates near 50 ms of main-thread time on `huge` (3.14.0 measured 35 KB and 55–75 ms). Corner badges (absolutely positioned) are left out of the spill check.
 
 ## Verification

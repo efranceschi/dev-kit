@@ -93,6 +93,10 @@
       <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><rect x="8" y="2.5" width="8" height="5" rx="1.2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="2.5" y="16.5" width="8" height="5" rx="1.2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="13.5" y="16.5" width="8" height="5" rx="1.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7.5V12M6.5 16.5V12h11v4.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
       <span data-i18n="Architecture">Architecture</span>
     </button>
+    <button type="button" class="map-btn arch-btn" id="ph-journey" aria-pressed="false" title="Every step the kit recorded in this project, from the first command to now" data-i18n-title="Every step the kit recorded in this project, from the first command to now">
+      <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><circle cx="5" cy="18" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="19" cy="14" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6.4 16.2l4.2-6.4M13.6 9.6l3.9 2.9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      <span data-i18n="Journey">Journey</span>
+    </button>
     <div class="phase-tabs" id="phases" role="tablist" aria-labelledby="phase-h"></div>
     <span class="visually-hidden" id="phase-step"></span>
     <button type="button" class="link-btn phase-back" id="phase-back" hidden data-i18n="Back to the current phase">Back to the current phase</button>
@@ -120,6 +124,25 @@
         <div class="arch-actions" id="arch-actions"></div>
       </div>
       <div class="arch-view" id="arch-view"></div>
+    </section>
+
+    <!-- the journey: every step recorded in .dev/ (log.md, telemetry.jsonl), built by dev_journey.py when asked -->
+    <section class="phase-panel journey-panel" id="phase-journey" aria-labelledby="jr-h" hidden>
+      <div class="arch-head">
+        <div class="arch-title">
+          <h2 id="jr-h" data-i18n="Journey">Journey</h2>
+          <p class="card-sub" id="jr-sub"></p>
+        </div>
+        <div class="arch-actions" id="jr-actions"></div>
+      </div>
+      <div class="jr-toolbar">
+        <div class="jr-zoom" id="jr-zoom"></div>
+        <div class="jr-filters" id="jr-filters" role="group" aria-label="Show" data-i18n-aria-label="Show"></div>
+      </div>
+      <div class="jr-body">
+        <div class="jr-chart" id="jr-chart"></div>
+        <aside class="jr-detail" id="jr-detail" aria-live="polite"></aside>
+      </div>
     </section>
 
     <section class="phase-panel" id="phase-conception" role="tabpanel" aria-labelledby="ph-conception" hidden>

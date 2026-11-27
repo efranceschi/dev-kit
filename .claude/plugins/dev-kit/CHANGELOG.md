@@ -2,6 +2,16 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.26.0 — 2026-11-27
+
+Eduardo asked to see on the board, in one map, every step recorded as activity since the kit started in the project, built when asked rather than live, and agreed to the design from the interview: a Journey tab, rebuilt on demand by a program from what .dev/ already keeps.
+
+### Added
+- Board **Journey** tab (next to Map and Architecture): one screen with a lane per phase (Conception, Planning, Construction, Releases, Stable, plus Questions and issues). Skill runs, agents and task runs are bars (start to end; running, blocked or failed shown apart); artifacts, plan changes, reviews, checkpoints, QA gates (a flag), hard floors, releases (a star), flags, deploys, production health checks, questions and issues are marks, clustered with a count when they would overlap. Releases and milestones run as bands on top with how long they took and their estimated cost.
+- The axis is the calendar with idle stretches folded: a night becomes a thin break, days with nothing recorded a narrow strip labelled "3 d idle". Zoom by clicking a release, a milestone or a date (project, release, milestone, day, or a cluster's stretch), with a breadcrumb back; chips filter by kind (they are the legend too, with counts); a click on a bar or a mark shows what happened in a side panel (times, duration, model, route, tokens, commit, score, milestone) with buttons to open the task, zoom into its milestone or see that day; with nothing picked the panel sums up the window (duration, days with activity, tasks, skill runs, agents, QA rounds, releases, cost).
+- `dev_journey.py build [--json]`: the journey rebuilt from `.dev/log.md`, `.dev/telemetry.jsonl`, `state.json`, `costs/milestones.json` and `run/prod-health.json`, read-only, the same files always giving the same output (no model involved). The board serves it at `/api/journey` only when the tab opens or **Refresh** is clicked, cached by the files' signatures; nothing new is recorded for it.
+- `docs/demo/journey_history.py`: gives the Larder demo the skill runs, agents and costs a real project has, for the screenshots. `test_dev_journey.py`.
+
 ## 3.25.0 — 2026-11-27
 
 Eduardo asked the spog page to say plainly that it is the Single Pane of Glass, translated, and to call him with a subtle sound that repeats until he acknowledges it or the block is gone, with a way to silence it.
