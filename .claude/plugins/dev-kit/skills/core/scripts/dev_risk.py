@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dev_ledger as led  # noqa: E402
+import dev_ids as dids  # noqa: E402
 
 TIERS = ("speed", "balanced", "balanced+", "quality")
 LEVELS = ("low", "medium", "high")
@@ -180,7 +181,7 @@ def finding_severity(store, t: dict) -> str | None:
     if t.get("finding_severity"):
         return t["finding_severity"]
     src = str(t.get("source") or "")
-    m = re.match(r"^qa/(M\d+(?:\.\d+)?)/report\.md#([\w.-]+?)(?:-r\d+)?$", src)
+    m = re.match(r"^qa/(" + dids.MILESTONE + r")/report\.md#([\w.-]+?)(?:-r\d+)?$", src)
     if not m:
         return None
     for f in findings_of(store, m.group(1)).values():
@@ -453,7 +454,7 @@ def risk_rows(store, milestone: str, events: list[dict] | None = None) -> list[d
     findings = findings_of(store, milestone)
     fix_src = {}
     for k, v in tasks.items():
-        m = re.match(r"^qa/M\d+(?:\.\d+)?/report\.md#([\w.-]+?)(?:-r\d+)?$", str(v.get("source") or ""))
+        m = re.match(r"^qa/" + dids.MILESTONE + r"/report\.md#([\w.-]+?)(?:-r\d+)?$", str(v.get("source") or ""))
         if m:
             fix_src[k] = m.group(1)
     ledger = led.load(store.dev)

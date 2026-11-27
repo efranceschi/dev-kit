@@ -26,6 +26,10 @@ import random
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir
+import dev_ids as dids  # noqa: E402
 
 RESULTS = ("ok", "findings", "failed")
 
@@ -156,7 +160,7 @@ def record(dev: Path, root: Path, prefix: str, units: dict[str, list[str]], cont
 
 # ------------------------------------------------------------------ document sections
 
-ID_RE = re.compile(r"\b(?:AC-\d+|S-\d+|ADR-\d+|T-\d{3,}|US-\d+|J-\d+)\b")
+ID_RE = re.compile(rf"\b(?:{dids.AC}|{dids.SCREEN}|{dids.ADR}|{dids.TASK}|{dids.STORY}|{dids.JOURNEY})\b")
 
 
 def sections(path: Path) -> list[dict]:

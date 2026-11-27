@@ -32,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir
 import dev_telemetry as tel  # noqa: E402
+import dev_ids as dids  # noqa: E402
 
 DEFAULT_PRICES = {
     "currency": "USD",
@@ -333,7 +334,7 @@ def tag_milestones(usage: list[dict], dev: Path) -> list[dict]:
     """Each usage row gets the milestone it was spent on: the milestone of a task in progress at that moment (the
     lowest-numbered one if several run), otherwise the milestone whose QA window holds it, otherwise none."""
     tasks, qa = milestone_windows(dev)
-    num = lambda m: (lambda g: (int(g[1]), int(g[2] or 0)) if g else (10 ** 6, 0))(re.fullmatch(r"M(\d+)(?:\.(\d+))?", str(m)))  # noqa: E731
+    num = dids.mkey
     out = []
     for r in usage:
         ts = parse_ts(r.get("ts"))
@@ -374,7 +375,7 @@ def milestone_costs(dev: Path) -> dict:
             if e["event"] != "agent_end" or not e.get("tokens"):
                 continue
             sc = str(e.get("scope") or "")
-            m = sc if re.fullmatch(r"M\d+(?:\.\d+)?", sc) else (ts.get(sc) or {}).get("milestone")
+            m = sc if dids.is_id("milestone", sc) else (ts.get(sc) or {}).get("milestone")
             if m:
                 row = rows.setdefault(m, {"usd": 0.0, "usd_complete": False, "tokens": 0, "requests": 0, "partial": True})
                 row["requests"] += 1

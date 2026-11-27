@@ -21,7 +21,9 @@ How the plugin is built, tested and documented. Users do not need this page.
   skills/*/SKILL.md              27 skills, invoked as /dev-kit:<name>
   skills/core/                   support skill, not invocable
     SKILL.md                     marker (disable-model-invocation: true, user-invocable: false)
-    scripts/dev_state.py         state: init, sync-plan, next, start, done, block, unblock, drop, add-task, add-question,
+    scripts/dev_ids.py           the one definition of every id (patterns, canonical forms, order, next free number;
+                                 conventions §3): every script and the board use it, the lint refuses id patterns elsewhere
+    scripts/dev_state.py         state: init, sync-plan, ids, next, start, done, block, unblock, drop, add-task, add-question,
                                  fix-tasks, freeze, affected, hard-floor, ci, debt, gate, review, checkpoint, artifact, stale, xref, tests, ledger, brief, tier, set-risk, risk-profile,
                                  risk-report, lock, qa-watch, job (long commands under a supervisor), strings, contrast, set, status, issues (add-issue, issue, pull-issues, cooldown, backlog),
                                  preview, deploy, cleanup, event, feedback, telemetry, tip, tips, notify,
@@ -70,7 +72,7 @@ How the plugin is built, tested and documented. Users do not need this page.
     shared/interview/ templates/ checklists/ prompts/   interview script, artifact templates, review checklists, output and isolation contracts
     tests/                       lint_suite.py, test_dev_state.py, test_dev_state_gaps.py, test_dev_board.py,
                                  test_dev_cost.py, test_dev_docs.py, test_dev_score.py, test_dev_ledger.py, test_dev_spec.py,
-                                 test_dev_ui.py, test_dev_router.py, test_dev_spog.py, test_dev_journey.py,
+                                 test_dev_ui.py, test_dev_router.py, test_dev_spog.py, test_dev_journey.py, test_ids.py,
                                  test_v3_foundation.py, test_v3_quality.py, test_v3_roles.py, test_v3_flow.py, test_v3_board.py, test_v3_ops.py, test_v3_cross.py (3.0 acceptance criteria, one file
                                  per phase), test_v3_migration.py on fixtures/v2.6.1/ (2.6.1 projects written by the 2.6.1
                                  scripts; fixtures/v2.6.1/build_fixture_261.py rebuilds them)

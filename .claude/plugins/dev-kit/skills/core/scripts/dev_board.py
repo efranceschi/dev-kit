@@ -68,6 +68,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))  # -I drops the script dir
 import dev_state as ds  # noqa: E402
+import dev_ids as dids  # noqa: E402
 import dev_diagram as dg  # noqa: E402
 import dev_router as router  # noqa: E402
 import dev_journey as jr  # noqa: E402
@@ -80,6 +81,11 @@ DEFAULT_PORT = 8765
 # Identity of this code: a running server whose record carries another value was started by an older copy
 # of the kit (e.g. before a plugin update) and is restarted by `start` instead of reused.
 I18N = ASSETS / "i18n"  # the board's text catalogs: en.json is the base, one file per language (pt-BR.json, …)
+
+
+def ids_payload() -> bytes:
+    """The id patterns of dev_ids.py, for the page (one definition of every id, conventions §3)."""
+    return json.dumps(dids.board_patterns(), separators=(",", ":")).replace("</", "<\\/").encode("utf-8")
 
 
 def i18n_payload() -> bytes:
@@ -282,7 +288,7 @@ def _read(path: Path) -> str:
         return ""
 
 
-ADR_HEAD = re.compile(r"^###\s+(ADR-\d{1,4})\s*[—–-]\s*(.+?)\s*$")
+ADR_HEAD = re.compile(rf"^###\s+({dids.ADR})\s*[—–-]\s*(.+?)\s*$")
 ADR_META = re.compile(r"status:\s*([^·\n]+?)\s*(?:·|$)")
 ADR_DATE = re.compile(r"date:\s*(\d{4}-\d{2}-\d{2})")
 DECISIONS_SHOWN = 40
@@ -348,7 +354,7 @@ def milestone_goals(plan: str) -> dict:
             if cur and buf:
                 goals[cur] = " ".join(buf)
             head = h[3:].split()
-            cur = head[0] if head and re.fullmatch(r"M\d+(?:\.\d+)?", head[0]) else None
+            cur = head[0] if head and dids.is_id("milestone", head[0]) else None
             buf = []
         elif h.startswith("#"):
             if cur and buf:
@@ -477,8 +483,8 @@ def _task_events(root: Path) -> list[dict]:
     return events
 
 
-AC_LINE_RE = re.compile(r"^\s*[-*]\s*\**(AC-\d+)\**\s*(?:\[[^\]]*\])?\s*:\s*(.+)$")
-TASK_ID_RE = re.compile(r"T-\d{1,5}")
+AC_LINE_RE = re.compile(rf"^\s*[-*]\s*\**({dids.AC})\**\s*(?:\[[^\]]*\])?\s*:\s*(.+)$")
+TASK_ID_RE = re.compile(dids.TASK)
 SHA_RE = re.compile(r"[0-9a-f]{7,40}")
 
 
@@ -570,7 +576,7 @@ def task_detail(root: Path, tid: str) -> dict | None:
             prd.setdefault(m.group(1), m.group(2).strip())
     acs = []
     for a in t.get("acceptance") or []:
-        m = re.match(r"(AC-\d+)\s*(?:\[[^\]]*\])?\s*:?\s*(.*)", str(a))
+        m = re.match(rf"({dids.AC})\s*(?:\[[^\]]*\])?\s*:?\s*(.*)", str(a))
         acs.append({"id": m.group(1) if m else None, "text": str(a),
                     "prd": prd.get(m.group(1)) if m and prd.get(m.group(1)) not in (None, (m.group(2) or "").strip()) else None})
     tasks = store.tasks()
@@ -602,14 +608,14 @@ def _short(agent: object) -> str:
 
 def _node_of(scope: object) -> str | None:
     s = str(scope or "")
-    if re.fullmatch(r"T-\d{1,5}", s):
+    if dids.is_id("task", s):
         return s
-    if re.fullmatch(r"M\d{1,3}(?:\.\d{1,2})?", s):
+    if dids.is_id("milestone", s):
         return f"GATE:{s}"
     return None
 
 
-SCOPE_LINE = re.compile(r"(?m)^\s*Scope:\s*(T-\d{1,5}|M\d{1,3}(?:\.\d{1,2})?)\b")
+SCOPE_LINE = re.compile(rf"(?m)^\s*Scope:\s*({dids.TASK}|{dids.MILESTONE})\b")
 _SCOPE_CACHE: dict[str, str] = {}
 
 
@@ -898,20 +904,20 @@ def live_feed(events: list[dict], n: int = LIVE_TAIL) -> list[dict]:
 # The activity feed shows what means something to the user (§16 of the 3.0 spec): each row is a kind and its values,
 # worded by the board's catalog; technical lines (cleanup, tips, cost, state notes, sync) stay in the full log.
 FEED_RULES = (
-    ("task_done", re.compile(r"^done (?P<task>T-\d+)(?! commit corrected)")),
-    ("task_started", re.compile(r"^start (?P<task>T-\d+) (?P<title>.*?)(?: tier=\S+ arm=\S+)?$")),
-    ("task_blocked", re.compile(r"^block (?P<task>T-\d+): (?P<reason>.*)$")),
-    ("task_dropped", re.compile(r"^drop (?P<task>T-\d+): (?P<reason>.*)$")),
-    ("gate_passed", re.compile(r"^gate (?P<milestone>M[\d.]+) passed(?: score=(?P<score>\d+))?")),
-    ("qa_round_done", re.compile(r"^gate (?P<milestone>M[\d.]+) pending(?: score=(?P<score>\d+))?(?: \((?P<reason>.*)\))?$")),
-    ("gate_failed", re.compile(r"^gate (?P<milestone>M[\d.]+) failed(?: score=(?P<score>\d+))?")),
-    ("question_open", re.compile(r"^add-question (?P<id>Q-\d+) \([^)]*\): (?P<text>.*)$")),
-    ("question_answered", re.compile(r"^answer-question (?P<id>Q-\d+): (?P<text>.*)$")),
-    ("issue_new", re.compile(r"^add-issue (?P<id>I-\d+) \((?P<type>[a-z]+)/(?P<cls>[a-z-]+)\) (?P<title>.*)$")),
-    ("issue_classified", re.compile(r"^issue (?P<id>I-\d+) .*class=(?P<cls>[a-z-]+)")),
-    ("release_submitted", re.compile(r"^release (?P<release>R\d+) submitted for approval")),
-    ("release_approved", re.compile(r"^release (?P<release>R\d+) approved")),
-    ("release_rejected", re.compile(r"^release (?P<release>R\d+) rejected")),
+    ("task_done", re.compile(r"^done (?P<task>" + dids.TASK + r")(?! commit corrected)")),
+    ("task_started", re.compile(r"^start (?P<task>" + dids.TASK + r") (?P<title>.*?)(?: tier=\S+ arm=\S+)?$")),
+    ("task_blocked", re.compile(r"^block (?P<task>" + dids.TASK + r"): (?P<reason>.*)$")),
+    ("task_dropped", re.compile(r"^drop (?P<task>" + dids.TASK + r"): (?P<reason>.*)$")),
+    ("gate_passed", re.compile(r"^gate (?P<milestone>" + dids.MILESTONE + r") passed(?: score=(?P<score>\d+))?")),
+    ("qa_round_done", re.compile(r"^gate (?P<milestone>" + dids.MILESTONE + r") pending(?: score=(?P<score>\d+))?(?: \((?P<reason>.*)\))?$")),
+    ("gate_failed", re.compile(r"^gate (?P<milestone>" + dids.MILESTONE + r") failed(?: score=(?P<score>\d+))?")),
+    ("question_open", re.compile(r"^add-question (?P<id>" + dids.QUESTION + r") \([^)]*\): (?P<text>.*)$")),
+    ("question_answered", re.compile(r"^answer-question (?P<id>" + dids.QUESTION + r"): (?P<text>.*)$")),
+    ("issue_new", re.compile(r"^add-issue (?P<id>" + dids.ISSUE + r") \((?P<type>[a-z]+)/(?P<cls>[a-z-]+)\) (?P<title>.*)$")),
+    ("issue_classified", re.compile(r"^issue (?P<id>" + dids.ISSUE + r") .*class=(?P<cls>[a-z-]+)")),
+    ("release_submitted", re.compile(r"^release (?P<release>" + dids.RELEASE + r") submitted for approval")),
+    ("release_approved", re.compile(r"^release (?P<release>" + dids.RELEASE + r") approved")),
+    ("release_rejected", re.compile(r"^release (?P<release>" + dids.RELEASE + r") rejected")),
     ("released", re.compile(r"^release (?P<version>[^\sR][^\s]*) \((?P<tag>[^)]*)\)")),
     ("deploy", re.compile(r"^deploy (?P<env>\S+) (?P<status>\S+) (?P<sha>\S+)")),
     ("review", re.compile(r"^review (?P<name>\S+) (?P<value>\S+)(?: score=(?P<score>\d+))?")),
@@ -1361,6 +1367,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(500, {"ok": False, "error": f"missing asset {name}"})
         if name == "index.html":
             body = body.replace(b"__BOARD_TOKEN__", self.server.token.encode()).replace(b"__BOARD_I18N__", i18n_payload())
+            body = body.replace(b"__BOARD_IDS__", ids_payload())
         ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
         if ctype.startswith("text/") or ctype.endswith(("javascript", "svg+xml")):
             ctype += "; charset=utf-8"

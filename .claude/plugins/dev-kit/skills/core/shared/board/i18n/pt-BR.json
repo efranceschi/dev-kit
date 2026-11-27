@@ -788,6 +788,7 @@
     "{v} tokens": "{v} tokens",
     "{v} with fix rounds or failing": "{v} com rodadas de correção ou falhando",
     "{v} · gate {gate}": "{v} · gate {gate}",
+    "{r} · {i} of {n}": "{r} · {i} de {n}",
     "{v} · last: {detail}": "{v} · última: {detail}",
     "{v} · waiting for {v2}": "{v} · aguardando {v2}",
     "{v} · {v2} in later milestones": "{v} · {v2} em milestones posteriores",

@@ -44,6 +44,7 @@ import sys
 from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir
+import dev_ids as dids  # noqa: E402
 
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 ALWAYS = ("changelog.d/", "docs/setup.d/")
@@ -56,7 +57,7 @@ GIT_DENY = [
 ]
 MANUAL_ADOPT = re.compile(
     r"\bgit\s+(?:-C\s+\S+\s+)?(?:apply|am|cherry-pick)\b"
-    r"|\bgit\s+(?:-C\s+\S+\s+)?(?:checkout|restore|merge)\b[^;&|\n]*dev-kit/T-\d+"
+    r"|\bgit\s+(?:-C\s+\S+\s+)?(?:checkout|restore|merge)\b[^;&|\n]*dev-kit/" + dids.TASK + r""
     r"|\b(?:cp|rsync|ditto)\b[^;&|\n]*worktrees/")
 # Waiting on a process by its command line: `pgrep -f`, `ps … | grep` (and loops around them) match their own command
 # line, so they report "running" long after the work ended. Long commands run as kit jobs instead (§17).

@@ -127,7 +127,11 @@
   const hideTip = () => { tip.hidden = true; };
 
   const store = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
-  const TASK_RE = /^T-\d{1,5}$/;
+  /** Id patterns from dev_ids.py, served in the page (conventions §3): one definition of every id. */
+  const IDP = (() => { try { return JSON.parse(document.getElementById("id-patterns").textContent); } catch (e) { return {}; } })();
+  const idp = (k) => IDP[k] || "(?!)";
+  const TASK_RE = new RegExp(`^${idp("task")}$`);
+  const REL_HASH = new RegExp(`^release:(${idp("release")})$`);
   const INS = ["burndown", "velocity", "gates", "models"];
   let query = "";            // text filter of the kanban
   let typeFilter = "";       // task type filter of the kanban
@@ -174,7 +178,7 @@
     h("span", { class: "agent-time", "data-start": x.started_at, text: dur((Date.now() - parseT(x.started_at)) / 1000) })].filter(Boolean);
   /** Task ids inside free text become buttons that open the task; everything else stays text. */
   function linkify(text) {
-    return String(text || "").split(/\b(T-\d{1,5})\b/).map((part) => (TASK_RE.test(part) && data.tasks[part]
+    return String(text || "").split(new RegExp(`\\b(${idp("task")})\\b`)).map((part) => (TASK_RE.test(part) && data.tasks[part]
       ? h("button", { type: "button", class: "tid-btn", text: part, title: data.tasks[part].title, onclick: () => openTask(part) }) : part));
   }
   // ------------------------------------------------------------------ commands: shown as text only (the board is read-only; the console runs them)
@@ -866,6 +870,11 @@
   }
   /** The release that holds a milestone, if any. */
   const relOf = (id) => relPlan().find((r) => r.milestones.includes(id)) || null;
+  /** "R2 · 2 of 3": where a milestone sits in its release. Display only: ids never restart per release (conventions §3). */
+  const relPos = (id) => {
+    const r = relOf(id);
+    return r ? tr("{r} · {i} of {n}", { r: r.id, i: r.milestones.indexOf(id) + 1, n: r.milestones.length }) : "";
+  };
   /** "R1–R4" for a range of releases (any order), "R3" for one. */
   const tlRange = (rels) => { const ids = rels.map((r) => r.id).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))); return ids.length > 1 ? `${ids[0]}–${ids.at(-1)}` : ids[0] || ""; };
   /** A folded range as a chip: it opens in place. */
@@ -1080,7 +1089,7 @@
       const now = m.id === data.current_milestone;
       return h("button", {
         role: "tab", type: "button", id: `tab-${m.id}`, class: `sel-btn${closed ? " ok" : ""}${now ? " now" : ""}${m.id === cur ? " sel" : ""}${x.active || inQa ? " active" : ""}`,
-        "aria-selected": String(m.id === cur), "aria-controls": "main", tabindex: m.id === cur ? "0" : "-1", title: tr("{v} · gate {gate}", { v: m.title || m.id, gate: m.gate }) + (msTook(m) ? ` · ${tr("took {v}", { v: msTook(m).text })}` : ""),
+        "aria-selected": String(m.id === cur), "aria-controls": "main", tabindex: m.id === cur ? "0" : "-1", title: tr("{v} · gate {gate}", { v: m.title || m.id, gate: m.gate }) + (relPos(m.id) ? ` · ${relPos(m.id)}` : "") + (msTook(m) ? ` · ${tr("took {v}", { v: msTook(m).text })}` : ""),
         onclick: () => selectMilestone(m.id, true),
       }, h("strong", { text: m.id }),
       closed ? h("span", { class: "sel-meta", "aria-hidden": "true", text: "✓" }) : x.total ? h("span", { class: "sel-meta", text: `${x.done}/${x.total}` }) : null,
@@ -1129,7 +1138,7 @@
     const ts = tasksOf(m);
     const counts = Object.fromEntries(STATUS.map((st) => [st.key, ts.filter((t) => t.status === st.key).length]));
     const pct = ts.length ? Math.round((counts.done / ts.length) * 100) : 0;
-    $("ms-title").textContent = m ? `${m.id} · ${m.title || tr("Milestone")}` : tr("No milestone planned yet");
+    $("ms-title").textContent = m ? `${m.id} · ${m.title || tr("Milestone")}` + (relPos(m.id) ? ` · ${relPos(m.id)}` : "") : tr("No milestone planned yet");
     const goal = $("ms-goal");
     if (m) goal.textContent = m.goal || tr("No goal paragraph in plan.md for this milestone.");
     else fill(goal, tr("Run "), cmd("/dev-kit:plan"), tr(" to create milestones and tasks."));
@@ -2392,7 +2401,7 @@
     const row = (m) => {
       const x = milestoneInfo(m);
       const done = isClosed(m);
-      return h("li", { class: "has-btn" }, h("button", { type: "button", class: `road-row${done ? " done" : ""}${m.id === data.current_milestone ? " cur" : ""}`, title: m.goal || null, onclick: () => { closeList(); openMilestone(m.id); } },
+      return h("li", { class: "has-btn" }, h("button", { type: "button", class: `road-row${done ? " done" : ""}${m.id === data.current_milestone ? " cur" : ""}`, title: [relPos(m.id), m.goal].filter(Boolean).join(" · ") || null, onclick: () => { closeList(); openMilestone(m.id); } },
         h("span", { class: done ? "tab-ok" : `tab-dot ${x.active ? "active" : m.gate}`, "aria-hidden": "true", text: done ? "✓" : null }),
         h("strong", { class: "id", text: m.id }),
         h("span", { class: "road-title", text: m.title || m.id }),
@@ -3381,7 +3390,7 @@
     x.reason ? h("span", { class: "muted", text: tr(" · needed because {reason}", { reason: x.reason }) }) : null))) : null);
   /** A task's source as a link: a .dev markdown report (qa/M1/report.md#F-3), or the release review of a rejected release. */
   function sourceLink(src) {
-    const rel = String(src).match(/^release:(R\d{1,3})$/);
+    const rel = String(src).match(REL_HASH);
     if (rel) {
       const r = relPlan().find((x) => x.id === rel[1]);
       return docLink((r && r.review_doc) || `releases/${rel[1]}/review.md`, tr("{v} rejected · release review", { v: rel[1] }));
@@ -3456,7 +3465,7 @@
   // ------------------------------------------------------------------ markdown documents of .dev/: a side drawer, linkable as #doc:<path>
   // A small renderer that builds the DOM with h() (text through textContent, never innerHTML): headings with anchors,
   // paragraphs, nested lists and checkboxes, tables, fenced code, quotes, rules, and inline code, bold, italic, links.
-  const ID_TOKEN = /^(ADR-\d{1,5}|Q-\d{1,5}|I-\d{1,5}|T-\d{1,5}|F-\d{1,5}|AC-\d{1,4}|M\d{1,3}(?:\.\d{1,2})?|R\d{1,3})\b/;
+  const ID_TOKEN = new RegExp(`^(${["adr", "question", "issue", "task", "finding", "ac", "milestone", "release"].map(idp).join("|")})\\b`);
   const INLINE = /(`+)([\s\S]*?[^`])\1(?!`)|\*\*([^*]+?)\*\*|__([^_]+?)__|~~([^~]+?)~~|\*([^*\s](?:[^*]*?[^*\s])?)\*|(?<![\w])_([^_\s](?:[^_]*?[^_\s])?)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>/g;
   let docCur = null;          // {path, anchor} of the document shown
   /** A .dev-relative path for a link written inside a document (relative to that document), or null outside .dev. */
@@ -3655,7 +3664,6 @@
     if (docOrigin && docOrigin.isConnected) docOrigin.focus();
     docOrigin = null;
   });
-  const REL_HASH = /^release:(R\d{1,3})$/;
   const DOC_HASH = /^doc:([\w./-]+\.md)(?::([\w-]+))?$/i;
 
   // ------------------------------------------------------------------ stop server

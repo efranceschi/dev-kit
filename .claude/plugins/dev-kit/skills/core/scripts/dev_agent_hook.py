@@ -46,6 +46,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir
+import dev_ids as dids  # noqa: E402
 
 EVENTS = {"SessionStart": "session_start", "SubagentStart": "agent_start", "SubagentStop": "agent_stop"}
 MAX_BYTES = 256 * 1024
@@ -88,7 +89,7 @@ def subagent_transcript(payload: dict) -> str | None:
 
 
 SLOT_RE = re.compile(r"(?m)^\s*Slot:\s*(\d{1,3})\b")
-SCOPE_RE = re.compile(r"(?m)^\s*Scope:\s*(T-\d{1,5}|M\d{1,3}(?:\.\d{1,2})?|hotfix-T-\d{1,5})\b")
+SCOPE_RE = re.compile(rf"(?m)^\s*Scope:\s*({dids.TASK}|{dids.MILESTONE}|hotfix-{dids.TASK})\b")
 AGENT_TOOLS = ("Agent", "Task")
 # the read-only kit agents: a permission of theirs denied in a round child is recorded as skipped by the auditor (§17)
 AUDITOR_AGENTS = {"a11y-auditor", "code-reviewer", "copy-reviewer", "data-reviewer", "deps-auditor", "design-reviewer",
@@ -209,7 +210,7 @@ def emit_agent_event(dev: Path, event: str, payload: dict) -> None:
             fields["skill"] = tok(open_sk[-1]["skill"]).lower() or None
             fields["scope"] = fields["scope"] or open_sk[-1]["scope"]
         sc = str(fields.get("scope") or "")
-        if re.fullmatch(r"M\d+(?:\.\d+)?", sc):
+        if dids.is_id("milestone", sc):
             try:
                 st = json.loads((dev / "state.json").read_text(encoding="utf-8"))
                 fields["round"] = int(((st.get("milestones") or {}).get(sc) or {}).get("qa_runs", 0)) + 1

@@ -458,7 +458,9 @@ class TestFixesMilestoneId(Base):
         self.assertTrue(tel.ID_RE.match("M5.1"))
         self.assertEqual(dsm.plan_ops_valid([{"op": "move_task", "task": "T-001", "milestone": "M5.1"}])[1], [])
         js = (CORE / "shared" / "board" / "board.js").read_text(encoding="utf-8")
-        self.assertIn(r"M\d{1,3}(?:\.\d{1,2})?|R\d{1,3}", js)
+        import dev_ids as dids
+        self.assertTrue(dids.is_id("milestone", "M5.1"))
+        self.assertIn('"milestone", "release"].map(idp)', js)  # the board reads the patterns of dev_ids.py (3.27.0)
 
 
 # ------------------------------------------------------------------ item 15: P-nnn requests, "Round N"

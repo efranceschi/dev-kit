@@ -2,6 +2,22 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.27.0 — 2026-11-27
+
+Eduardo asked how milestones should be numbered and approved a proposal to standardize, control and live with older numbering: ids stay global and continuous (a release groups milestones, it never restarts the count), and now the kit enforces it. Before, a plan that restarted at M1 in R2 was synced silently and the first M1 vanished from the state, and `add-task` accepted a milestone called `banana`.
+
+### Added
+- `scripts/dev_ids.py`: the one definition of every id (milestone, release, task, issue, question, fact, finding, ADR, request, AC, screen, story, journey): patterns, canonical forms, order (`M5 < M5.1 < M6`) and the next free number. Every script uses it, and the board gets the same patterns from the server (`__BOARD_IDS__` in the page) instead of its own copies, so an id valid in state is linked everywhere. The lint refuses an id pattern outside `dev_ids.py` (there were 64 copies with different limits).
+- `sync-plan` makes the ids of `plan.md` canonical and unique before reading it: a `## M<n>`, `## R<n>` or `### T-nnn` written twice (numbering restarted per release) keeps its id once, where work started or else the first copy, and the others get the next free numbers; `M01`, `m1`, `Milestone 1`, `Release 2`, `T-1` become canonical (references in the plan follow) and `## M1: Title` becomes `## M1 — Title`. It keeps the old plan in `.dev/backup/plan-ids-<stamp>.md`, records an ADR, makes `review plan` stale and prints the changes (`ids:` lines). An id with history (gate run, QA folder, branch, work started) is never renamed: a non-canonical one is kept as legacy (`ids.legacy`), and a repeated id whose copies both started stops the sync for a repair by hand. Renamed ids go to `ids.retired` and are never given again.
+- `dev_state.py ids check [--json]` (what sync-plan would change, ids in state that break the rule, counters behind), `ids fix` (runs sync-plan) and `ids next milestone|release|task|issue [--count N]` (the next free ids without taking them; the `plan` skill takes its numbers from it). `/dev-kit:debug` reports the same checks, ids only.
+- Board: a milestone shows its place in its release, `R2 · 2 of 3` (heading, tab and roadmap tooltips; display only).
+
+### Changed
+- `add-task` creates a new milestone only with the next free number (`M<last+1>`, from `brownfield.first_milestone` on an existing project); `plan-apply`, the issue-queue draft and the gate-passed hint use the same next number, retired ids included.
+- Question ids skip the ids already in `open-questions.md` (a lost counter no longer reuses one), like tasks and issues.
+- A finding cited outside its report carries its scope (`M4/F-003`); `fact add --origin` accepts it.
+- Older projects need no migration: ids the kit wrote are already canonical, and pre-3.0 fixes milestones (`M<n>`), `R0` and `R-001` requests keep working. No new state version.
+
 ## 3.26.0 — 2026-11-27
 
 Eduardo asked to see on the board, in one map, every step recorded as activity since the kit started in the project, built when asked rather than live, and agreed to the design from the interview: a Journey tab, rebuilt on demand by a program from what .dev/ already keeps.

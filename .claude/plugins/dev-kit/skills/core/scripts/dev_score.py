@@ -63,6 +63,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir; dev_telemetry lives next to us
 import dev_telemetry as tel  # noqa: E402
+import dev_ids as dids  # noqa: E402
 
 AUDITOR_DIMENSION = {
     "code-reviewer": "code",
@@ -602,7 +603,7 @@ def consolidate(inputs: list[Path], quality: dict, kind: str, scope: str, previo
     if previous is None:  # round 1: merge_findings already merged duplicates per dimension
         keep["deferred"] = []
     used = {str(f.get("id")) for f in keep["findings"] if f.get("_previous")}
-    nums = [int(m.group(1)) for x in used for m in [re.match(r"F-(\d+)$", x)] if m]
+    nums = [dids.number(x) for x in used if dids.is_id("finding", x)]
     nxt = max(nums, default=0) + 1
     order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     findings, disputed = [], []

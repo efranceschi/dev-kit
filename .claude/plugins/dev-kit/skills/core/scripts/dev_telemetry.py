@@ -19,9 +19,13 @@ import re
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir
+import dev_ids as dids  # noqa: E402
 
 VERSION = 1
-ID_RE = re.compile(r"^(T-\d{1,5}|M\d{1,3}(?:\.\d{1,2})?|R\d{1,3}|F-\d{1,5}|Q-\d{1,5}|ADR-\d{1,5}|I-\d{1,5})$")
+ID_RE = re.compile(rf"^({dids.TASK}|{dids.MILESTONE}|{dids.RELEASE}|{dids.FINDING}|{dids.QUESTION}|{dids.ADR}|{dids.ISSUE})$")
 TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,39}$")
 
 COUNTS = {"critical", "high", "medium", "low"}
@@ -446,7 +450,7 @@ AGENT_STAGE = {"implementer": "implement", "architect": "architecture", "require
 
 def scope_stage(scope: object) -> str | None:
     s = str(scope or "")
-    if re.fullmatch(r"M\d+(?:\.\d+)?", s) or re.fullmatch(r"(?i)T-\d+", s) or s.lower().startswith("hotfix-"):
+    if dids.is_id("milestone", s) or dids.is_id("task", s.upper()) or s.lower().startswith("hotfix-"):
         return "qa"
     return {"prd": "prd", "design": "design", "plan": "plan", "ux": "usability", "docs": "docs_release",
             "release": "docs_release"}.get(s)

@@ -30,6 +30,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))  # -I drops the script dir
 import dev_state as ds  # noqa: E402
+import dev_ids as dids  # noqa: E402
 
 VERSION = 1
 LANES = ("conception", "planning", "construction", "releases", "stable", "inbox")
@@ -48,8 +49,8 @@ SKILL_LANE = {
 REVIEW_LANE = {"prd": "conception", "design": "conception", "plan": "planning", "docs": "releases", "ux": "releases"}
 CONCEPTION_ARTIFACTS = {"brief", "interview", "prd", "architecture", "ux", "ui", "design"}
 
-T = r"(?P<task>T-\d+)"
-M = r"(?P<milestone>M[\d.]+)"
+T = rf"(?P<task>{dids.TASK})"
+M = rf"(?P<milestone>{dids.MILESTONE})"
 # (kind, category, lane or None for "decided by the values", pattern) over the text of a log.md line
 LOG_RULES = (
     ("init", "docs", "conception", re.compile(r"^init (?P<how>created|updated)\b")),
@@ -71,17 +72,17 @@ LOG_RULES = (
     ("review", "checks", None, re.compile(r"^review (?P<name>\S+) (?P<value>\S+)(?: score=(?P<score>\d+))?")),
     ("checkpoint", "checks", None, re.compile(r"^checkpoint (?P<target>prd|plan) (?P<decision>confirm|adjust)")),
     ("preview", "delivery", "construction", re.compile(rf"^preview {M} (?P<status>stopped|\S+)")),
-    ("release_submitted", "delivery", "releases", re.compile(r"^release (?P<release>R\d+) submitted for approval")),
-    ("release_approved", "delivery", "releases", re.compile(r"^release (?P<release>R\d+) approved")),
-    ("release_rejected", "delivery", "releases", re.compile(r"^release (?P<release>R\d+) rejected: (?P<reason>.*?)(?: \([^)]*\))?$")),
+    ("release_submitted", "delivery", "releases", re.compile(r"^release (?P<release>" + dids.RELEASE + r") submitted for approval")),
+    ("release_approved", "delivery", "releases", re.compile(r"^release (?P<release>" + dids.RELEASE + r") approved")),
+    ("release_rejected", "delivery", "releases", re.compile(r"^release (?P<release>" + dids.RELEASE + r") rejected: (?P<reason>.*?)(?: \([^)]*\))?$")),
     ("released", "delivery", "releases", re.compile(r"^release (?P<version>[^\sR][^\s]*) \((?P<tag>[^)]*)\): (?P<what>.*)$")),
     ("flag", "delivery", "releases", re.compile(r"^flag (?P<name>\S+) (?P<event>\S+)")),
     ("deploy", "delivery", "releases", re.compile(r"^deploy (?P<env>\S+) (?P<status>\S+) (?P<sha>\S+)")),
-    ("prod_failed", "delivery", "stable", re.compile(r"^prod-check failed \((?P<detail>.*?)\): (?P<issue>I-\d+)")),
+    ("prod_failed", "delivery", "stable", re.compile(r"^prod-check failed \((?P<detail>.*?)\): (?P<issue>" + dids.ISSUE + r")")),
     ("cooldown", "inbox", "stable", re.compile(rf"^cooldown {M}->(?P<next>\S+): (?P<text>.*)$")),
-    ("question_open", "inbox", "inbox", re.compile(r"^add-question (?P<id>Q-\d+) \((?P<skill>[^)]*)\): (?P<text>.*)$")),
-    ("question_answered", "inbox", "inbox", re.compile(r"^answer-question (?P<id>Q-\d+): (?P<text>.*)$")),
-    ("issue_new", "inbox", "inbox", re.compile(r"^add-issue (?P<id>I-\d+) \((?P<type>[a-z]+)/(?P<cls>[a-z-]+)\) (?P<text>.*)$")),
+    ("question_open", "inbox", "inbox", re.compile(r"^add-question (?P<id>" + dids.QUESTION + r") \((?P<skill>[^)]*)\): (?P<text>.*)$")),
+    ("question_answered", "inbox", "inbox", re.compile(r"^answer-question (?P<id>" + dids.QUESTION + r"): (?P<text>.*)$")),
+    ("issue_new", "inbox", "inbox", re.compile(r"^add-issue (?P<id>" + dids.ISSUE + r") \((?P<type>[a-z]+)/(?P<cls>[a-z-]+)\) (?P<text>.*)$")),
     ("issue_pulled", "inbox", "planning", re.compile(rf"^pull-issues {M}: (?P<text>.*)$")),
 )
 LOG_LINE = re.compile(r"^- (?P<at>\S+) (?P<text>.*)$")
@@ -219,7 +220,7 @@ def _session_runs(events: list[dict], now: int) -> list[dict]:
                 scope = str(e.get("scope") or "")
                 lane = REVIEW_LANE.get(scope, "releases") if skill == "review" else SKILL_LANE.get(skill, "construction")
                 run = _item(t, lane, "skills", "skill", scope, {"skill": skill, "args": e.get("args_kind")},
-                            m=scope if re.fullmatch(r"M[\d.]+", scope) else None, s="running")
+                            m=scope if dids.is_id("milestone", scope) else None, s="running")
                 skills[key] = run
                 last_skill[sess] = run
                 out.append(run)
@@ -239,8 +240,8 @@ def _session_runs(events: list[dict], now: int) -> list[dict]:
                 if key in agents:
                     close_stale(agents.pop(key), t)
                 owner = last_skill.get(sess)
-                lane = "construction" if re.match(r"^(T-\d+|M[\d.]+|GATE:)", scope) else (owner["l"] if owner else "construction")
-                ms = scope[5:] if scope.startswith("GATE:") else scope if re.fullmatch(r"M[\d.]+", scope) else None
+                lane = "construction" if re.match(rf"^({dids.TASK}|{dids.MILESTONE}|GATE:)", scope) else (owner["l"] if owner else "construction")
+                ms = scope[5:] if scope.startswith("GATE:") else scope if dids.is_id("milestone", scope) else None
                 run = _item(t, lane, "agents", "agent", scope, {"agent": agent, "model": e.get("model"), "effort": e.get("effort"),
                                                                  "skill": e.get("skill") or (owner["v"]["skill"] if owner else None)}, m=ms, s="running")
                 agents[key] = run

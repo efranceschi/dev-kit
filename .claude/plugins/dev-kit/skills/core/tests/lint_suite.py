@@ -214,6 +214,15 @@ def main(argv: list[str]) -> int:
         if res.returncode not in (0, 1):
             err(f"docs: dev_docs.py check crashed: {res.stderr.strip()[:200]}")
 
+    # one definition of every id (conventions §3): no id pattern outside dev_ids.py, in the scripts or the board page
+    id_pat = re.compile(r"(?<![A-Za-z])(?:T|Q|I|K|F|D|P|S|J|US|ADR|AC)-\(?\\d|(?<![A-Za-z])[MR](?:\\d|\[\\d|\(\\d)")
+    for f in sorted((core / "scripts").glob("*.py")) + [core / "shared" / "board" / "board.js"]:
+        if f.name == "dev_ids.py" or not f.exists():
+            continue
+        for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            if id_pat.search(line):
+                err(f"{f.relative_to(claude)}:{n}: id pattern outside dev_ids.py (use its patterns): {line.strip()[:90]}")
+
     contract_checks(claude, core, skill_files, agent_files, err)
 
     for w in warnings:

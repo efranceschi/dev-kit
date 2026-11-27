@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir
+import dev_ids as dids  # noqa: E402
 
 FINISHED = ("done", "dropped")
 SECRET_KEY = re.compile(r"(?i)token|secret|passw|pwd|api[_-]?key|access[_-]?key|private[_-]?key|credential|cookie|session[_-]?key|^auth")
@@ -58,7 +59,7 @@ SECRETS = [
 SECRET_ASSIGN = re.compile(r"(?i)(\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|auth)\b[\"']?\s*[:=]\s*[\"']?)"
                            r"([^\s\"',;&]{4,})")
 URL_CREDS = re.compile(r"(://)[^/\s:@]+:[^/\s@]+@")
-IDS = re.compile(r"\b(?:T-\d{1,5}|Q-\d{1,5}|I-\d{1,5}|F-\d{1,5}|ADR-\d{1,5}|P-\d{1,5}|A-\d{1,5}|M\d{1,3}|R\d{1,3})\b")
+IDS = re.compile(rf"\b(?:{dids.TASK}|{dids.QUESTION}|{dids.ISSUE}|{dids.FINDING}|{dids.ADR}|{dids.REQUEST}|A-{dids.SEQ}|{dids.MILESTONE}|{dids.RELEASE})\b")
 KIT_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+@-]{0,63}$")
 KEEP_BRANCHES = ("main", "master", "HEAD")
 
@@ -97,7 +98,7 @@ def names_of(root: Path, st: dict) -> list[str]:
     try:
         for ln in (root / ".dev" / "open-questions.md").read_text(encoding="utf-8", errors="replace").splitlines():
             cells = [c.strip() for c in ln.strip().strip("|").split("|")]
-            if cells and re.fullmatch(r"Q-\d+", cells[0]):
+            if cells and dids.is_id("question", cells[0]):
                 out.update(c for c in cells[3:5] if c)
     except OSError:
         pass
@@ -312,7 +313,7 @@ def checks(root: Path) -> list[dict]:
     kit_wt = str((dev / "run" / "worktrees").resolve())
     for w in wts[1:]:
         br = w.get("branch") or ""
-        m = re.fullmatch(r"dev-kit/(T-\d+)", br)
+        m = re.fullmatch(rf"dev-kit/({dids.TASK})", br)
         if m:
             t = tasks.get(m.group(1)) or {}
             if not os.path.realpath(w["path"]).startswith(kit_wt):
@@ -366,6 +367,19 @@ def checks(root: Path) -> list[dict]:
             add("job_running", "info", f"job {name} is running", f"since {j.get('started_at')}, limit {round(float(j.get('timeout_s') or 0) / 60)} min")
         elif state == "timed_out":
             add("job_timed_out", "warn", f"job {name} hit its time limit and was stopped", f"ended {j.get('ended_at')}, log {j.get('log')}")
+    # ids that break conventions §3 (a numbering restarted per release, M01, a counter behind): dev_state.py ids check
+    try:
+        res = subprocess.run([sys.executable, "-I", str(Path(__file__).resolve().parent / "dev_state.py"), "--root", str(root),
+                              "ids", "check", "--json"], capture_output=True, text=True, timeout=60)
+        rep = json.loads(res.stdout) if res.stdout.strip().startswith("{") else {}
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        rep = {}
+    for e in rep.get("errors") or []:
+        add("ids_repeated_with_work", "error", e, "plan.md (`dev_state.py ids check`)")
+    if rep.get("would_change"):
+        add("ids_to_renumber", "warn", "plan.md has ids that sync-plan will renumber (conventions §3)", "; ".join(f"{x[0]} → {x[-1]}" for x in (IDS.findall(c) for c in rep["would_change"]) if x)[:400])  # ids only, never titles
+    for w in (rep.get("warnings") or []) + (rep.get("state") or []):
+        add("ids_warning", "info", w, "`dev_state.py ids check`")
     if started:
         add("round_running", "info", f"round {rnd.get('round')} started {started}", f"pids {rnd.get('pid')}/{rnd.get('child')}")
     return out
@@ -447,7 +461,7 @@ def dump(root: Path, n: int, share: bool = False) -> tuple[str, list[dict]]:
         for c in git(root, "log", "-15", "--format=%h%x00%B%x01").split("\x01"):
             sha, _, body = c.strip("\n").partition("\x00")
             if sha:
-                ids = sorted(set(re.findall(r"\bT-\d+\b", body)))
+                ids = sorted(set(re.findall(rf"\b{dids.TASK}\b", body)))
                 commits.append(f"{sha} " + (" ".join(ids) if ids else "") + " (subject removed)")
         status_txt = "\n".join(f"{ln[:2]} {sh.path(ln[3:]) if not ln[3:].startswith('.dev') else ln[3:]}" for ln in status.splitlines() if len(ln) > 3)
         branches = "\n".join(sh.branch(b) for b in git(root, "branch", "--list", "dev-kit/*", "--format=%(refname:short)").splitlines())
@@ -495,7 +509,7 @@ def dump(root: Path, n: int, share: bool = False) -> tuple[str, list[dict]]:
     parts.append(section(f".dev/log.md (last {n})", "\n".join(log_line(x, sh) for x in tail(dev / "log.md", n).splitlines())))
     oq = tail(dev / "open-questions.md", 60)
     if sh:
-        oq = "\n".join(sorted({f"{q} " + ("open" if re.search(r"(?i)\bopen\b", ln) else "") for ln in oq.splitlines() for q in re.findall(r"\bQ-\d+\b", ln)}))
+        oq = "\n".join(sorted({f"{q} " + ("open" if re.search(r"(?i)\bopen\b", ln) else "") for ln in oq.splitlines() for q in re.findall(rf"\b{dids.QUESTION}\b", ln)}))
     parts.append(section("Open questions", oq if sh else redact(oq)))
     rlogs = sorted((run / "rounds").glob("*.log"), key=lambda p: p.stat().st_mtime) if (run / "rounds").is_dir() else []
     for p in rlogs[-3:]:

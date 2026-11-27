@@ -788,6 +788,7 @@
     "{v} tokens": "{v} tokens",
     "{v} with fix rounds or failing": "{v} with fix rounds or failing",
     "{v} · gate {gate}": "{v} · gate {gate}",
+    "{r} · {i} of {n}": "{r} · {i} of {n}",
     "{v} · last: {detail}": "{v} · last: {detail}",
     "{v} · waiting for {v2}": "{v} · waiting for {v2}",
     "{v} · {v2} in later milestones": "{v} · {v2} in later milestones",

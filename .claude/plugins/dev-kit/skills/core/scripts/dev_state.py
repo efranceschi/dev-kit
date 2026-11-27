@@ -5,7 +5,10 @@ Standard library only. Run with: python3 -I dev_state.py <subcommand> [...]
 
 Subcommands
   init          create .dev/ and state.json (idempotent; updates given fields)
-  sync-plan     read .dev/plan.md and add/update milestones and tasks (never touches status)
+  sync-plan     read .dev/plan.md and add/update milestones and tasks (never touches status); first makes its ids
+                canonical and unique (a numbering restarted per release is renumbered), conventions §3
+  ids ACTION    check [--json]: ids that break §3 (what sync-plan would renumber) | fix: sync-plan | next KIND [--count N]:
+                the next free milestone, release, task or issue ids, without taking them
   strings       user-facing strings added since a commit (--since SHA [--worktree]), for the copy review
   contrast      WCAG contrast of the colour token pairs in ui-spec.md (--pairs fg/bg,… or automatic)
   lock          acquire | release | status NAME: one holder at a time for an exclusive resource (--holder --ttl --wait)
@@ -121,6 +124,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir; dev_telemetry lives next to us
+import dev_ids as dids  # noqa: E402
 import dev_telemetry as tel  # noqa: E402
 import dev_ledger as led  # noqa: E402
 import dev_risk as risk  # noqa: E402
@@ -733,12 +737,12 @@ TIPS_MODES = ("on", "off", "always")
 UI_KEYS = ("offered", "spinner_tips", "statusline", "title", "notify")
 
 
-MID = r"M\d+(?:\.\d+)?"  # M5, or M5.1 for the fixes milestone of a rejected release (§3)
+MID = dids.MILESTONE  # M5, or M5.1 for the fixes milestone of a rejected release (§3)
 MILESTONE_RE = re.compile(r"^##\s+(" + MID + r")\s*(?:[—–-]+\s*)?(.*?)\s*$")
-RELEASE_RE = re.compile(r"^##\s+(R\d+)\s*(?:[—–-]+\s*)?(.*?)\s*$")  # a planned release groups the milestones below it (§4)
+RELEASE_RE = re.compile(r"^##\s+(" + dids.RELEASE + r")\s*(?:[—–-]+\s*)?(.*?)\s*$")  # a planned release groups the milestones below it (§4)
 RELEASE_STATUSES = ("in_progress", "ready_for_review", "awaiting_approval", "deploying_prod", "released")
 RELEASE_SIZE = (2, 5)  # milestones per release the planner aims for (§4 grouping rules)
-TASK_RE = re.compile(r"^###\s+(T-\d{3,})\s+(.*?)\s*$")
+TASK_RE = re.compile(r"^###\s+(" + dids.TASK + r")\s+(.*?)\s*$")
 FIELD_RE = re.compile(r"^-\s+([a-z_]+):\s*(.*?)\s*$")
 SUBITEM_RE = re.compile(r"^\s{2,}-\s+(.*?)\s*$")
 # milestone fields, between the `## Mn` heading and its first task (conventions.md §4)
@@ -780,14 +784,7 @@ def explicit_exit(ms: dict) -> bool:
 
 # --------------------------------------------------------------------------- helpers
 
-def mkey(m: str) -> tuple[int, int]:
-    """Order of a milestone id: M5 < M5.1 < M5.2 < M6 (a release's fixes milestone follows its last milestone)."""
-    mm = re.fullmatch(r"M(\d+)(?:\.(\d+))?", str(m))
-    return (int(mm.group(1)), int(mm.group(2) or 0)) if mm else (10 ** 6, 0)
-
-
-def mmajor(m: str) -> int:
-    return mkey(m)[0]
+mkey, mmajor = dids.mkey, dids.mmajor  # M5 < M5.1 < M5.2 < M6 (dev_ids.py)
 
 
 def _clock() -> datetime:
@@ -1113,9 +1110,11 @@ class Store:
         return f"T-{n:03d}"
 
     def new_question_id(self) -> str:
-        n = int(self.state.get("next_question_id", 1))
-        self.state["next_question_id"] = n + 1
-        return f"Q-{n:03d}"
+        path = self.dev / "open-questions.md"
+        used = re.findall(rf"\b{dids.QUESTION}\b", self.read_text(path)) if self.file_exists(path) else []
+        qid, self.state["next_question_id"] = dids.next_seq("question", self.state.get("next_question_id", 1), used,
+                                                            (self.state.get("ids") or {}).get("retired") or [])
+        return qid
 
     def in_progress(self) -> list[str]:
         return [t for t, v in self.tasks().items() if v["status"] == "in_progress"]
@@ -1592,6 +1591,302 @@ def plan_releases(text: str, milestones: dict) -> tuple[list[dict], list[str]]:
     return out, problems
 
 
+# ---------------------------------------------------------------- ids (conventions.md §3, dev_ids.py)
+
+def milestone_has_history(store: Store, m: str) -> bool:
+    """A milestone id with history (a gate run, a QA folder, a branch, work started) is never renamed."""
+    ms = store.milestones().get(m)
+    if ms is not None and (ms.get("gate", "pending") != "pending" or ms.get("qa_runs") or ms.get("frozen")):
+        return True
+    if any(v.get("milestone") == m and (v.get("status") != "todo" or v.get("started_at")) for v in store.tasks().values()):
+        return True
+    if (store.dev / "qa" / m).exists():
+        return True
+    return bool(_git(store, "rev-parse", "--verify", "--quiet", f"refs/heads/dev-kit/{m}"))
+
+
+def task_has_history(store: Store, t: str) -> bool:
+    v = store.tasks().get(t)
+    return bool(v) and (v.get("status") != "todo" or bool(v.get("started_at") or v.get("commit")))
+
+
+def release_has_history(store: Store, r: str) -> bool:
+    return bool((store.state.get("release_state") or {}).get(r)) or any(
+        x.get("release") == r for x in store.state.get("releases") or [])
+
+
+def id_registry(store: Store) -> dict:
+    """`ids` in state: `legacy` (non-canonical ids kept because they have history) and `retired` (old ids of renamed
+    items, never given again)."""
+    reg = store.state.setdefault("ids", {})
+    reg.setdefault("legacy", [])
+    reg.setdefault("retired", [])
+    return reg
+
+
+def _heading_title(rest: str) -> str:
+    return re.sub(r"^\s*[—–:.)-]+\s*", "", rest or "").strip()
+
+
+def plan_ids_fix(store: Store, text: str) -> tuple[str, list[str], list[str], list[str], list[str]]:
+    """Make the ids of plan.md canonical and unique (conventions §3), in memory. Returns (text, changes, errors,
+    warnings, legacy): a repeated `## M<n>` (numbering restarted per release), `## R<n>` or `### T-nnn` keeps its id
+    once (where work started, else the first) and the others get the next free number; `M01`, `m1`, `Milestone 1`,
+    `Release 2`, `T-1` become canonical; `## M1: Title` becomes `## M1 — Title`. An id with history is never renamed:
+    a non-canonical one is kept as legacy, and a repeated one whose copies both started is an error to repair by hand."""
+    st_ms, st_ts = store.milestones(), store.tasks()
+    reg = (store.state.get("ids") or {})
+    legacy_ok, retired = set(reg.get("legacy") or []), list(reg.get("retired") or [])
+    first = int((store.state.get("brownfield") or {}).get("first_milestone") or 1)
+    lines = text.split("\n")
+    heads: list[dict] = []
+    cur_r = cur_m = None
+    for i, line in enumerate(lines):
+        s = line.rstrip()
+        r, m, t = RELEASE_RE.match(s), MILESTONE_RE.match(s), TASK_RE.match(s)
+        if r:
+            cur_r, cur_m = r.group(1), None
+            heads.append({"kind": "release", "id": r.group(1), "title": r.group(2), "line": i, "parsed": True})
+        elif m:
+            cur_m = len(heads)
+            heads.append({"kind": "milestone", "id": m.group(1), "title": m.group(2), "line": i, "parsed": True,
+                          "release": cur_r, "tasks": []})
+        elif t:
+            heads.append({"kind": "task", "id": t.group(1), "title": t.group(2), "line": i, "parsed": True, "ms": cur_m})
+            if cur_m is not None:
+                heads[cur_m]["tasks"].append(t.group(1))
+        elif s.startswith("## "):
+            near = dids.NEAR_HEADING.match(s)
+            if near and not (near.group("r") and near.group("sub")):
+                kind = "milestone" if (near.group("m") or near.group("mword")) else "release"
+                cand = dids.canonical(kind, s[3:near.end("sub") if near.group("sub") else near.end("n")].strip())
+                if cand:
+                    if kind == "release":
+                        cur_r, cur_m = cand, None
+                    else:
+                        cur_m = len(heads)
+                    heads.append({"kind": kind, "id": None, "cand": cand, "title": _heading_title(s[near.end():]),
+                                  "line": i, "parsed": False, "release": cur_r, "tasks": []})
+                    continue
+            cur_m = None
+            if s.startswith("# "):
+                cur_r = None
+        elif s.startswith("# "):
+            cur_r = cur_m = None
+    taken = {"milestone": set(st_ms) | set(retired), "release": set(), "task": set(st_ts) | set(retired)}
+    taken["release"] |= {x["id"] for x in store.state.get("release_plan") or []} | set((store.state.get("release_state") or {}))
+    taken["release"] |= {x.get("release") for x in store.state.get("releases") or [] if x.get("release")}
+    for h in heads:
+        if h["id"]:
+            taken[h["kind"]].add(h["id"])
+
+    def fresh(kind: str) -> str:
+        if kind == "milestone":
+            nid = dids.next_milestone(taken["milestone"], first=first)
+        elif kind == "release":
+            nid = dids.next_release(taken["release"])
+        else:
+            nid, _ = dids.next_seq("task", store.state.get("next_task_id", 1), taken["task"])
+        taken[kind].add(nid)
+        return nid
+
+    history = {"milestone": lambda x: milestone_has_history(store, x), "release": lambda x: release_has_history(store, x),
+               "task": lambda x: task_has_history(store, x)}
+    changes, errors, warnings, legacy = [], [], [], []
+    renames: dict[int, str] = {}   # index in heads -> new id
+    whole: dict[str, str] = {}     # non-canonical id -> canonical, rewritten everywhere in the text
+    for kind in ("release", "milestone", "task"):
+        groups: dict[str, list[int]] = {}
+        for k, h in enumerate(heads):
+            if h["kind"] == kind and h["id"]:
+                groups.setdefault(h["id"], []).append(k)
+        for hid, idx in groups.items():
+            if len(idx) > 1:
+                if kind == "milestone":
+                    started = [k for k in idx if any(task_has_history(store, t) for t in heads[k]["tasks"])]
+                elif kind == "task" and history[kind](hid):
+                    # the copy the state already holds is the one with the same title (and milestone, when known)
+                    rec = st_ts.get(hid) or {}
+                    started = [k for k in idx if heads[k]["title"] == rec.get("title")] or idx
+                    if len(started) > 1:
+                        ms_of = {k: heads[heads[k]["ms"]]["id"] if heads[k]["ms"] is not None else None for k in started}
+                        started = [k for k in started if ms_of[k] == rec.get("milestone")] or started
+                else:
+                    started = idx if history[kind](hid) else []
+                if len(started) > 1 or (kind == "release" and started):
+                    errors.append(f"{hid} appears {len(idx)} times in plan.md and work already started under it; "
+                                  "give the copies their own ids by hand (/dev-kit:debug shows the state)")
+                    continue
+                keep = started[0] if started else idx[0]
+                for k in idx:
+                    if k != keep:
+                        renames[k] = fresh(kind)
+            elif not dids.is_canonical(kind, hid):
+                if hid in legacy_ok:
+                    continue
+                if history[kind](hid):
+                    legacy.append(hid)
+                    warnings.append(f"{hid} is not in the canonical form ({dids.canonical(kind, hid) or '?'}) but has history: "
+                                    "kept as a legacy id")
+                    continue
+                c = dids.canonical(kind, hid)
+                nid = c if c and c not in taken[kind] else fresh(kind)
+                taken[kind].add(nid)
+                renames[idx[0]] = nid
+                whole[hid] = nid
+    for k, h in enumerate(heads):
+        if not h["parsed"]:
+            nid = h["cand"] if h["cand"] not in taken[h["kind"]] else fresh(h["kind"])
+            taken[h["kind"]].add(nid)
+            renames[k] = nid
+    if errors:
+        return text, [], errors, warnings, legacy
+    for k, h in enumerate(heads):
+        line = lines[h["line"]]
+        nid = renames.get(k)
+        if h["kind"] == "task":
+            if nid:
+                lines[h["line"]] = f"### {nid} {h['title']}"
+                changes.append(f"{h['id']} → {nid} ({h['title'][:40]})")
+            continue
+        title = _heading_title(h["title"])
+        cosmetic = h["parsed"] and h["title"] != title
+        if nid or cosmetic:
+            lines[h["line"]] = f"## {nid or h['id']}" + (f" — {title}" if title else "")
+            old = h["id"] or line[3:].strip()
+            where = f" in {h['release']}" if h["kind"] == "milestone" and h.get("release") else ""
+            changes.append(f"{old}{where} → {nid}" if nid else f"heading of {h['id']}: {line.strip()} → {lines[h['line']].strip()}")
+    out = "\n".join(lines)
+    for old, new in whole.items():
+        out = re.sub(rf"(?<![\w.-]){re.escape(old)}(?![\w.-])", new, out)
+    # milestones in plan order should go up (a release's fixes milestone M<k>.<i> sits after M<k>)
+    seen: list[str] = []
+    for line in out.split("\n"):
+        m = MILESTONE_RE.match(line.rstrip())
+        if m:
+            seen.append(m.group(1))
+    for a_, b_ in zip(seen, seen[1:]):
+        if dids.mkey(b_) < dids.mkey(a_):
+            warnings.append(f"{b_} comes after {a_} in plan.md; milestones are numbered in the order they run")
+    return out, changes, errors, warnings, legacy
+
+
+def apply_plan_ids(store: Store, plan_path: Path, text: str) -> tuple[str, list[str], list[str]]:
+    """Run plan_ids_fix inside sync-plan: refuse on errors; otherwise keep a backup, write the fixed plan, retire the
+    old ids, record an ADR and make review plan stale. Returns (text, notices, warnings)."""
+    fixed, changes, errors, warnings, legacy = plan_ids_fix(store, text)
+    if errors:
+        fail("ids: " + "; ".join(errors))
+    reg = id_registry(store) if (changes or legacy) else None
+    if legacy:
+        reg["legacy"] = sorted(set(reg["legacy"]) | set(legacy), key=lambda x: (dids.number(x), x))
+    if not changes:
+        return text, [], warnings
+    try:
+        bdir = store.dev / "backup"
+        bdir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        (bdir / f"plan-ids-{stamp}.md").write_text(text, encoding="utf-8")
+    except OSError:
+        pass
+    for c in changes:
+        old = c.split(" ", 1)[0]
+        if (dids.is_id("milestone", old) or dids.is_id("task", old)) and old not in reg["retired"] and " → " in c \
+                and not old.startswith("heading"):
+            if old not in fixed.split():  # a repeated id keeps one copy: only an id gone from the plan retires
+                reg["retired"].append(old)
+                if dids.is_id("milestone", old) and not milestone_has_history(store, old):
+                    store.milestones().pop(old, None)
+                elif dids.is_id("task", old) and not task_has_history(store, old):
+                    store.tasks().pop(old, None)
+    store.stage(plan_path, fixed)
+    adr = append_adr(store, "Plan ids made canonical and unique", [
+        "- context: ids are global and continuous, never restarted per release, never reused (conventions.md §3).",
+        "- decision: " + "; ".join(changes) + ".",
+        f"- consequences: review plan is stale until the new numbering is reviewed; the plan before it is in .dev/backup/."])
+    revs = store.state.setdefault("reviews", {})
+    if (revs.get("plan") or {}).get("verdict") == "pass":
+        revs["plan"]["stale_reason"] = "plan ids renumbered by sync-plan"
+    store.event("ids", transition="fix", count=len(changes))
+    store.log(f"ids fixed ({adr}): " + "; ".join(changes))
+    return fixed, [f"ids renumbered ({adr}): " + "; ".join(changes),
+                   "review the new numbering with /dev-kit:review plan (now stale)"], warnings
+
+
+def state_id_problems(store: Store) -> list[str]:
+    """Ids in state that break the rules (conventions §3): non-canonical and not legacy, counters behind the ids."""
+    out = []
+    legacy = set((store.state.get("ids") or {}).get("legacy") or [])
+    for kind, rows in (("milestone", store.milestones()), ("task", store.tasks()), ("issue", issues(store))):
+        for k in rows:
+            if not dids.is_canonical(kind, k) and k not in legacy:
+                out.append(f"{k}: not a canonical {kind} id ({dids.canonical(kind, k) or 'no canonical form'})")
+    for kind, key, rows in (("task", "next_task_id", store.tasks()), ("issue", "next_issue_id", issues(store))):
+        top = max([dids.number(x) for x in rows if dids.is_id(kind, x)] + [0])
+        if rows and int(store.state.get(key, 1)) <= top:
+            out.append(f"{key} is {store.state.get(key, 1)} but {dids.fmt(kind, top)} exists (the next id skips it)")
+    return out
+
+
+def next_ids(store: Store, kind: str, count: int) -> list[str]:
+    """The next free ids of a kind, without taking them (plan writes them; sync-plan records them)."""
+    reg = store.state.get("ids") or {}
+    retired = reg.get("retired") or []
+    plan = store.dev / "plan.md"
+    text = store.read_text(plan) if store.file_exists(plan) else ""
+    pm, pt = (parse_plan(text) if text else ({}, {}))
+    out: list[str] = []
+    if kind == "milestone":
+        used = set(store.milestones()) | set(pm)
+        first = int((store.state.get("brownfield") or {}).get("first_milestone") or 1)
+        for _ in range(count):
+            out.append(dids.next_milestone(used | set(out), retired, first))
+    elif kind == "release":
+        used = {x["id"] for x in store.state.get("release_plan") or []} | set(store.state.get("release_state") or {})
+        used |= {r.group(1) for r in (RELEASE_RE.match(ln) for ln in text.splitlines()) if r}
+        for _ in range(count):
+            out.append(dids.next_release(used | set(out), retired))
+    else:
+        used = {"task": set(store.tasks()) | set(pt), "issue": set(issues(store))}[kind]
+        key = {"task": "next_task_id", "issue": "next_issue_id"}[kind]
+        n = store.state.get(key, 1)
+        for _ in range(count):
+            nid, n = dids.next_seq(kind, n, used | set(out), retired)
+            out.append(nid)
+    return out
+
+
+def cmd_ids(store: Store, a: argparse.Namespace) -> None:
+    store.load()
+    if a.action == "next":
+        if a.kind not in ("milestone", "release", "task", "issue"):
+            fail("ids next takes milestone, release, task or issue")
+        print("\n".join(next_ids(store, a.kind, max(1, int(a.count or 1)))))
+        return
+    if a.action == "fix":
+        return cmd_sync_plan(store, argparse.Namespace(plan=None))
+    plan = store.dev / "plan.md"
+    text = store.read_text(plan) if store.file_exists(plan) else ""
+    _, changes, errors, warnings, legacy = plan_ids_fix(store, text) if text else ("", [], [], [], [])
+    state_p = state_id_problems(store)
+    rep = {"ok": not errors and not changes and not state_p, "errors": errors, "would_change": changes,
+           "warnings": warnings, "state": state_p, "legacy": sorted(set((store.state.get("ids") or {}).get("legacy") or []) | set(legacy)),
+           "retired": (store.state.get("ids") or {}).get("retired") or []}
+    if a.json:
+        print(json.dumps(rep, ensure_ascii=False, indent=1))
+    else:
+        for e in errors:
+            print(f"error: {e}")
+        for c in changes:
+            print(f"sync-plan will renumber: {c}")
+        for w in warnings + state_p:
+            print(f"warning: {w}")
+        if rep["ok"]:
+            print("ids ok")
+    if errors:
+        sys.exit(1)
+
+
 def sync_plan_text(store: Store, text: str) -> tuple[dict, tuple[int, int, int], list[str]]:
     """Bring state in line with plan.md text, in memory: milestones and tasks added or updated (never status), each
     task's position in the plan as `seq` (the order `next` follows within a milestone). Returns the parsed tasks,
@@ -1725,6 +2020,7 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
     if not plan_path.exists():
         fail(f"plan not found: {plan_path}")
     text = plan_path.read_text(encoding="utf-8")
+    text, id_notices, id_warnings = apply_plan_ids(store, plan_path, text)
     mig = migrate_releases(store, text)
     notices: list[str] = []
     legacy = bool(store.state.get("needs_release_migration") or store.state.get("releases")
@@ -1760,6 +2056,7 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
         tasks, (added_m, added_t, updated_t), problems = sync_plan_text(store, text)
     except ValueError as e:
         fail(str(e))
+    problems = id_warnings + problems
     made = ensure_flags(store)
     if made:
         notices.append("release flags created (off): " + ", ".join(made))
@@ -1775,6 +2072,8 @@ def cmd_sync_plan(store: Store, a: argparse.Namespace) -> None:
     print(f"synced: {added_m} new milestones, {added_t} new tasks, {updated_t} updated")
     for x in notices:
         print(f"migration: {x}")
+    for x in id_notices:
+        print(f"ids: {x}")
     if problems:
         print("warnings:\n  " + "\n  ".join(problems))
 
@@ -2107,7 +2406,7 @@ def affected_tasks(store: Store, acs: list[str]) -> list[dict]:
     for tid, v in sorted(store.tasks().items(), key=lambda kv: int(kv[0][2:])):
         if v["status"] not in ("todo", "in_progress", "blocked"):
             continue
-        cited = set(re.findall(r"\bAC-\d+\b", " ".join(map(str, v.get("acceptance") or [])) + " " + str(v.get("title") or ""), re.I))
+        cited = set(re.findall(rf"\b{dids.AC}\b", " ".join(map(str, v.get("acceptance") or [])) + " " + str(v.get("title") or ""), re.I))
         hit = sorted({c.upper() for c in cited} & want, key=lambda c: int(c.split("-")[1]))
         if hit:
             out.append({"task": tid, "title": v["title"], "status": v["status"], "milestone": v["milestone"], "acs": hit,
@@ -2118,7 +2417,7 @@ def affected_tasks(store: Store, acs: list[str]) -> list[dict]:
 def cmd_affected(store: Store, a: argparse.Namespace) -> None:
     store.load()
     acs = [x for x in re.split(r"[,\s]+", a.acs or "") if x]
-    if not acs or not all(re.fullmatch(r"AC-\d+", x, re.I) for x in acs):
+    if not acs or not all(re.fullmatch(dids.AC, x, re.I) for x in acs):
         fail("--acs needs AC ids, e.g. AC-4,AC-7")
     rows = affected_tasks(store, acs)
     if a.json:
@@ -2567,7 +2866,7 @@ def cmd_pipeline(store: Store, a: argparse.Namespace) -> None:
                 print(f"branch {b}: {', '.join(sorted(k for k, v in ahead_tasks(store, b).items()))}")
         return
     br = a.branch or ""
-    if not re.fullmatch(r"dev-kit/(R\d+|M\d+(?:\.\d+)?)", br):
+    if not re.fullmatch(rf"dev-kit/({dids.RELEASE}|{dids.MILESTONE})", br):
         fail("the branch is dev-kit/R<n> or dev-kit/M<n>")
     target = br.split("/", 1)[1]
     wt = store.dev / "run" / "worktrees" / br.replace("/", "-")
@@ -2973,7 +3272,7 @@ def write_facts_md(store: Store) -> None:
 
 def facts_for(store: Store, files: list[str], acs: list[str], limit: int = 10) -> list[tuple[str, dict]]:
     """Live facts whose files or ACs cross these (a folder tag covers what is under it), newest first."""
-    want_acs = {x.upper() for a in acs for x in re.findall(r"\bAC-\d+\b", str(a), re.I)}
+    want_acs = {x.upper() for a in acs for x in re.findall(rf"\b{dids.AC}\b", str(a), re.I)}
     fs = [f.strip().strip("/") for f in files if f.strip()]
     hits = []
     for k, f in (store.state.get("facts") or {}).items():
@@ -2998,13 +3297,13 @@ def cmd_fact(store: Store, a: argparse.Namespace) -> None:
         why = sensitive(text + " " + ev)
         if why:
             fail(f"refused: the fact or its evidence contains {why}; write the fact without it")
-        if not a.origin or not re.fullmatch(r"(T-\d{1,5}|F-\d{1,5}|I-\d{1,5}|qa/M\d+(?:\.\d+)?(?: R\d+)?|M\d+(?:\.\d+)?|release|user)", a.origin):
+        if not a.origin or not re.fullmatch(rf"({dids.TASK}|{dids.FINDING}|{dids.SCOPED_FINDING}|{dids.ISSUE}|qa/{dids.MILESTONE}(?: {dids.RELEASE})?|{dids.MILESTONE}|release|user)", a.origin):
             fail("--origin is T-nnn, F-nnn, I-nnn, qa/<M> R<n>, release or user")
         n = int(store.state.get("next_fact_id", 1))
         store.state["next_fact_id"] = n + 1
         fid = f"K-{n:03d}"
         acs = [x.upper() for x in split(a.acs)]
-        if any(not re.fullmatch(r"AC-\d+", x) for x in acs):
+        if any(not dids.is_id("ac", x) for x in acs):
             fail("--acs takes AC ids")
         facts(store)[fid] = {"text": text.replace("\n", " ")[:400], "evidence": ev.replace("\n", " ")[:300],
                              "sha": (a.sha or _git(store, "rev-parse", "--short", "HEAD") or "")[:12] or None, "date": today(),
@@ -3740,9 +4039,13 @@ def cmd_add_task(store: Store, a: argparse.Namespace) -> None:
     if a.milestone not in store.milestones():
         if not a.milestone_title:
             fail(f"milestone {a.milestone} does not exist; pass --milestone-title to create it")
+        nxt = next_ids(store, "milestone", 1)[0]
+        if a.milestone != nxt:
+            fail(f"a new milestone takes the next free number: {nxt}, not {a.milestone} (ids are continuous, never "
+                 "inserted, restarted or renumbered; conventions.md §3)")
         store.milestones()[a.milestone] = {"title": a.milestone_title, "gate": "pending", "qa_runs": 0}
     elif store.milestones()[a.milestone].get("gate") == "passed" and a.lane != "hotfix" and not a.force:
-        nxt = f"M{max(mmajor(m) for m in store.milestones()) + 1}"
+        nxt = next_ids(store, "milestone", 1)[0]
         later = [m for m in store.milestone_order() if mkey(m) > mkey(a.milestone)
                  and store.milestones()[m].get("gate", "pending") == "pending"]
         fail(f"gate of {a.milestone} already passed; add the task to {later[0] if later else nxt}"
@@ -5183,7 +5486,7 @@ def verify_bisect(store: Store, test_cmd: str, setup: str | None, timeout: int) 
     subject = _git(store, "log", "-1", "--format=%s", first_bad) or ""
     task = by_commit.get(first_bad)
     if not task:
-        m = re.search(r"\b(T-\d+)\b", subject)
+        m = re.search(rf"\b({dids.TASK})\b", subject)
         task = m.group(1) if m else None
     store.event("verify_bisect", commit=first_bad[:12], task=task or "-", steps=len(tried))
     return {"base": st["base"], "head": st["head"], "first_bad": first_bad, "task": task, "subject": subject,
@@ -6333,7 +6636,7 @@ def queue_needs(store: Store) -> list[dict]:
         size_max = int(((store.state.get("autonomy") or {}).get("milestone_size") or {}).get("max", 12))
         pick = [k for k in queue(store, ("standard", "intangible"))][:size_max]
         pick.sort(key=lambda k: (SEV_RANK.get(iss[k].get("severity"), 4), iss[k]["created_at"], k))
-        nxt = f"M{max([mmajor(x) for x in store.milestones()] or [0]) + 1}"
+        nxt = next_ids(store, "milestone", 1)[0]
         out.append({"kind": "queue_over_limit", "count": len(waiting), "limit": cfg["limit"],
                     "limit_pct_remaining": cfg["limit_pct_remaining"], "remaining_tasks": remaining,
                     "milestone": nxt, "issues": pick,
@@ -6627,7 +6930,7 @@ def xref_report(store: Store) -> dict:
     prd = read(artifact_paths(store, "prd"))
     defined, inactive = set(), set()
     for ln in prd.splitlines():
-        m = re.match(r"^\s*(?:[-*]|\d+\.)\s*\**(AC-\d+)\b", ln)
+        m = re.match(rf"^\s*(?:[-*]|\d+\.)\s*\**({dids.AC})\b", ln)
         if not m:
             continue
         defined.add(m.group(1))
@@ -6638,7 +6941,7 @@ def xref_report(store: Store) -> dict:
     planned: dict[str, list[str]] = {}
     for tid, t in tasks.items():
         for item in t.get("acceptance") or []:
-            for ac in re.findall(r"\bAC-\d+\b", str(item)):
+            for ac in re.findall(rf"\b{dids.AC}\b", str(item)):
                 planned.setdefault(ac, []).append(tid)
         for d in t.get("deps") or []:
             if d not in store.tasks():
@@ -6670,7 +6973,7 @@ def xref_report(store: Store) -> dict:
     try:
         denied: dict[str, int] = {}
         for e in tel.read_events(store.dev)[0]:
-            if e["event"] == "fence_deny" and re.fullmatch(r"T-\d+", str(e.get("scope") or "")):
+            if e["event"] == "fence_deny" and dids.is_id("task", e.get("scope")):
                 denied[e["scope"]] = denied.get(e["scope"], 0) + 1
         for tid, n in sorted(denied.items()):
             notes.append(f"fence_denied: {tid} was denied {n} edit(s) outside its files (its files: may be incomplete; "
@@ -6696,20 +6999,20 @@ def xref_report(store: Store) -> dict:
     if ux and ui:
         screens = {}
         for ln in ux.splitlines():
-            m = re.match(r"^\s*\|\s*(S-\d+)\s*\|", ln)
+            m = re.match(rf"^\s*\|\s*({dids.SCREEN})\s*\|", ln)
             if m:
                 screens[m.group(1)] = "existing" in ln.lower().split("|")[-2] if ln.count("|") > 2 else False
-        specced = set(re.findall(r"^#{2,4}\s*(S-\d+)\b", ui, flags=re.M))
+        specced = set(re.findall(rf"^#{{2,4}}\s*({dids.SCREEN})\b", ui, flags=re.M))
         for sid in sorted(screens):
             if not screens[sid] and sid not in specced:
                 problems.append({"check": "screen_unspecified", "id": sid, "detail": "screen in ux-flows.md with no section in ui-spec.md"})
         for sid in sorted(specced - set(screens)):
             problems.append({"check": "screen_unknown", "id": sid, "detail": "section in ui-spec.md for a screen not in the ux-flows.md inventory"})
     dec = store.dev / "decisions.md"
-    adrs = set(re.findall(r"^#{2,4}\s*(ADR-\d+)\b", dec.read_text(encoding="utf-8", errors="replace"), flags=re.M)) if dec.exists() else set()
+    adrs = set(re.findall(rf"^#{{2,4}}\s*({dids.ADR})\b", dec.read_text(encoding="utf-8", errors="replace"), flags=re.M)) if dec.exists() else set()
     cited: dict[str, set[str]] = {}
     for n in ("prd", "architecture", "ux", "ui", "plan"):
-        for adr in re.findall(r"\bADR-\d+\b", read(artifact_paths(store, n))):
+        for adr in re.findall(rf"\b{dids.ADR}\b", read(artifact_paths(store, n))):
             cited.setdefault(adr, set()).add(n)
     for adr in sorted(set(cited) - adrs, key=acn):
         problems.append({"check": "adr_unknown", "id": adr, "detail": f"cited in {', '.join(sorted(cited[adr]))} but not in decisions.md"})
@@ -7223,8 +7526,7 @@ def record_presence_adr(store: "Store") -> None:
 def append_adr(store: Store, title: str, body: list[str], source: str = "auto") -> str:
     path = store.dev / "decisions.md"
     text = store.read_text(path) if store.file_exists(path) else "# Decisions\n"
-    n = max([int(x) for x in re.findall(r"^###\s+ADR-(\d+)", text, re.M)] + [0]) + 1
-    adr = f"ADR-{n:03d}"
+    adr, _ = dids.next_seq("adr", 1, re.findall(rf"^###\s+({dids.ADR})", text, re.M))
     block = [f"### {adr} — {title} ({source})", f"- date: {today()} · status: accepted · source: {source}", *body]
     store.stage(path, text.rstrip("\n") + "\n\n" + "\n".join(block) + "\n")
     return adr
@@ -7525,7 +7827,7 @@ def next_command(store: Store) -> str:
 
 
 def _planned(store: Store, rid: str) -> dict:
-    if not re.fullmatch(r"R\d{1,3}", rid or ""):
+    if not dids.is_id("release", rid):
         fail(f"invalid release id {rid!r} (R1, R2…)")
     if not any(r["id"] == rid for r in store.state.get("release_plan") or []):
         fail(f"{rid} is not a planned release (plan.md has no '## {rid} — …' heading)")
@@ -7955,7 +8257,7 @@ def count_open_questions(store: Store) -> int:
         if line.strip().lower().startswith("## "):
             in_open = line.strip().lower() == "## open"
             continue
-        if in_open and re.match(r"^\|\s*Q-\d+", line):
+        if in_open and re.match(rf"^\|\s*{dids.QUESTION}", line):
             n += 1
     return n
 
@@ -8140,7 +8442,7 @@ def cmd_answer_question(store: Store, a: argparse.Namespace) -> None:
     """Move a question from Open to Resolved in open-questions.md with its answer (interview --gaps and every
     skill that asks use it)."""
     store.load()
-    if not re.fullmatch(r"Q-\d{1,5}", a.id):
+    if not dids.is_id("question", a.id):
         fail("question ids look like Q-3")
     answer = re.sub(r"\s+", " ", a.answer).strip().replace("|", "/")
     if not answer:
@@ -8379,7 +8681,8 @@ def plan_edit(store: Store, ops: list[dict], text: str) -> tuple[str, list[str],
         where, kind = f"change {n}", op.get("op")
         if kind == "new_milestone":
             m, title = op.get("milestone", ""), str(op.get("title") or "").strip()
-            nxt = f"M{max([mmajor(x) for x in ms] or [0]) + 1}"
+            nxt = dids.next_milestone(ms, (store.state.get("ids") or {}).get("retired") or (),
+                                      int((store.state.get("brownfield") or {}).get("first_milestone") or 1))
             if effects["new_milestones"]:
                 errors.append(f"{where}: one new milestone per draft")
             elif m != nxt:
@@ -8419,7 +8722,7 @@ def plan_edit(store: Store, ops: list[dict], text: str) -> tuple[str, list[str],
         elif kind == "new_release":
             rid, title = op.get("release", ""), str(op.get("title") or "").strip()
             _, rids = doc.release_map()
-            nxt = f"R{max([int(x[1:]) for x in rids] or [0]) + 1}"
+            nxt = dids.next_release(rids, (store.state.get("ids") or {}).get("retired") or ())
             if not rids:
                 errors.append(f"{where}: the plan has no planned releases; group the milestones with /dev-kit:plan first")
             elif rid != nxt:
@@ -8558,17 +8861,17 @@ def plan_edit(store: Store, ops: list[dict], text: str) -> tuple[str, list[str],
     return doc.text(), changes, sorted(set(errors), key=errors.index), effects
 
 
-PLAN_TASK, PLAN_MS = r"T-\d{3,5}", r"M\d{1,3}(?:\.\d{1,2})?"
+PLAN_TASK, PLAN_MS = dids.TASK, dids.MILESTONE
 PLAN_OPS = {
-    "schedule_issue": {"issue": r"^I-\d{3,5}$", "milestone": rf"^{PLAN_MS}$"},
+    "schedule_issue": {"issue": rf"^{dids.ISSUE}$", "milestone": rf"^{PLAN_MS}$"},
     "move_task": {"task": rf"^{PLAN_TASK}$", "milestone": rf"^{PLAN_MS}$"},
     "reorder": {"milestone": rf"^{PLAN_MS}$"},
     "new_milestone": {"milestone": rf"^{PLAN_MS}$"},
-    "move_milestone": {"milestone": rf"^{PLAN_MS}$", "release": r"^R\d{1,3}$"},
-    "new_release": {"release": r"^R\d{1,3}$"},
-    "drop_release": {"release": r"^R\d{1,3}$"},
+    "move_milestone": {"milestone": rf"^{PLAN_MS}$", "release": rf"^{dids.RELEASE}$"},
+    "new_release": {"release": rf"^{dids.RELEASE}$"},
+    "drop_release": {"release": rf"^{dids.RELEASE}$"},
     # an issue left waiting (conventions §15): park it, close it as wontfix, or open it again
-    "set_issue_status": {"issue": r"^I-\d{3,5}$", "status": r"^(parked|wontfix|open)$"},
+    "set_issue_status": {"issue": rf"^{dids.ISSUE}$", "status": r"^(parked|wontfix|open)$"},
 }
 PLAN_MAX_OPS = 100
 _BIDI = re.compile("[\u200e\u200f\u202a-\u202e\u2066-\u2069]")  # direction overrides hide what text says
@@ -8733,6 +9036,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--brownfield-json", help='existing-project marker, e.g. {"baseline_ref":"dev-kit-baseline","baseline_sha":"<sha>","mode":"feature","first_milestone":1}')
 
     s = sub.add_parser("sync-plan"); s.set_defaults(fn=cmd_sync_plan); s.add_argument("--plan")
+    s = sub.add_parser("ids"); s.set_defaults(fn=cmd_ids); s.add_argument("action", choices=("check", "fix", "next"))
+    s.add_argument("kind", nargs="?"); s.add_argument("--count", type=int, default=1); s.add_argument("--json", action="store_true")
 
     s = sub.add_parser("brief"); s.set_defaults(fn=cmd_brief); s.add_argument("task")
     s = sub.add_parser("tier"); s.set_defaults(fn=cmd_tier); s.add_argument("task"); s.add_argument("--json", action="store_true")
@@ -8946,7 +9251,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 # Commands that change state.json or the artifacts the kit keeps in step with it: each runs as one transaction.
 MUTATING = frozenset({
-    cmd_init, cmd_sync_plan, cmd_set_risk, cmd_risk_report, cmd_start, cmd_done, cmd_block, cmd_unblock, cmd_drop,
+    cmd_init, cmd_sync_plan, cmd_ids, cmd_set_risk, cmd_risk_report, cmd_start, cmd_done, cmd_block, cmd_unblock, cmd_drop,
     cmd_add_task, cmd_fix_tasks, cmd_add_question, cmd_answer_question, cmd_plan_apply, cmd_move_task,
     cmd_new_milestone, cmd_reorder, cmd_gate, cmd_review, cmd_artifact, cmd_release_submit, cmd_release_decide,
     cmd_release_record, cmd_set, cmd_deploy, cmd_preview, cmd_add_issue, cmd_issue, cmd_pull_issues, cmd_cooldown,
