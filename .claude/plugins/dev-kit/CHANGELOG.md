@@ -2,6 +2,18 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.23.1 — 2026-11-27
+
+Eduardo saw the autopilot end with "confirm the PRD with checkpoint confirm prd, or answer it on the board" and asked whether answering on the board had not been removed. It had: since 3.12.0 the board's only POST is stopping its server. The message came from texts the model relays: the review skill still said "the board offers the same buttons", and the review output handed the user an internal `dev_state.py` subcommand.
+
+### Fixed
+- Every text that offered an answer on the board now names the slash command that settles it in Claude Code: a pending checkpoint is `/dev-kit:review prd` or `/dev-kit:review plan` (it skips the reviewer and asks), parked questions are `/dev-kit:interview --gaps`.
+- `review` skill, `conventions.md` §19, `backlog` skill, `GET_STARTED.md` and `concepts.md`: the board only shows checkpoints and offers; no more "buttons on the board" or "on the board, or here".
+- `autopilot`: never tells the user to answer on the board nor hands them a `DS` command; the end-of-run report gives the command for each pending checkpoint and question, and the last line is `/dev-kit:review prd|plan` when a checkpoint waits.
+- `dev_state.py review … pass` and `status`: the checkpoint lines name `/dev-kit:review <target>` instead of "`checkpoint confirm` after the user says so" and "say so here".
+- Board: the checkpoint row in Needs you points to `/dev-kit:review prd|plan` (was `/dev-kit:backlog`) and its step reads "you confirm in Claude Code" (was "checkpoint on the board").
+- `implement`: `--parallel auto` is 3 (it still pointed to the removed Autopilot card).
+
 ## 3.23.0 — 2026-11-26
 
 Eduardo asked whether the model/effort matrix tunes itself per project when tasks keep failing and pass only after a higher model or effort. It did so only in part: two failures in a row raised a context until the end of the milestone, and the gate raised a context whose rule arm kept needing rounds. The case he described was lost: a retry runs one tier up, so its context key changed, and the gate deleted the failure records and filed the pass under the new key with `fails=1` on the arm that had solved it. The router now keeps both attempts where the task started and learns from the escalations themselves.

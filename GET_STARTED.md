@@ -31,7 +31,7 @@ Describe your idea in one sentence, or run `/dev-kit:start` with no text. The ki
 /dev-kit:autopilot --until plan
 ```
 
-This writes and reviews the PRD, architecture, UX/UI design and implementation plan, all in `.dev/`. After the PRD review and again after the plan review, the kit stops at a **checkpoint**: read the summary it shows (on the board, `/dev-kit:board`, **Needs you** has it too, with a link to the whole document) and confirm, or ask for changes in your own words. Nothing is built before you confirm the plan.
+This writes and reviews the PRD, architecture, UX/UI design and implementation plan, all in `.dev/`. After the PRD review and again after the plan review, the kit stops at a **checkpoint**: read the summary it shows in Claude Code and confirm there, or ask for changes in your own words (the board, `/dev-kit:board`, shows it read-only in **Needs you**, with a link to the whole document). Left for later, `/dev-kit:review prd` (or `plan`) asks again. Nothing is built before you confirm the plan.
 
 <p align="center">
   <img src=".claude/plugins/dev-kit/docs/images/board-planning.png" alt="The board's Planning lane: the flow plan, review, your confirmation and sync, all done, then the roadmap grouped by release, the backlog and the plan review" width="900">

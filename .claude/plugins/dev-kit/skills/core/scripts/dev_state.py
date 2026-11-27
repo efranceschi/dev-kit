@@ -6782,7 +6782,7 @@ def cmd_review(store: Store, a: argparse.Namespace) -> None:
     print(f"review {a.name}: {a.value}" + (f" (score {a.score})" if a.score is not None else "") + f" · rounds {r['rounds']}")
     if cp:
         print(f"checkpoint {a.name}: waiting for the user's confirmation ({CHECKPOINT_TITLE[a.name]}: "
-              f"`checkpoint confirm {a.name}` after the user says so); " + ("no milestone that has not started begins before it"
+              f"the user answers in Claude Code with /dev-kit:review {a.name}, never on the board; record it with `checkpoint confirm {a.name}` after they say so); " + ("no milestone that has not started begins before it"
                                                                            if a.name == "plan" else "architecture waits for it"))
         queue_notice(store, f"dev-kit: {CHECKPOINT_TITLE[a.name]} waits for you")
     if a.value == "pass" and a.name == "plan":
@@ -8073,7 +8073,7 @@ def cmd_status(store: Store, a: argparse.Namespace) -> None:
                 print(f"Needs you: {n['issue']} waited {n['milestones']} closed milestones · schedule it next, park it or wontfix")
     for n in checkpoint_needs(store) + debt_needs(store):
         if n["kind"] == "checkpoint":
-            print(f"Needs you: {n['title']} (review {n['target']} passed) · say so here to confirm it, or what must change")
+            print(f"Needs you: {n['title']} (review {n['target']} passed) · confirm it, or say what must change, with /dev-kit:review {n['target']}")
         else:
             print(f"Needs you: {n['text']} · promote to issues, accept with an ADR, or use the next cool-down")
     cs = store.dev / "costs" / "summary.json"

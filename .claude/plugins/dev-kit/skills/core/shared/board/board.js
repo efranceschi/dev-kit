@@ -1680,7 +1680,7 @@
       h("span", { text: tr("{title}{v}: the review passed; nothing {v2} until you confirm.", { title: x.title, v: x.round > 1 ? tr(" · round {round}", { round: x.round }) : "", v2: x.target === "prd" ? tr("after the PRD") : tr("new is built") }) }),
       h("span", { class: "sub" }, doc)];
     const summary = x.summary ? h("div", { class: "sub cp-summary" }, linkify(x.summary)) : null;
-    return h("li", {}, ...head, summary, h("span", { class: "sub" }, tr("Confirm in Claude Code with "), cmd("/dev-kit:backlog")));
+    return h("li", {}, ...head, summary, h("span", { class: "sub" }, tr("Confirm in Claude Code with "), cmd(`/dev-kit:review ${x.target === "prd" ? "prd" : "plan"}`)));
   }
   /** Needs you › deferred debt above the cap (conventions §7): promote, accept or cool-down, decided in Claude Code. */
   function debtRow(x) {
@@ -2277,7 +2277,7 @@
   function confirmNode(phase, key, label) {
     const s = stepOf(phase, key).state;
     const cp = ((data.backlog || {}).needs || []).find((x) => x.kind === "checkpoint" && x.target === key);
-    return { key: `confirm-${key}`, label, kind: "human", sub: tr("checkpoint on the board"), state: s === "done" ? "done" : s === "checkpoint" || cp ? "current" : "todo", need: cp ? 1 : 0,
+    return { key: `confirm-${key}`, label, kind: "human", sub: tr("you confirm in Claude Code"), state: s === "done" ? "done" : s === "checkpoint" || cp ? "current" : "todo", need: cp ? 1 : 0,
       needText: tr("waiting"), about: tr("Nothing after this step starts until you confirm it, or ask for changes"),
       detail: () => (cp ? h("ul", { class: "list" }, checkpointRow(cp)) : null) };
   }
