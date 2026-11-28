@@ -2,6 +2,16 @@
 
 All notable changes to the dev-kit plugin. Versions follow `.claude-plugin/plugin.json`. Entries before 1.12.0 were reconstructed from the git history.
 
+## 3.27.1 — 2026-11-27
+
+Eduardo showed the board's Backlog tile saying 13 queued issues, with the count 13 and an empty body holding only "See all (+13)", and asked whether other tiles did the same. They did: on three test projects (the demo, a 60-milestone one and one with very long texts) at four screen sizes, 83 tiles showed nothing but "See all", among them Documents, Reviews, Roadmap, Backlog, the release in numbers, Milestones, Holding back, Quality and documents, Project, Release flags, Release checks and Releases. After the fix, none does.
+
+### Fixed
+- A tile no longer hides a whole block because its end does not fit. The clamp hid every row whose bottom passed the tile, including the block that wraps a list (the issue queue, the later milestones, the facts of a release), so any list longer than its tile vanished at once. A block that holds rows of its own now goes only when it starts below the tile; otherwise its rows go one by one and the first ones stay, and "See all" counts the rest.
+- A row taller than the whole tile (a very long title) no longer leaves the tile empty: the first row stays, cut at the bottom, and the rest count in "See all".
+- Tiles keep at least 210 px on a desktop screen. Under a tall header (Releases on a 768 px screen) they had shrunk to 37 px of body; when the screen is too short for that, the page scrolls.
+- Portuguese plurals use the plural form for zero, as Brazilian usage does (Intl files 0 under "one" in Portuguese), on the board and on the SPOG page.
+
 ## 3.27.0 — 2026-11-27
 
 Eduardo asked how milestones should be numbered and approved a proposal to standardize, control and live with older numbering: ids stay global and continuous (a release groups milestones, it never restarts the count), and now the kit enforces it. Before, a plan that restarted at M1 in R2 was synced silently and the first M1 vanished from the state, and `add-task` accepted a milestone called `banana`.

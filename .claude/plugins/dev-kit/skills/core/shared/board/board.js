@@ -34,6 +34,8 @@
     const forms = (cat().plurals || {})[one] || (base().plurals || {})[one];
     let rule = "other";
     try { rule = new Intl.PluralRules(LANG).select(n); } catch (e) { /* other */ }
+    // CLDR files 0 under "one" in Portuguese, but Brazilian usage takes the plural form for zero
+    if (n === 0 && /^pt/i.test(LANG)) rule = "other";
     const s = forms ? forms[rule] || forms.other : `{n} ${n === 1 ? one : many || one + "s"}`;
     return fill_(s, { n });
   }
@@ -2195,15 +2197,26 @@
     // last rows first, so a list keeps its first rows and a block goes as a whole only when none of it fits; hiding a
     // row never moves the rows above it, so every bottom is read from the same layout
     const rows = [...box.querySelectorAll(CLAMP_ROWS)].reverse();
-    const bottoms = rows.map((el) => el.getBoundingClientRect().bottom);
+    // a block that holds rows of its own (a list, a titled list) goes only when it starts below the box: when just its
+    // end does not fit, its rows go one by one and the block keeps the ones that fit (3.27.1: a long issue queue hid
+    // its whole block, and the Backlog tile showed nothing but "See all")
+    const holds = rows.map((el) => rows.some((r) => r !== el && el.contains(r)));
+    const edges = rows.map((el, i) => { const r = el.getBoundingClientRect(); return holds[i] ? r.top + 1 : r.bottom; });
     const hide = [];
     const hidden = (el) => hide.some((x) => x.contains(el));
     let cut = 0;
     rows.forEach((el, i) => {
-      if (bottoms[i] <= limit || hidden(el)) return;
+      if (edges[i] <= limit || hidden(el)) return;
       cut += el.matches(COUNTED) ? 1 : [...el.querySelectorAll(COUNTED)].filter((c) => !hidden(c)).length;
       hide.push(el);
     });
+    // one row taller than the whole box (a very long title) would leave the tile with nothing but "See all": the first
+    // row that starts inside stays, cut at the bottom of the box, and the rows after it still count in "See all"
+    const firstRow = rows.slice().reverse().find((el, i) => el.matches(COUNTED) && el.getBoundingClientRect().top < limit);
+    if (firstRow && hidden(firstRow) && !rows.some((el) => el.matches(COUNTED) && !hidden(el))) {
+      for (let k = hide.length - 1; k >= 0; k--) if (hide[k].contains(firstRow)) hide.splice(k, 1);
+      cut = [...box.querySelectorAll(COUNTED)].filter(hidden).length;
+    }
     return { hide, cut, any: hide.length > 0, rows };
   }
   /** Write only: hides what clampMeasure found; a block left with nothing visible goes too (its title alone says nothing). */

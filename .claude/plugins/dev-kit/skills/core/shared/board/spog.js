@@ -29,6 +29,8 @@
     const forms = (cat().plurals || {})[one] || (base().plurals || {})[one];
     let rule = "other";
     try { rule = new Intl.PluralRules(LANG).select(n); } catch (e) { /* other */ }
+    // CLDR files 0 under "one" in Portuguese, but Brazilian usage takes the plural form for zero
+    if (n === 0 && /^pt/i.test(LANG)) rule = "other";
     const s = forms ? forms[rule] || forms.other : `{n} ${n === 1 ? one : many || one + "s"}`;
     return fill_(s, { n });
   }

@@ -764,6 +764,11 @@ main[aria-busy="true"] .phase-panel { opacity: .55; }
 @media (min-width: 1024px) and (min-height: 640px) {
   body { height: 100vh; height: 100dvh; overflow: hidden; }
   .app { height: 100vh; height: 100dvh; }
+  /* a tile never shrinks below a few rows (3.27.1: under the Releases header on a 768 px screen they kept 37 px of
+     body and showed only "See all"); when the screen is too short for that, the page scrolls instead */
+  main { overflow-y: auto; }
+  .phase-panel:has(> .tiles) { grid-template-rows: auto minmax(min-content, 1fr); }
+  .tiles.t2x2, .tiles.t3, .tiles.t3x2 { grid-auto-rows: minmax(210px, 1fr); }
 }
 
 /* ---------- top bar */
